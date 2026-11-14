@@ -13,7 +13,7 @@ const storefront = "/projects/storefront/sessions/initial/focus?panel=changes"
 const showcase = "/projects/studio/sessions/initial/focus?demo=showcase&panel=changes"
 
 const list = () => page.getByRole("list", { name: "Changes" })
-const rows = () => list().getByRole("button", { name: /^(?!Close the )/ })
+const rows = () => list().getByRole("button", { name: /^(?!Close the |Preview )/ })
 // A row's accessible label starts as `Title, branch, in project,`; the project is the storefront
 // unless said otherwise.
 const named = (title: string, branch = "", project = "storefront") =>
