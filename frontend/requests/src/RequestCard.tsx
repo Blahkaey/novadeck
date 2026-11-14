@@ -141,13 +141,13 @@ export const RequestCard = ({
   return (
     <article
       ref={card}
-      className="chat-request"
+      className="request-card"
       data-kind={request.kind}
       data-dialog={dialog?.type ?? "none"}
       aria-label={`${title}: ${request.tool}`}
       aria-busy={sending}
     >
-      <header className="chat-request-head">
+      <header className="request-head">
         <h3>
           {title}
           {request.subagent && " · subagent"}
@@ -156,7 +156,7 @@ export const RequestCard = ({
         {onlyTheTerminal && (
           <button
             type="button"
-            className="chat-key nodrag nopan"
+            className="request-key nodrag nopan"
             aria-label="Answer in terminal"
             onClick={onAnswerInTerminal}
           >
@@ -165,26 +165,27 @@ export const RequestCard = ({
         )}
       </header>
       {request.subject && !saysSubject(request) && (
-        <p className="chat-request-subject">{request.subject}</p>
+        <p className="request-subject">{request.subject}</p>
       )}
       {request.answered ? (
-        <p ref={status} tabIndex={-1} className="chat-request-answered" role="status">
+        <p ref={status} tabIndex={-1} className="request-answered" role="status">
           <span className="chat-spin" aria-hidden />
           Answered. Waiting for {agent}…
         </p>
       ) : dialog === null ? (
         <>
           {request.choices.length > 0 && (
-            <p className="chat-request-choices">
+            <p className="request-choices">
               <span>Options:</span> {request.choices.join(" · ")}
             </p>
           )}
-          <p className="chat-request-waiting">Waiting for the dialog…</p>
+          <p className="request-waiting">Waiting for the dialog…</p>
         </>
       ) : (
         <RequestDialog
           key={handedBackCount}
           dialog={dialog}
+          kind={request.kind}
           live={live}
           place={place}
           replying={replying}
@@ -200,12 +201,12 @@ export const RequestCard = ({
         />
       )}
       {notice && !request.answered && (
-        <p className="chat-request-again" role="status">
+        <p className="request-again" role="status">
           {notice}
         </p>
       )}
       {error && (
-        <p className="chat-error chat-request-error" role="alert">
+        <p className="chat-error request-error" role="alert">
           {error}
         </p>
       )}

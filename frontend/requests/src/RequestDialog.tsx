@@ -1,10 +1,11 @@
 import type {
   ChatAnswer,
   ChatDialog,
-  ChatDialogOption,
   ChatFormField,
   ChatQuestion,
+  ChatRequest,
 } from "@novadeck/core/conversation"
+import { noExtras, optionExtras } from "@novadeck/core/conversation/extras"
 import {
   answered,
   answeredCount,
@@ -28,6 +29,7 @@ import {
 } from "@novadeck/core/conversation/prompt-refusal"
 import { useEffect, useId, useRef, useState } from "react"
 
+import { Detail } from "./Detail"
 import {
   enter,
   entryOf,
@@ -38,6 +40,7 @@ import {
   type Entries,
 } from "./forms"
 import { Hint } from "./Hint"
+import { answerWordsLimit, Menu as OptionMenu, type MenuItem } from "./Menu"
 import { shownControls } from "./shown-controls"
 import { submitOnEnter } from "./submit-on-enter"
 import { holdsWords, isTyping, useMenu, type Menu } from "./use-menu"
@@ -72,17 +75,15 @@ type Controls = {
 
 const Sending = ({ sending }: { readonly sending: boolean }): React.JSX.Element | null =>
   sending ? (
-    <span className="chat-sending" aria-hidden>
+    <span className="request-sending" aria-hidden>
       {" "}
       …
     </span>
   ) : null
 
 // What the protocol takes: the person's words, and a form's text value.
-const wordsMax = 16_384
+const wordsMax = answerWordsLimit
 const formTextMax = 4096
-
-const textHint = { field: "Type your answer…", prompt: "Tell it what to do instead…" } as const
 
 // A row of a menu, as a button.
 const Row = ({
@@ -100,136 +101,102 @@ const Row = ({
       type="button"
       {...button}
       {...menu.row(index)}
-      className="chat-option nodrag nopan"
+      className="request-option nodrag nopan"
       data-on={menu.at === index || undefined}
     >
-      <span className="chat-option-number" aria-hidden>
+      <span className="request-option-number" aria-hidden>
         {index + 1}
       </span>
-      <span className="chat-option-words">{children}</span>
+      <span className="request-option-words">{children}</span>
     </button>
   )
 }
 
+// A dialog's options, in the harness's own words, with what core reads into them: a standing
+// yes's scope on a line under it, what a plan's standing yes lets the agent do, and an option
+// that is hard to take back armed before it sends. An option that takes words is a field the
+// person types into in its place.
 const Choices = ({
   dialog,
+  kind,
   refused,
   sending,
   send,
   edited,
-}: Controls & { readonly dialog: Extract<ChatDialog, { type: "choices" }> }): React.JSX.Element => {
-  // The option whose words are being written, and the words.
-  const [opened, setOpened] = useState<{
-    readonly dialog: string
-    readonly option: ChatDialogOption
-  } | null>(null)
-  const [words, setWords] = useState("")
-  const field = useRef<HTMLTextAreaElement>(null)
+}: Controls & {
+  readonly dialog: Extract<ChatDialog, { type: "choices" }>
+  readonly kind: ChatRequest["kind"]
+}): React.JSX.Element => {
+  // The words typed into each option that takes them, by its id: a dialog read again keeps them.
+  const [typed, setTyped] = useState<Readonly<Record<string, string>>>({})
+  const [pressed, setPressed] = useState<number | null>(null)
   const label = useId()
-  const menu = useMenu(dialog.options.length)
-  // A dialog read again keeps the option open only if it still means the same: the same
-  // label and kind of words. The words typed stay either way.
-  const current = dialog.options.find((option) => option.id === opened?.option.id)
-  const stays =
-    opened !== null &&
-    current !== undefined &&
-    (opened.dialog === dialog.id ||
-      (current.label === opened.option.label && current.text === opened.option.text))
-  const open = stays ? current.id : null
-  const writing = stays ? current : undefined
-  // Words that go on as the agent's next prompt are checked, not those typed in its field.
-  const refusedWords = writing?.text === "prompt" && refused(words)
-  const controlWords = writing?.text === "field" && hasControlCharacters(words)
-  const blockedWords = refusedWords || controlWords
-  useEffect(() => {
-    if (open !== null) field.current?.focus()
-  }, [open])
-  const submit = (): void => {
-    if (!writing || sending || words.trim() === "" || blockedWords) return
-    send(choiceAnswer(dialog.id, writing.id, words))
-  }
+  const extras = optionExtras(kind, dialog.options)
+  const items = dialog.options.map((option, index): MenuItem => {
+    const extra = extras[index] ?? noExtras
+    const words = typed[option.id] ?? ""
+    // Words that go on as the agent's next prompt are checked, not those typed in its field.
+    const blocked =
+      option.text === "prompt" && refused(words)
+        ? promptHint
+        : option.text === "field" && hasControlCharacters(words)
+          ? controlHint
+          : null
+    return {
+      // A row that means something else, read again, is another row.
+      key: `${option.id}\n${option.label}\n${option.text ?? ""}`,
+      label: shownControls(extra.lines?.head ?? option.label),
+      scope: extra.lines && shownControls(extra.lines.scope),
+      effect: extra.effect,
+      arms: extra.hard,
+      ...(option.text && {
+        words: {
+          value: words,
+          onChange: (text) => {
+            const value = option.text === "field" ? oneLine(text) : text
+            setTyped((all) => ({ ...all, [option.id]: value }))
+            edited()
+          },
+          // The row is the field: the harness's words say what to write, and name it.
+          placeholder: shownControls(option.label),
+          field: option.label,
+          required: true,
+          refused: blocked,
+          hint: "send",
+          limit: answerWordsLimit,
+          oneLine: option.text === "field",
+        },
+      }),
+    }
+  })
   return (
-    <div className="chat-dialog">
+    <div className="request-dialog">
       {dialog.title && (
-        <p className="chat-dialog-title" id={label}>
+        <p className="request-dialog-title" id={label}>
           {shownControls(dialog.title)}
         </p>
       )}
-      {dialog.detail && (
-        <pre className="chat-detail nodrag nopan nowheel" tabIndex={0} aria-label="What it asks">
-          {shownControls(dialog.detail)}
-        </pre>
-      )}
-      <div
-        className="chat-options"
-        role="group"
-        aria-labelledby={dialog.title ? label : undefined}
-        aria-label={dialog.title ? undefined : "Answers"}
-        onKeyDown={menu.onKeyDown}
-        onPointerMove={menu.onPointerMove}
-      >
-        {dialog.options.map((option, index) => (
-          <Row
-            key={option.id}
-            menu={menu}
-            index={index}
-            disabled={sending}
-            aria-expanded={option.text ? open === option.id : undefined}
-            data-open={open === option.id || undefined}
-            onClick={() => {
-              edited()
-              if (option.text) setOpened(open === option.id ? null : { dialog: dialog.id, option })
-              else send(choiceAnswer(dialog.id, option.id))
-            }}
-          >
-            {shownControls(option.label)}
-            {option.text && "…"}
-            <Sending sending={sending && menu.at === index} />
-          </Row>
-        ))}
-      </div>
-      {writing?.text && (
-        <div className="chat-writing">
-          <textarea
-            ref={field}
-            className="chat-field nodrag nopan"
-            aria-label={writing.label}
-            aria-describedby={
-              writing.text === "field" ? `${label}-hint ${label}-line` : `${label}-hint`
-            }
-            placeholder={textHint[writing.text]}
-            rows={1}
-            maxLength={wordsMax}
-            value={words}
-            disabled={sending}
-            spellCheck
-            onChange={(event) => {
-              setWords(writing.text === "field" ? oneLine(event.target.value) : event.target.value)
-              edited()
-            }}
-            onKeyDown={submitOnEnter(submit, writing.text === "field")}
-          />
-          <button
-            type="button"
-            className="chat-key nodrag nopan"
-            disabled={sending || words.trim() === "" || blockedWords}
-            onClick={submit}
-          >
-            Send answer
-            <Sending sending={sending} />
-          </button>
-          {writing.text === "field" && (
-            <p className="sr-only" id={`${label}-line`}>
-              The agent's field takes one line.
-            </p>
-          )}
-          <Hint
-            id={`${label}-hint`}
-            className="chat-field-hint"
-            text={refusedWords ? promptHint : controlWords ? controlHint : ""}
-          />
-        </div>
-      )}
+      {dialog.detail && <Detail text={dialog.detail} label="What it asks" />}
+      <OptionMenu
+        label={dialog.title ? shownControls(dialog.title) : "Answers"}
+        items={items}
+        busy={sending}
+        pressed={pressed}
+        onPress={(index) => {
+          const option = dialog.options[index]
+          if (!option) return
+          edited()
+          setPressed(index)
+          send(choiceAnswer(dialog.id, option.id))
+        }}
+        onOpen={edited}
+        onWords={(index) => {
+          const option = dialog.options[index]
+          if (!option) return
+          setPressed(index)
+          send(choiceAnswer(dialog.id, option.id, typed[option.id] ?? ""))
+        }}
+      />
     </div>
   )
 }
@@ -258,20 +225,20 @@ const QuestionRows = ({
   const menu = useMenu(question.options.length + (question.text ? 1 : 0))
   return (
     <fieldset
-      className="chat-question"
+      className="request-question"
       role={question.multiSelect ? "group" : "radiogroup"}
       aria-labelledby={`${id}-q`}
       onKeyDown={menu.onKeyDown}
       onPointerMove={menu.onPointerMove}
     >
-      <legend id={`${id}-q`} className="chat-question-text">
+      <legend id={`${id}-q`} className="request-question-text">
         {shownControls(question.question)}
       </legend>
       {question.options.map((option, at) => {
         const checked = pick?.options.includes(option.id) ?? false
         const row = menu.row(at)
         return (
-          <label key={option.id} className="chat-option" data-on={menu.at === at || undefined}>
+          <label key={option.id} className="request-option" data-on={menu.at === at || undefined}>
             {/* No `name`: the group is the person's marks, which React keeps, and a named group
                 would answer Tab and the arrows its own way, picking as it goes. */}
             <input
@@ -294,19 +261,19 @@ const QuestionRows = ({
                 else onPick(option.id)
               }}
             />
-            <span className="chat-option-number" aria-hidden>
+            <span className="request-option-number" aria-hidden>
               {at + 1}
             </span>
-            <span className="chat-option-words">
+            <span className="request-option-words">
               {question.multiSelect && (
-                <span className="chat-check" aria-hidden>
-                  [<span className="chat-check-mark">{checked ? "✓" : ""}</span>]{" "}
+                <span className="request-check" aria-hidden>
+                  [<span className="request-check-mark">{checked ? "✓" : ""}</span>]{" "}
                 </span>
               )}
               <span id={`${id}-${at}-l`}>{shownControls(option.label)}</span>
             </span>
             {option.description && (
-              <span className="chat-option-more" id={`${id}-${at}-d`}>
+              <span className="request-option-more" id={`${id}-${at}-d`}>
                 {shownControls(option.description)}
               </span>
             )}
@@ -352,8 +319,8 @@ const OwnWords = ({
   readonly onDone: () => void
 }): React.JSX.Element => (
   <>
-    <label className="chat-option" data-on={on || undefined}>
-      <span className="chat-option-number" aria-hidden>
+    <label className="request-option" data-on={on || undefined}>
+      <span className="request-option-number" aria-hidden>
         {number}
       </span>
       <input
@@ -361,7 +328,7 @@ const OwnWords = ({
         type="text"
         tabIndex={shown ? row.tabIndex : -1}
         maxLength={wordsMax}
-        className="chat-field nodrag nopan"
+        className="request-field nodrag nopan"
         aria-label={`Other: ${question.question}`}
         aria-describedby={`${id}-other-hint`}
         placeholder="Something else…"
@@ -374,7 +341,7 @@ const OwnWords = ({
     </label>
     <Hint
       id={`${id}-other-hint`}
-      className="chat-field-hint"
+      className="request-field-hint"
       text={hasControlCharacters(text) ? controlHint : ""}
     />
   </>
@@ -444,8 +411,8 @@ const Review = ({
   }
   return (
     <>
-      <p className="chat-question-text">Send these answers?</p>
-      <dl className="chat-review">
+      <p className="request-question-text">Send these answers?</p>
+      <dl className="request-review">
         {questions.map((question, index) => {
           const words = answerWords(question, picks[question.id])
           return (
@@ -461,11 +428,11 @@ const Review = ({
       {/* The hint by the words themselves is on a page out of sight. */}
       <Hint
         id={hintId}
-        className="chat-field-hint chat-review-hint"
+        className="request-field-hint request-review-hint"
         text={held ? controlHint : ""}
       />
       <div
-        className="chat-options"
+        className="request-options"
         role="group"
         aria-label="Send the answers"
         onKeyDown={menu.onKeyDown}
@@ -474,23 +441,28 @@ const Review = ({
         <button
           {...row(0)}
           type="submit"
-          className="chat-option nodrag nopan"
+          className="request-option nodrag nopan"
           aria-disabled={!ready || undefined}
           aria-describedby={held ? hintId : undefined}
         >
-          <span className="chat-option-number" aria-hidden>
+          <span className="request-option-number" aria-hidden>
             1
           </span>
-          <span className="chat-option-words">
+          <span className="request-option-words">
             Submit answers
             <Sending sending={sending} />
           </span>
         </button>
-        <button {...row(1)} type="button" className="chat-option nodrag nopan" onClick={onRestart}>
-          <span className="chat-option-number" aria-hidden>
+        <button
+          {...row(1)}
+          type="button"
+          className="request-option nodrag nopan"
+          onClick={onRestart}
+        >
+          <span className="request-option-number" aria-hidden>
             2
           </span>
-          <span className="chat-option-words">Start over</span>
+          <span className="request-option-words">Start over</span>
         </button>
       </div>
     </>
@@ -584,7 +556,7 @@ const Questions = ({
   }
   return (
     <form
-      className="chat-dialog chat-questions"
+      className="request-dialog request-questions"
       aria-label="Answer the questions"
       onKeyDown={turnKeys}
       onKeyDownCapture={(event) => {
@@ -599,13 +571,13 @@ const Questions = ({
         else submit()
       }}
     >
-      <div className="chat-tabs-line">
+      <div className="request-tabs-line">
         {replying ? (
-          <p className="chat-dialog-title">
+          <p className="request-dialog-title">
             The questions are set aside. Your reply in the box below goes to the agent instead.
           </p>
         ) : (
-          <div className="chat-tabs" role="tablist" aria-label="The questions">
+          <div className="request-tabs" role="tablist" aria-label="The questions">
             {[
               ...questions.map((question, index) => ({
                 key: `question:${question.id}`,
@@ -618,7 +590,7 @@ const Questions = ({
                 id={tabId(at)}
                 type="button"
                 role="tab"
-                className="chat-tab nodrag nopan"
+                className="request-tab nodrag nopan"
                 aria-selected={at === page}
                 aria-controls={panelId(at)}
                 tabIndex={at === page ? 0 : -1}
@@ -626,7 +598,7 @@ const Questions = ({
                 onClick={() => setTurned(at)}
               >
                 {at < questions.length && answered(picks, questions[at]!) && (
-                  <span className="chat-tab-done" aria-hidden>
+                  <span className="request-tab-done" aria-hidden>
                     ✓
                   </span>
                 )}
@@ -636,7 +608,12 @@ const Questions = ({
           </div>
         )}
         {talks && (
-          <button type="button" className="chat-key nodrag nopan" disabled={sending} onClick={chat}>
+          <button
+            type="button"
+            className="request-key nodrag nopan"
+            disabled={sending}
+            onClick={chat}
+          >
             {replying ? "Back to the questions" : "Chat about this"}
           </button>
         )}
@@ -648,7 +625,7 @@ const Questions = ({
       )}
       {!replying && (
         // Every page in one cell, so the tallest sets the height and turning one moves nothing.
-        <fieldset ref={pages} className="chat-pages" disabled={sending}>
+        <fieldset ref={pages} className="request-pages" disabled={sending}>
           {questions.map((question, index) => {
             const id = `${base}-${index}`
             return (
@@ -656,7 +633,7 @@ const Questions = ({
                 key={question.id}
                 id={panelId(index)}
                 role="tabpanel"
-                className="chat-page"
+                className="request-page"
                 aria-labelledby={tabId(index)}
                 data-page={index}
                 data-shown={index === page || undefined}
@@ -683,7 +660,7 @@ const Questions = ({
           <div
             id={panelId(questions.length)}
             role="tabpanel"
-            className="chat-page"
+            className="request-page"
             aria-labelledby={tabId(questions.length)}
             data-page={questions.length}
             data-shown={page === questions.length || undefined}
@@ -729,7 +706,7 @@ const Picked = ({
   readonly onChange: (value: string) => void
 }): React.JSX.Element => (
   <div
-    className="chat-picks"
+    className="request-picks"
     role="radiogroup"
     aria-labelledby={labelId}
     aria-required={field.required || undefined}
@@ -737,7 +714,7 @@ const Picked = ({
     aria-describedby={described}
   >
     {(field.kind === "boolean" ? ["yes", "no"] : field.choices).map((choice) => (
-      <label key={choice} className="chat-pick" data-on={value === choice || undefined}>
+      <label key={choice} className="request-pick" data-on={value === choice || undefined}>
         <input
           type="radio"
           name={name}
@@ -789,7 +766,7 @@ const Form = ({
   }
   return (
     <form
-      className="chat-dialog chat-form"
+      className="request-dialog request-form"
       aria-label="Fill in the form"
       noValidate
       onSubmit={(event) => {
@@ -797,8 +774,8 @@ const Form = ({
         answer("accept")
       }}
     >
-      {dialog.message && <p className="chat-dialog-title">{dialog.message}</p>}
-      <fieldset className="chat-form-fields" disabled={sending}>
+      {dialog.message && <p className="request-dialog-title">{dialog.message}</p>}
+      <fieldset className="request-form-fields" disabled={sending}>
         {fields.map((field, index) => {
           const id = `${base}-${index}`
           const entry = entryOf(entries, field)
@@ -809,23 +786,23 @@ const Form = ({
               .join(" ") || undefined
           const invalid = !entryValid(entries, field)
           const mark = field.required && (
-            <span aria-hidden className="chat-required">
+            <span aria-hidden className="request-required">
               {" *"}
             </span>
           )
           return (
             <div
               key={field.id}
-              className="chat-form-field"
+              className="request-form-field"
               data-missing={(invalid && (tried || entry.value !== "")) || undefined}
             >
               {field.kind === "choice" || field.kind === "boolean" ? (
-                <span className="chat-form-label" id={`${id}-l`}>
+                <span className="request-form-label" id={`${id}-l`}>
                   {field.label}
                   {mark}
                 </span>
               ) : (
-                <label className="chat-form-label" htmlFor={id}>
+                <label className="request-form-label" htmlFor={id}>
                   {field.label}
                   {mark}
                 </label>
@@ -846,7 +823,7 @@ const Form = ({
                   type={field.kind === "number" ? "number" : "text"}
                   maxLength={field.kind === "text" ? formTextMax : undefined}
                   step={field.kind === "number" ? "any" : undefined}
-                  className="chat-field nodrag nopan"
+                  className="request-field nodrag nopan"
                   placeholder={field.required ? "required" : "optional"}
                   value={entry.value}
                   aria-required={field.required || undefined}
@@ -860,12 +837,12 @@ const Form = ({
               {field.kind === "text" && (
                 <Hint
                   id={hintId}
-                  className="chat-field-hint"
+                  className="request-field-hint"
                   text={hasControlCharacters(entry.value) ? controlHint : ""}
                 />
               )}
               {field.description && (
-                <p className="chat-form-description" id={`${id}-d`}>
+                <p className="request-form-description" id={`${id}-d`}>
                   {field.description}
                 </p>
               )}
@@ -874,7 +851,7 @@ const Form = ({
         })}
       </fieldset>
       <div
-        className="chat-options"
+        className="request-options"
         role="group"
         aria-label="Answer the form"
         onKeyDown={menu.onKeyDown}
@@ -883,14 +860,14 @@ const Form = ({
         <button
           {...menu.row(0)}
           type="submit"
-          className="chat-option nodrag nopan"
+          className="request-option nodrag nopan"
           data-on={menu.at === 0 || undefined}
           aria-disabled={!ready || sending || undefined}
         >
-          <span className="chat-option-number" aria-hidden>
+          <span className="request-option-number" aria-hidden>
             1
           </span>
-          <span className="chat-option-words">
+          <span className="request-option-words">
             Submit
             <Sending sending={sending} />
           </span>
@@ -916,12 +893,12 @@ const Raw = ({
   readonly dialog: Extract<ChatDialog, { type: "raw" }>
   readonly live: Live | undefined
 }): React.JSX.Element => (
-  <div className="chat-dialog">
+  <div className="request-dialog">
     {/* That an answer didn't take is news; why the chat can't read a dialog isn't, with the
         dialog's own rows right there. */}
     <p
       className={
-        dialog.reason === "failed" || !live ? "chat-raw-reason" : "chat-raw-reason sr-only"
+        dialog.reason === "failed" || !live ? "request-raw-reason" : "request-raw-reason sr-only"
       }
       data-failed={dialog.reason === "failed" || undefined}
     >
@@ -930,7 +907,7 @@ const Raw = ({
     {live ? (
       live.rows
     ) : (
-      <pre className="chat-raw nodrag nopan nowheel" tabIndex={0} aria-label="The dialog's text">
+      <pre className="request-raw nodrag nopan nowheel" tabIndex={0} aria-label="The dialog's text">
         {shownControls(dialog.text)}
       </pre>
     )}
@@ -941,6 +918,7 @@ const Raw = ({
 // form, the terminal's own rows or the dialog's text for one the chat can't answer.
 export const RequestDialog = ({
   dialog,
+  kind,
   live,
   place,
   replying,
@@ -948,6 +926,7 @@ export const RequestDialog = ({
   ...controls
 }: Controls & {
   readonly dialog: ChatDialog
+  readonly kind: ChatRequest["kind"]
   // The terminal's own rows, shown for a dialog no adapter read in place of its text.
   readonly live: Live | undefined
   readonly place: RequestPlace
@@ -955,7 +934,7 @@ export const RequestDialog = ({
   readonly onReply: ((dialog: string | null) => void) | undefined
 }): React.JSX.Element =>
   dialog.type === "choices" ? (
-    <Choices dialog={dialog} {...controls} />
+    <Choices dialog={dialog} kind={kind} {...controls} />
   ) : dialog.type === "questions" ? (
     <Questions dialog={dialog} place={place} replying={replying} onReply={onReply} {...controls} />
   ) : dialog.type === "form" ? (
