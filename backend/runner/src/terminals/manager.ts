@@ -254,7 +254,7 @@ export class Terminals {
   /** Saves terminals for restoring, and reads them back. */
   private readonly saves: Saves
   /** Agents' messages to each other, and how each terminal's agent takes them. */
-  private readonly messaging: Messaging
+  readonly messaging: Messaging
   private readonly inbox: Inbox
   /** Agents' feedback drafts, held in memory for the app's feedback card. */
   readonly feedback: Feedback
@@ -1560,10 +1560,6 @@ export class Terminals {
   }
   clearAsks(ids: readonly string[]): void {
     this.inbox.clear(ids)
-  }
-  /** Rings `text` to the terminal's agent as Novadeck's notice; false where none shows yet. */
-  notice(terminalId: string, text: string): boolean {
-    return this.messaging.notice(terminalId, text, { always: true })
   }
 
   /** A terminal's threads and messages with their states. */
