@@ -1,3 +1,4 @@
+import type { ForgeConnection, ForgeName } from "@novadeck/core/forges"
 import type { AgentConnection, Backend } from "@novadeck/core/port"
 import { createStore } from "@novadeck/core/store"
 import type { Runner } from "@novadeck/runner-client"
@@ -11,6 +12,8 @@ import type { RunnerBackendOptions } from "./backend"
 type RunnerSwitchCalls = {
   readonly agents: Pick<Runner["agents"], "set" | "list">
   readonly settings: Pick<Runner["settings"], "set">
+  // Not every runner has forges (see `RunnerApi`).
+  readonly forges?: Pick<Runner["forges"], "set" | "list"> | undefined
 }
 
 export const runnerSwitches = (
@@ -20,6 +23,7 @@ export const runnerSwitches = (
     transcripts: kept,
     transcriptsAvailable,
     agents: integrations,
+    forges: forgeStates,
     welcomed,
     hibernateAfterMinutes,
     worktrees: allowed,
@@ -28,19 +32,64 @@ export const runnerSwitches = (
     | "transcripts"
     | "transcriptsAvailable"
     | "agents"
+    | "forges"
     | "welcomed"
     | "hibernateAfterMinutes"
     | "worktrees"
   >,
   track: <T>(work: Promise<T>) => Promise<T>,
-): Pick<Backend, "transcripts" | "hibernation" | "worktrees" | "agents"> => {
+): Pick<Backend, "transcripts" | "hibernation" | "worktrees" | "agents" | "forges"> => {
   const transcripts = createStore(kept ?? true)
   const hibernateAfter = createStore(hibernateAfterMinutes ?? null)
   const worktrees = createStore(allowed ?? false)
   const agents = createStore<readonly AgentConnection[]>(
     (integrations ?? []).map((agent) => ({ ...agent, busy: false })),
   )
+  const forges = createStore<readonly ForgeConnection[]>(
+    (forgeStates ?? []).map((forge) => ({ ...forge, busy: false })),
+  )
   const welcome = createStore(welcomed === false)
+  const updateForge = (forge: ForgeName, next: (current: ForgeConnection) => ForgeConnection) =>
+    forges.update((list) => list.map((item) => (item.forge === forge ? next(item) : item)))
+  // How many switches each forge has had, so a list asked before one never undoes it.
+  const forgeSwitched = new Map<ForgeName, number>()
+  const switchForge = (forge: ForgeName, enabled: boolean): void => {
+    const calls = runner.forges
+    if (!calls) return
+    forgeSwitched.set(forge, (forgeSwitched.get(forge) ?? 0) + 1)
+    updateForge(forge, (current) => ({
+      ...current,
+      busy: true,
+      error: undefined,
+    }))
+    void track(calls.set(forge, enabled)).then(
+      (result) => updateForge(forge, () => ({ ...result, busy: false })),
+      (error: unknown) =>
+        updateForge(forge, (current) => ({
+          ...current,
+          busy: false,
+          error: error instanceof Error ? error.message : String(error),
+        })),
+    )
+  }
+  const refreshForges = (options?: { readonly fresh?: boolean }): Promise<void> => {
+    const calls = runner.forges
+    if (!calls) return Promise.resolve()
+    const asked = new Map(forgeSwitched)
+    return track(calls.list(options?.fresh ? { fresh: true } : undefined)).then(
+      (list) => {
+        forges.update((current) =>
+          list.map((found) => {
+            const shown = current.find((item) => item.forge === found.forge)
+            // A change under way, or one made since the list was asked, reports its own result.
+            const since = forgeSwitched.get(found.forge) !== asked.get(found.forge)
+            return shown && (shown.busy || since) ? shown : { ...found, busy: false }
+          }),
+        )
+      },
+      () => {},
+    )
+  }
   // Replaces one agent's entry, keeping the others.
   const updateAgent = (
     agent: AgentConnection["agent"],
@@ -124,6 +173,9 @@ export const runnerSwitches = (
             },
           },
         }
+      : {}),
+    ...(forgeStates !== undefined && runner.forges
+      ? { forges: { state: forges, set: switchForge, refresh: refreshForges } }
       : {}),
     ...(integrations !== undefined
       ? {
