@@ -221,9 +221,34 @@ const images: ProfileImages = {
   },
 }
 
+/**
+ * The hint its empty box shows in a mode that has one, `Accept-edits mode: file edits
+ * auto-approved (shift+tab to cycle)` and `Plan mode: research & plan only (shift+tab to cycle)`
+ * (probed 2026-11-15, 1.5.7, fixtures/mode-hint.probe.json). It is drawn in grey (palette colour
+ * 8), not dim, so the bright cells keep it, with the cursor at the box's start; a word typed
+ * replaces it, and the cursor goes after the word.
+ */
+const modeHint = /^[A-Z][\w-]* mode: [^\n]*\(shift\+tab to cycle\)$/
+
+/**
+ * The box with that hint read as empty: only a first row that is the hint, with the cursor still
+ * at the box's start, is one. A draft that says the same words has the cursor after them.
+ */
+const unhinted = (found: InputBox | undefined, screen: ScreenText): InputBox | undefined =>
+  found?.mode === "prompt" &&
+  found.first === found.last &&
+  screen.cursor.row === found.first &&
+  screen.cursor.column <= markers.prompt.length + 1 &&
+  modeHint.test(found.text)
+    ? { ...found, text: "" }
+    : found
+
 /** How its box reads off a screen. */
 const read = (screen: ScreenText): InputBox | undefined =>
-  marked(agreeing(ruledBox(boxScreen(screen), markers), shellFooter(screen.rows)), screen)
+  unhinted(
+    marked(agreeing(ruledBox(boxScreen(screen), markers), shellFooter(screen.rows)), screen),
+    screen,
+  )
 
 /**
  * Antigravity's input box: between two `─` rules, `> ` leading its first row and the rest

@@ -1,4 +1,5 @@
 import type { ScreenText } from "@novadeck/emulator/headless"
+import { loadProbe } from "@novadeck/harness-core/testing/probes"
 import { describe, expect, it } from "vitest"
 
 import { box } from "./box.js"
@@ -53,5 +54,38 @@ describe("Antigravity's images", () => {
   it("types the place of an image among the words, which it shows no mark for", () => {
     expect(box.images!.typed?.(1)).toBe("[Image #1]")
     expect(box.images!.typed?.(12)).toBe("[Image #12]")
+  })
+})
+
+// Probed 2026-11-15, 1.5.7, fixtures/mode-hint.probe.json: in accept-edits and plan modes its
+// empty box shows a hint in grey (not dim), the cursor at the box's start; a word replaces it.
+describe("Antigravity's mode hint", () => {
+  const { versions } = loadProbe<{ versions: Record<string, Record<string, ScreenText>> }>(
+    import.meta.dirname,
+    "mode-hint.probe.json",
+  )
+  const states = versions["1.5.7"]!
+
+  it.each(["default", "accept-edits", "plan", "auto"])(
+    "reads its %s mode's idle box as empty",
+    (mode) => {
+      expect(box.read(states[`${mode} empty`]!)).toMatchObject({
+        text: "",
+        mode: "prompt",
+      })
+    },
+  )
+
+  it.each(["default", "accept-edits", "plan", "auto"])(
+    "reads a word typed in %s mode as the draft",
+    (mode) => {
+      expect(box.read(states[`${mode} typed`]!)).toMatchObject({ text: "hello" })
+    },
+  )
+
+  it("keeps a draft that repeats the hint's words, as its cursor is after them", () => {
+    const hint = "Plan mode: research & plan only (shift+tab to cycle)"
+    const screen = screenOf("", rule, `> ${hint}`, rule, "")
+    expect(box.read({ ...screen, cursor: { row: 2, column: hint.length + 2 } })?.text).toBe(hint)
   })
 })

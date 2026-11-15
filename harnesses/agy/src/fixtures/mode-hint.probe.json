@@ -1,0 +1,2247 @@
+{
+  "harness": "agy",
+  "source": "src/e2e/probes/agy-mode-hint.e2e.ts, run with NOVADECK_E2E_PROBES=1 (2026-11-15)",
+  "how": "Antigravity started in the e2e deck against the fake model with each --mode, read at its idle prompt before any turn (120x40) as the input-box probe does (`rows`, `bright` where dim cells blank some, `cursor`, and the style runs of each row), then with the word `hello` typed. In accept-edits and plan modes the empty box holds a hint, `<Mode> mode: ... (shift+tab to cycle)`, in palette colour 8 (grey), not SGR dim, so `bright` keeps it, with the cursor at the box's start; typing replaces it. Default and auto modes show none.",
+  "versions": {
+    "1.5.7": {
+      "default empty": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 12,
+          "column": 1
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "3": "warning: unrecognized --mode value \"default\" (valid: accept-edits, auto, plan)",
+          "5": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "6": "     ▀▀▀▀▀▀       Gemini API key",
+          "7": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "8": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "9": "  ▄▀▀      ▀▀▄",
+          "11": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "12": ">",
+          "13": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "14": "? for shortcuts                                                                                     Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "14": "? for shortcuts"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "3": [
+            {
+              "text": "warning: unrecognized --mode value \"default\" (valid: accept-edits, auto, plan)                                          ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "9": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "11": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "12": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": "                                                                                                                       ",
+              "style": ""
+            }
+          ],
+          "13": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "14": [
+            {
+              "text": "? for shortcuts",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                     ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "default typed": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 12,
+          "column": 6
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "3": "warning: unrecognized --mode value \"default\" (valid: accept-edits, auto, plan)",
+          "5": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "6": "     ▀▀▀▀▀▀       Gemini API key",
+          "7": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "8": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "9": "  ▄▀▀      ▀▀▄",
+          "11": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "12": "> hello",
+          "13": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "14": "                                                                                                    Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "14": ""
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "3": [
+            {
+              "text": "warning: unrecognized --mode value \"default\" (valid: accept-edits, auto, plan)                                          ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "9": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "11": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "12": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " hello                                                                                                                 ",
+              "style": ""
+            }
+          ],
+          "13": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "14": [
+            {
+              "text": "                                                                                                    ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "accept-edits empty": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 1
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": "> Accept-edits mode: file edits auto-approved (shift+tab to cycle)",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "? for shortcuts                                                                      accept-edits · Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": "? for shortcuts                                                                      accept-edits"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " ",
+              "style": ""
+            },
+            {
+              "text": "Accept-edits mode: file edits auto-approved (shift+tab to cycle)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                      ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "? for shortcuts",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            },
+            {
+              "text": "accept-edits",
+              "style": "fgp2"
+            },
+            {
+              "text": " · Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "accept-edits typed": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 6
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": "> hello",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "                                                                                     accept-edits · Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": "                                                                                     accept-edits"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " hello                                                                                                                 ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "                                                                                     ",
+              "style": ""
+            },
+            {
+              "text": "accept-edits",
+              "style": "fgp2"
+            },
+            {
+              "text": " · Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "plan empty": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 1
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": "> Plan mode: research & plan only (shift+tab to cycle)",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "? for shortcuts                                                                              plan · Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": "? for shortcuts                                                                              plan"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " ",
+              "style": ""
+            },
+            {
+              "text": "Plan mode: research & plan only (shift+tab to cycle)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                  ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "? for shortcuts",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                              ",
+              "style": ""
+            },
+            {
+              "text": "plan",
+              "style": "fgp12"
+            },
+            {
+              "text": " · Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "plan typed": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 6
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": "> hello",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "                                                                                             plan · Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": "                                                                                             plan"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " hello                                                                                                                 ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "                                                                                             ",
+              "style": ""
+            },
+            {
+              "text": "plan",
+              "style": "fgp12"
+            },
+            {
+              "text": " · Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "auto empty": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 1
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": ">",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "? for shortcuts                                                                                     Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": "? for shortcuts"
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": "                                                                                                                       ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "? for shortcuts",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                     ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      },
+      "auto typed": {
+        "height": 40,
+        "columns": 120,
+        "cursor": {
+          "row": 11,
+          "column": 6
+        },
+        "rows": {
+          "0": "To run a command as administrator (user \"root\"), use \"sudo <command>\".",
+          "1": "See \"man sudo_root\" for details.",
+          "4": "      ▄▀▀▄        Antigravity CLI 1.5.7",
+          "5": "     ▀▀▀▀▀▀       Gemini API key",
+          "6": "    ▀▀▀▀▀▀▀▀      Gemini 3.1 Pro (Low)",
+          "7": "   ▄▀▀    ▀▀▄     /tmp/novadeck-e2e-5xGGUY/project",
+          "8": "  ▄▀▀      ▀▀▄",
+          "10": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "11": "> hello",
+          "12": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+          "13": "                                                                                                    Gemini 3.1 Pro · low"
+        },
+        "bright": {
+          "13": ""
+        },
+        "styles": {
+          "0": [
+            {
+              "text": "To run a command as administrator (user \"root\"), use \"sudo <command>\".                                                  ",
+              "style": ""
+            }
+          ],
+          "1": [
+            {
+              "text": "See \"man sudo_root\" for details.                                                                                        ",
+              "style": ""
+            }
+          ],
+          "4": [
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp179"
+            },
+            {
+              "text": "▀",
+              "style": "fgp208,bgp208"
+            },
+            {
+              "text": "▀",
+              "style": "fgp203,bgp209"
+            },
+            {
+              "text": "▄",
+              "style": "fgp203"
+            },
+            {
+              "text": "        ",
+              "style": ""
+            },
+            {
+              "text": "Antigravity CLI 1.5.7",
+              "style": "bold,fgp12"
+            },
+            {
+              "text": "                                                                                 ",
+              "style": ""
+            }
+          ],
+          "5": [
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp149,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp143,bgp107"
+            },
+            {
+              "text": "▀",
+              "style": "fgp173,bgp173"
+            },
+            {
+              "text": "▀",
+              "style": "fgp209,bgp209"
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp203,bgp167"
+            },
+            {
+              "text": "       ",
+              "style": ""
+            },
+            {
+              "text": "Gemini API key",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                        ",
+              "style": ""
+            }
+          ],
+          "6": [
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp107,bgp113"
+            },
+            {
+              "text": "▀",
+              "style": "fgp71,bgp72"
+            },
+            {
+              "text": "▀",
+              "style": "fgp72,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp67"
+            },
+            {
+              "text": "▀",
+              "style": "fgp103"
+            },
+            {
+              "text": "▀",
+              "style": "fgp98,bgp68"
+            },
+            {
+              "text": "▀",
+              "style": "fgp97,bgp62"
+            },
+            {
+              "text": "▀",
+              "style": "fgp132,bgp97"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro (Low)",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                                  ",
+              "style": ""
+            }
+          ],
+          "7": [
+            {
+              "text": "   ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp78"
+            },
+            {
+              "text": "▀",
+              "style": "fgp78,bgp74"
+            },
+            {
+              "text": "▀",
+              "style": "fgp73,bgp74"
+            },
+            {
+              "text": "    ",
+              "style": ""
+            },
+            {
+              "text": "▀▀",
+              "style": "fgp68,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp68"
+            },
+            {
+              "text": "     ",
+              "style": ""
+            },
+            {
+              "text": "/tmp/novadeck-e2e-5xGGUY/project",
+              "style": "fgp8"
+            },
+            {
+              "text": "                                                                      ",
+              "style": ""
+            }
+          ],
+          "8": [
+            {
+              "text": "  ",
+              "style": ""
+            },
+            {
+              "text": "▄",
+              "style": "fgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp79,bgp75"
+            },
+            {
+              "text": "▀",
+              "style": "fgp75"
+            },
+            {
+              "text": "      ",
+              "style": ""
+            },
+            {
+              "text": "▀",
+              "style": "fgp69"
+            },
+            {
+              "text": "▀",
+              "style": "fgp69,bgp69"
+            },
+            {
+              "text": "▄",
+              "style": "fgp69"
+            },
+            {
+              "text": "                                                                                                          ",
+              "style": ""
+            }
+          ],
+          "10": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "11": [
+            {
+              "text": ">",
+              "style": "fgp12"
+            },
+            {
+              "text": " hello                                                                                                                 ",
+              "style": ""
+            }
+          ],
+          "12": [
+            {
+              "text": "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+              "style": "fgp8"
+            }
+          ],
+          "13": [
+            {
+              "text": "                                                                                                    ",
+              "style": ""
+            },
+            {
+              "text": "Gemini 3.1 Pro · low",
+              "style": "dim"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
