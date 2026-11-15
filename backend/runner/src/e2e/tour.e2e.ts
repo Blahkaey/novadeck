@@ -125,15 +125,20 @@ for (const setup of setups) {
       const prepared = await prepare(run)
 
       const terminal = await run.deck.openAt(prepared.directory, prepared.command)
-      // What the harness's process was started with, while it runs.
-      const argv = await poll(
-        () => {
-          const words = terminal.summary().process?.argv?.join(" ")
-          return words?.includes(tourWrites[setup.agent][0]!) ? words : undefined
-        },
-        `${terminal.handle}'s ${setup.name} to start`,
-        30_000,
-      )
+      // What the harness's process was started with, while it runs: not on Windows, where the
+      // runner reads no foreground process's command line (`foregroundProcess.argv` is null).
+      // There the agent binding, its greeting and no usage error on screen show it took them.
+      const argv =
+        process.platform === "win32"
+          ? undefined
+          : await poll(
+              () => {
+                const words = terminal.summary().process?.argv?.join(" ")
+                return words?.includes(tourWrites[setup.agent][0]!) ? words : undefined
+              },
+              `${terminal.handle}'s ${setup.name} to start`,
+              30_000,
+            )
 
       if (prepared.brief === "doorbell") {
         // Plain, with nothing yet to say: its agent asks for the tour once it has bound.
@@ -174,9 +179,11 @@ for (const setup of setups) {
 
       // Started as the line says: the harness runs with the tour's write flags, which it
       // took (no usage error), with no question about the folder on its screen.
-      expect(argv).toContain(tourWrites[setup.agent].join(" "))
-      if (setup.agent === "codex")
-        expect(argv).toContain(`--model ${luna} -c model_reasoning_effort=low`)
+      if (argv !== undefined) {
+        expect(argv).toContain(tourWrites[setup.agent].join(" "))
+        if (setup.agent === "codex")
+          expect(argv).toContain(`--model ${luna} -c model_reasoning_effort=low`)
+      }
       expect(terminal.summary().agent).toBe(setup.agent)
       const shown = await terminal.screen()
       expect(shown).not.toMatch(
