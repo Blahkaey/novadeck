@@ -134,6 +134,25 @@ describe("the Windows shims", () => {
   })
 })
 
+describe("the allow rules Antigravity's launches took", () => {
+  it("go only as the runner first writes its files, never under sessions still running", async ({
+    resources,
+  }) => {
+    const directory = mkdtempSync(join(tmpdir(), "novadeck-allow-"))
+    resources.defer(() => rmSync(directory, { recursive: true, force: true }))
+    const first = await installShellFiles(directory, { platform: "linux", fresh: true })
+    mkdirSync(first.allow, { recursive: true })
+    const taken = join(first.allow, "00000000-0000-4000-8000-000000000001.json")
+    writeFileSync(taken, "{}")
+    // Written again, as when Codex connects: a running session may read its file again.
+    await installShellFiles(directory, { platform: "linux" })
+    expect(existsSync(taken)).toBe(true)
+    // A runner's next start, before any of its shells.
+    await installShellFiles(directory, { platform: "linux", fresh: true })
+    expect(existsSync(taken)).toBe(false)
+  })
+})
+
 describe("installing the relay", () => {
   it("puts the running copy back on Windows when the new one can't take its place", async () => {
     const { files, ops } = memory(
@@ -251,14 +270,14 @@ describe("the cmd.exe pass-through", () => {
       options({ cmdShim: join(folder, "none.exe") }),
     )
     expect(without.cmdShimDir).toBeUndefined()
-    expect(existsSync(agyShim(without))).toBe(false)
+    expect(readFileSync(agyShim(without), "utf8")).not.toContain('set "PATH=')
     // A folder whose path still needs quoting (no short name) is not put on PATH.
     const spaced = await installShellFiles(
       directory,
       options({ short: (path: string) => Promise.resolve(`${path} with space`) }),
     )
     expect(spaced.cmdShimDir).toBeUndefined()
-    expect(existsSync(agyShim(spaced))).toBe(false)
+    expect(readFileSync(agyShim(spaced), "utf8")).not.toContain('set "PATH=')
   })
 
   it("is not used where cmd prints nothing, and not on another platform", async ({ resources }) => {
@@ -266,33 +285,34 @@ describe("the cmd.exe pass-through", () => {
     const quiet = await installShellFiles(directory, options({ prints: () => Promise.resolve() }))
     expect(quiet.cmdShimDir).toBeUndefined()
     expect(existsSync(quiet.agyCmdDir)).toBe(false)
-    expect(existsSync(agyShim(quiet))).toBe(false)
+    expect(readFileSync(agyShim(quiet), "utf8")).not.toContain('set "PATH=')
     const linux = await installShellFiles(directory, options({ platform: "linux" }))
     expect(linux.cmdShimDir).toBeUndefined()
     expect(existsSync(linux.agyCmdDir)).toBe(false)
   })
 
-  it("takes the shim away again once cmd prints nothing", async ({ resources }) => {
+  it("takes the folder off Antigravity's PATH again once cmd prints nothing", async ({
+    resources,
+  }) => {
     const { directory, options } = setup(resources)
     const printing = await installShellFiles(directory, options())
-    expect(existsSync(agyShim(printing))).toBe(true)
+    expect(readFileSync(agyShim(printing), "utf8")).toContain('set "PATH=')
     const quiet = await installShellFiles(directory, options({ prints: () => Promise.resolve() }))
-    expect(existsSync(agyShim(quiet))).toBe(false)
+    expect(readFileSync(agyShim(quiet), "utf8")).not.toContain('set "PATH=')
   })
 
-  it("is written, without the pass-through, while the worktrees folder exists, and goes with it", async ({
+  // Every session takes Novadeck's tools through it (harnesses/agy/src/shim.ts).
+  it("is written, without the pass-through, whether or not the worktrees folder exists", async ({
     resources,
   }) => {
     const { directory, folder, options } = setup(resources)
     const quiet = options({ prints: () => Promise.resolve() })
-    expect(existsSync(agyShim(await installShellFiles(directory, quiet)))).toBe(false)
-    mkdirSync(join(folder, "worktrees"))
-    const present = await installShellFiles(directory, quiet)
-    const written = readFileSync(agyShim(present), "utf8")
+    const written = readFileSync(agyShim(await installShellFiles(directory, quiet)), "utf8")
     expect(written).toContain("--add-dir=")
+    expect(written).toContain('novadeck-relay.exe" allow ')
     expect(written).not.toContain('set "PATH=')
-    rmSync(join(folder, "worktrees"), { recursive: true })
-    expect(existsSync(agyShim(await installShellFiles(directory, quiet)))).toBe(false)
+    mkdirSync(join(folder, "worktrees"))
+    expect(readFileSync(agyShim(await installShellFiles(directory, quiet)), "utf8")).toBe(written)
   })
 
   it("is written with the pass-through as before, whether or not the folder exists", async ({

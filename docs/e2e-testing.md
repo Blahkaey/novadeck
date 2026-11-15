@@ -399,7 +399,9 @@ network:
 
 Messaging scenarios live in `messaging.e2e.ts`, a runner restart's in `restart.e2e.ts`,
 an agent starting another with a task, or closing another's terminal, in
-`tasks.e2e.ts`, what a quit or a close leaves of an agent's tools in `quit.e2e.ts`, an agent's look at a page it showed (the picture reaches each harness's model) in `look.e2e.ts`, the person typing around messages in `person.e2e.ts`, messages that come while the agent waits on the person (a
+`tasks.e2e.ts`, what a quit or a close leaves of an agent's tools in `quit.e2e.ts`, an agent's look at a page it showed (the picture reaches each harness's model) in `look.e2e.ts`, the person typing around messages in `person.e2e.ts`, Novadeck's own tools running unasked however a session started (typed, opened by an agent,
+resumed at a restart, resumed from History) in `tools-unasked.e2e.ts`, messages that come while
+the agent waits on the person (a
 permission question, its own popup, a picker) in `requests.e2e.ts`, a nested run of the
 harness inside an agent's turn in `nested.e2e.ts`, the person forking a session in a new
 terminal or in place in `forks.e2e.ts`, the person clearing the conversation
@@ -1056,8 +1058,8 @@ transcript says.
   characters), and trusts the project unless seeded `folderTrusted: false`. Seeded
   `popup: true`, it also names an account (`oauthAccount`) with a billing admin's roles,
   for whom Claude Code warns of a session's cost.
-  `settings.json` allows Novadeck's MCP tools (`mcp__plugin_novadeck_novadeck`) and its
-  own print mode (`Bash(claude -p:*)`, for `shell`), and sets the manual permission mode with auto mode off (`defaultMode: "default"`,
+  `settings.json` allows its own print mode (`Bash(claude -p:*)`, for `shell`), and nothing
+  of Novadeck's: Novadeck's shim allows its MCP tools, as in anyone's session. It sets the manual permission mode with auto mode off (`defaultMode: "default"`,
   `disableAutoMode: "disable"`): 2.1.287 defaults to auto mode, where a classifier
   decides what asks, and shows a notice about its billing through a gateway, or with
   `defaultMode` alone an offer to make auto mode the default, each waiting on Enter.
@@ -1147,7 +1149,8 @@ transcript says.
   its prompt only then. Once the plugin is connected, `connected` starts the pinned
   `codex app-server` and makes the calls its "Hooks need review" screen makes:
   `hooks/list` for each hook's current hash, then `config/batchWrite` to record them
-  as trusted, and to let Novadeck's MCP tools run without asking. It copies the hashes
+  as trusted. Nothing approves Novadeck's MCP tools there: Novadeck's shim does, as in
+  anyone's session. It copies the hashes
   rather than computing them, so it holds as long as that protocol does, which Novadeck's
   own trust check relies on too.
 - **Its model catalog.** `model_catalog_json` points at a `models.json` in its home that
@@ -1202,9 +1205,9 @@ transcript says.
   credential and `GOOGLE_GEMINI_BASE_URL` pointing at the fake model. The Code Assist
   route stays untested.
 - **Seeding.** `~/.gemini/antigravity-cli/settings.json` in the sandbox marks
-  onboarding complete, trusts the project, picks the Gemini provider and allows
-  Novadeck's MCP tools (`mcp(novadeck_novadeck/*)`) and its own print mode
-  (`command(agy -p)`, for `shell`) to run without asking. Its shell tool, `run_command`,
+  onboarding complete, trusts the project, picks the Gemini provider and allows its own
+  print mode (`command(agy -p)`, for `shell`) to run without asking. Nothing of Novadeck's:
+  its shim passes those rules with Novadeck's MCP tools added, as in anyone's session. Its shell tool, `run_command`,
   runs `agy -p '<prompt>'`, waiting up to 30 s before leaving it to run on; the nested
   Antigravity's hooks report a conversation of its own. `/fork` at its prompt says
   "Forked conversation." and how to go back (`/resume <parent>`); its status line names

@@ -57,6 +57,12 @@ export type InstallOptions = {
    * would rename it under a terminal starting Codex just then.
    */
   readonly pwsh?: boolean | "kept"
+  /**
+   * Whether this is the runner's first writing, before any of its shells start: only then
+   * does it empty the allow rules launches before took (`ShellPaths.allow`). A later writing,
+   * as when Codex connects, leaves them, as sessions running then may read theirs again.
+   */
+  readonly fresh?: boolean
   /** For tests: how to tell whether cmd prints (the machine's own check by default). */
   readonly prints?: typeof cmdPrints
   /** Where agents' worktrees live, for the shims to pass on (`~/.novadeck/worktrees` by default). */
@@ -72,9 +78,7 @@ export type InstallOptions = {
  * moment reads the old or the new file.
  *
  * It is also how the shell files are rewritten on demand: it is safe to call again, and
- * changes only what differs. Antigravity's Windows shim exists only while the worktrees
- * folder does, so whoever first creates that folder calls this right after (the runner's
- * `rewriteShellFiles`), and the next shell finds the shim.
+ * changes only what differs.
  */
 export const installShellFiles = async (
   directory: string,
@@ -83,6 +87,7 @@ export const installShellFiles = async (
     cmdShim = join(dirname(relay), cmdShimName),
     pwshShim = join(dirname(relay), pwshShimName),
     pwsh = false,
+    fresh = false,
     prints: printing = cmdPrints,
     worktrees,
     platform = process.platform,
@@ -158,6 +163,9 @@ export const installShellFiles = async (
     // eslint-disable-next-line no-await-in-loop -- As above; held a moment on Windows, tried again.
     await settled(() => rename(temporary, file.path))
   }
+  // The allow rules launches of a runner before took (Antigravity's shim,
+  // harnesses/agy/src/shim.ts), whose sessions ended with it.
+  if (fresh) await rm(paths.allow, { recursive: true, force: true })
   // A resume command left by a runner that stopped before its shell took it is stale.
   await rm(paths.resume, { recursive: true, force: true })
   await mkdir(paths.resume, { recursive: true, mode: 0o700 })
