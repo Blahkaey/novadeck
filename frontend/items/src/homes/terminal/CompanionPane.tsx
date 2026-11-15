@@ -1,3 +1,4 @@
+import { kindRules } from "@novadeck/core/items"
 import type { WorkspaceTarget } from "@novadeck/core/types"
 import { Shown, useShown } from "@novadeck/toolkit/shown"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
@@ -8,7 +9,7 @@ import { AwakeContext, useWakeful } from "../../awake"
 import { isNew, isSecret, type BarMember, type BehindGroup } from "../../bar/bar"
 import { usePaneTurn } from "../../pane-turns"
 import type { LookContext } from "../../registration"
-import { stackNames } from "../../registry"
+import { registrationOf, stackNames } from "../../registry"
 import type { ItemStore } from "../../store/item-store"
 import { UnderHeader } from "../../under-header"
 import { memberLook, MemberView, slotIcon } from "./drawing"
@@ -441,8 +442,24 @@ export const CompanionPane = ({
   first?: boolean
 }): React.JSX.Element => {
   // Its turn, each time it comes into sight; picking another tab while it's in sight
-  // waits for none.
-  const turn = usePaneTurn(first, member !== undefined && !leaving)
+  // waits for none. Out of sight a while, what it shows goes, except a kind that stays
+  // built (a page, a plan).
+  const item = member?.kind === "item" ? member.item : undefined
+  const turn = usePaneTurn(
+    first,
+    member !== undefined && !leaving,
+    !item || !registrationOf(item).staysBuilt,
+  )
+  // While it isn't built, its item is followed all the same, so it shows at once when built
+  // again rather than loading: what it held stays, only its view goes.
+  const followed =
+    item !== undefined && !turn.built && !leaving && kindRules[item.kind].follow !== "always"
+      ? item.id
+      : undefined
+  useEffect(
+    () => (followed === undefined ? undefined : itemStore.watch(target, followed)),
+    [itemStore, target, followed],
+  )
   // What it shows is shown once laid out: not while it stands in, as messages aren't
   // seen and a page doesn't wake behind the stand-in.
   const inSight = useShown()
