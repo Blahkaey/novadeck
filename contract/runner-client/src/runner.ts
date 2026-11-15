@@ -731,6 +731,8 @@ export type Runner = {
     prepare(agent: AgentName): Promise<TourPrepared>
     /** Rings the tour's start line to the agent in the terminal (`tour.brief`). */
     brief(terminalId: string): Promise<void>
+    /** Rings the tour's agent in the terminal to carry on with its brief (`tour.nudge`). */
+    nudge(terminalId: string): Promise<void>
   }
   /** Disconnects. Attached terminals finish; their shells keep running on the runner. */
   close(): Promise<void>
@@ -993,6 +995,7 @@ export const connectRunner = async (
     tour: {
       prepare: (agent) => call((client) => client.tour.prepare({ agent })),
       brief: (terminalId) => call((client) => client.tour.brief({ terminalId })),
+      nudge: (terminalId) => call((client) => client.tour.nudge({ terminalId })),
     },
     close: () => Promise.resolve(connection.close()),
   }

@@ -124,6 +124,7 @@ export const runnerTour = (
       throw hasCode(error, "MODELS_UNLISTED") ? new TourNeedsAgent(error.message, agent) : error
     }),
   brief: (terminalId) => track(tour.brief(terminalId)),
+  nudge: (terminalId) => track(tour.nudge(terminalId)),
   ...(asked && { asked }),
 })
 

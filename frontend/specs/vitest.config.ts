@@ -46,6 +46,7 @@ const optimizedUpFront = [
 // fence). A spec that reads `isMac()` from a file not listed here fails, naming this list
 // (setup.ts).
 export const eachPlatform = [
+  "src/agents/tour-driver.spec.tsx",
   "src/companions/companions.spec.tsx",
   "src/desktop/portable.spec.tsx",
   "src/desktop/sandbox.spec.tsx",

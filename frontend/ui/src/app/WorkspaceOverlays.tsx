@@ -34,6 +34,7 @@ import { CloseTerminalDialog } from "../terminals/CloseTerminalDialog"
 import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
+import { TourSpotlight } from "../tour/Spotlight"
 import { TourConsentDialog } from "../tour/TourConsent"
 import { CloseTeamRows } from "./CloseTeamRows"
 import {
@@ -59,6 +60,7 @@ import { switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
 import { useTour } from "./useTour"
+import { useTourDriver } from "./useTourDriver"
 
 // Rendered beside a deferred dialog, so it mounts only once the dialog's view has loaded.
 const Loaded = ({
@@ -295,7 +297,8 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const worktrees = useWorktrees(backend.worktrees)
   const agents = useAgents(backend.agents)
   const installs = useInstalls(backend.agents)
-  const tour = useTour(backend, agents.list)
+  const driver = useTourDriver(backend.tour)
+  const tour = useTour(backend, agents.list, driver.begin)
   const forgeList = useForges(backend.forges)
   const forgeRuns = useForgeRuns(backend.forges)
   const approval = useApproval(backend.approvals)
@@ -395,6 +398,16 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           transcripts={transcripts}
           onDone={backend.agents.finishWelcome}
           {...(tour ? { onTour: tour.offer } : {})}
+        />
+      )}
+      {driver.shown && (
+        <TourSpotlight
+          {...driver.shown}
+          onPause={driver.pause}
+          onResume={driver.resume}
+          onSkip={driver.skip}
+          onEnd={driver.end}
+          onBack={driver.back}
         />
       )}
       {tour && (

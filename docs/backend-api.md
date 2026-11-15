@@ -1813,8 +1813,11 @@ one from an earlier runner.
   (`terminals.create`).
 - `tour.brief({ terminalId })` rings the tour's start line to the agent in the terminal, as
   Novadeck's notice, for a run whose `brief` is `doorbell`: the doorbell delivers it once the
-  agent's prompt shows and its MCP tools are listed. A terminal whose agent hasn't shown yet
-  is a `CONFLICT`; the client asks once it has bound.
+  agent's prompt shows and its MCP tools are listed. A terminal whose agent hasn't shown yet,
+  or that isn't in the tour's folder, is a `CONFLICT`; the client asks once it has bound.
+- `tour.nudge({ terminalId })` rings the agent in one of the tour's terminals a fixed line, as
+  Novadeck's notice, to carry on with its brief from the step it is on: the UI's tour driver
+  sends it where a step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
 `INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,

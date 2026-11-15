@@ -133,6 +133,7 @@ const Row = ({
       role="listitem"
       className="item inbox-row"
       data-inbox-row={row.id}
+      data-tour="inbox-card"
       data-type={type}
       data-urgency={settled ? "quiet" : answered ? "answered" : toneOf(row)}
       data-seen={row.seen}

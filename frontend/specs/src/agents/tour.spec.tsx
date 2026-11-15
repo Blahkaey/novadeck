@@ -15,11 +15,11 @@ const start = (): Locator => consent().getByRole("button", { name: "Start the to
 const consentSays = (words: string): Promise<void> =>
   expect.poll(() => consent().query()?.textContent ?? "").toContain(words)
 
-// The tour is on screen: its own project, with its one terminal selected.
+// The tour is on screen: its own project, with its one terminal, its agent's, selected.
 const expectTourOpen = async (): Promise<void> => {
-  await expectSelected("Tour")
   await expect.poll(() => workspaceSwitcher().element().textContent ?? "").toContain("Tour")
-  expect(terminalTabNames()).toEqual(["Tour"])
+  await expect.poll(() => terminalTabNames().length).toBe(1)
+  await expectSelected(terminalTabNames()[0]!)
 }
 
 // Offers the tour from Preferences' About, which closes for it; with `connect`, Claude Code

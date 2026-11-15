@@ -610,6 +610,19 @@ App:
   models unlisted" fails it as Codex not signed in yet does, with a Start button that opens the
   agent in a terminal. A spec asks with the address: `&tour=on` offers it, `&tourStart=fails`
   and `&tourStart=unlisted` fail the first start.
+  The tour's terminal runs a scripted agent (`frontend/demo/src/tour/player.ts`): after a few
+  hundred ms it binds, works, names its terminal "Tour lead" (as its own describe) and finishes
+  its turn; Antigravity starts working only once the UI rang `brief`. "Tour agent: hold at
+  folder trust" / "sign-in" / "hooks" hold the next one at that startup screen until "Answer the
+  startup screen"; "Tour agent: quiet until nudged" has the next one sit idle at its prompt,
+  no turn begun, until `Tour.nudge`, then work and name itself. Addresses: `&tourScreen=startup|sign-in|hooks` (`&tourScreenMs=<n>`
+  answers the screen after n ms), `&tourAgent=quiet`, `&tourPatienceMs=<n>` (the UI's wait
+  before nudging).
+  As the agent goes, the tour's driver (`frontend/ui/src/tour/driver.ts`, `app/useTourDriver.ts`)
+  draws a ring around what its step points at and a coach card beside it: "Your agent is
+  starting", or, while a startup screen holds, "Your agent is asking you something first" in
+  that screen's words. Pause, Skip step and End tour steer it; while paused, or while another
+  project is on screen, a small bar stands in for it.
 - **Boot failures:** each fails the first attempt as the runner would, so a transient one
   retries on its own and the others wait for Retry (an incompatible runner, or a workspace
   a newer Novadeck has used, only for Quit). Each hint carries the error code, so the search

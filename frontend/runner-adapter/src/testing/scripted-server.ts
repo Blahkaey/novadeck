@@ -353,6 +353,7 @@ export const scriptedRunner = ({
     tour: {
       prepare: api.tour.prepare.handler(unplayed("tour.prepare")),
       brief: api.tour.brief.handler(unplayed("tour.brief")),
+      nudge: api.tour.nudge.handler(unplayed("tour.nudge")),
     },
     settings: {
       get: api.settings.get.handler(() => ({

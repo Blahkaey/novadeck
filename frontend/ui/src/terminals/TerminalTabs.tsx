@@ -180,7 +180,7 @@ export const TerminalTabs = ({
       }}
     >
       {away && <DropAdrift adrift={away.adrift} />}
-      <div className={`terminal-tab-list ${sidebarListClasses}`} ref={attach}>
+      <div className={`terminal-tab-list ${sidebarListClasses}`} ref={attach} data-tour="tabs">
         <Fragment key={drag.generation}>
           {terminals.map((terminal, index) => renderTab(terminal, index))}
         </Fragment>

@@ -18,7 +18,7 @@ import { demoTurns } from "@novadeck/demo/agents/turns"
 import { isDemoFeedback } from "@novadeck/demo/feedback"
 import { isDemoInbox } from "@novadeck/demo/inbox"
 import { isDemoSource } from "@novadeck/demo/source"
-import { demoTour } from "@novadeck/demo/tour"
+import { demoTour, isDemoTour } from "@novadeck/demo/tour"
 import { createDemo, type DemoVariant } from "@novadeck/demo/variants"
 import { babciaCuesOf } from "@novadeck/demo/videos/babcia"
 import { launchCuesOf } from "@novadeck/demo/videos/launch"
@@ -212,8 +212,10 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
 
   const { worktrees: offered, forges: forgesOffered, ...withoutWorktrees } = inner
   const installs = createDemoInstalls()
-  // On the panel's own agents, which the tour runs one of.
-  const tour = demoTour(states.agents.state, () => latest)
+  // On the panel's own agents, which the tour runs one of. The inner demo's tour is the one its
+  // player follows, so the panel's actions reach it.
+  const tour = isDemoTour(inner.tour) ? inner.tour : demoTour(states.agents.state, () => latest)
+  if (isDemoTour(tour)) tour.follow(states.agents.state, () => latest)
   const backend: Backend = installs.wrap({
     ...withoutWorktrees,
     ...(launch.worktrees && offered ? { worktrees: offered } : {}),

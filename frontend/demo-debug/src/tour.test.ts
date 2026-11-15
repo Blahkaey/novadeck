@@ -51,8 +51,36 @@ describe("the tour group", () => {
     await expect(tour.prepare("agy")).resolves.toMatchObject({ brief: "doorbell" })
   })
 
+  it("holds the next tour agent at a screen, answers it, and has it go quiet", () => {
+    const tour = tourOf()
+    const [group] = tourGroups(tour)
+    const run = (label: string) =>
+      void group!.actions.find((each) => each.label === label)!.run({} as never)
+    run("Tour agent: hold at sign-in")
+    expect(tour.take()).toEqual({ screen: "sign-in", quiet: false })
+    run("Tour agent: hold at folder trust")
+    expect(tour.take().screen).toBe("startup")
+    run("Tour agent: hold at hooks")
+    run("Tour agent: quiet until nudged")
+    expect(tour.take()).toEqual({ screen: "hooks", quiet: true })
+    expect(tour.take()).toEqual({ quiet: false })
+    let answered = 0
+    tour.answered(() => (answered += 1))
+    run("Answer the startup screen")
+    expect(answered).toBe(1)
+  })
+
   it("gives each action a hint that says what appears", () => {
     const [group] = tourGroups(tourOf())
     for (const action of group!.actions) expect(action.hint.length).toBeGreaterThan(20)
+  })
+})
+
+describe("the tour the debug panel shares with the demo", () => {
+  it("runs the agents the panel connects, once it follows them", async () => {
+    const tour = demoTour(createStore<readonly AgentConnection[]>([]), () => undefined)
+    await expect(tour.prepare("claude")).rejects.toThrow()
+    tour.follow(createStore(connected), () => undefined)
+    await expect(tour.prepare("claude")).resolves.toMatchObject({ model: "haiku" })
   })
 })

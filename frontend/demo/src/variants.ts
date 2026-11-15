@@ -2,11 +2,12 @@ import type { Backend } from "@novadeck/core/port"
 
 import { addressParams } from "./address"
 import { withShellItems } from "./agents/shell-items"
-import type { DemoTurns } from "./agents/turns"
+import { demoTurns, type DemoTurns } from "./agents/turns"
 import { plainDemo, type PlainVariant } from "./index"
 import { withMoves } from "./moves"
 import { showcaseDemo } from "./showcase/demo"
 import type { DemoTerminalSetup } from "./terminals/screens"
+import { withTourAgent } from "./tour"
 
 // The demos the content preview can run: the showcase, and the plain ones.
 export type DemoVariant = "showcase" | PlainVariant
@@ -27,11 +28,11 @@ export const demoVariants: readonly DemoVariant[] = [
 export const createDemo = (
   variant: DemoVariant,
   terminals?: DemoTerminalSetup,
-  turns?: DemoTurns,
+  turns: DemoTurns = demoTurns(),
 ): Backend => {
   const backend =
     variant === "showcase"
-      ? showcaseDemo(terminals, turns)
+      ? withTourAgent(showcaseDemo(terminals, turns), turns)
       : plainDemo(variant, terminals, undefined, turns)
   // The videos' demos keep their cues by the backend they made, and move nothing. The others
   // make each agent's shells an item on its bar, as the runner does.

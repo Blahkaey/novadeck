@@ -114,6 +114,7 @@ export const WorkspaceHeader = ({
       </div>
       <div
         data-workspace-view-switch
+        data-tour="views"
         className="header-view-controls relative flex shrink-0 items-center"
       >
         {switchable && (
