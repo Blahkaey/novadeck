@@ -39,10 +39,12 @@ export default defineConfig({
       // and raised to 1.3 MB in #439, when main sat about 100 bytes under it. The demo's was
       // raised to 195 kB for History's rows, which the demo keeps (190,171 bytes then), and
       // to 205 kB for the changes pane's layers and the small git its samples come from
-      // (198,875 bytes then).
+      // (198,875 bytes then), and to 206 kB for the tour's demo: its port, its hold and the watch
+      // that starts its scripted agent, which itself loads only as a tour starts (205,083 bytes
+      // then).
       budgets: {
         first: 1_300_000,
-        demo: 205_000,
+        demo: 206_000,
         demoModule: "/frontend/demo/src/visitor/connect.ts",
       },
     }),
