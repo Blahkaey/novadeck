@@ -29,6 +29,7 @@ import {
   WorkspaceStore,
   WorkspaceTooNewError,
 } from "./workspaces/store.js"
+import { keepWorktreeChanges } from "./worktrees/changes-shown.js"
 import { RootFolder } from "./worktrees/root-folder.js"
 import { Worktrees } from "./worktrees/worktrees.js"
 
@@ -377,6 +378,16 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     )
     // After it: the owners it found gone leave their merged worktrees to cleanup.
     .finally(() => worktrees.start())
+  keepWorktreeChanges({
+    onMade: (listener) => worktrees.onMade(listener),
+    onChanged: (listener) => worktrees.onChanged(listener),
+    enabled: () => store.settings.runner().worktrees,
+    owner: (root) => worktrees.all().find((row) => row.path === root)?.terminalId,
+    place: (terminalId) => terminals.place(terminalId),
+    show: (place, root) => items.showChangesUnlessShown(place, root),
+    closeOn: (terminalId, root) => items.closeChangesOn(terminalId, root),
+    closeAll: (root) => items.closeChangesAt(root),
+  })
   const works = new Works({
     tracked: () =>
       worktrees.all().map(({ path, projectId, terminalId, createdAt, commonDir, base }) => ({
