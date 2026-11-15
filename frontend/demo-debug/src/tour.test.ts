@@ -1,6 +1,7 @@
 import type { AgentConnection } from "@novadeck/core/port"
 import { createStore } from "@novadeck/core/store"
-import { demoTour, demoTourRefusal } from "@novadeck/demo/tour"
+import { demoTour } from "@novadeck/demo/tour"
+import { demoTourRefusal } from "@novadeck/demo/tour-runs"
 
 import { describe, expect, it } from "./test"
 import { tourGroups } from "./tour"

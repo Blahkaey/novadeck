@@ -1,40 +1,13 @@
-import { harnesses, type AgentName } from "@novadeck/core/harnesses"
-import { TourNeedsAgent, type AgentConnection, type Tour, type TourRun } from "@novadeck/core/port"
+import type { AgentConnection, Tour } from "@novadeck/core/port"
 import { createStore, type MutableStore, type Store } from "@novadeck/core/store"
 import type { Workspace } from "@novadeck/core/types"
-
-const agentName = (agent: AgentName): string =>
-  harnesses.find(({ id }) => id === agent)?.name ?? agent
 
 // Where the demo's tour runs, as the runner's runs in `~/.novadeck/tour`.
 export const demoTourFolder = "~/.novadeck/tour"
 
-const startLine = "Start the Novadeck tour: follow AGENTS.md in this folder."
-
-// The launch lines the runner builds for each harness (backend/runner/src/tour/launch.ts),
-// on each one's cheapest model.
-const launches: Readonly<Record<AgentName, Omit<TourRun, "directory" | "removed">>> = {
-  claude: {
-    command: `claude --model haiku --effort low --permission-mode acceptEdits "${startLine}"`,
-    brief: "launch",
-    model: "haiku",
-  },
-  codex: {
-    command: `codex --model gpt-6-luna -c model_reasoning_effort=low --sandbox workspace-write --ask-for-approval on-request "${startLine}"`,
-    brief: "launch",
-    model: "gpt-6-luna",
-  },
-  agy: {
-    command: "agy --model gemini-3.8-flash-low --effort low --mode accept-edits",
-    brief: "doorbell",
-    model: "gemini-3.8-flash-low",
-  },
-}
-
-// Why the demo's tour won't start, where the debug panel says it shouldn't: as a runner
-// refuses one (a folder of the person's own in its place), with the sentence it gives.
-export const demoTourRefusal =
-  "~/.novadeck/tour holds files Novadeck didn't put there, so the tour leaves it as it is."
+// What a start answers, loaded only as one is readied: the website's visitor demo, which never
+// offers the tour, doesn't carry it in its first load.
+const runs = () => import("./tour-runs")
 
 export type DemoTour = Tour & {
   // Whether the UI offers it: held back, as everywhere, until the debug panel or a spec's
@@ -77,24 +50,17 @@ export const demoTour = (
       return () => void listeners.delete(listener)
     },
     briefed,
-    prepare: (agent) => {
+    prepare: async (agent) => {
       const fails = failing
       failing = undefined
-      if (fails === "folder") return Promise.reject(new Error(demoTourRefusal))
-      if (fails === "unlisted")
-        return Promise.reject(
-          new TourNeedsAgent(
-            `${agentName(agent)} hasn't listed its models here yet, so the tour can't pick its cheapest. Start ${agentName(agent)} and sign in, then take the tour.`,
-            agent,
-          ),
-        )
+      const { demoRun, demoRefusal } = await runs()
+      if (fails) throw demoRefusal(fails, agent)
       const connected = agents.getSnapshot().some((each) => each.agent === agent && each.connected)
-      if (!connected)
-        return Promise.reject(new Error("Novadeck isn't connected to it, so the tour can't start."))
+      if (!connected) throw new Error("Novadeck isn't connected to it, so the tour can't start.")
       const removed = (workspace()?.projects ?? [])
         .filter((project) => project.directory === demoTourFolder)
         .map((project) => project.id)
-      return Promise.resolve({ ...launches[agent], directory: demoTourFolder, removed })
+      return { ...demoRun(agent), directory: demoTourFolder, removed }
     },
     brief: (terminalId) => {
       briefed.update((ids) => [...ids, terminalId])
