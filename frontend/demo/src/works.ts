@@ -12,8 +12,18 @@ import type {
 } from "@novadeck/core/works"
 
 import type { DemoTurns } from "./agents/turns"
-import { createDemoPreview, previewPath, type DemoPreview, type OwlChange } from "./preview"
-import { terminalOfHandle } from "./source"
+import { demoHandle } from "./handles"
+import {
+  addedPath,
+  createDemoPreview,
+  previewPath,
+  renamedPath,
+  renamedTo,
+  type DemoPreview,
+  type OwlChange,
+  type PreviewScenario,
+} from "./preview"
+import { isDemoSource, terminalOfHandle } from "./source"
 
 // The demo's Changes: each tracked worktree's work against main, from fixtures planned per demo
 // (`WorkPlan`) and kept by the demo's own store, standing in for the runner, which reads the
@@ -310,10 +320,19 @@ export type DemoWorksControl = {
   readonly ownerClosed: (root: string) => void
   // The work of the terminal changes `path` (as it did when `at`): added to its files where
   // it had none, else its time moved on, as a runner's does at each new write.
-  readonly touchFile: (terminalId: string, path: string, at: number) => void
+  readonly touchFile: (
+    terminalId: string,
+    path: string,
+    at: number,
+    extra?: Partial<WorkFile>,
+  ) => void
   // The storefront's third agent changes src/checkout/Checkout.tsx, as the file preview shows
   // it, in a clash with the others or in lines main has rewritten since; or no longer.
   readonly previewOwl: (change: OwlChange | undefined) => void
+  // Crow adds src/checkout/OrderSummary.tsx too (which Moth adds), or renames
+  // src/checkout/PaymentStep.tsx to src/checkout/PaymentForm.tsx (which Moth modifies), or no
+  // longer.
+  readonly previewScenario: (which: PreviewScenario, on: boolean) => void
   // The terminal's worktree differs from nothing but has `count` commits main lacks, as one
   // squash-merged does.
   readonly commitsMainLacks: (at: Placed, count: number) => void
@@ -363,9 +382,15 @@ export const createDemoWorks = (
     readonly show?: (work: Work, terminalId: string) => Promise<string | null>
     // What a file previews as; a backend with none previews nothing.
     readonly preview?: DemoPreview
+    // Has the Source panel show an agent's change to a file, by its handle, or no longer.
+    readonly mark?: (
+      handle: string,
+      path: string,
+      kind: "modified" | "added" | "deleted" | undefined,
+    ) => void
   } = {},
 ): DemoWorks => {
-  const { now = Date.now, show, preview } = options
+  const { now = Date.now, show, preview, mark } = options
   const state = createStore<WorksState>({ works: initial, synced: true, reported: true })
   // How many worktrees were made since the demo began, which the Changes toggle flares for.
   const made = createStore(0)
@@ -410,7 +435,12 @@ export const createDemoWorks = (
     made.update((count) => count + 1)
     return fresh
   }
-  const touchFile = (terminalId: string, path: string, at: number): void => {
+  const touchFile = (
+    terminalId: string,
+    path: string,
+    at: number,
+    extra: Partial<WorkFile> = {},
+  ): void => {
     const own = ownedBy(terminalId)
     if (!own) return
     const file: WorkFile = {
@@ -422,6 +452,7 @@ export const createDemoWorks = (
       unreadAdded: 1,
       unreadRemoved: 1,
       conflict: false,
+      ...extra,
     }
     change(own.root, (work) =>
       summed(
@@ -449,8 +480,45 @@ export const createDemoWorks = (
     preview: async (projectId, path): Promise<WorkPreview> =>
       preview
         ? preview.read(state.getSnapshot().works, projectId, path)
-        : { main: null, works: [] },
+        : { main: null, works: [], renames: [] },
     touchFile,
+    previewScenario: (which, on) => {
+      if (!preview) return
+      const at = now()
+      preview.scenario(which, on, at)
+      // Crow's files, and Moth's, which only come with the rename and stay after it.
+      const crow: [string, Partial<WorkFile>, "added" | "deleted"][] =
+        which === "added"
+          ? [[addedPath, { status: "added" }, "added"]]
+          : [
+              [renamedTo, { status: "renamed", from: renamedPath }, "added"],
+              [renamedPath, { status: "deleted" }, "deleted"],
+            ]
+      // Moth edits the old file, which Crow then renames away: deleted shows over modified.
+      if (on && which === "rename") {
+        touchFile(preview.mothTerminal, renamedPath, at)
+        mark?.(demoHandle(1), renamedPath, "modified")
+      }
+      const handle = demoHandle(4)
+      for (const [path, extra, kind] of crow) {
+        // The old path is Moth's file too: Crow's rename is no file of its own in the work.
+        const listed = which === "rename" && path === renamedPath ? undefined : extra
+        if (on) {
+          if (listed) touchFile(preview.crowTerminal, path, at, listed)
+          mark?.(handle, path, kind)
+        } else {
+          const own = ownedBy(preview.crowTerminal)
+          if (own && listed)
+            change(own.root, (work) =>
+              summed(
+                work,
+                work.files.filter((file) => file.path !== path),
+              ),
+            )
+          mark?.(handle, path, undefined)
+        }
+      }
+    },
     previewOwl: (kind) => {
       if (!preview) return
       const at = now()
@@ -607,8 +675,10 @@ export const withWorks = (
   const { plans = [], turns, show } = options
   let latest: Workspace | undefined
   const preview = createDemoPreview(Date.now())
+  const source = isDemoSource(backend.source) ? backend.source : undefined
   const works = createDemoWorks(worksFromPlans(backend.seed, plans, Date.now()), {
     preview,
+    ...(source && { mark: source.mark }),
     ...(show && {
       show: (work: Work, terminalId: string) => show(work, terminalId, latest),
     }),

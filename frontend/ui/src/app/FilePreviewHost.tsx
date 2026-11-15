@@ -1,13 +1,21 @@
 import type { WorkPreview } from "@novadeck/core/works"
 import { FilePreview } from "@novadeck/items/FilePreview"
-import type { Agent } from "@novadeck/items/FilePreview"
+import type { Agent, Rename } from "@novadeck/items/FilePreview"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 
-import { projectPath, sourceOfWorks } from "../sidebar/source-works"
+import { sourceOfWorks } from "../sidebar/source-works"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useStoreSelector } from "./controller/useStoreSelector"
 import { currentTarget, sameTarget } from "./selectors"
-import { noSource, noWorks, ownersOf, sameOwners, sameWorks } from "./source-feed"
+import {
+  copyOf,
+  noSource,
+  noWorks,
+  ownersOf,
+  previewFiles,
+  sameOwners,
+  sameWorks,
+} from "./source-feed"
 import type { FilePreviewRequest } from "./ui-store"
 
 // How often an open preview is read again while an agent writes the file: the works come every
@@ -20,6 +28,19 @@ const noHandles: ReadonlySet<string> = new Set()
 // backend for it and draws it with the agents' names, lighting and writes from the app. It
 // shows `fallback` (the file as it is in main) until it has something to preview, and where
 // the backend can't say, the file may hold secrets, or no work changes it any longer.
+// Whether the window should go back to the project's own file: it points at an agent's copy in
+// its worktree (main lacked the file) and the preview, read, lists no work for it any longer
+// (merged, or closed), so what the window holds is about to be gone.
+export const shouldRepoint = (
+  request: Pick<FilePreviewRequest, "backed">,
+  preview: Pick<WorkPreview, "unavailable" | "works" | "renames"> | undefined,
+): boolean =>
+  request.backed &&
+  preview !== undefined &&
+  !preview.unavailable &&
+  preview.works.length === 0 &&
+  preview.renames.length === 0
+
 const Reading = ({
   request,
   fallback,
@@ -28,7 +49,7 @@ const Reading = ({
   fallback: ReactNode
 }): React.JSX.Element => {
   const { projectId, path } = request
-  const { backend } = useWorkspaceServices()
+  const { backend, commands } = useWorkspaceServices()
   const works = backend.works
   // The works are followed while the preview shows.
   useEffect(() => works?.watch(), [works])
@@ -65,17 +86,17 @@ const Reading = ({
   const changed = useMemo(
     () =>
       JSON.stringify(
-        projectWorks.flatMap((work) => {
-          const file =
-            work.folder === undefined
-              ? undefined
-              : work.files.find((each) => projectPath(work.folder!, each.path) === path)
-          return file
-            ? [[work.root, file.status, file.changedAt, file.added, file.removed, work.working]]
-            : []
-        }),
+        previewFiles(projectWorks, projectId, path).map(({ work, file }) => [
+          work.root,
+          file.path,
+          file.status,
+          file.changedAt,
+          file.added,
+          file.removed,
+          work.working,
+        ]),
       ),
-    [projectWorks, path],
+    [projectWorks, projectId, path],
   )
   const [preview, setPreview] = useState<WorkPreview | undefined>()
   const writers = [...writing].toSorted().join(" ")
@@ -125,12 +146,31 @@ const Reading = ({
           label: handle === undefined ? (work.branch ?? "worktree") : `@${handle}`,
           status: work.status,
           changedAt: work.changedAt,
+          renamedFrom: work.renamedFrom,
           hunks: work.hunks,
         }
       }),
     [preview, owners],
   )
-  if (!preview || preview.unavailable || agents.length === 0) return <>{fallback}</>
+  // Where main has the file by now, the window goes back to it; where it still doesn't it stays.
+  const repoint = shouldRepoint(request, preview)
+  useEffect(() => {
+    if (repoint) commands.openSourceFile(path).catch(() => {})
+  }, [repoint, commands, path])
+  const renames = useMemo(
+    (): readonly Rename[] =>
+      (preview?.renames ?? []).map((rename) => {
+        const handle =
+          rename.terminalId === null ? undefined : owners.get(rename.terminalId)?.handle
+        return {
+          label: handle === undefined ? (rename.branch ?? "worktree") : `@${handle}`,
+          to: rename.to,
+        }
+      }),
+    [preview, owners],
+  )
+  if (!preview || preview.unavailable || (agents.length === 0 && renames.length === 0))
+    return <>{fallback}</>
   return (
     <FilePreview
       path={path}
@@ -138,6 +178,13 @@ const Reading = ({
       agents={agents}
       lit={lit ?? noHandles}
       writing={writing}
+      renames={renames}
+      // The file it was renamed to has its own preview, backed by the renamer's copy where main lacks it.
+      onOpen={(to) =>
+        void commands
+          .openSourceFile(to, { preview: true, copy: copyOf(projectWorks, projectId, to) })
+          .catch(() => {})
+      }
     />
   )
 }

@@ -478,8 +478,14 @@ Agents:
   third version in the clash), "A change doesn't apply" a change of `owl`'s to a line main has
   rewritten since (a red box saying so, with Show, and "1 change doesn't apply" in the summary),
   and "Third agent leaves the file preview" takes it away. Lighting an agent in the Source strip
-  dims the others' changes in the preview. Other files and projects have no preview, so they open
-  as main's copy.
+  dims the others' changes in the preview. Two more files are previewed: `src/checkout/OrderSummary.tsx`,
+  which main lacks and Moth adds (the whole file as added lines under Moth's head; "Crow adds
+  OrderSummary.tsx too" makes a whole-file clash, the last writer shown), and
+  `src/checkout/PaymentStep.tsx`: "Crow renames PaymentStep.tsx, moth edits it" puts a note at the
+  top of PaymentStep.tsx saying crow renames it to `PaymentForm.tsx` (Open shows that file's
+  preview: main's PaymentStep with crow's head "renamed from", crow's edit and Moth's change to
+  the old file carried onto it); "Crow's add and rename end" takes both away. Other files and
+  projects have no preview, so they open as main's copy.
 - **Agent connections:** make the next connect in Preferences fail, refresh the agents, or
   connect Antigravity with the note Preferences shows where its own status line keeps
   Novadeck's out, as on Windows.
