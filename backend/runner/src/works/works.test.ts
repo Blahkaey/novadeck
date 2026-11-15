@@ -15,6 +15,7 @@ import { dirname, join } from "node:path"
 import type { PullRequest, Work, WorkMade } from "@novadeck/protocol"
 import { afterEach, vi } from "vitest"
 
+import { timing } from "../checkouts/git.js"
 import { Snapshots } from "../checkouts/snapshots.js"
 import { DomainError } from "../errors.js"
 import { describe, expect, it as base } from "../test.js"
@@ -210,6 +211,29 @@ const current = async (works: Works): Promise<Map<string, Work>> => {
     stop.abort()
   }
   return found
+}
+
+// DIAGNOSTIC, not to merge: each git run and each change told, by ms since the start.
+const traced = () => {
+  const start = performance.now()
+  const lines: string[] = []
+  const at = () => String(Math.round(performance.now() - start)).padStart(6)
+  const before = timing.saw
+  timing.saw = (args) =>
+    lines.push(
+      `${at()} git ${args
+        .filter((a) => !a.startsWith("-c"))
+        .slice(0, 3)
+        .join(" ")}`,
+    )
+  const name = expect.getState().currentTestName
+  return {
+    note: (text: string) => lines.push(`${at()} ${text}`),
+    end: () => {
+      timing.saw = before
+      console.log(`WORKS-TRACE ${name}\n${lines.join("\n")}`)
+    },
+  }
 }
 
 describe.skipIf(!hasGit)("the works of tracked worktrees", () => {
@@ -585,18 +609,27 @@ describe.skipIf(!hasGit)("the works of tracked worktrees", () => {
     resources,
   }) => {
     const { main } = fixture
+    const trace = traced()
+    resources.defer(() => trace.end())
     main.write("b.txt", "x\n")
     const { works } = open(() => [{ terminalId: terminal(1), root: main.root }])
     resources.defer(() => works.close())
     const stop = new AbortController()
     resources.defer(() => stop.abort())
     const seen: string[] = []
+    trace.note("watch")
     void (async () => {
-      for await (const change of works.watch("owner", stop.signal))
+      for await (const change of works.watch("owner", stop.signal)) {
+        trace.note(
+          `told ${change.type}${change.type === "changed" ? ` ${change.work.files.map((f) => f.status).join()}` : ""}`,
+        )
         if (change.type === "changed") seen.push(change.work.files.map((f) => f.status).join())
+      }
     })()
     await vi.waitFor(() => expect(seen.at(-1)).toBe("modified"))
+    trace.note("git rm")
     main.git("rm", "--quiet", "-f", "b.txt")
+    trace.note("git rm done")
     await vi.waitFor(() => expect(seen.at(-1)).toBe("deleted"))
   })
 
@@ -1015,14 +1048,19 @@ describe.skipIf(!hasGit)("the works of tracked worktrees", () => {
     resources,
   }) => {
     const { main } = fixture
+    const trace = traced()
+    resources.defer(() => trace.end())
     const there: Where[] = [{ terminalId: terminal(1), root: main.root }]
     const { works } = open(() => there)
     resources.defer(() => works.close())
     const stop = new AbortController()
     const seen: string[] = []
+    trace.note("watch")
     const done = (async () => {
-      for await (const change of works.watch("owner", stop.signal))
+      for await (const change of works.watch("owner", stop.signal)) {
         seen.push(change.type === "changed" ? `changed ${change.work.added}` : change.type)
+        trace.note(`told ${seen.at(-1)}`)
+      }
     })()
     const until = async (text: string) => {
       const deadline = Date.now() + 5_000
@@ -1033,10 +1071,13 @@ describe.skipIf(!hasGit)("the works of tracked worktrees", () => {
     }
     await until("synced")
     // Tracked, it is listed from the start, with nothing differing.
+    trace.note("write b2")
     main.write("b.txt", "b\nb2\n")
     await until("changed 1")
+    trace.note("write b4")
     main.write("b.txt", "b\nb2\nb3\nb4\n")
     await until("changed 3")
+    trace.note("untrack")
     there.length = 0
     await until("removed")
     stop.abort()
