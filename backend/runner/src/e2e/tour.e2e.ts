@@ -214,7 +214,9 @@ for (const setup of setups) {
         await writeFile(join(directory, "kept.txt"), "left by the last run")
         await rm(cache(run), { force: true })
 
-        await expect(run.deck.tour.prepare(setup.agent)).rejects.toMatchObject({ code: "MODELS_UNLISTED" })
+        await expect(run.deck.tour.prepare(setup.agent)).rejects.toMatchObject({
+          code: "MODELS_UNLISTED",
+        })
 
         await expect(readFile(join(directory, "kept.txt"), "utf8")).resolves.toBe(
           "left by the last run",
