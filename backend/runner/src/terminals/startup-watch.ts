@@ -1,14 +1,20 @@
 import type { ScreenText } from "@novadeck/emulator/headless"
-import type { AgentName } from "@novadeck/protocol"
+import {
+  isAgentName,
+  type AgentName,
+  type StartupScreen,
+  type TerminalSummary,
+} from "@novadeck/protocol"
 import type { Terminal } from "@novadeck/terminal/host"
 import type { BoxProfile } from "@novadeck/tui-input/box"
 
 import { harnesses } from "../harnesses/registry.js"
 import { coalesced } from "./coalesce.js"
 import type { Record } from "./record.js"
+import { programOf } from "./sampling.js"
 
 /** What the watch reads of a terminal's record, and what it keeps there. */
-export type WatchedRecord = Pick<Record, "summary" | "startupScreen"> & {
+export type WatchedRecord = Pick<Record, "summary" | "startupScreen" | "bound" | "signedOut"> & {
   readonly terminal: Pick<Terminal, "run">
 }
 
@@ -27,6 +33,20 @@ export const startupDelayMs = (platform: NodeJS.Platform): number =>
  * prompt first and may raise its hooks review or update screen over it a few seconds later.
  */
 const promptedDelays = 6
+
+/**
+ * For how many delays a session's prompt is looked at once it binds, for a harness whose
+ * prompt can say it isn't signed in (Claude Code's footer draws with the prompt), and after
+ * that only while it says so, or did lately (`signedOutLingerMs`).
+ */
+const signedOutDelays = 3
+
+/**
+ * How long a prompt that said it isn't signed in is still looked at once it no longer does:
+ * Claude Code's `/login` covers its footer while the person signs in, and they may leave it
+ * with Escape, or their sign-in fail, back at the prompt that says so again.
+ */
+const signedOutLingerMs = 10 * 60_000
 
 /**
  * What a screen says of the agent expected there: its own `box`, which it takes prompts in;
@@ -61,6 +81,17 @@ export type Track = {
   readonly box: number | null
   /** Its box stood long enough: the agent is past any startup screen, and is left alone. */
   readonly prompted: boolean
+  /** Which screen its text says it is, where its harness tells (`Harness.heldScreen`). */
+  readonly screen?: StartupScreen | undefined
+  /**
+   * When its harness was last asked whether Novadeck's hooks run, once its box stood a delay;
+   * asked again a delay later while it couldn't answer.
+   */
+  readonly asked?: number | undefined
+  /** Since when a session was seen bound there, for the looks at its prompt. */
+  readonly bound?: number | undefined
+  /** When the bound session's prompt last said it isn't signed in. */
+  readonly signedOut?: number | undefined
 }
 
 export const freshTrack = (now: number): Track => ({
@@ -89,7 +120,8 @@ export const nextTrack = (
 ): Track => {
   if (look === "box") {
     const box = track.box ?? now
-    return { ...freshTrack(now), text, box, prompted: now - box >= delayMs * promptedDelays }
+    const prompted = now - box >= delayMs * promptedDelays
+    return { ...freshTrack(now), text, box, prompted, asked: track.asked }
   }
   if (look === "screen" && text === track.text)
     return { ...track, moving: null, held: track.held || now - track.still >= delayMs, box: null }
@@ -106,26 +138,75 @@ export const nextTrack = (
 
 const trackKey = ({ summary, terminal }: WatchedRecord): string => `${summary.id}/${terminal.run}`
 
+/**
+ * The agent a terminal's foreground program is, with no session bound: one the person typed
+ * in its shell, which Novadeck didn't launch and so expects nowhere.
+ */
+const typedAgent = ({ bound, summary }: WatchedRecord): AgentName | undefined => {
+  const program = !bound && summary.process ? programOf(summary.process) : undefined
+  return isAgentName(program) ? program : undefined
+}
+
 export type StartupHost<R extends WatchedRecord> = {
   readonly stopping: () => boolean
   readonly records: () => Iterable<R>
-  /** The agent expected in the terminal, which neither bound nor showed its prompt yet. */
-  readonly expected: (terminalId: string) => AgentName | null
+  readonly messaging: () => {
+    /** The agent expected in the terminal, which neither bound nor showed its prompt yet. */
+    readonly expected: (terminalId: string) => AgentName | null
+    /** The agent whose hooks were found not to run there, with no session bound, if any. */
+    readonly untrustedAgent: (terminalId: string) => AgentName | undefined
+  }
+  readonly shown: () => {
+    /**
+     * The expected agent's own box stood a delay with no session bound: whether Novadeck's
+     * hooks run for it there is asked, which marks it in `untrustedAgent` where they don't.
+     * Whether its harness answered: one that couldn't is asked again a delay later.
+     */
+    readonly boxStood: (record: R, agent: AgentName) => Promise<boolean>
+  }
   readonly screen: (terminalId: string) => Promise<ScreenText | undefined>
   /** The terminal's summary changed. */
   readonly changed: (record: R) => void
 }
 
 /**
- * Tells which terminals an agent is expected in are held at one of its own screens for the
- * person, as a folder-trust, update, sign-in or onboarding screen, where no harness reports
- * anything Novadeck binds on. It looks only while one is expected.
+ * What holds the terminal's agent for the person, as the summary shows it: a bound session
+ * whose prompt says it isn't signed in; else an agent whose hooks Novadeck found off
+ * (`hooksOff`); else the screen `held` names, of the agent expected there. The summary's own
+ * value where it says the same.
+ */
+export const startupOf = (
+  record: WatchedRecord,
+  hooksOff: AgentName | undefined,
+  held: { readonly agent: AgentName; readonly screen: StartupScreen } | null,
+): TerminalSummary["startup"] => {
+  const { bound, summary } = record
+  const next = bound
+    ? record.signedOut === bound.binding
+      ? { agent: bound.binding.agent, screen: "sign-in" as const }
+      : null
+    : hooksOff
+      ? { agent: hooksOff, screen: "hooks" as const }
+      : held
+  const shown = summary.startup
+  return shown?.agent === next?.agent && shown?.screen === next?.screen ? shown : next
+}
+
+/**
+ * Tells which terminals an agent is expected in, or was typed in by the person, are held at
+ * one of its own screens for the person, as a folder-trust, update, sign-in or onboarding
+ * screen, where no harness reports anything Novadeck binds on; which hold an agent whose hooks
+ * Novadeck found off, asking the harness once its own box has stood a while; and which hold a
+ * bound session whose prompt says it isn't signed in. It looks only while one is expected or
+ * typed, a session just bound, or a mark stands; a summary that changes (`noticed`) wakes it.
  */
 export class StartupWatch<R extends WatchedRecord> {
   private timer: ReturnType<typeof setInterval> | undefined
   private looking = false
   /** By terminal and run: a restart's new shell starts over. */
   private tracks = new Map<string, Track>()
+  /** The tracks whose harness answered whether Novadeck's hooks run there. */
+  private answered = new Set<string>()
   private readonly schedule = coalesced(
     () => this.tick(),
     "Novadeck's startup watch failed:",
@@ -139,6 +220,22 @@ export class StartupWatch<R extends WatchedRecord> {
     private readonly now: () => number = Date.now,
   ) {}
 
+  /**
+   * A terminal's summary changed: the watch looks again where that may need it, as at an
+   * agent the person typed in its shell, a session that bound, or an agent found with its
+   * hooks off.
+   */
+  noticed(record: R): void {
+    if (this.timer || this.host.stopping()) return
+    const track = this.tracks.get(trackKey(record))
+    const wanted = record.bound
+      ? this.looksBound(record, track)
+      : (this.agentIn(record) !== undefined && !track?.prompted) ||
+        (this.host.messaging().untrustedAgent(record.summary.id) !== undefined &&
+          record.summary.startup?.screen !== "hooks")
+    if (wanted) this.start()
+  }
+
   /** An agent is expected in some terminal. */
   start(): void {
     if (this.timer || this.host.stopping()) return
@@ -149,6 +246,7 @@ export class StartupWatch<R extends WatchedRecord> {
   stop(): void {
     this.pause()
     this.tracks.clear()
+    this.answered.clear()
   }
 
   private pause(): void {
@@ -163,18 +261,36 @@ export class StartupWatch<R extends WatchedRecord> {
       const tracks = new Map<string, Track>()
       for (const record of this.host.records()) {
         const { id } = record.summary
-        const agent = this.host.expected(id)
-        const known = this.tracks.get(trackKey(record))
-        if (known?.prompted) tracks.set(trackKey(record), known)
+        const key = trackKey(record)
+        const agent = this.agentIn(record)
+        const known = this.tracks.get(key)
+        if (record.bound) {
+          // eslint-disable-next-line no-await-in-loop -- One terminal's screen at a time.
+          tracks.set(key, await this.lookBound(record, known))
+        } else if (known?.prompted) tracks.set(key, known)
         else if (agent) {
           // eslint-disable-next-line no-await-in-loop -- One terminal's screen at a time.
-          const track = await this.look(trackKey(record), id, harnesses[agent].box)
-          if (track) tracks.set(trackKey(record), track)
+          const track = await this.look(key, id, agent)
+          if (track) tracks.set(key, track)
+          if (track?.asked !== undefined && track.asked !== known?.asked)
+            this.host
+              .shown()
+              .boxStood(record, agent)
+              .then(
+                (answered) => {
+                  if (answered && this.tracks.has(key)) this.answered.add(key)
+                },
+                (error: unknown) => {
+                  console.error("Novadeck couldn't ask whether its hooks run:", error)
+                },
+              )
           // A session bound during the look: nothing here may mark it again.
-          if (this.host.expected(id) === agent) this.show(record, agent, track?.held === true)
+          if (this.agentIn(record) === agent && !record.bound)
+            this.show(record, agent, track?.held === true, track?.screen)
         }
       }
       this.tracks = tracks
+      for (const key of this.answered) if (!tracks.has(key)) this.answered.delete(key)
       this.settle()
     } finally {
       this.looking = false
@@ -183,28 +299,94 @@ export class StartupWatch<R extends WatchedRecord> {
 
   // Once the looks are done, all at once, as any expectation may have ended during them:
   // none that did keeps its mark, and with nothing left to look at the watch rests.
+  // A mark that stands keeps the watch looking, so it ends with what made it: an agent whose
+  // hooks are off leaving, or a session's prompt signed in.
   private settle(): void {
     let looking = false
     for (const record of this.host.records()) {
-      if (!this.host.expected(record.summary.id)) this.show(record, null, false)
-      else if (!this.tracks.get(trackKey(record))?.prompted) looking = true
+      const track = this.tracks.get(trackKey(record))
+      if (record.bound) looking ||= this.looksBound(record, track)
+      else if (!this.agentIn(record)) this.show(record, null, false)
+      else if (!track?.prompted) looking = true
+      if (record.summary.startup) looking = true
     }
     if (!looking) this.pause()
   }
 
-  private async look(key: string, terminalId: string, box: BoxProfile): Promise<Track | undefined> {
+  // The agent the watch looks for in a terminal: the one Novadeck expects there, else one the
+  // person typed in its shell.
+  private agentIn(record: R): AgentName | undefined {
+    return this.host.messaging().expected(record.summary.id) ?? typedAgent(record)
+  }
+
+  private async look(
+    key: string,
+    terminalId: string,
+    agent: AgentName,
+  ): Promise<Track | undefined> {
     const screen = await this.host.screen(terminalId)
     if (!screen) return undefined
     const now = this.now()
+    const harness = harnesses[agent]
     const track = this.tracks.get(key) ?? freshTrack(now)
-    return nextTrack(track, lookAt(screen, box), screen.rows.join("\n"), now, this.delayMs)
+    const look = lookAt(screen, harness.box)
+    const next = nextTrack(track, look, screen.rows.join("\n"), now, this.delayMs)
+    // Its box stood a delay: its hooks may be off, which nothing but its harness tells.
+    // Asked once it answers, else again each delay, until the watch leaves it alone.
+    const due =
+      next.box !== null &&
+      now - next.box >= this.delayMs &&
+      !this.answered.has(key) &&
+      (next.asked === undefined || now - next.asked >= this.delayMs)
+    return {
+      ...next,
+      screen: look === "screen" ? harness.heldScreen?.(screen.rows) : undefined,
+      asked: due ? now : next.asked,
+    }
   }
 
-  private show(record: R, agent: AgentName | null, held: boolean): void {
-    const startup =
-      agent && held ? { agent, screen: record.startupScreen?.screen ?? "startup" } : null
-    const { startup: shown } = record.summary
-    if (shown?.agent === startup?.agent && shown?.screen === startup?.screen) return
+  // Whether a bound session's prompt is still looked at: for a while once it binds, for as
+  // long as it says it isn't signed in, and for a while after it last did.
+  private looksBound(record: R, track: Track | undefined): boolean {
+    const { bound } = record
+    if (!bound || !harnesses[bound.binding.agent].signedOut) return false
+    if (record.signedOut === bound.binding || track?.bound === undefined) return true
+    const now = this.now()
+    if (track.signedOut !== undefined && now - track.signedOut < signedOutLingerMs) return true
+    return now - track.bound < this.delayMs * signedOutDelays
+  }
+
+  private async lookBound(record: R, known: Track | undefined): Promise<Track> {
+    let track: Track = {
+      ...(known ?? freshTrack(this.now())),
+      bound: known?.bound ?? this.now(),
+    }
+    const { bound } = record
+    const signedOut = bound && harnesses[bound.binding.agent].signedOut
+    if (bound && signedOut && this.looksBound(record, track)) {
+      const screen = await this.host.screen(record.summary.id)
+      if (screen && record.bound === bound) {
+        const says = signedOut(screen.rows)
+        record.signedOut = says ? bound.binding : undefined
+        if (says) track = { ...track, signedOut: this.now() }
+      }
+    }
+    this.show(record, null, false)
+    return track
+  }
+
+  private show(
+    record: R,
+    agent: AgentName | null,
+    held: boolean,
+    screen?: StartupScreen | undefined,
+  ): void {
+    const startup = startupOf(
+      record,
+      this.host.messaging().untrustedAgent(record.summary.id),
+      agent && held ? { agent, screen: record.startupScreen?.screen ?? screen ?? "startup" } : null,
+    )
+    if (startup === record.summary.startup) return
     record.summary = { ...record.summary, startup }
     this.host.changed(record)
   }

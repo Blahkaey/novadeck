@@ -33,6 +33,7 @@ import { statusLineLimit, statusLineSettings } from "./settings.js"
 import { conversational, shapes } from "./shapes.js"
 import { followShells } from "./shells.js"
 import { commands, makeCmdShim, posixShim, valued } from "./shim.js"
+import { heldScreen, hooksTrusted } from "./startup.js"
 import { shown, startupScreen } from "./status-line.js"
 import { transcripts, typedEntry } from "./transcripts.js"
 
@@ -205,6 +206,8 @@ export const agy = {
   commandFields: ["CommandLine"],
   shown,
   startupScreen,
+  heldScreen,
+  hooksTrusted,
   launch,
   messaging,
   box,
