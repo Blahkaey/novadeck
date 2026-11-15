@@ -1,4 +1,5 @@
 import { header } from "@novadeck/harness-core/header"
+import { cmdLaunch, posixLaunch } from "@novadeck/harness-core/launch-mark"
 import { cmdAdd, posixAdd } from "@novadeck/harness-core/shim-root"
 
 /**
@@ -68,7 +69,8 @@ export const valued = [
 // shim, which passes --add-dir for the folder where agents' worktrees live, once that exists,
 // so a session may write there as in its own folder, under the person's own permission mode,
 // and the person's allow rules with Novadeck's own tools added (`allowNovadeck`).
-// Its commands, and anything outside Novadeck's shells, run unchanged.
+// As a session starts, it tells Novadeck so (`posixLaunch`, and `cmdLaunch` on Windows). Its
+// commands, and anything outside Novadeck's shells, run unchanged.
 export const posixShim = (root?: string): string => `#!/bin/sh
 ${header("#", "shim for agy")}
 # Runs the real agy with access to the folder where agents' worktrees live, and with
@@ -118,6 +120,7 @@ if [ -n "\${HOME:-}" ] && novadeck_dir=$(cd "$(dirname "$0")/.." && pwd); then
   "$novadeck_dir/novadeck-relay" allow "$HOME/.gemini/antigravity-cli/settings.json" '${allowNovadeck}' "$novadeck_settings" >/dev/null 2>&1 ||
     novadeck_settings=
 fi
+${posixLaunch("agy")}
 exec "$novadeck_real" \${novadeck_add:+"$novadeck_add"} \${novadeck_settings:+--settings "$novadeck_settings"} "$@"
 `
 
@@ -139,7 +142,8 @@ exec "$novadeck_real" \${novadeck_add:+"$novadeck_add"} \${novadeck_settings:+--
 // --add-dir for the folder where agents' worktrees live, once that exists, as the other shims do,
 // and the person's allow rules with Novadeck's own tools added, as the POSIX shim does: in a
 // file, as cmd would read the quotes of JSON, which the relay writes and says it did by its exit
-// code, so nothing it prints is read back through cmd.
+// code, so nothing it prints is read back through cmd. Only a session tells Novadeck it starts
+// (`cmdLaunch`): its commands go on as before, with the folder and the rules, but say nothing.
 export const makeCmdShim = ({
   cmdShimDir,
   root,
@@ -165,6 +169,29 @@ ${cmdAdd(root)}${cmdShimDir === undefined ? "" : `\nset "PATH=${cmdShimDir};%PAT
 set "novadeck_settings=%~dp0..\\${allowFolder}\\%NOVADECK_TERMINAL_ID%.json"
 set "novadeck_with="
 "%~dp0..\\novadeck-relay.exe" allow "%USERPROFILE%\\.gemini\\antigravity-cli\\settings.json" "${allowNovadeck}" "%novadeck_settings%" >nul 2>nul && set novadeck_with=--settings "%novadeck_settings%"
+rem The first word that isn't an option or an option's value may be another command, which
+rem starts no session, so it doesn't tell Novadeck one starts; it runs as a session does. The
+rem words are walked as Claude Code's are (harnesses/claude/src/shim.ts), and %* keeps them all.
+:command
+set novadeck_arg=""%1
+if "%novadeck_arg:"=#%"=="##" goto session
+set "novadeck_arg=%novadeck_arg:"=%"
+if not defined novadeck_arg goto session
+for %%v in (${valued.join(" ")}) do if "%novadeck_arg%"=="%%v" goto value
+if "%novadeck_arg:~0,1%"=="-" (
+  shift
+  goto command
+)
+for %%c in (${commands.join(" ")}) do if "%novadeck_arg%"=="%%c" goto run
+goto session
+:value
+shift
+shift
+goto command
+:session
+${cmdLaunch("agy")}
+:run
+set "novadeck_arg="
 "%novadeck_real%" %novadeck_add% %novadeck_with% %*
 exit /b %ERRORLEVEL%
 :plain
