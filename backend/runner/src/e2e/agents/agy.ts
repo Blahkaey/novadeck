@@ -233,6 +233,7 @@ export const agy: AgentSetup = {
             : [
                 sandbox.project,
                 ...(seed?.trustedInside ?? []).map((name) => join(sandbox.project, name)),
+                ...(seed?.trustedInHome ?? []).map((name) => join(sandbox.home, name)),
               ],
         modelProvider: "gemini",
         // Nothing of Novadeck's: its shim passes these rules with Novadeck's MCP tools

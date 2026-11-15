@@ -1,7 +1,7 @@
 import { resolve as resolvePath } from "node:path"
 
 import type { Effort, Install, Model } from "@novadeck/harness-core/harness"
-import { doorbellLine, quotedLine } from "@novadeck/harness-core/prompts"
+import { doorbellLine } from "@novadeck/harness-core/prompts"
 import type { AgentName } from "@novadeck/protocol"
 import type { Trees } from "@novadeck/terminal/pty"
 import { freshNonce } from "@novadeck/tui-input"
@@ -30,7 +30,7 @@ import {
   waitingRefusal,
   type CloseAnswer,
 } from "./closes.js"
-import { sessionLaunch } from "./commands.js"
+import { commandLine, sessionLaunch } from "./commands.js"
 import type { Companion } from "./companion.js"
 import { readDescribeRequest, type DescribeAnswer } from "./describe-request.js"
 import { mention } from "./handles.js"
@@ -57,11 +57,6 @@ import { nobodyToRun, runNotice, waitingToRun } from "./runs.js"
 import { shellBusy } from "./sampling.js"
 import type { Sleeper, Sleepers } from "./sleepers.js"
 import { cleanSummary, described, summaryRefusal, titleRefusal } from "./titles.js"
-
-// A command line for the words: every word but a quoted line is a plain word, and a line
-// holds nothing a shell expands.
-const commandLine = (argv: readonly string[]): string =>
-  argv.map((word) => (/^[\w./-]+$/.test(word) ? word : quotedLine(word))).join(" ")
 
 /**
  * Who leads the agent an `open_agent` starts: its opener, with a brief by default and

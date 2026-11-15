@@ -172,6 +172,7 @@ export {
   type RunnerSettings,
   type RunnerSettingsState,
 } from "./settings.js"
+export { tourPrepared, type TourPrepared } from "./tour.js"
 export {
   type Approval,
   type ApprovalAction,

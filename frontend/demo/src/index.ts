@@ -58,6 +58,7 @@ import {
   type DemoTerminalSetup,
 } from "./terminals/screens"
 import { demoWakes } from "./terminals/wakes"
+import { demoTour, isDemoTour } from "./tour"
 import { babciaIntroOf, createBabcia } from "./videos/babcia"
 import { chirpIntroOf, chirpSeed, chirpTranscripts } from "./videos/chirp"
 import { createLaunch } from "./videos/launch"
@@ -183,6 +184,7 @@ export const demoBackend = (
       welcome: welcomeOpen,
       finishWelcome: () => welcomeOpen.update(() => false),
     },
+    tour: demoTour(agents, () => latest),
   }
   terminalsOf.set(terminals.mountTerminal, terminals)
   return backend
@@ -822,6 +824,14 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
       ),
     ),
   )
+  // `&tour=on` offers the tour, held back from everyone until its story is whole, and
+  // `&tourStart=fails` makes its first start fail, as a folder of the person's own does, and
+  // `&tourStart=unlisted` as Codex not signed in yet does.
+  if (isDemoTour(backend.tour)) {
+    if (params.get("tour") === "on") backend.tour.offered.update(() => true)
+    if (params.get("tourStart") === "fails") backend.tour.failNext()
+    if (params.get("tourStart") === "unlisted") backend.tour.failNext("unlisted")
+  }
   if (isDemoInbox(backend.inbox)) {
     const answer = params.get("inboxAnswer")
     if (answer === "failed") backend.inbox.failNext()

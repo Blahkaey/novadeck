@@ -28,22 +28,32 @@ describe("the Linux application menu", () => {
 
 describe("the macOS application menu", () => {
   it("keeps the default menus by their roles", () => {
-    expect(macMenu(() => {}).map((item) => item.role)).toEqual([
-      "appMenu",
-      "fileMenu",
-      "editMenu",
-      "viewMenu",
-      "windowMenu",
-      "help",
-    ])
+    expect(
+      macMenu(
+        () => {},
+        () => {},
+      ).map((item) => item.role),
+    ).toEqual(["appMenu", "fileMenu", "editMenu", "viewMenu", "windowMenu", "help"])
   })
 
-  it("opens the logs folder from Help", () => {
+  it("offers the tour from Help, then opens the logs folder", () => {
     const opened: string[] = []
-    const help = macMenu(() => void opened.push("logs")).at(-1)!
-    const [item] = help.submenu as MenuItemConstructorOptions[]
-    expect(item).toMatchObject({ label: "Open Logs Folder" })
-    ;(item!.click as () => void)()
-    expect(opened).toEqual(["logs"])
+    const help = macMenu(
+      () => void opened.push("logs"),
+      () => void opened.push("tour"),
+    ).at(-1)!
+    const [tour, logs] = help.submenu as MenuItemConstructorOptions[]
+    expect(tour).toMatchObject({ label: "Take the Tour" })
+    expect(logs).toMatchObject({ label: "Open Logs Folder" })
+    ;(tour!.click as () => void)()
+    ;(logs!.click as () => void)()
+    expect(opened).toEqual(["tour", "logs"])
+  })
+
+  it("leaves the tour out where it isn't offered", () => {
+    const help = macMenu(() => {}).at(-1)!
+    expect((help.submenu as MenuItemConstructorOptions[]).map((item) => item.label)).toEqual([
+      "Open Logs Folder",
+    ])
   })
 })

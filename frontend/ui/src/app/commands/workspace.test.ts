@@ -232,6 +232,40 @@ describe("workspace commands", () => {
     })
   })
 
+  context("when opening the tour", () => {
+    const folder = "/home/x/.novadeck/tour"
+
+    it("adds the tour's folder as a project named Tour, with a fresh session, on screen", () => {
+      const app = openCommands()
+      app.commands.openTour({ directory: folder, removed: [] })
+      const snapshot = app.workspace.getSnapshot()
+      const tour = snapshot.projects.at(-1)!
+      expect(tour).toMatchObject({ name: "Tour", directory: folder })
+      expect(tour.history).toHaveLength(1)
+      expect(tour.history[0]!.state.roster.terminals).toEqual([])
+      expect(snapshot.activeProjectId).toBe(tour.id)
+      expect(app.ui.getSnapshot().location.route).toMatchObject({ projectId: tour.id })
+    })
+
+    it("takes the place of the projects the backend removed from its folder", () => {
+      const app = openCommands()
+      app.commands.openTour({ directory: folder, removed: [] })
+      const earlier = app.workspace.getSnapshot().activeProjectId
+      app.commands.openTour({ directory: folder, removed: [earlier, "gone-already"] })
+      const snapshot = app.workspace.getSnapshot()
+      expect(snapshot.projects.map((each) => each.id)).not.toContain(earlier)
+      expect(snapshot.projects.filter((each) => each.name === "Tour")).toHaveLength(1)
+      expect(snapshot.activeProjectId).not.toBe(earlier)
+    })
+
+    it("takes the place of the only project there was", () => {
+      const app = openCommands()
+      app.commands.openTour({ directory: folder, removed: ["project"] })
+      const snapshot = app.workspace.getSnapshot()
+      expect(snapshot.projects.map((each) => each.name)).toEqual(["Tour"])
+    })
+  })
+
   context("when arranging projects", () => {
     it("pins a project, then unpins it", async () => {
       const { app, ids, arrangement } = await three()

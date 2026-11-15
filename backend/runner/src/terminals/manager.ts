@@ -1561,6 +1561,10 @@ export class Terminals {
   clearAsks(ids: readonly string[]): void {
     this.inbox.clear(ids)
   }
+  /** Rings `text` to the terminal's agent as Novadeck's notice; false where none shows yet. */
+  notice(terminalId: string, text: string): boolean {
+    return this.messaging.notice(terminalId, text, { always: true })
+  }
 
   /** A terminal's threads and messages with their states. */
   messages(terminalId: string): TerminalMessages {

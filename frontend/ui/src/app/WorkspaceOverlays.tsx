@@ -34,6 +34,7 @@ import { CloseTerminalDialog } from "../terminals/CloseTerminalDialog"
 import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
+import { TourConsentDialog } from "../tour/TourConsent"
 import { CloseTeamRows } from "./CloseTeamRows"
 import {
   useFeatureFlag,
@@ -57,6 +58,7 @@ import {
 import { switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
+import { useTour } from "./useTour"
 
 // Rendered beside a deferred dialog, so it mounts only once the dialog's view has loaded.
 const Loaded = ({
@@ -293,6 +295,7 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const worktrees = useWorktrees(backend.worktrees)
   const agents = useAgents(backend.agents)
   const installs = useInstalls(backend.agents)
+  const tour = useTour(backend, agents.list)
   const forgeList = useForges(backend.forges)
   const forgeRuns = useForgeRuns(backend.forges)
   const approval = useApproval(backend.approvals)
@@ -391,6 +394,18 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           onInstall={installs.install}
           transcripts={transcripts}
           onDone={backend.agents.finishWelcome}
+          {...(tour ? { onTour: tour.offer } : {})}
+        />
+      )}
+      {tour && (
+        <TourConsentDialog
+          consent={tour.consent}
+          agents={tour.agents}
+          connecting={tour.connecting}
+          onAgent={tour.choose}
+          onStart={tour.start}
+          onStartAgent={tour.startAgent}
+          onClose={tour.close}
         />
       )}
       <CrashLoopDialog
@@ -471,6 +486,7 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           {...(experimental ? { experimental } : {})}
           {...(version ? { version } : {})}
           {...(backend.openLogs ? { logs: backend.openLogs } : {})}
+          {...(tour ? { tour: () => afterClose(() => tour.offer()) } : {})}
           {...(uninstall ? { uninstall } : {})}
           {...(backend.forges
             ? {

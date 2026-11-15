@@ -110,6 +110,15 @@ export const desktopWindowFocus = (app: DesktopApp | undefined): Backend["window
     })
 }
 
+// The app's menu asking for the tour, where it has one: nothing but the ask crosses.
+export const desktopTourAsked = (
+  app: DesktopApp | undefined,
+): RunnerBackendOptions["tourAsked"] => {
+  const listen = app?.onTourAsked
+  if (!listen) return undefined
+  return (listener) => listen(() => listener())
+}
+
 // The app's self-updates, where it has them: what crosses the bridge is checked, so the
 // page shows only what looks like a release's, and the channel only as one it knows.
 export const desktopUpdates = (app: DesktopApp | undefined): Backend["updates"] => {
@@ -335,6 +344,7 @@ export const desktopOptions = (
   const notices = desktopNotices(app)
   const badge = desktopBadge(app)
   const windowFocus = desktopWindowFocus(app)
+  const tourAsked = desktopTourAsked(app)
   const updates = desktopUpdates(app)
   const whatsNew = desktopWhatsNew(app)
   const version = desktopVersion(app)
@@ -349,6 +359,7 @@ export const desktopOptions = (
     ...(notices ? { notices } : {}),
     ...(badge ? { badge } : {}),
     ...(windowFocus ? { windowFocus } : {}),
+    ...(tourAsked ? { tourAsked } : {}),
     ...(updates ? { updates } : {}),
     ...(whatsNew ? { whatsNew } : {}),
     ...(version ? { version } : {}),

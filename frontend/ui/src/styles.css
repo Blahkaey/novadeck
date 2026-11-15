@@ -106,6 +106,7 @@
 @import "./preferences/settings.css" layer(components);
 @import "./preferences/welcome.css" layer(components);
 @import "./preferences/welcome-preview.css" layer(components);
+@import "./tour/tour.css" layer(components);
 @import "./search/search.css" layer(components);
 
 @import "./theme/coolant.css" layer(themes);

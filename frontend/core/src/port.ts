@@ -228,6 +228,46 @@ export type TerminalMoveUndo = {
   readonly lead?: string | undefined
 }
 
+// A run of the tour, readied (`Tour.prepare`): the folder it runs in, the command that starts
+// its agent there, and where the agent's first line goes: on that command (`launch`), or rung
+// once the agent shows in its terminal, which the UI asks for with `Tour.brief` (`doorbell`).
+// `model` is the one the agent starts on, where one was picked. `removed` are the projects that
+// were open at the folder, which the backend removed, terminals and all, before emptying it.
+export type TourRun = {
+  readonly directory: string
+  readonly command: string
+  readonly brief: "launch" | "doorbell"
+  readonly model?: string | undefined
+  readonly removed: readonly string[]
+}
+
+// Why a run of the tour can't start where the agent has to start first, as Codex does before
+// it has listed its models: the sentence to show, and the agent to start.
+export class TourNeedsAgent extends Error {
+  constructor(
+    message: string,
+    readonly agent: AgentName,
+  ) {
+    super(message)
+    this.name = "TourNeedsAgent"
+  }
+}
+
+export type Tour = {
+  // Readies a run with the agent; rejects, with a sentence to show, where it can't start:
+  // with a `TourNeedsAgent` where the agent has to start first.
+  readonly prepare: (agent: AgentName) => Promise<TourRun>
+  // Rings the tour's start line to the agent in the terminal, once it shows there.
+  readonly brief: (terminalId: string) => Promise<void>
+  // Optional. Calls `listener` each time the app's own menu asks for the tour; answers a
+  // function that stops listening. Absent where the app has no such menu.
+  readonly asked?: (listener: () => void) => () => void
+  // Whether the UI offers the tour yet. It is held back from everyone until its story is
+  // whole: absent, as from the runner's adapter, it isn't offered; the demo offers it where
+  // its debug panel or a spec turns this on. (It goes once the tour is offered to all.)
+  readonly offered?: Store<boolean>
+}
+
 export type BackendFields = {
   // The workspace to start from, available before the app first renders. It needs at
   // least one project, each with at least one session; mounting throws otherwise.
@@ -327,6 +367,10 @@ export type BackendFields = {
     readonly welcome: Store<boolean>
     readonly finishWelcome: () => void
   }
+  // Optional. Novadeck's tour: a live run of the person's own agent, on its cheapest model, in
+  // a folder of the backend's own, which the UI opens as a project of its own. Absent where the
+  // backend has none.
+  readonly tour?: Tour
   // Optional. Where the content of what agents put in front of the person comes from: the
   // plans they write and what they show, which the backend reports as items through the
   // seed and `item/*` and `window/*` actions. Every terminal gets a companion bar and

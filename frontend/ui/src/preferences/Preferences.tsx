@@ -141,6 +141,7 @@ export const Preferences = ({
   experimental,
   version,
   logs,
+  tour,
   uninstall,
   notices = false,
   systemSounds = false,
@@ -224,6 +225,8 @@ export const Preferences = ({
   version?: string
   // Opens the desktop app's logs folder; absent where the backend keeps no logs.
   logs?: () => void
+  // Offers the tour again, once Preferences closes; absent where the backend has none.
+  tour?: () => void
   // Removing the desktop app; absent where the backend offers none, as for a portable copy.
   uninstall?: UninstallValue
 }): React.JSX.Element => {
@@ -276,7 +279,8 @@ export const Preferences = ({
   const hasAddons = voice !== undefined || murmur !== undefined
   // About is the app itself: its version, updates, logs and removal; a backend with none of
   // them has no tab for it.
-  const hasAbout = version !== undefined || experimental !== undefined || !!logs || !!uninstall
+  const hasAbout =
+    version !== undefined || experimental !== undefined || !!logs || !!tour || !!uninstall
   // The Experimental tab, with the chat view, is there only while its switch is on.
   const hasExperimental = experimental?.on === true
   const hidden = (id: PreferencesTab): boolean =>
@@ -753,8 +757,27 @@ export const Preferences = ({
                   </div>
                 </Section>
               )}
-              {(logs || uninstall) && (
+              {(logs || tour || uninstall) && (
                 <div className="flex flex-col gap-2.5">
+                  {tour && (
+                    <div className={settingsCardClasses}>
+                      <AddonRow
+                        scope="about"
+                        id="tour"
+                        label="Tour"
+                        description="Watch your own agent work in Novadeck, with a team, in a sandbox. About 2 minutes."
+                      >
+                        <button
+                          type="button"
+                          className="button min-h-8 shrink-0 px-3 text-control"
+                          aria-describedby="about-tour-description"
+                          onClick={tour}
+                        >
+                          Take the tour
+                        </button>
+                      </AddonRow>
+                    </div>
+                  )}
                   {logs && (
                     <div className={settingsCardClasses}>
                       <AddonRow

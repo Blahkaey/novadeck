@@ -18,6 +18,7 @@ import { demoTurns } from "@novadeck/demo/agents/turns"
 import { isDemoFeedback } from "@novadeck/demo/feedback"
 import { isDemoInbox } from "@novadeck/demo/inbox"
 import { isDemoSource } from "@novadeck/demo/source"
+import { demoTour } from "@novadeck/demo/tour"
 import { createDemo, type DemoVariant } from "@novadeck/demo/variants"
 import { babciaCuesOf } from "@novadeck/demo/videos/babcia"
 import { launchCuesOf } from "@novadeck/demo/videos/launch"
@@ -44,6 +45,7 @@ import { planGroups } from "./plans"
 import { sourceGroups } from "./source"
 import { createDemoStates } from "./states"
 import { sessionTarget } from "./terminals"
+import { tourGroups } from "./tour"
 import type { DemoActionContext } from "./types"
 import { voiceGroups } from "./voice"
 import { worksGroups } from "./works"
@@ -210,6 +212,8 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
 
   const { worktrees: offered, forges: forgesOffered, ...withoutWorktrees } = inner
   const installs = createDemoInstalls()
+  // On the panel's own agents, which the tour runs one of.
+  const tour = demoTour(states.agents.state, () => latest)
   const backend: Backend = installs.wrap({
     ...withoutWorktrees,
     ...(launch.worktrees && offered ? { worktrees: offered } : {}),
@@ -246,6 +250,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
     releaseLead: approvals.release,
     ...(launch.slowAttach ? { boot } : {}),
     agents: states.agents,
+    tour,
     notices: states.notices,
     updates: states.updates,
     // The idle shells the runner may say hold a job, as the Updates group sets it.
@@ -277,6 +282,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
         groups: [
           ...states.groups,
           ...installGroups(installs, states),
+          ...tourGroups(tour),
           updatesGroup(launch, states.updateControls),
           ...approvalGroups(approvals, () => latest),
           ...inboxGroups(isDemoInbox(inner.inbox) ? inner.inbox : undefined, inner.seed),
