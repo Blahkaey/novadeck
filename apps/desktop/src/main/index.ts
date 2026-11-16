@@ -403,6 +403,14 @@ const remoteSettings = async (): Promise<RemoteSettings | undefined> => {
   }
 }
 
+// A remote runner's connections are dropped as the system wakes: one that slept can look
+// open while nothing reaches the runner, and the page asks for fresh ones.
+const linkRemote = (settings: RemoteSettings): RunnerProcess => {
+  const linked = remoteRunner({ settings, log: logger.for("remote") })
+  powerMonitor.on("resume", () => linked.reconnect())
+  return linked
+}
+
 const launch = async (): Promise<void> => {
   // The signature is not asked here: it takes a moment, and a portable copy is told
   // without it.
@@ -456,7 +464,7 @@ const launch = async (): Promise<void> => {
     await session
       .fromPartition(pagesPartition)
       .setProxy({ proxyRules: remote.pagesProxy, proxyBypassRules: "<-loopback>" })
-  if (remote) runner = remoteRunner({ settings: remote, log: logger.for("remote") })
+  if (remote) runner = linkRemote(remote)
   else
     runner = startRunner({
       // A remote runner has no use for the key, so the keychain is not asked for it.

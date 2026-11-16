@@ -63,10 +63,18 @@ describe("the compiled desktop app", () => {
       // Read before either runner is made, and only one of the two is.
       const settings = main.indexOf("remote = await remoteSettings()")
       expect(settings).toBeGreaterThan(-1)
-      expect(settings).toBeLessThan(main.indexOf("runner = remoteRunner("))
+      expect(settings).toBeLessThan(main.indexOf("runner = linkRemote(remote)"))
       expect(main).toMatch(
-        /if \(remote\) runner = remoteRunner\([^\n]*\n\s*else\s*runner = startRunner\(/u,
+        /if \(remote\) runner = linkRemote\(remote\);?\n\s*else\s*runner = startRunner\(/u,
       )
+      // Its connections are dropped as the system wakes, and each pings the runner.
+      expect(main).toMatch(/powerMonitor\.on\("resume", \(\) => linked\.reconnect\(\)\)/u)
+      expect(main).toContain("handshakeTimeout")
+      // `ws` loads from the packaged app's own node_modules, as a dependency: bundled, its
+      // optional native helpers would be empty stand-ins that break masking a large frame,
+      // on an Electron whose Node has no masking of its own.
+      expect(main).toMatch(/import \{[^}]*WebSocket[^}]*\} from "ws"/u)
+      expect(main).not.toContain("viteOptionalPeerDep_bufferutil")
       // The runner's token is added to each handshake in the main process; the preload
       // hears only that the runner is remote.
       expect(main).toContain("tunnelPort(")

@@ -124,6 +124,11 @@ With a remote runner:
 
 - Shells, agents, projects and files are the runner's machine's. Quitting the app only
   disconnects: the runner and its shells run on, and the next launch finds them.
+- Each connection pings the runner every 20 seconds and is dropped when no answer comes
+  within 10, or when it takes more than 15 seconds to open; every connection is dropped as
+  the machine wakes from sleep. The page then reconnects, rather than wait on a link that
+  looks open while nothing reaches the runner. The log says so once (`remote.stalled`),
+  naming the runner by its origin alone.
 - Open folder asks for the folder's full path on the runner's machine, in a small window,
   and asks the runner about it before the page makes its project (the runner has no call
   that only looks, so a project named "Folder check" is made there and removed at once).
