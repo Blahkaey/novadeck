@@ -4,6 +4,7 @@ import { spawn as nodePtySpawn } from "node-pty"
 
 import { agentProcesses, endFollowed, type Listing } from "./descendants.js"
 import { terminalForeground } from "./foreground.js"
+import type { Priority } from "./priority.js"
 import type { ExitCause, Scopes } from "./scopes.js"
 import { anyRunning, relayMs, taskkillTree, type Member } from "./trees.js"
 
@@ -45,12 +46,17 @@ export type NativeSpawn = (
 
 /**
  * How ptys start: node-pty's `spawn` unless a test plays one, the platform their ending
- * follows, and where each program is kept apart from the app's, as `userScopes()` gives on Linux.
+ * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux,
+ * and how far its priority yields to the app's, as `terminalPriorities()` gives on macOS and
+ * Windows. `trees` reads a Windows shell's programs, which may have started before its
+ * priority could be lowered.
  */
 export type PtyOptions = {
   readonly native?: NativeSpawn
   readonly platform?: NodeJS.Platform
   readonly scopes?: Scopes
+  readonly priority?: Priority
+  readonly trees?: Pick<ProcessTrees, "read">
 }
 
 /** A process's tree on Windows, read and ended as `Trees` does. */
@@ -270,6 +276,27 @@ export const spawnPty = (
   })
   const scope = child.pid > 0 ? options.scopes?.contain(child.pid) : undefined
   let drawn = false
+  // macOS names the shell's pid at once, so it is lowered before it can start anything. A
+  // ConPTY names it 0 until it has started the shell, which may be running its startup
+  // command by then; its first output follows the pid. So on Windows the shell is lowered
+  // then, with what it started meanwhile, and what any of them start after that inherits.
+  if (platform === "win32") {
+    let lowered = false
+    child.onData(() => {
+      if (lowered || !(child.pid > 0)) return
+      lowered = true
+      const shell = child.pid
+      options.priority?.lower(shell)
+      if (options.priority)
+        void options.trees
+          ?.read(shell)
+          .then((tree) => {
+            for (const member of tree ?? [])
+              if (member.pid !== shell) options.priority?.lower(member.pid)
+          })
+          .catch(() => {})
+    })
+  } else if (child.pid > 0) options.priority?.lower(child.pid)
   let exited = false
   let ending = false
   // node-pty's exit came, its fd closed, while the report may wait for its cause.

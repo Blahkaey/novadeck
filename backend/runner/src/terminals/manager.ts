@@ -320,6 +320,7 @@ export class Terminals {
     this.pty = {
       ...(options.pty?.native && { native: options.pty.native }),
       ...(options.pty?.scopes && { scopes: options.pty.scopes }),
+      ...(options.pty?.priority && { priority: options.pty.priority, trees: this.trees }),
       platform: options.pty?.platform ?? process.platform,
     }
     this.host = createTerminalHost({

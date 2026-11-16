@@ -145,7 +145,7 @@ down: the app's own processes, and anything a shell started in the few milliseco
 before its move. A startup command, as an agent opened in a terminal is, waits for the
 move, about a quarter of a second at most on a calm machine, then runs either way; what
 the person's own startup files start doesn't wait. Without a user bus (no systemd, a container, WSL without systemd),
-shells run in the app's scope as before. macOS and Windows are unchanged.
+shells run in the app's scope as before. macOS and Windows have no scopes (see the priority below).
 
 A terminal's scope also asks for `CPUWeight=10` (`terminalCpuWeight`), a tenth of the
 app's scope's default 100. Inside the desktop's `app.slice` every thread otherwise weighs
@@ -164,6 +164,25 @@ systemd has no CPU controller to give its apps (a `Delegate=` that leaves it out
 cgroup v1), the weight is left unset, and terminals share the CPU with the app as before.
 Scopes themselves need systemd 253 or later, the first to take `OOMPolicy` on a scope;
 below that the first start fails and terminals stay in the app's scope.
+
+On macOS and Windows each terminal's shell is lowered to "below normal" priority
+(`terminalPriority` in `libraries/terminal/src/pty/priority.ts`: nice 10 on macOS,
+BELOW_NORMAL_PRIORITY_CLASS on Windows, through `os.setPriority`), and what it starts
+inherits that, so the agent, its builds and its test runs all sit below the window when
+the CPU is short, the same aim as the weight above. On macOS the call comes right after the
+shell is spawned, before it can have started anything. On Windows the ConPTY starts the
+shell before it names its process id, so the call comes with the shell's first output, and
+the programs it started by then, as `cmd /k` with an agent's startup command may have, are
+lowered too, found through the relay's process tree; whatever any of them starts after
+that inherits it. A program that started and itself started another in the instant between
+is the one gap. A failed call (the process gone, no permission) is ignored. Linux gets no
+nice: with scopes, the weight does it, and a second penalty would only starve terminals
+beside other desktop apps; without them (no systemd or user bus), nice would do nothing
+anyway, as the kernel's autogroups, on by default in desktop distributions, share the CPU
+per session and each terminal is one, so nice only orders a terminal's own programs.
+`priority.e2e.ts` checks it for each harness on macOS and Windows. The latency benefit
+there is expected, not measured: the Linux figures above come from a Linux machine, and
+none of this has been measured on macOS or Windows.
 
 While a program holds the foreground, its profile decides how the terminal looks.
 `frontend/ui/src/terminals/processes/profiles.ts` maps program names to a tab and

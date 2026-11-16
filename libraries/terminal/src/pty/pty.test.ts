@@ -139,6 +139,49 @@ describe("a pty", () => {
     expect(pty.drawn).toBe(true)
   })
 
+  it("lowers a macOS shell's priority as it starts, before it can start anything", () => {
+    const lowered: number[] = []
+    const standIn = nativeStandIn({ pid: 77 })
+    spawnPty({
+      file: "shell",
+      args: [],
+      cwd: "/",
+      env: {},
+      cols: 80,
+      rows: 24,
+      platform: "darwin",
+      native: standIn.spawn,
+      priority: { lower: (pid) => void lowered.push(pid) },
+    })
+    expect(lowered).toEqual([77])
+  })
+
+  it("lowers a Windows shell's priority once its output shows its pid, with what it started by then", async () => {
+    const lowered: number[] = []
+    const standIn = nativeStandIn({ conpty: true })
+    const read = vi.fn<ProcessTrees["read"]>(async (root) => {
+      const pid = typeof root === "number" ? root : root.pid
+      return [pid, 5, 6].map((each) => ({ pid: each, startedAt: 1 }))
+    })
+    spawnPty({
+      file: "shell",
+      args: [],
+      cwd: "/",
+      env: {},
+      cols: 80,
+      rows: 24,
+      platform: "win32",
+      native: standIn.spawn,
+      priority: { lower: (pid) => void lowered.push(pid) },
+      trees: { read },
+    })
+    expect(lowered).toEqual([])
+    standIn.draw("$ ")
+    standIn.draw("$ ")
+    await vi.waitFor(() => expect(lowered).toEqual([2 ** 30, 5, 6]))
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
   it("reports an exit once, its code null where the program's isn't known yet", () => {
     const standIn = nativeStandIn()
     const pty = start(standIn, "linux")

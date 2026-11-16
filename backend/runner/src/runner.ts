@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 
 import { errors, protocolVersion } from "@novadeck/protocol"
 import { TerminalError } from "@novadeck/terminal"
-import { userScopes } from "@novadeck/terminal/pty"
+import { terminalPriorities, userScopes } from "@novadeck/terminal/pty"
 import { createSessions, type Sessions } from "@novadeck/wire/server"
 import { ORPCError } from "@orpc/server"
 
@@ -295,6 +295,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   // On Linux each shell runs in a systemd scope of its own, so one killed for memory
   // takes down its terminal, not the app.
   const scopes = userScopes()
+  // On macOS and Windows each shell and what it starts run below the window's priority.
+  const priority = terminalPriorities()
   // Without a key from the app no transcript is saved or shown.
   const sealer = createTranscriptSealer(options.transcriptKey)
   // Whether an agent works in the worktree now, read afresh each time it is asked: a turn may
@@ -356,7 +358,9 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     items,
     // Without an engine nothing is described, so terminals have nothing to wait for.
     ...(options.murmur?.engine !== undefined && { describer: murmur }),
-    ...(scopes && { pty: { scopes } }),
+    ...((scopes || priority) && {
+      pty: { ...(scopes && { scopes }), ...(priority && { priority }) },
+    }),
     ...options.terminals,
   })
   const projects = new Projects(store, terminals, items, worktrees)
