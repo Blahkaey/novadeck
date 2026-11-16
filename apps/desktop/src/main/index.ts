@@ -78,7 +78,7 @@ import {
   type QuitSteps,
 } from "./quit.js"
 import { notQuitting } from "./quitting.js"
-import { checkRemoteFolder, remoteClient } from "./remote/check.js"
+import { remoteClient, remoteFolders } from "./remote/check.js"
 import { askRemoteFolder } from "./remote/folder.js"
 import { remoteRunner } from "./remote/runner.js"
 import { readRemoteSettings, remoteSettingsFile, type RemoteSettings } from "./remote/settings.js"
@@ -708,16 +708,14 @@ const launch = async (): Promise<void> => {
   ipcMain.handle(directoryPickerChannel, async (event) => {
     const window = appWindow(event)
     if (!window) return null
-    // A remote runner's folders are not this machine's to browse: the person names one,
-    // which the runner is asked about before the page hears of it.
-    if (remote) {
-      const client = remoteClient(remote)
+    // A remote runner's folders are not this machine's: the person browses them through
+    // the runner, which looks at the folder before the page hears of it.
+    if (remote)
       return askRemoteFolder(
         window,
         (options) => new BrowserWindow(options),
-        (path) => checkRemoteFolder(path, client),
+        remoteFolders(remoteClient(remote)),
       )
-    }
     const result = await dialog.showOpenDialog(window, {
       properties: ["openDirectory", "createDirectory"],
     })

@@ -4,17 +4,18 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
-import { delimiter, join, relative } from "node:path"
+import { homedir, tmpdir } from "node:os"
+import { delimiter, dirname, join, parse, relative } from "node:path"
 
 import { vi } from "vitest"
 
 import { describe, expect, it } from "../test.js"
-import { listFolder, maxFolderEntries } from "./folder.js"
+import { browseFolder, listFolder, maxFolderEntries } from "./folder.js"
 
 const git = (directory: string, ...args: string[]) =>
   execFileSync("git", args, { cwd: directory, stdio: "ignore" })
@@ -265,5 +266,102 @@ describe("a project's folder", () => {
     expect(entries[0]!.name).toBe("f00000")
     // At exactly the limit nothing is cut.
     expect((await listFolder(root, "", limit + 5)).truncated).toBe(false)
+  })
+})
+
+describe("browsing the runner's folders", () => {
+  it("shows a folder's real path, its parent and its folders by name, never its files or .git", async ({
+    resources,
+  }) => {
+    const root = repository(resources)
+    mkdirSync(join(root, ".config"))
+    const real = realpathSync(root)
+
+    await expect(browseFolder(root)).resolves.toEqual({
+      path: real,
+      parent: dirname(real),
+      folders: [".config", "docs", "node_modules", "src"],
+      truncated: false,
+    })
+    await expect(browseFolder(join(root, "src", "dist"))).resolves.toEqual({
+      path: join(real, "src", "dist"),
+      parent: join(real, "src"),
+      folders: [],
+      truncated: false,
+    })
+  })
+
+  it.skipIf(process.platform === "win32")(
+    "asks git nothing, as picking a folder has no use for what it ignores",
+    async ({ resources }) => {
+      const root = repository(resources)
+      // A git that is run leaves a mark, as a listing's does.
+      const bin = project(resources)
+      const ran = join(bin, "ran")
+      writeFileSync(join(bin, "git"), `#!/bin/sh\ntouch "${ran}"\n`, { mode: 0o755 })
+      const saved = process.env.PATH
+      process.env.PATH = `${bin}${delimiter}${saved ?? ""}`
+      try {
+        await browseFolder(root)
+        expect(existsSync(ran)).toBe(false)
+        await listFolder(root, "")
+        expect(existsSync(ran)).toBe(true)
+      } finally {
+        process.env.PATH = saved
+      }
+    },
+  )
+
+  it("starts in the home folder without a path", async () => {
+    await expect(browseFolder(undefined)).resolves.toMatchObject({
+      path: realpathSync(homedir()),
+    })
+  })
+
+  it("follows a link to the folder it names, and lists a link to a folder as a folder", async ({
+    resources,
+  }) => {
+    const root = project(resources)
+    mkdirSync(join(root, "real", "inside"), { recursive: true })
+    symlinkSync(join(root, "real"), join(root, "linked"), "dir")
+    const real = realpathSync(root)
+
+    await expect(browseFolder(join(root, "linked"))).resolves.toMatchObject({
+      path: join(real, "real"),
+      folders: ["inside"],
+    })
+    await expect(browseFolder(root)).resolves.toMatchObject({ folders: ["linked", "real"] })
+  })
+
+  it("has no parent at the root", async () => {
+    const root = parse(process.cwd()).root
+    await expect(browseFolder(root)).resolves.toMatchObject({ path: root, parent: null })
+  })
+
+  it("lists at most its limit of folders, and says there are more", async ({ resources }) => {
+    const root = project(resources)
+    for (const name of ["a", "b", "c"]) mkdirSync(join(root, name))
+    writeFileSync(join(root, "file"), "")
+
+    await expect(browseFolder(root, 2)).resolves.toMatchObject({
+      folders: ["a", "b"],
+      truncated: true,
+    })
+    await expect(browseFolder(root, 3)).resolves.toMatchObject({ truncated: false })
+  })
+
+  it("refuses a path that isn't a full one, is missing or is no folder", async ({ resources }) => {
+    const root = project(resources)
+    writeFileSync(join(root, "notes.md"), "")
+    for (const path of [
+      "relative/path",
+      "",
+      join(root, "missing"),
+      join(root, "notes.md"),
+      `${root}\0x`,
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- Each path in turn.
+      await expect(browseFolder(path)).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })
+    }
   })
 })

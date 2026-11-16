@@ -1,54 +1,78 @@
-import { randomUUID } from "node:crypto"
-
 import { connectRunner, hasCode, type Runner } from "@novadeck/runner-client"
 import { websocket } from "@novadeck/wire/client"
 
-import type { FolderCheck } from "./folder.js"
+import type { FolderLook, Place, RemoteFolders } from "./folder.js"
 import type { RemoteSettings } from "./settings.js"
 
-/** The part of a runner the check uses. */
-type Projects = { readonly projects: Pick<Runner["projects"], "create" | "remove"> } & Pick<
+/** The part of a runner the folder browser uses. */
+type Projects = { readonly projects: Pick<Runner["projects"], "browse" | "list"> } & Pick<
   Runner,
   "close"
 >
 
-// How long the runner has to answer about one folder.
+// How long the runner has to answer each time.
 const checkMs = 10_000
 
+/** `promise`, or a failure once the runner has taken longer than `checkMs` to answer. */
+const timed = <T>(promise: Promise<T>): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("The runner took too long to answer.")), checkMs).unref()
+    }),
+  ])
+
 /**
- * Asks the runner whether `path` is a folder on its machine, before the page makes a project
- * of it: a project the runner refuses would stay in the window, with terminals that can't
- * start. The runner has no call that only looks, so a project is made there and removed at
- * once, which takes the same checks and answers the folder's real path. `connect` reaches
- * the runner as a client of its own, apart from the page's.
+ * The runner's folders for the folder browser, over a connection of its own, apart from the
+ * page's: made at the first question, kept for the next, and made again after one that
+ * failed. Each look only looks: the runner makes nothing of it. `connect` reaches the runner.
  */
-export const checkRemoteFolder = async (
-  path: string,
-  connect: () => Promise<Projects>,
-): Promise<FolderCheck> => {
-  let runner: Projects
-  try {
-    runner = await connect()
-  } catch {
-    return { problem: "The runner could not be reached to check that folder." }
+export const remoteFolders = (connect: () => Promise<Projects>): RemoteFolders => {
+  let runner: Promise<Projects> | undefined
+  let closed = false
+  const reach = (): Promise<Projects> => {
+    runner ??= connect()
+    // A connection that failed is made again next time.
+    runner.catch(() => (runner = undefined))
+    return runner
   }
-  const id = randomUUID()
-  try {
-    const project = await runner.projects.create({ id, name: "Folder check", cwd: path })
-    await runner.projects.remove({ projectId: id })
-    return { path: project.cwd }
-  } catch (error) {
-    if (hasCode(error, "INVALID_DIRECTORY"))
-      return { problem: "No folder has that full path on the runner's machine." }
-    // Made but not removed, as when the connection dropped in between: removed if it can be.
-    await runner.projects.remove({ projectId: id }).catch(() => {})
-    return { problem: "The runner could not be asked about that folder." }
-  } finally {
-    await runner.close().catch(() => {})
+  return {
+    async browse(path): Promise<FolderLook> {
+      let client: Projects
+      try {
+        client = await reach()
+      } catch {
+        return { problem: "The runner could not be reached to look at that folder." }
+      }
+      try {
+        return await timed(client.projects.browse(path === undefined ? {} : { path }))
+      } catch (error) {
+        // The runner says why in words for the person: not a full path, no such folder,
+        // not a folder, or one it can't read.
+        if (hasCode(error, "INVALID_DIRECTORY"))
+          return {
+            problem:
+              error instanceof Error && error.message
+                ? error.message
+                : "No folder has that full path on the runner's machine.",
+          }
+        return { problem: "The runner could not be asked about that folder." }
+      }
+    },
+    async places(): Promise<readonly Place[]> {
+      const client = await reach()
+      const projects = await timed(client.projects.list())
+      return projects.map((project) => ({ name: project.name, path: project.cwd }))
+    },
+    close() {
+      if (closed) return
+      closed = true
+      void runner?.then((client) => client.close()).catch(() => {})
+    },
   }
 }
 
-/** A client of the remote runner for one check: its own connection, closed after it. */
+/** A client of the remote runner, on its own connection. */
 export const remoteClient =
   (settings: Pick<RemoteSettings, "url" | "token">): (() => Promise<Runner>) =>
   () =>

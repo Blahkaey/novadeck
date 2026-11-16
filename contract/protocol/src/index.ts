@@ -158,6 +158,7 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type FolderBrowse,
   type FolderListing,
   maxClientStateLength,
   type Project,

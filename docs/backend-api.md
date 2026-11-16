@@ -129,9 +129,12 @@ With a remote runner:
   the machine wakes from sleep. The page then reconnects, rather than wait on a link that
   looks open while nothing reaches the runner. The log says so once (`remote.stalled`),
   naming the runner by its origin alone.
-- Open folder asks for the folder's full path on the runner's machine, in a small window,
-  and asks the runner about it before the page makes its project (the runner has no call
-  that only looks, so a project named "Folder check" is made there and removed at once).
+- Open folder browses the runner's machine in a small window that runs no script: it starts
+  in the runner owner's home folder, its subfolders are links, with the folder above, the
+  home folder and the projects' folders to start from, and its path field takes a typed
+  path. "Open this folder" opens the folder shown, or the path typed, once the runner has
+  looked at it (`projects.browse`, which only looks); one it can't show stays, with the
+  reason.
 - A file pasted or dropped into a terminal is sent as a copy, as from a browser: its path
   on this machine names nothing there.
 - With `pagesProxy`, the companion pane's pages load through it, loopback addresses

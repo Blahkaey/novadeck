@@ -47,7 +47,7 @@ import { forgeIntegration, forgeName } from "./forges.js"
 import { closedTerminal, historyChange } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
-import { clientState, folderListing, project, workspaceSession } from "./projects.js"
+import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
 import { sliceChange } from "./slices.js"
 import {
@@ -151,6 +151,12 @@ export const contract = {
     folder: procedure
       .input(z.strictObject({ projectId: id, folder: z.string().max(4096) }))
       .output(folderListing),
+    // A folder of the runner's machine and the folders in it, for a client that picks a
+    // project's folder there, as the desktop app of a runner on another machine does: `path`
+    // absolute, or the runner owner's home folder when omitted. Only looks: it makes nothing.
+    // A path that isn't absolute, is missing, is no folder or can't be read is
+    // INVALID_DIRECTORY. Whoever holds the token can read any folder through a shell anyway.
+    browse: procedure.input(z.strictObject({ path: directory.optional() })).output(folderBrowse),
   },
   sessions: {
     // In the order the person arranged them; a session created since comes first.

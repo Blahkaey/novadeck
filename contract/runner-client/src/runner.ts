@@ -15,6 +15,7 @@ import {
   type ClosedTerminal,
   type CompanionWindow,
   type FeedbackDraft,
+  type FolderBrowse,
   type FolderListing,
   type ForgeIntegration,
   type ForgeName,
@@ -139,6 +140,13 @@ export type Runner = {
      * outside the project's directory.
      */
     folder(input: { readonly projectId: string; readonly folder: string }): Promise<FolderListing>
+    /**
+     * A folder of the runner's machine by its absolute `path`, or the runner owner's home
+     * folder without one: its real path, its parent's (null at the root), and the folders in
+     * it. Makes nothing. Rejects with `INVALID_DIRECTORY` for a path that isn't absolute, is
+     * missing, is no folder or can't be read.
+     */
+    browse(input: { readonly path?: string }): Promise<FolderBrowse>
   }
   readonly sessions: {
     list(input: { readonly projectId: string }): Promise<WorkspaceSession[]>
@@ -781,6 +789,7 @@ export const connectRunner = async (
           client.projects.arrange({ order: [...input.order], pinned: [...input.pinned] }),
         ),
       folder: (input) => call((client) => client.projects.folder(input)),
+      browse: (input) => call((client) => client.projects.browse(input)),
     },
     sessions: {
       list: (input) => call((client) => client.sessions.list(input)),

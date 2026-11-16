@@ -1,147 +1,197 @@
+import type { FolderBrowse } from "@novadeck/protocol"
 import type { BrowserWindow, BrowserWindowConstructorOptions } from "electron"
 
-// The addresses the prompt's page navigates to, which never load (the name is one no
-// network resolves): the window reads its answer from them.
+import { addressOf, escaped, openPageWindow, page } from "./page-window.js"
+
+// The addresses the browser's page navigates to, which never load: the window reads what the
+// person did from them.
 const origin = "https://novadeck-folder.invalid"
-const chosen = `${origin}/chosen`
-const cancelled = `${origin}/cancelled`
 
-/**
- * What the runner says of a path the person gave: the folder it names there, by its real
- * path, or why it can't be opened, in words for the person.
- */
-export type FolderCheck = { readonly path: string } | { readonly problem: string }
+/** A folder to start from: the home folder, or a project's. */
+export type Place = { readonly name: string; readonly path: string }
 
-const entities: Readonly<Record<string, string>> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
+/** What the runner says of a path: the folder there, or why it can't be shown, in words for the person. */
+export type FolderLook = FolderBrowse | { readonly problem: string }
+
+/** The runner's folders, as the browser asks about them over one connection. */
+export type RemoteFolders = {
+  /** The folder at `path`, or the runner owner's home folder without one. */
+  browse(path: string | undefined): Promise<FolderLook>
+  /** The folders of the runner's projects, to start from; none when they can't be read. */
+  places(): Promise<readonly Place[]>
+  /** Ends the connection, once the browser is done. */
+  close(): void
 }
 
-const escaped = (text: string): string =>
-  text.replace(/[&<>"']/g, (character) => entities[character] ?? character)
+/** What the browser shows: the folder, the path field, what went wrong, and where to start from. */
+export type FolderView = {
+  /** The folder shown; none until the runner showed one. */
+  readonly folder?: FolderBrowse
+  /** What the path field holds: the folder's path, or what the person typed. */
+  readonly path: string
+  /** Why the path last asked about can't be shown or opened. */
+  readonly problem?: string
+  readonly places: readonly Place[]
+}
+
+/** What the person did on the page. */
+export type FolderAction =
+  | { readonly kind: "browse"; readonly path: string | undefined }
+  | { readonly kind: "open"; readonly path: string }
+  | { readonly kind: "cancel" }
+
+/** What a navigation of the browser's page asks for, or undefined for no action of its. */
+export const folderAction = (url: URL): FolderAction | undefined => {
+  if (url.origin !== origin) return undefined
+  const path = url.searchParams.get("path")?.trim() || undefined
+  if (url.pathname === "/browse") return { kind: "browse", path }
+  if (url.pathname === "/open") return path ? { kind: "open", path } : { kind: "browse", path }
+  if (url.pathname === "/cancelled") return { kind: "cancel" }
+  return undefined
+}
+
+/** `name` in the folder at `path`, joined with the separator that path uses. */
+export const inside = (path: string, name: string): string => {
+  const separator = /^[A-Za-z]:\\|^\\\\/.test(path) ? "\\" : "/"
+  return path.endsWith(separator) ? `${path}${name}` : `${path}${separator}${name}`
+}
+
+const browseLink = (path: string, text: string, label = text): string =>
+  `<a href="${escaped(addressOf(origin, "/browse", { path }))}" title="${escaped(label)}">${escaped(text)}</a>`
+
+const style = `
+  body { height: 100vh; }
+  form { display: flex; flex-direction: column; height: 100%; }
+  .path { display: flex; gap: 8px; }
+  .places { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; }
+  ul { flex: 1; overflow: auto; list-style: none; margin: 12px 0 0; padding: 4px 0; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 4px; }
+  li a { display: block; padding: 3px 10px; text-decoration: none; font: 13px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  li a:hover, li a:focus { background: color-mix(in srgb, Highlight 30%, transparent); outline: none; }
+  li.hidden a { opacity: 0.6; }
+  li.empty { padding: 3px 10px; opacity: 0.6; }
+  .note { margin: 8px 0 0; }
+  .actions { margin-top: 12px; }`
 
 /**
- * The prompt's page: a form for one path, and a link that cancels. It runs no script; the
- * form and the link navigate to addresses of the prompt's own. Shown again after a path the
- * runner refused, it holds that `path` and says the `problem`.
+ * The browser's page: a typable path field, the places to start from, the folder's
+ * subfolders as links (hidden ones last), and a button that opens the folder shown, or the
+ * path typed. It runs no script: every link and button navigates to an address of the
+ * browser's own, and names and paths are escaped wherever they show.
  */
-export const folderPromptPage = (
-  again: { readonly path: string; readonly problem: string } | undefined = undefined,
-): string => `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
-<title>Open folder</title>
-<style>
-  :root { color-scheme: light dark; font: 13px system-ui, sans-serif; }
-  body { margin: 0; padding: 20px; }
-  label { display: block; font-weight: 600; margin-bottom: 4px; }
-  p { margin: 0 0 12px; opacity: 0.7; }
-  p[role="alert"] { margin: 8px 0 0; opacity: 1; color: #c0392b; }
-  input { box-sizing: border-box; width: 100%; padding: 6px 8px; font: 13px ui-monospace, monospace; }
-  div { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px; }
-  button { padding: 5px 16px; font: inherit; }
-  a { color: inherit; }
-</style>
-<form action="${chosen}" method="get">
+export const folderBrowserPage = (view: FolderView): string => {
+  const { folder } = view
+  const sorted = folder
+    ? [
+        ...folder.folders.filter((name) => !name.startsWith(".")),
+        ...folder.folders.filter((name) => name.startsWith(".")),
+      ]
+    : []
+  const entries = folder
+    ? [
+        ...(folder.parent === null
+          ? []
+          : [`<li>${browseLink(folder.parent, "..", `Up to ${folder.parent}`)}</li>`]),
+        ...sorted.map(
+          (name) =>
+            `<li${name.startsWith(".") ? ' class="hidden"' : ""}>${browseLink(inside(folder.path, name), `${name}/`, inside(folder.path, name))}</li>`,
+        ),
+        ...(sorted.length === 0 ? ['<li class="empty">No folders in this folder.</li>'] : []),
+      ]
+    : []
+  return page(
+    "Open folder",
+    style,
+    `<form action="${origin}/browse" method="get">
   <label for="path">Folder on the runner's machine</label>
-  <p>Its full path there, such as /home/you/project.</p>
-  <input id="path" name="path" required autofocus autocomplete="off" spellcheck="false" placeholder="/home/you/project" value="${escaped(again?.path ?? "")}">
-  ${again ? `<p role="alert">${escaped(again.problem)}</p>` : ""}
-  <div><a href="${cancelled}">Cancel</a><button>Open</button></div>
-</form>
-</html>`
-
-/**
- * What a navigation of the prompt's page answers: the path the person gave, null when they
- * cancelled or gave none, and undefined for any other address, which is no answer.
- */
-export const folderAnswer = (address: string): string | null | undefined => {
-  const url = URL.parse(address)
-  if (url?.origin !== origin) return undefined
-  if (url.pathname !== "/chosen") return null
-  const path = url.searchParams.get("path")?.trim()
-  return path ? path : null
+  <div class="path">
+    <input id="path" name="path" autofocus autocomplete="off" spellcheck="false" placeholder="/home/you/project" value="${escaped(view.path)}">
+    <button>Go</button>
+  </div>
+  ${view.places.length > 0 ? `<nav class="places" aria-label="Places">${view.places.map((place) => browseLink(place.path, place.name, place.path)).join("")}</nav>` : ""}
+  ${view.problem ? `<p role="alert">${escaped(view.problem)}</p>` : ""}
+  ${folder ? `<ul aria-label="Folders in ${escaped(folder.path)}">${entries.join("")}</ul>` : '<ul aria-label="Folders"></ul>'}
+  ${folder?.truncated ? `<p class="note">Only the first ${folder.folders.length} folders are listed: type a path to go further.</p>` : ""}
+  <div class="actions"><a href="${origin}/cancelled">Cancel</a><button formaction="${origin}/open">Open this folder</button></div>
+</form>`,
+  )
 }
 
-/** The prompt's window: over the app's, without script, a preload or anything of Node. */
-const promptWindow = (parent: BrowserWindow): BrowserWindowConstructorOptions => ({
-  parent,
-  modal: true,
-  width: 460,
-  height: 210,
-  useContentSize: true,
-  resizable: false,
-  minimizable: false,
-  maximizable: false,
-  fullscreenable: false,
-  autoHideMenuBar: true,
-  show: false,
-  title: "Open folder",
-  webPreferences: {
-    sandbox: true,
-    contextIsolation: true,
-    nodeIntegration: false,
-    javascript: false,
-    // Its own session, kept nowhere: nothing of the app's or the pages'.
-    partition: "folder-prompt",
-  },
-})
-
-const pageAddress = (page: string): string =>
-  `data:text/html;charset=utf-8,${encodeURIComponent(page)}`
+/** The places to start from: the home folder first, then each project's, each path once. */
+const placesOf = (home: string | undefined, projects: readonly Place[]): readonly Place[] => {
+  const all = [...(home === undefined ? [] : [{ name: "Home", path: home }]), ...projects]
+  return all.filter((place, index) => all.findIndex((each) => each.path === place.path) === index)
+}
 
 /**
  * Asks the person for a folder on the runner's machine, which no folder picker of this
- * machine can browse: a small window over `parent` with a field for its path. `check` asks
- * the runner about each path given; one it refuses is shown again with the reason, for the
- * person to mend. Answers the folder's real path there, or null when the person cancels or
- * closes the window.
+ * machine can browse: a small window over `parent` that starts in the runner owner's home
+ * folder, with its folders to click through, places to start from, and a path field to type
+ * into. "Open this folder" answers the folder shown, or the path typed, by its real path
+ * there, once the runner has looked at it; one it can't show stays to be mended, with the
+ * reason. Answers null when the person cancels or closes the window.
  */
 export const askRemoteFolder = (
   parent: BrowserWindow,
   create: (options: BrowserWindowConstructorOptions) => BrowserWindow,
-  check: (path: string) => Promise<FolderCheck>,
+  folders: RemoteFolders,
 ): Promise<string | null> =>
   new Promise((resolve) => {
-    const window = create(promptWindow(parent))
+    let view: FolderView = { path: "", places: [] }
+    let home: string | undefined
+    let projects: readonly Place[] = []
     let answer: string | null = null
-    let gone = false
-    // One path is asked about at a time: what the person does meanwhile waits for its answer.
-    let checking = false
-    const { webContents } = window
-    const ask = async (path: string): Promise<void> => {
-      checking = true
-      const result = await check(path).catch((): FolderCheck => ({
+    // One thing is asked of the runner at a time: what the person does meanwhile is dropped.
+    let busy = false
+    const look = (path: string | undefined): Promise<FolderLook> =>
+      folders.browse(path).catch((): FolderLook => ({
         problem: "The runner could not be asked about that folder.",
       }))
-      checking = false
-      if (gone) return
-      if ("path" in result) {
+    const window = openPageWindow(parent, create, {
+      title: "Open folder",
+      width: 460,
+      height: 460,
+      resizable: true,
+      partition: "folder-prompt",
+      origin,
+      first: folderBrowserPage(view),
+      navigate: (url) => {
+        const action = folderAction(url)
+        if (action === undefined || busy) return
+        if (action.kind === "cancel") return window.close()
+        void act(action)
+      },
+      closed: () => {
+        folders.close()
+        resolve(answer)
+      },
+    })
+    const act = async (action: Exclude<FolderAction, { kind: "cancel" }>): Promise<void> => {
+      busy = true
+      const result = await look(action.path)
+      busy = false
+      if (window.gone) return
+      if ("problem" in result) {
+        view = { ...view, path: action.path ?? "", problem: result.problem }
+      } else if (action.kind === "open") {
         answer = result.path
-        window.close()
-        return
+        return window.close()
+      } else {
+        view = { folder: result, path: result.path, places: placesOf(home, projects) }
       }
-      void window.loadURL(pageAddress(folderPromptPage({ path, problem: result.problem })))
+      window.draw(folderBrowserPage(view))
     }
-    webContents.on("will-navigate", (event, address) => {
-      event.preventDefault()
-      const given = folderAnswer(address)
-      if (given === undefined || checking) return
-      if (given === null) window.close()
-      else void ask(given)
-    })
-    webContents.setWindowOpenHandler(() => ({ action: "deny" }))
-    webContents.on("before-input-event", (_event, input) => {
-      if (input.type === "keyDown" && input.key === "Escape") window.close()
-    })
-    window.once("ready-to-show", () => window.show())
-    window.once("closed", () => {
-      gone = true
-      resolve(answer)
-    })
-    void window.loadURL(pageAddress(folderPromptPage()))
+    // The home folder first, with the projects' folders to start from.
+    busy = true
+    void Promise.all([look(undefined), folders.places().catch(() => [])]).then(
+      ([result, places]) => {
+        busy = false
+        projects = places
+        if (!("problem" in result)) home = result.path
+        view =
+          "problem" in result
+            ? { path: "", problem: result.problem, places: placesOf(home, projects) }
+            : { folder: result, path: result.path, places: placesOf(home, projects) }
+        window.draw(folderBrowserPage(view))
+      },
+    )
   })

@@ -1,76 +1,105 @@
+import type { FolderBrowse } from "@novadeck/protocol"
 import { WireError } from "@novadeck/wire"
 
 import { context, describe, expect, it } from "../../test"
-import { checkRemoteFolder } from "./check"
+import { remoteFolders } from "./check"
 
-/** A runner as the check uses one: the folders it has, and what it was asked to do. */
+const home: FolderBrowse = {
+  path: "/home/ana",
+  parent: "/home",
+  folders: ["code"],
+  truncated: false,
+}
+
+/** A runner as the browser uses one: the folders it has, and what it was asked to do. */
 const runner = (
-  options: { folders?: Readonly<Record<string, string>>; removes?: boolean } = {},
+  options: {
+    folders?: Readonly<Record<string, FolderBrowse>>
+    reachable?: () => boolean
+    fails?: unknown
+  } = {},
 ) => {
-  const { folders = { "/srv/link": "/srv/app" }, removes = true } = options
+  const { folders = { "/srv/link": { ...home, path: "/srv/app", parent: "/srv" } } } = options
   const did: string[] = []
-  const projects = new Set<string>()
   return {
     did,
-    projects,
-    connect: () =>
-      Promise.resolve({
+    connect: () => {
+      did.push("connect")
+      if (options.reachable && !options.reachable())
+        return Promise.reject(new WireError("DISCONNECTED", "No runner."))
+      return Promise.resolve({
         projects: {
-          create: (input: { id: string; name: string; cwd?: string }) => {
-            did.push(`create ${input.cwd}`)
-            const cwd = folders[input.cwd ?? ""]
-            if (!cwd)
-              return Promise.reject(
-                new WireError("INVALID_DIRECTORY", "Project directory does not exist"),
-              )
-            projects.add(input.id)
-            return Promise.resolve({ id: input.id, name: input.name, cwd, pinned: false })
+          browse: (input: { path?: string }) => {
+            did.push(`browse ${input.path ?? "home"}`)
+            if (options.fails) return Promise.reject(options.fails)
+            if (input.path === undefined) return Promise.resolve(home)
+            const found = folders[input.path]
+            return found
+              ? Promise.resolve(found)
+              : Promise.reject(new WireError("INVALID_DIRECTORY", "No folder has that path."))
           },
-          remove: (input: { projectId: string }) => {
-            did.push("remove")
-            if (!removes) return Promise.reject(new WireError("DISCONNECTED", "Lost."))
-            projects.delete(input.projectId)
-            return Promise.resolve()
+          list: () => {
+            did.push("list")
+            return Promise.resolve([
+              { id: "p", name: "Storefront", cwd: "/home/ana/code/storefront", pinned: false },
+            ])
           },
         },
         close: () => {
           did.push("close")
           return Promise.resolve()
         },
-      }),
+      })
+    },
   }
 }
 
-describe("checkRemoteFolder", () => {
-  it("answers a folder's real path on the runner's machine, and leaves no project there", async () => {
-    const { connect, did, projects } = runner()
-    await expect(checkRemoteFolder("/srv/link", connect)).resolves.toEqual({ path: "/srv/app" })
-    expect(did).toEqual(["create /srv/link", "remove", "close"])
-    expect(projects.size).toBe(0)
+describe("remoteFolders", () => {
+  it("looks at folders over one connection, makes nothing, and closes it once done", async () => {
+    const { connect, did } = runner()
+    const folders = remoteFolders(connect)
+
+    await expect(folders.browse(undefined)).resolves.toEqual(home)
+    await expect(folders.browse("/srv/link")).resolves.toMatchObject({ path: "/srv/app" })
+    folders.close()
+    await Promise.resolve()
+
+    expect(did).toEqual(["connect", "browse home", "browse /srv/link", "close"])
   })
 
-  context("when the folder can't be opened", () => {
-    it("says the runner has no such folder", async () => {
-      const { connect, did } = runner()
-      await expect(checkRemoteFolder("/srv/nowhere", connect)).resolves.toEqual({
-        problem: "No folder has that full path on the runner's machine.",
+  it("offers the runner's projects as places to start from", async () => {
+    const { connect } = runner()
+    await expect(remoteFolders(connect).places()).resolves.toEqual([
+      { name: "Storefront", path: "/home/ana/code/storefront" },
+    ])
+  })
+
+  context("when the folder can't be shown", () => {
+    it("says why, in the runner's words", async () => {
+      const { connect } = runner()
+      await expect(remoteFolders(connect).browse("/srv/nowhere")).resolves.toEqual({
+        problem: "No folder has that path.",
       })
-      expect(did).toEqual(["create /srv/nowhere", "close"])
     })
 
-    it("says the runner is out of reach", async () => {
-      const unreachable = () => Promise.reject(new WireError("DISCONNECTED", "No runner."))
-      await expect(checkRemoteFolder("/srv/app", unreachable)).resolves.toEqual({
-        problem: "The runner could not be reached to check that folder.",
+    it("says the runner is out of reach, and reaches for it again next time", async () => {
+      let reachable = false
+      const { connect, did } = runner({ reachable: () => reachable })
+      const folders = remoteFolders(connect)
+
+      await expect(folders.browse(undefined)).resolves.toEqual({
+        problem: "The runner could not be reached to look at that folder.",
       })
+      reachable = true
+      await expect(folders.browse(undefined)).resolves.toEqual(home)
+      expect(did).toEqual(["connect", "connect", "browse home"])
     })
 
-    it("tries once more to remove what it made when the runner stops answering", async () => {
-      const { connect, did } = runner({ removes: false })
-      await expect(checkRemoteFolder("/srv/link", connect)).resolves.toEqual({
+    it("says the runner could not be asked when it fails otherwise", async () => {
+      const { connect } = runner({ fails: new WireError("DISCONNECTED", "Lost.") })
+      await expect(remoteFolders(connect).browse("/srv/link")).resolves.toEqual({
         problem: "The runner could not be asked about that folder.",
       })
-      expect(did).toEqual(["create /srv/link", "remove", "remove", "close"])
     })
   })
 })

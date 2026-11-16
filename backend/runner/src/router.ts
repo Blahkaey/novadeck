@@ -28,7 +28,7 @@ import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
-import { listFolder } from "./workspaces/folder.js"
+import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Projects } from "./workspaces/projects.js"
 import type { WorkspaceStore } from "./workspaces/store.js"
 
@@ -164,6 +164,7 @@ export const createRouter = (options: {
         projects.ensureNotRemoving(input.projectId)
         return listFolder(store.project(input.projectId).cwd, input.folder)
       }),
+      browse: api.projects.browse.handler(({ input }) => browseFolder(input.path)),
     },
     sessions: {
       list: api.sessions.list.handler(({ input }) => projects.sessions(input.projectId)),
