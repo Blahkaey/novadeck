@@ -18,6 +18,11 @@ export type ServerOptions = HttpOptions &
     voice?: RunnerOptions["voice"]
     /** Murmur's engine and where it installs; see `RunnerOptions.murmur`. */
     murmur?: RunnerOptions["murmur"]
+    /**
+     * A file holding the key saved transcripts are encrypted with, made on the first start;
+     * see `loadKeyFile`. Without one no transcript is saved or shown again.
+     */
+    transcriptKeyFile?: string
     /** The cap on running and retained terminals: 32 when omitted, none when `null`. */
     maxTerminals?: number | null
     terminals?: TerminalOptions
@@ -28,15 +33,22 @@ export type { HttpServer as Server } from "./http.js"
 /** Standalone runner: HTTP status plus a token-authenticated WebSocket runner API. */
 export const startServer = async (options: ServerOptions = {}): Promise<HttpServer> => {
   if (options.token === undefined) return startHttpServer(options)
-  const [{ createRunner }, { serveWebSocket }] = await Promise.all([
+  const [{ createRunner }, { serveWebSocket }, { loadKeyFile }] = await Promise.all([
     import("./index.js"),
     import("@novadeck/wire/server"),
+    import("./terminals/key-file.js"),
   ])
+  // Read before anything starts, so a key file that can't be used stops the start.
+  const transcriptKey =
+    options.transcriptKeyFile === undefined
+      ? undefined
+      : await loadKeyFile(options.transcriptKeyFile)
   // A shared, network-reachable runner keeps a cap unless told otherwise; the
   // desktop runner has none. The manager reads an absent cap as none.
   const cap = options.maxTerminals === undefined ? 32 : options.maxTerminals
   const runner = createRunner({
     ...(options.database !== undefined && { database: options.database }),
+    ...(transcriptKey !== undefined && { transcriptKey: Promise.resolve(transcriptKey) }),
     ...(options.shell !== undefined && { shell: options.shell }),
     ...(options.uploads !== undefined && { uploads: options.uploads }),
     ...(options.relay !== undefined && { relay: options.relay }),

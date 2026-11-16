@@ -132,8 +132,11 @@ With a remote runner:
 - With `pagesProxy`, the companion pane's pages load through it, loopback addresses
   included, so `localhost:3000` is the runner's machine's. Without it they load from this
   machine. A link opened in the system's browser is always this machine's.
-- The standalone runner has no transcript key (see [SECURITY.md](../SECURITY.md#terminal-runner)),
-  so no transcript is saved or shown.
+- The standalone runner keeps no transcript key of its own, so it saves and shows no
+  terminal's earlier output, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for one: it
+  makes the key there on its first start, and refuses to start on a file there it can't use
+  (see [SECURITY.md](../SECURITY.md#terminal-runner)). With it, restored terminals show what
+  they last showed, and Preferences offers the switch that turns saving off.
 - The standalone runner caps running and kept terminals together at 32, where the desktop
   app's own runner has no cap. `NOVADECK_MAX_TERMINALS` sets another cap, a positive whole
   number, or `none` for no cap; any other value stops the start.

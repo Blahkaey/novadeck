@@ -295,7 +295,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   // On Linux each shell runs in a systemd scope of its own, so one killed for memory
   // takes down its terminal, not the app.
   const scopes = userScopes()
-  // Without a key from the app no transcript is saved or shown.
+  // Without a key, from the app or a standalone runner's key file, no transcript is saved or shown.
   const sealer = createTranscriptSealer(options.transcriptKey)
   // Whether an agent works in the worktree now, read afresh each time it is asked: a turn may
   // have started since. A shell command or agent whose current checkout is the worktree counts,

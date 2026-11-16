@@ -246,8 +246,16 @@ key-like runs) is masked in a worker thread; a transcript that cannot be masked 
 saved, and the copy saved before stays. The masked text is then encrypted (AES-256-GCM,
 bound to its terminal) with a key the desktop app keeps in the system keychain: the
 Keychain on macOS, DPAPI on Windows, the Secret Service on Linux (GNOME Keyring, or KWallet
-where it offers the Secret Service). Where nothing protects that key (no keyring on Linux,
-an unlock that is refused or fails, the standalone runner, which has no key) no transcript is saved or shown, and the setting stays as it is.
+where it offers the Secret Service). A standalone runner has no app to keep its key: it keeps
+none, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for it, which it makes on its first
+start (32 random bytes, owner-only) and reads on every later one. It refuses to start on a
+file there that it can't read, that isn't a 32-byte key, or that other accounts can read or
+change, and never overwrites one: losing or replacing that file leaves every transcript saved
+under it unreadable. That file sits on the same disk as the database, so it keeps transcripts
+only from a copy of the database that leaves without it, such as a backup of the database
+alone; anyone who can read both reads the transcripts. Where nothing protects the key (no
+keyring on Linux, an unlock that is refused or fails, a standalone runner without a key file)
+no transcript is saved or shown, and the setting stays as it is.
 A restored terminal waits a few seconds, once for the run, for the key; if it comes later,
 that terminal's saved transcript is not shown and is left as it is until the next start.
 A transcript found unencrypted is forgotten at every start, key or not, but a database set

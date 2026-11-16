@@ -81,6 +81,21 @@ describe("server configuration", () => {
     expect(readConfig({})).not.toHaveProperty("relay")
   })
 
+  it("reads the transcript key file as an absolute path, only with a token", () => {
+    const token = "configuration-tests-only-not-a-real-credential"
+    expect(
+      readConfig({ NOVADECK_TOKEN: token, NOVADECK_TRANSCRIPT_KEY_FILE: "data/transcript-key" })
+        .transcriptKeyFile,
+    ).toBe(resolve("data/transcript-key"))
+    expect(
+      readConfig({ NOVADECK_TOKEN: token, NOVADECK_TRANSCRIPT_KEY_FILE: " " }),
+    ).not.toHaveProperty("transcriptKeyFile")
+    expect(readConfig({ NOVADECK_TOKEN: token })).not.toHaveProperty("transcriptKeyFile")
+    expect(readConfig({ NOVADECK_TRANSCRIPT_KEY_FILE: "data/transcript-key" })).not.toHaveProperty(
+      "transcriptKeyFile",
+    )
+  })
+
   it("reads a cap on terminals, or none, and leaves the server's own unless one is set", () => {
     expect(readConfig({ NOVADECK_MAX_TERMINALS: "64" }).maxTerminals).toBe(64)
     expect(readConfig({ NOVADECK_MAX_TERMINALS: " 1 " }).maxTerminals).toBe(1)

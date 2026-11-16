@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -280,6 +280,45 @@ describe("WebSocket authentication and protocol", () => {
     } finally {
       kept.close()
     }
+  })
+
+  it("keeps transcripts with a key file, made on the first start, and none without one", async ({
+    resources,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-key-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const keyFile = join(directory, "transcript-key")
+
+    const keyed = await fixture(resources, { transcriptKeyFile: keyFile })
+    const { client } = await keyed.connect()
+    await expect(client.settings.get()).resolves.toMatchObject({ transcriptsAvailable: true })
+    expect(await readFile(keyFile)).toHaveLength(32)
+
+    const plain = await fixture(resources)
+    const other = await plain.connect()
+    await expect(other.client.settings.get()).resolves.toMatchObject({
+      transcriptsAvailable: false,
+    })
+  })
+
+  it("refuses to start on a key file that holds no key, and leaves it be", async ({
+    resources,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-key-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const keyFile = join(directory, "transcript-key")
+    await writeFile(keyFile, "not a key", { mode: 0o600 })
+
+    await expect(
+      startServer({
+        port: 0,
+        token,
+        database: join(directory, "workspace.sqlite"),
+        transcriptKeyFile: keyFile,
+        terminals: ptyOptions,
+      }),
+    ).rejects.toThrow(`The transcript key file ${keyFile} doesn't hold a key`)
+    expect(await readFile(keyFile, "utf8")).toBe("not a key")
   })
 })
 

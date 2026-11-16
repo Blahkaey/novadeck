@@ -84,6 +84,7 @@ export const readConfig = (environment: NodeJS.ProcessEnv = process.env): Server
   const murmurEngine = environment.NOVADECK_MURMUR_ENGINE?.trim()
   const murmurSource = environment.NOVADECK_MURMUR_SOURCE?.trim()
   const maxTerminals = readMaxTerminals(environment.NOVADECK_MAX_TERMINALS)
+  const keyFile = environment.NOVADECK_TRANSCRIPT_KEY_FILE?.trim()
   return {
     hostname: readHost(environment),
     port: readPort(environment.PORT),
@@ -113,6 +114,8 @@ export const readConfig = (environment: NodeJS.ProcessEnv = process.env): Server
           : murmurDirectory,
         directory: join(dirname(database), "murmur"),
       },
+      // Without one no transcript is saved, as upstream's standalone runner keeps none.
+      ...(keyFile && { transcriptKeyFile: resolve(keyFile) }),
     }),
     ...(maxTerminals !== undefined && { maxTerminals }),
     // Another build of the relay than `@novadeck/relay`'s, as a packaged one.
