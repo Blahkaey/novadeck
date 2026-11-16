@@ -1,0 +1,69 @@
+name: Remote Mac App
+
+# This fork's own build of the desktop app for macOS, which connects to a runner on another
+# machine (see "The desktop app on another machine's runner" in docs/backend-api.md). It is
+# packaged as Package packages a pull request's: unsigned, as version 0.0.0, which looks for no
+# updates, and without the voice and murmur engines, which a remote runner's machine holds.
+# The disk image is kept as an artifact of the run. Runs when the branch moves, and by hand.
+on:
+  push:
+    branches: [remote-runner]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push replaces a build still under way.
+concurrency:
+  group: remote-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check Out Source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set Up Toolchain
+        id: toolchain
+        continue-on-error: true
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+        with:
+          runtime: node@26
+          cache: true
+          require-lockfile: true
+
+      # An immediate retry hit the same registry outage in the flake audit.
+      - name: Wait Before Retrying Toolchain
+        if: steps.toolchain.outcome == 'failure'
+        shell: bash
+        run: sleep 180
+
+      - name: Set Up Toolchain Again
+        if: steps.toolchain.outcome == 'failure'
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+        with:
+          runtime: node@26
+          cache: true
+          require-lockfile: true
+
+      # The relay is built with the Rust its rust-toolchain.toml names, as one binary for both
+      # architectures. The app's update feed names this repository, as Package's does.
+      - name: Package Application
+        shell: bash
+        env:
+          NOVADECK_RELAY_UNIVERSAL: "1"
+          REPOSITORY: ${{ github.repository }}
+        run: pnpm run package:mac "-c.publish.owner=${REPOSITORY%%/*}" "-c.publish.repo=${REPOSITORY#*/}"
+
+      - name: Upload App
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: novadeck-mac-universal
+          path: apps/desktop/release/novadeck-mac-universal.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
