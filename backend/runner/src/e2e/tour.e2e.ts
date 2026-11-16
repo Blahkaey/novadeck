@@ -130,11 +130,12 @@ for (const setup of setups) {
       const prepared = await prepare(run)
 
       const terminal = await run.deck.openAt(prepared.directory, prepared.command)
-      // What the harness's process was started with, while it runs: not on Windows, where the
-      // runner reads no foreground process's command line (`foregroundProcess.argv` is null).
-      // There the agent binding, its greeting and no usage error on screen show it took them.
+      // What the harness's process was started with, while it runs: only on Linux, as the runner
+      // reads no foreground process's command line on Windows or macOS
+      // (`foregroundProcess.argv` is null there). There the agent binding, its greeting and no
+      // usage error on screen show it took them.
       const argv =
-        process.platform === "win32"
+        process.platform !== "linux"
           ? undefined
           : await poll(
               () => {
