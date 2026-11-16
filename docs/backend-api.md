@@ -97,6 +97,46 @@ connect directly over WSS; it does not need a terminal backend on Cloudflare.
 Follow the [runner trust boundary](../SECURITY.md#terminal-runner) before exposing
 the service. There is no TLS, login page, or public multi-user hosting layer here.
 
+### The desktop app on another machine's runner
+
+The desktop app connects to a standalone runner on another machine, in place of starting
+its own, when its data folder holds a `remote-runner.json` (`~/Library/Application
+Support/novadeck` on macOS, `~/.config/novadeck` on Linux, `%APPDATA%\novadeck` on Windows):
+
+```json
+{
+  "url": "ws://127.0.0.1:8787/api/rpc",
+  "token": "the runner's NOVADECK_TOKEN",
+  "pagesProxy": "socks5://127.0.0.1:1080"
+}
+```
+
+The runner stays on loopback, and SSH carries it: `ssh -N -L 8787:127.0.0.1:8787 -D 1080
+user@machine` forwards the runner's port, and opens the SOCKS proxy `pagesProxy` names.
+`url` is a `ws:` address on this machine, as such a tunnel gives, or a `wss:` one; the app
+refuses an unencrypted address anywhere else, as the token crosses in the handshake. The
+main process carries each port its page asks for to that WebSocket (`tunnelPort` in
+`@novadeck/wire/electron`) and adds the token there, so the page never holds it. A file
+that can't be read or understood stops the launch with a message; the app never falls back
+to a runner of its own. Keep the file readable by its owner only.
+
+With a remote runner:
+
+- Shells, agents, projects and files are the runner's machine's. Quitting the app only
+  disconnects: the runner and its shells run on, and the next launch finds them.
+- Open folder asks for the folder's full path on the runner's machine, in a small window,
+  and asks the runner about it before the page makes its project (the runner has no call
+  that only looks, so a project named "Folder check" is made there and removed at once).
+- A file pasted or dropped into a terminal is sent as a copy, as from a browser: its path
+  on this machine names nothing there.
+- With `pagesProxy`, the companion pane's pages load through it, loopback addresses
+  included, so `localhost:3000` is the runner's machine's. Without it they load from this
+  machine. A link opened in the system's browser is always this machine's.
+- The standalone runner has no transcript key (see [SECURITY.md](../SECURITY.md#terminal-runner)),
+  so no transcript is saved or shown, and it caps terminals at 32.
+- The app and the runner must be the same build: the protocol's version doesn't change
+  with every change to its calls.
+
 ## Runner API
 
 The runner owns shells and workspace metadata. The UI talks to it through one

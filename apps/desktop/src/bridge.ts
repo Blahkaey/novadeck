@@ -16,6 +16,12 @@ export const graphicsArgumentPrefix = "--novadeck-graphics="
 /** Given to the page's preload when the app sends feedback notes: the value is `1`; absent otherwise. */
 export const feedbackArgumentPrefix = "--novadeck-feedback="
 
+/**
+ * Given to the page's preload when the runner is on another machine: the value is `1`; absent
+ * otherwise. A path on this machine then names nothing the runner can read.
+ */
+export const remoteArgumentPrefix = "--novadeck-remote="
+
 /** Renderer-to-main request for what goes along with a feedback note; answers it. */
 export const feedbackAboutChannel = "novadeck:feedback-about"
 

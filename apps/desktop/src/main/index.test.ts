@@ -55,6 +55,28 @@ describe("the compiled desktop app", () => {
       )
     })
 
+    it("connects to another machine's runner, where the data folder names one, in place of starting its own", async () => {
+      const main = await read("main/index.js")
+      const preload = await read("preload/index.cjs")
+
+      expect(main).toContain('"remote-runner.json"')
+      // Read before either runner is made, and only one of the two is.
+      const settings = main.indexOf("remote = await remoteSettings()")
+      expect(settings).toBeGreaterThan(-1)
+      expect(settings).toBeLessThan(main.indexOf("runner = remoteRunner("))
+      expect(main).toMatch(
+        /if \(remote\) runner = remoteRunner\([^\n]*\n\s*else\s*runner = startRunner\(/u,
+      )
+      // The runner's token is added to each handshake in the main process; the preload
+      // hears only that the runner is remote.
+      expect(main).toContain("tunnelPort(")
+      expect(preload).toContain("--novadeck-remote=")
+      expect(preload).not.toContain("remote-runner.json")
+      // Its folders are asked for by path, and its pages may load through its proxy.
+      expect(main).toContain("askRemoteFolder(")
+      expect(main).toContain('proxyBypassRules: "<-loopback>"')
+    })
+
     it("offers a folder picker parented to the requesting window", async () => {
       const main = await read("main/index.js")
       const preload = await read("preload/index.cjs")

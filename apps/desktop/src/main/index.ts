@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 
 import { consoleLogger, logPath, openSession, type Logger, type Session } from "@novadeck/log"
 import type { DesktopBadge, DesktopFeedbackAbout } from "@novadeck/protocol/bridge"
+import { pagesPartition } from "@novadeck/protocol/pages"
 import { startHttpServer, type HttpServer } from "@novadeck/runner/http"
 import { brokerPorts } from "@novadeck/wire/electron"
 import {
@@ -36,6 +37,7 @@ import {
   feedbackArgumentPrefix,
   noticeClickChannel,
   portableStateChannel,
+  remoteArgumentPrefix,
   runnerPortChannel,
   versionChannel,
 } from "../bridge.js"
@@ -76,6 +78,10 @@ import {
   type QuitSteps,
 } from "./quit.js"
 import { notQuitting } from "./quitting.js"
+import { checkRemoteFolder, remoteClient } from "./remote/check.js"
+import { askRemoteFolder } from "./remote/folder.js"
+import { remoteRunner } from "./remote/runner.js"
+import { readRemoteSettings, remoteSettingsFile, type RemoteSettings } from "./remote/settings.js"
 import {
   developmentOrigin,
   murmurEngine,
@@ -261,6 +267,9 @@ const updatesLog = updateLogOn(logger.for("updates"))
 const quitting = notQuitting()
 let server: HttpServer | undefined
 let runner: RunnerProcess | undefined
+// The runner on another machine this launch connects to, where the data folder names one
+// (see ./remote/settings.ts); the app then starts none of its own.
+let remote: RemoteSettings | undefined
 // Names this run of the app; see `PortableHost.run`.
 const run = randomUUID()
 
@@ -336,6 +345,7 @@ const createWindow = (origin: string): BrowserWindow => {
       `${apiUrlArgumentPrefix}${apiUrl}`,
       webglContextsArgument(webglContexts),
       ...(feedbackTo ? [`${feedbackArgumentPrefix}1`] : []),
+      ...(remote ? [`${remoteArgumentPrefix}1`] : []),
     ],
   })
   // Closing the last window quits, which ends the shells, except on macOS; either way
@@ -364,9 +374,9 @@ const openLogs = (): void => {
     )
 }
 
-// The key saved transcripts are encrypted with, asked for as the app is ready and never
-// waited on: a Linux keyring may ask the person to unlock it, and neither the window nor
-// the runner holds back for that. Null where none can be kept safe.
+// The key saved transcripts are encrypted with, asked for as the app's own runner starts
+// and never waited on: a Linux keyring may ask the person to unlock it, and neither the
+// window nor the runner holds back for that. Null where none can be kept safe.
 const loadKey = (): Promise<string | null> =>
   loadTranscriptKey({
     storage: safeStorage,
@@ -377,7 +387,21 @@ const loadKey = (): Promise<string | null> =>
     log.warn("transcript-key.failed", "The transcript key could not be loaded.", { err: error })
     return null
   })
-let transcriptKey: Promise<string | null> = Promise.resolve(null)
+
+// The settings of a remote runner, if the data folder holds any. Settings that can't be
+// used stop the launch, and say why: the person asked for another machine's runner, and
+// must not find themselves in this one's.
+const remoteSettings = async (): Promise<RemoteSettings | undefined> => {
+  try {
+    return await readRemoteSettings(join(app.getPath("userData"), remoteSettingsFile))
+  } catch (error) {
+    dialog.showErrorBox(
+      "Novadeck can't connect to its remote runner",
+      error instanceof Error ? error.message : String(error),
+    )
+    throw error
+  }
+}
 
 const launch = async (): Promise<void> => {
   // The signature is not asked here: it takes a moment, and a portable copy is told
@@ -425,19 +449,29 @@ const launch = async (): Promise<void> => {
   // Settled before the runner makes its database, which marks a data folder as used: a
   // launch that dies in between must not make the next one look like an update.
   await news.settleLaunch()
-  runner = startRunner({
-    transcriptKey,
-    entry: join(currentDirectory, "runner.js"),
-    database: join(app.getPath("userData"), "workspace.sqlite"),
-    relay: relayPath(),
-    engine: voice.manifest,
-    source: voice.source,
-    murmurEngine: murmur.manifest,
-    murmurSource: murmur.source,
-    softwareGraphics,
-    log: (start) => JSON.stringify(logSetup(start)),
-    events: logRunnerEvents(logger, !app.isPackaged),
-  })
+  remote = await remoteSettings()
+  // The companion pane's pages load from the runner's machine, where the agents' servers
+  // run: this machine's own addresses are reached through the proxy too.
+  if (remote?.pagesProxy)
+    await session
+      .fromPartition(pagesPartition)
+      .setProxy({ proxyRules: remote.pagesProxy, proxyBypassRules: "<-loopback>" })
+  if (remote) runner = remoteRunner({ settings: remote, log: logger.for("remote") })
+  else
+    runner = startRunner({
+      // A remote runner has no use for the key, so the keychain is not asked for it.
+      transcriptKey: loadKey(),
+      entry: join(currentDirectory, "runner.js"),
+      database: join(app.getPath("userData"), "workspace.sqlite"),
+      relay: relayPath(),
+      engine: voice.manifest,
+      source: voice.source,
+      murmurEngine: murmur.manifest,
+      murmurSource: murmur.source,
+      softwareGraphics,
+      log: (start) => JSON.stringify(logSetup(start)),
+      events: logRunnerEvents(logger, !app.isPackaged),
+    })
   // A port is shell access: only the main frame of this app's own window showing its
   // own UI may ask for one.
   brokerPorts({
@@ -666,6 +700,16 @@ const launch = async (): Promise<void> => {
   ipcMain.handle(directoryPickerChannel, async (event) => {
     const window = appWindow(event)
     if (!window) return null
+    // A remote runner's folders are not this machine's to browse: the person names one,
+    // which the runner is asked about before the page hears of it.
+    if (remote) {
+      const client = remoteClient(remote)
+      return askRemoteFolder(
+        window,
+        (options) => new BrowserWindow(options),
+        (path) => checkRemoteFolder(path, client),
+      )
+    }
     const result = await dialog.showOpenDialog(window, {
       properties: ["openDirectory", "createDirectory"],
     })
@@ -738,7 +782,6 @@ app.on("second-instance", () => {
 
 app.whenReady().then(() => {
   if (!primaryInstance) return
-  transcriptKey = loadKey()
   // A system shutdown quits, which saves every page and terminal before the shells end.
   quitOnShutdown(powerMonitor, updates.quitOnSessionEnd)
   // Ctrl+Q and the menu's Quit are the person's quit, which installs a waiting update; a

@@ -108,6 +108,13 @@ beside the wire's own handshake.
   - `relayPorts({ channel, message })`, in the preload: ports can't cross the context bridge,
     so it relays each one to the page as a window message, and returns the request function
     for the bridge to expose.
+  - `tunnelPort(port, { open, token, ended })`, in the main process, for a service that runs
+    elsewhere: what `deliver` does with a port in place of handing it to a process of the
+    app's. It carries the port's client to a server reached over the WebSocket `open`
+    makes, and adds the server's `token` to the client's handshake, so the page never holds
+    it. What the client sends before the socket opens waits for it. Either end closing
+    closes the other, so a client that reconnects asks for a fresh port, and `ended(opened)`
+    says whether the socket ever opened. Returns a function that ends the tunnel.
 
   Forking, restarting and closing the service's process stay the app's.
 
