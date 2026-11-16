@@ -73,8 +73,8 @@ describe("the tour agent in the demo", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it("binds, works, describes itself and finishes its turn", async () => {
-    const { at } = open()
+  it("binds, works, describes itself and finishes its turn, with the story off", async () => {
+    const { at } = open("claude", (tour) => tour.configure({ story: false }))
     expect((await at(0))?.state).toBe("idle")
     const working = await at(tourPhaseMs.bind + 10)
     expect(working).toMatchObject({ state: "running", process: "claude", agent: { working: true } })

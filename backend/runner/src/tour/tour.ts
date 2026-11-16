@@ -5,9 +5,10 @@ import type { AgentName, Project, TourPrepared } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { agentLabel } from "../messaging/messages.js"
-import { briefFiles, nudgeLine, startLine } from "./brief.js"
+import { briefFiles, nudgeLine, startLine, type Teammate } from "./brief.js"
 import { resetTourFolder, tourFolder } from "./folder.js"
 import { tourChoice, tourLaunch } from "./launch.js"
+import { pickName } from "./name.js"
 
 /** What the tour needs of the runner. */
 export type TourHost = {
@@ -24,7 +25,14 @@ export type TourHost = {
   readonly notice: (terminalId: string, text: string) => boolean
   /** The terminal's folder now; throws for a terminal the runner doesn't have. */
   readonly cwdOf: (terminalId: string) => string
+  /** The person's global git name, if git has one; never read over a network. */
+  readonly gitName: () => Promise<string | undefined>
+  /** The OS account's name, if the system says it. */
+  readonly account: () => string | undefined
 }
+
+// The order a second harness is looked for in, for the designer of a mixed team.
+const agentOrder: readonly AgentName[] = ["claude", "codex", "agy"]
 
 /**
  * Novadeck's tour, on the runner's side: its folder, made afresh for each run, and the line
@@ -40,7 +48,10 @@ export class Tour {
   /**
    * Readies a run of the tour with `agent`: removes any project open at its folder, closing
    * its terminals, so nothing runs there; then empties the folder and writes the brief there;
-   * then builds the agent's launch line, on its cheapest model. An agent Novadeck isn't
+   * then builds the agent's launch line, on its cheapest model. The brief names the person
+   * (`pickName`) and the two teammates the lead opens, each on its harness's cheapest model: the
+   * copywriter on `agent`'s, the designer on another connected harness's where one lists its
+   * cheapest, else on `agent`'s too. An agent Novadeck isn't
    * connected to is a `CONFLICT`, as its tools would be missing; so is a folder that isn't
    * Novadeck's (`resetTourFolder`), and a run asked for while another is being readied. One
    * whose cheapest model can't be told is `MODELS_UNLISTED`: Codex lists its models only once
@@ -90,9 +101,31 @@ export class Tour {
           }),
       ),
     )
-    await resetTourFolder(directory, briefFiles)
+    const [designer, name] = await Promise.all([
+      this.designerFor(agent, models),
+      this.host
+        .gitName()
+        .catch(() => undefined)
+        .then((git) => pickName(git, this.host.account())),
+    ])
+    const copywriter = teammate(agent, models)!
+    await resetTourFolder(directory, briefFiles({ name, copywriter, designer }))
     const launch = await tourLaunch(agent, { models, install, cwd: directory })
     return { ...launch, directory, removed }
+  }
+
+  // The designer's harness: the first other connected one whose cheapest model is listed, else
+  // the lead's own.
+  private async designerFor(agent: AgentName, models: readonly Model[]): Promise<Teammate> {
+    for (const other of agentOrder.filter((each) => each !== agent)) {
+      // eslint-disable-next-line no-await-in-loop -- The first that fits is taken.
+      if (!(await this.host.connected(other).catch(() => false))) continue
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      const listed = await this.host.models(other).catch((): readonly Model[] => [])
+      const found = teammate(other, listed)
+      if (found) return found
+    }
+    return teammate(agent, models)!
   }
 
   /**
@@ -122,6 +155,12 @@ export class Tour {
     if (!this.host.notice(terminalId, line))
       throw new DomainError("CONFLICT", "The terminal's agent hasn't started yet.")
   }
+}
+
+// The agent as a teammate on its cheapest model, or none where that can't be told.
+const teammate = (agent: AgentName, models: readonly Model[]): Teammate | undefined => {
+  const { model, effort } = tourChoice(agent, models)
+  return model === undefined ? undefined : { agent, model, ...(effort !== undefined && { effort }) }
 }
 
 /**

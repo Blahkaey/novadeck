@@ -18,13 +18,9 @@ describe("the tour group", () => {
     const asked: string[] = []
     const stop = tour.asked!(() => asked.push("asked"))
     const [group] = tourGroups(tour)
-    expect(tour.offered.getSnapshot()).toBe(false)
     void group!.actions.find((each) => each.label === "Offer the tour")!.run({} as never)
     stop()
     expect(asked).toEqual(["asked"])
-    expect(tour.offered.getSnapshot()).toBe(true)
-    void group!.actions.find((each) => each.label === "Hold the tour back")!.run({} as never)
-    expect(tour.offered.getSnapshot()).toBe(false)
     expect(group!.section).toBe("App")
   })
 
@@ -82,5 +78,24 @@ describe("the tour the debug panel shares with the demo", () => {
     await expect(tour.prepare("claude")).rejects.toThrow()
     tour.follow(createStore(connected), () => undefined)
     await expect(tour.prepare("claude")).resolves.toMatchObject({ model: "haiku" })
+  })
+
+  it("drives the story: answers the tagline ask, quiets the team, stops the agent", () => {
+    const tour = tourOf()
+    const [group] = tourGroups(tour)
+    const run = (label: string) =>
+      void group!.actions.find((each) => each.label === label)!.run({} as never)
+    const picked: number[] = []
+    const stopped: string[] = []
+    tour.tagline((option) => picked.push(option))
+    tour.stopped(() => stopped.push("stop"))
+    run("Tour story: answer the tagline ask (A)")
+    run("Tour agent: stop")
+    run("Tour story: teammates stay quiet until nudged")
+    expect(picked).toEqual([0])
+    expect(stopped).toEqual(["stop"])
+    expect(tour.take()).toEqual({ quiet: false, quietTeam: true })
+    expect(tour.take()).toEqual({ quiet: false })
+    for (const action of group!.actions) expect(action.hint).toBeTruthy()
   })
 })

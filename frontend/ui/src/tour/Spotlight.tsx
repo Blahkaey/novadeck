@@ -87,6 +87,7 @@ export const coachPlace = (
 }
 
 type Controls = {
+  readonly onNext: () => void
   readonly onPause: () => void
   readonly onResume: () => void
   readonly onSkip: () => void
@@ -108,9 +109,11 @@ export const TourSpotlight = ({
   steps,
   paused,
   away,
+  next,
   onPause,
   onResume,
   onSkip,
+  onNext,
   onEnd,
   onBack,
 }: {
@@ -121,9 +124,11 @@ export const TourSpotlight = ({
   readonly paused: boolean
   // The tour's project isn't the one on screen.
   readonly away: boolean
+  // The step waits on the person's Next.
+  readonly next: boolean
 } & Controls): React.JSX.Element | null => {
   const anchor = paused || away ? null : (coach?.anchor ?? null)
-  const box = useAnchorBox(anchor, terminalId)
+  const box = useAnchorBox(anchor, coach?.terminalId ?? terminalId)
   if (away)
     return (
       <TourBar text="The tour goes on in its project.">
@@ -161,6 +166,8 @@ export const TourSpotlight = ({
         box={box}
         step={step}
         steps={steps}
+        next={next}
+        onNext={onNext}
         onPause={onPause}
         onSkip={onSkip}
         onEnd={onEnd}
@@ -174,6 +181,8 @@ const CoachCard = ({
   box,
   step,
   steps,
+  next,
+  onNext,
   onPause,
   onSkip,
   onEnd,
@@ -182,7 +191,8 @@ const CoachCard = ({
   readonly box: Box | null
   readonly step: number
   readonly steps: number
-} & Pick<Controls, "onPause" | "onSkip" | "onEnd">): React.JSX.Element => {
+  readonly next: boolean
+} & Pick<Controls, "onNext" | "onPause" | "onSkip" | "onEnd">): React.JSX.Element => {
   const card = useRef<HTMLElement>(null)
   const [place, setPlace] = useState<{ readonly left: number; readonly top: number } | null>(null)
   // Placed by its own size once drawn, and again as its anchor moves or its size changes, as
@@ -192,13 +202,13 @@ const CoachCard = ({
     if (!element) return
     const placeNow = (): void => {
       const { width, height } = element.getBoundingClientRect()
-      const next = coachPlace(
+      const placed = coachPlace(
         box,
         { width, height },
         { width: window.innerWidth, height: window.innerHeight },
       )
       setPlace((current) =>
-        current && current.left === next.left && current.top === next.top ? current : next,
+        current && current.left === placed.left && current.top === placed.top ? current : placed,
       )
     }
     placeNow()
@@ -224,12 +234,31 @@ const CoachCard = ({
         <button type="button" className="button ghost min-h-8 px-2.5 text-control" onClick={onEnd}>
           End tour
         </button>
-        <button type="button" className="button ghost min-h-8 px-2.5 text-control" onClick={onSkip}>
-          Skip step
-        </button>
-        <button type="button" className="button min-h-8 px-3 text-control" onClick={onPause}>
+        {!next && (
+          <button
+            type="button"
+            className="button ghost min-h-8 px-2.5 text-control"
+            onClick={onSkip}
+          >
+            Skip step
+          </button>
+        )}
+        <button
+          type="button"
+          className={`button ${next ? "ghost px-2.5" : "px-3"} min-h-8 text-control`}
+          onClick={onPause}
+        >
           Pause
         </button>
+        {next && (
+          <button
+            type="button"
+            className="button primary min-h-8 px-3 text-control"
+            onClick={onNext}
+          >
+            Next
+          </button>
+        )}
       </div>
     </section>
   )

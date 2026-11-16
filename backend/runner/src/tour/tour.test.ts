@@ -26,6 +26,10 @@ const tourIn = (
     notices?: [string, string][]
     shown?: readonly string[]
     models?: readonly Model[]
+    // Models by harness, over the harnesses' own lists.
+    lists?: Partial<Record<AgentName, readonly Model[]>>
+    git?: string
+    account?: string
     // How each removal goes; at once by default.
     removal?: () => Promise<void>
     // Each terminal's folder; the tour's own by default.
@@ -38,7 +42,11 @@ const tourIn = (
     home,
     connected: (agent) => Promise.resolve((options.connected ?? ["claude"]).includes(agent)),
     models: (agent) =>
-      options.models ? Promise.resolve(options.models) : harnesses[agent].launch.models(install),
+      options.lists?.[agent]
+        ? Promise.resolve(options.lists[agent])
+        : options.models
+          ? Promise.resolve(options.models)
+          : harnesses[agent].launch.models(install),
     install: () => Promise.resolve(undefined),
     projects: {
       list: () => projects.filter(({ id }) => !removed.includes(id)),
@@ -54,6 +62,8 @@ const tourIn = (
       return true
     },
     cwdOf: (terminalId) => options.cwds?.[terminalId] ?? tourFolder(home),
+    gitName: () => Promise.resolve(options.git),
+    account: () => options.account,
   }
   return { tour: new Tour(host), removed }
 }
@@ -75,9 +85,14 @@ describe("readying the tour", () => {
     expect(prepared).toMatchObject({ directory, brief: "launch", model: "haiku", removed: [] })
     expect(prepared.command).toMatch(/^claude --model haiku /)
     expect((await readdir(directory)).toSorted()).toEqual(
-      ["AGENTS.md", "CLAUDE.md", tourMarker].toSorted(),
+      [".claude", "AGENTS.md", "CLAUDE.md", tourMarker].toSorted(),
     )
     expect(await readFile(join(directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
+    expect(JSON.parse(await readFile(join(directory, ".claude", "settings.json"), "utf8"))).toEqual(
+      {
+        permissions: { defaultMode: "acceptEdits" },
+      },
+    )
   })
 
   it("removes the projects open at its folder, and no other", async ({ resources }) => {
@@ -163,6 +178,96 @@ describe("readying the tour", () => {
   })
 })
 
+const brief = (home: string) => readFile(join(tourFolder(home), "AGENTS.md"), "utf8")
+
+// The arguments the brief gives `open_agent` for each of its two teammates, in order.
+const opened = (text: string): string[] =>
+  [...text.matchAll(/Call `open_agent` with (agent "[^\n]*?)(?:, and as|\n)/g)].map(
+    ([, each]) => each!,
+  )
+
+const luna: Model = { id: "gpt-e2e-luna", efforts: ["low", "medium"] }
+
+describe("the brief's facts", () => {
+  it("names the person and has a lead's own harness open both teammates on its cheapest model", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
+    const { tour } = tourIn(home, { git: "Ada Lovelace" })
+    await tour.prepare("claude")
+    const text = await brief(home)
+    expect(text).toContain("welcome card for Ada, with two teammates")
+    expect(text).toContain('NAME with "Ada"')
+    expect(text).toContain("welcome.svg")
+    expect(text).toContain('<text x="48" y="110"')
+    expect(opened(text)).toEqual([
+      'agent "claude", model "haiku", effort "low"',
+      'agent "claude", model "haiku", effort "low"',
+    ])
+  })
+
+  it("puts the designer on a second connected harness where one lists its cheapest model", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
+    const { tour } = tourIn(home, {
+      connected: ["claude", "codex", "agy"],
+      lists: { codex: [luna] },
+    })
+    await tour.prepare("agy")
+    // Claude Code comes first of the others.
+    expect(opened(await brief(home))).toEqual([
+      'agent "agy", model "gemini-3.8-flash-low", effort "low"',
+      'agent "claude", model "haiku", effort "low"',
+    ])
+    await tour.prepare("claude")
+    expect(opened(await brief(home))).toEqual([
+      'agent "claude", model "haiku", effort "low"',
+      'agent "codex", model "gpt-e2e-luna", effort "low"',
+    ])
+  })
+
+  it("takes Codex's luna from its catalog, and keeps the lead's harness where the other can't be told", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
+    const { tour } = tourIn(home, { connected: ["codex", "claude"], lists: { codex: [luna] } })
+    await tour.prepare("codex")
+    expect(opened(await brief(home))).toEqual([
+      'agent "codex", model "gpt-e2e-luna", effort "low"',
+      'agent "claude", model "haiku", effort "low"',
+    ])
+    // A connected harness that lists no models, as Codex before it has signed in.
+    const alone = tourIn(home, { connected: ["claude", "codex"], lists: { codex: [] } })
+    await alone.tour.prepare("claude")
+    expect(opened(await brief(home))).toEqual([
+      'agent "claude", model "haiku", effort "low"',
+      'agent "claude", model "haiku", effort "low"',
+    ])
+  })
+
+  it("leaves out an effort a model takes none of", async ({ resources }) => {
+    const home = await scratchHome(resources)
+    const { tour } = tourIn(home, {
+      connected: ["codex"],
+      lists: { codex: [{ id: "gpt-e2e-luna", efforts: [] }] },
+    })
+    await tour.prepare("codex")
+    expect(opened(await brief(home))).toEqual([
+      'agent "codex", model "gpt-e2e-luna"',
+      'agent "codex", model "gpt-e2e-luna"',
+    ])
+  })
+
+  it("is composed again for each run", async ({ resources }) => {
+    const home = await scratchHome(resources)
+    await tourIn(home, { git: "Ada" }).tour.prepare("claude")
+    expect(await brief(home)).toContain("for Ada,")
+    await tourIn(home, { git: "Grace Hopper" }).tour.prepare("claude")
+    expect(await brief(home)).toContain("for Grace,")
+  })
+})
+
 describe("ringing the tour's brief", () => {
   it("rings the start line to the terminal's agent", () => {
     const notices: [string, string][] = []
@@ -212,5 +317,23 @@ describe("a project's folder within the tour's", () => {
     expect(
       withinFolder("C:\\Users\\x\\.Novadeck\\TOUR", "c:/users/x/.novadeck/tour", "win32"),
     ).toBe(true)
+  })
+})
+
+describe("the brief's wording", () => {
+  it("keeps the nudge from making an agent redo a step", () => {
+    expect(nudgeLine).toContain("Don't redo a step.")
+  })
+
+  it("leaves the tagline to the person, and has the copywriter cope with a dismissal or its own words", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
+    await tourIn(home).tour.prepare("claude")
+    const text = await brief(home)
+    expect(text).toContain("Never answer your teammates' questions to the person yourself")
+    expect(text).toMatch(/body "The lead is making a\s+>\s+welcome card for/)
+    expect(text).toContain("dismissed the question")
+    expect(text).toContain("their words as the tagline")
   })
 })

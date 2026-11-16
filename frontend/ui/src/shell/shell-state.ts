@@ -15,8 +15,9 @@ type CanvasKeyboardFocus = {
   readonly request: number
 }
 // How a view brings the selection into sight: as it is, framed alone, or, on Canvas, with
-// the camera flown in to it as a header's double-click does.
-export type NavigationMove = "center" | "fit" | "fly"
+// the camera flown in to it as a header's double-click does, or framed with every window
+// shown, as the 0 key does (the tour's last look at the team).
+export type NavigationMove = "center" | "fit" | "fly" | "fit-all"
 type ShellNavigation = { readonly count: number; readonly move: NavigationMove }
 type ZenState = {
   readonly sidebar: boolean

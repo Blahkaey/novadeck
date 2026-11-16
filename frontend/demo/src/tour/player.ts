@@ -3,8 +3,9 @@ import type { BackendAction, TerminalKey } from "@novadeck/core/port"
 import type { TerminalMetadata } from "@novadeck/core/types"
 
 import type { DemoTurns } from "../agents/turns"
-import type { DemoTour, TourScreen } from "../tour"
+import type { DemoTour, TourScreen, TourStage } from "../tour"
 import { demoRun } from "../tour-runs"
+import { playTourStory } from "./story"
 
 // How long each phase of the demo's tour agent takes: short and fixed, so specs run fast.
 export const tourPhaseMs = { bind: 300, work: 400, finish: 400 } as const
@@ -44,6 +45,14 @@ export const describedAs = (key: TerminalKey, by: string): BackendAction => ({
   titleSource: { kind: "agent", by },
 })
 
+// The lead's process ended, as one that exits reports.
+export const exited = (key: TerminalKey): BackendAction => ({
+  type: "terminal/status",
+  target: target(key),
+  terminalId: key.terminalId,
+  status: { state: "exited", exitCode: 1, signal: null },
+})
+
 type Player = {
   readonly key: TerminalKey
   readonly harness: AgentName
@@ -52,13 +61,16 @@ type Player = {
   readonly dispatch: (actions: BackendAction[]) => void
   // The terminal as the workspace holds it now; none once it's closed.
   readonly terminal: () => TerminalMetadata | undefined
+  // What the story's rest needs of the backend; without it the lead stops after describing itself.
+  readonly stage?: TourStage | undefined
 }
 
 // Plays the tour's agent in its terminal: an optional startup screen, held until answered;
 // bound at the doorbell's ring where the harness waits for one (Antigravity), else at once;
-// working; describing itself (once nudged, where quiet); and a finished turn. Answers a
-// function that stops it.
-export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal }: Player) => {
+// working; describing itself (once nudged, where quiet); then, with the story on, opening its
+// team, which talks, asks the person and is answered, and showing a card (see `story.ts`); and
+// a finished turn. Answers a function that stops it.
+export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal, stage }: Player) => {
   const plan = tour.take()
   const verbs = turns.as(harness)
   const timers = new Set<ReturnType<typeof setTimeout>>()
@@ -95,14 +107,25 @@ export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal }:
     if (!found) over = true
     return found
   }
+  const finish = (reply: string) =>
+    verbs.finish(key, terminal(), "completed", { after: tourPhaseMs.finish, reply })
   const describe = () => {
     const found = alive()
     if (!found) return
     dispatch([describedAs(key, found.handle ?? harness)])
-    verbs.finish(key, terminal(), "completed", {
-      after: tourPhaseMs.finish,
-      reply: "That's the tour's lead: ready.",
+    if (!stage || !tour.story()) return finish("That's the tour's lead: ready.")
+    const stopStory = playTourStory({
+      key,
+      harness,
+      tour,
+      turns,
+      dispatch,
+      stage,
+      terminal,
+      quietTeam: plan.quietTeam === true,
+      finish: () => finish("Your team wrote the welcome card, and it's showing beside me."),
     })
+    stops.add(stopStory)
   }
   const work = () => {
     if (!alive()) return
@@ -146,12 +169,21 @@ export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal }:
     stops.add(stop)
     if (ms !== undefined) later(ms, answer)
   })
-  return () => {
+  const stop = () => {
     over = true
     timers.forEach(clearTimeout)
     timers.clear()
-    stops.forEach((stop) => stop())
+    stops.forEach((each) => each())
     stops.clear()
     turns.release(key)
   }
+  // Its process exits, as an agent that can't go on does: the terminal says so, and nothing
+  // more is played.
+  const stopHere = tour.stopped(() => {
+    if (over) return
+    stop()
+    dispatch([exited(key)])
+  })
+  stops.add(stopHere)
+  return stop
 }

@@ -5,8 +5,8 @@ import { workspaceSwitcher } from "../support/sessions"
 import { expectSelected, openWorkspace, terminalTabNames } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
-// Held back from everyone until its story is whole; the demo offers it on `&tour=on`.
-const offered = "/?tour=on"
+// Offered in every build; its demo agent stops after its first step, as these specs need.
+const offered = "/?tourStory=off"
 
 const consent = (): Locator => page.getByRole("dialog", { name: "Take the tour" })
 const welcome = (): Locator => page.getByRole("dialog", { name: "Welcome to Novadeck" })
@@ -38,13 +38,9 @@ const offerFromAbout = async ({ connect = true } = {}): Promise<void> => {
 }
 
 describe("The tour", () => {
-  it("isn't offered yet, even in experimental builds", async () => {
-    await openWorkspace("/?demo=welcome&channel=experimental")
-    await expect.element(welcome()).toBeVisible()
-    expect(welcome().getByRole("button", { name: "Take the tour" }).query()).toBeNull()
-    await welcome().getByRole("button", { name: "Skip for now" }).click()
-    await openPreferencesOn("About")
-    expect(preferencesDialog().getByRole("button", { name: "Take the tour" }).query()).toBeNull()
+  it("is offered in every build, from the welcome dialog", async () => {
+    await openWorkspace("/?demo=welcome")
+    await expect.element(welcome().getByRole("button", { name: "Take the tour" })).toBeVisible()
   })
 
   context("offered from Preferences' About", () => {

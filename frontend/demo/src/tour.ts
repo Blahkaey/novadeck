@@ -1,9 +1,13 @@
 import type { AgentName } from "@novadeck/core/harnesses"
+import type { InboxAnswer } from "@novadeck/core/inbox"
+import { emptyCompanions, type ItemContent } from "@novadeck/core/items"
 import type { AgentConnection, Backend, Tour } from "@novadeck/core/port"
-import { createStore, type MutableStore, type Store } from "@novadeck/core/store"
+import { createStore, type Store } from "@novadeck/core/store"
 import type { Workspace } from "@novadeck/core/types"
 
 import type { DemoTurns } from "./agents/turns"
+import { isDemoInbox, type DemoInbox } from "./inbox"
+import { createDemoMessages, isDemoMessages, type DemoMessages } from "./messages"
 import { terminalOf } from "./workspace"
 
 // Where the demo's tour runs, as the runner's runs in `~/.novadeck/tour`.
@@ -24,12 +28,27 @@ export type TourAgentPlan = {
   readonly screen?: TourScreen | undefined
   // It binds but never describes itself until nudged.
   readonly quiet: boolean
+  // Its lead, once it described itself, opens no teammates until nudged again.
+  readonly quietTeam?: boolean | undefined
+}
+
+// What a lead needs of the backend to play the story's rest (see `tour/story.ts`): the
+// workspace as it is now, a new terminal of the demo's numbering, the agents' messages and the
+// Inbox where the demo has them, and a way to show a card beside the lead.
+export type TourStage = {
+  readonly workspace: () => Workspace | undefined
+  readonly newTerminal: Backend["newTerminal"]
+  readonly messages: DemoMessages | undefined
+  readonly inbox: DemoInbox | undefined
+  // What the person last answered a row of the Inbox, as the story's ask needs to read it.
+  readonly answeredWith: (id: string) => InboxAnswer | undefined
+  // Answers a row as the person would in the Inbox.
+  readonly answerRow: (id: string, answer: InboxAnswer) => void
+  // Makes what a shown item holds follow-able, before its item is upserted.
+  readonly hold: (itemId: string, content: ItemContent) => void
 }
 
 export type DemoTour = Tour & {
-  // Whether the UI offers it: held back, as everywhere, until the debug panel or a spec's
-  // `&tour=on` turns it on.
-  readonly offered: MutableStore<boolean>
   // Makes the next start fail, as the debug panel or a spec's `&tourStart=fails` asks: as a
   // folder of the person's own does, or (`unlisted`) as Codex not signed in yet does.
   readonly failNext: (how?: "folder" | "unlisted") => void
@@ -53,7 +72,20 @@ export type DemoTour = Tour & {
     agents: Store<readonly AgentConnection[]>,
     workspace: () => Workspace | undefined,
   ) => void
-  readonly configure: (options: { patienceMs?: number; screenMs?: number }) => void
+  readonly configure: (options: { patienceMs?: number; screenMs?: number; story?: boolean }) => void
+  // Whether the lead plays the rest of the story after describing itself (`&tourStory=off`
+  // stops it there).
+  readonly story: () => boolean
+  // The next run's lead opens its team only once nudged again after it described itself.
+  readonly goQuietTeam: (quiet?: boolean) => void
+  // The agents Novadeck is connected to, in the order it lists them.
+  readonly connected: () => readonly AgentName[]
+  // Answers the tagline ask by its option, as the person would: nothing while none waits.
+  readonly answerTagline: (option?: number) => void
+  readonly tagline: (listener: (option: number) => void) => () => void
+  // The lead's agent stops, its process exited, as one that can't go on does.
+  readonly stop: () => void
+  readonly stopped: (listener: () => void) => () => void
   // For the agent's player: what the next run is to do (taken once), when a held screen
   // answers itself, and a way to hear an answer.
   readonly take: () => TourAgentPlan
@@ -80,11 +112,16 @@ export const demoTour = (
   const nudged = createStore<readonly string[]>([])
   const listeners = new Set<() => void>()
   let asking = false
-  const answers = new Set<() => void>()
   let plan: TourAgentPlan = { quiet: false }
   let screenMs: number | undefined
+  let story = true
+  // The story's events, which its lead hears: an option the person picked, or the stop.
+  const events = new Set<(event: number | "stop" | "answer") => void>()
+  const hear = (listener: (event: number | "stop" | "answer") => void) => {
+    events.add(listener)
+    return () => void events.delete(listener)
+  }
   const tour: DemoTour = {
-    offered: createStore(false),
     failNext: (how = "folder") => {
       failing = how
     },
@@ -111,13 +148,27 @@ export const demoTour = (
       plan = { ...plan, quiet }
     },
     answer: () => {
-      for (const listener of answers) listener()
+      events.forEach((each) => each("answer"))
     },
     follow: (nextAgents, nextWorkspace) => {
       agents = nextAgents
       workspace = nextWorkspace
     },
+    story: () => story,
+    goQuietTeam: (quiet = true) => {
+      plan = { ...plan, quietTeam: quiet }
+    },
+    connected: () =>
+      agents
+        .getSnapshot()
+        .filter((each) => each.connected)
+        .map((each) => each.agent),
+    answerTagline: (option = 0) => events.forEach((each) => each(option)),
+    tagline: (listener) => hear((event) => typeof event === "number" && listener(event)),
+    stop: () => events.forEach((each) => each("stop")),
+    stopped: (listener) => hear((event) => event === "stop" && listener()),
     configure: (options) => {
+      story = options.story ?? true
       const own: { patienceMs?: number } = tour
       if (options.patienceMs === undefined) delete own.patienceMs
       else own.patienceMs = options.patienceMs
@@ -130,8 +181,7 @@ export const demoTour = (
     },
     screenMs: () => screenMs,
     answered: (listener) => {
-      answers.add(listener)
-      return () => void answers.delete(listener)
+      return hear((event) => event === "answer" && listener())
     },
     prepare: async (agent) => {
       const fails = failing
@@ -165,7 +215,10 @@ export const tourHarness = (command: string): AgentName | undefined => {
 }
 
 // The backend with the tour's agent played in the terminals the UI adds in the tour's folder,
-// as a runner would report one (see `tour/player.ts`, loaded as the first one starts).
+// as a runner would report one (see `tour/player.ts`, loaded as the first one starts). Where the
+// story is on, the lead's teammates talk through the backend's messages (made here where it has
+// none: only terminals that join show one), ask through its Inbox and show their card through
+// its companions.
 export const withTourAgent = (backend: Backend, turns: DemoTurns): Backend => {
   let latest: Workspace | undefined
   // The demo's tour, on its own agents, joins here, not in every demo: the website's visitor
@@ -175,14 +228,51 @@ export const withTourAgent = (backend: Backend, turns: DemoTurns): Backend => {
     : demoTour(backend.agents?.state ?? createStore<readonly AgentConnection[]>([]), () => latest)
   let sink: Parameters<NonNullable<Backend["start"]>>[0] | undefined
   const stops = new Set<() => void>()
+  const exists = (target: { projectId: string; workspaceSessionId: string }, terminalId: string) =>
+    terminalOf(latest, { ...target, terminalId }) !== undefined
+  const messages = backend.messages ?? createDemoMessages([], false, exists)
+  const inbox = isDemoInbox(backend.inbox) ? backend.inbox : undefined
+  const answers = new Map<string, InboxAnswer>()
+  const answerRow = (id: string, answer: InboxAnswer): void => {
+    answers.set(id, answer)
+    inbox?.answer(id, answer)
+  }
+  const held = new Map<string, ItemContent>()
+  const companions = backend.companions ?? emptyCompanions()
+  const stage: TourStage = {
+    workspace: () => latest,
+    newTerminal: (request) => backend.newTerminal(request),
+    messages: isDemoMessages(messages) ? messages : undefined,
+    inbox,
+    answeredWith: (id) => answers.get(id),
+    answerRow,
+    hold: (itemId, content) => void held.set(itemId, content),
+  }
   return {
     ...backend,
     tour,
+    messages,
+    ...(inbox && backend.inbox ? { inbox: { ...backend.inbox, answer: answerRow } } : {}),
+    companions: {
+      ...companions,
+      follow: (target, itemId, options, on) => {
+        const content = held.get(itemId)
+        if (!content) return companions.follow(target, itemId, options, on)
+        on(content)
+        return () => {}
+      },
+    },
     commit: (workspace, actions) => {
       latest = workspace
       backend.commit(workspace, actions)
       for (const action of actions) {
-        if (action.type !== "terminal/add" || action.terminal.directory !== demoTourFolder) continue
+        // A teammate the lead opened is played by the lead's story, not as a lead of its own.
+        if (
+          action.type !== "terminal/add" ||
+          action.terminal.directory !== demoTourFolder ||
+          action.terminal.ledBy
+        )
+          continue
         const harness = tourHarness(action.terminal.command)
         const at = sink
         if (!harness || !at) continue
@@ -203,6 +293,7 @@ export const withTourAgent = (backend: Backend, turns: DemoTurns): Backend => {
             turns,
             dispatch: at.dispatch,
             terminal: () => terminalOf(latest, key),
+            stage,
           })
         })
       }

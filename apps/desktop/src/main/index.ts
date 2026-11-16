@@ -35,6 +35,7 @@ import {
   directoryPickerChannel,
   feedbackArgumentPrefix,
   noticeClickChannel,
+  tourAskChannel,
   portableStateChannel,
   runnerPortChannel,
   versionChannel,
@@ -351,6 +352,17 @@ const createWindow = (origin: string): BrowserWindow => {
     quit: updates.quitOnSessionEnd,
   })
   return window
+}
+
+// Help's "Take the Tour": the window in front, or else the first, comes forward and its page
+// offers the tour.
+const askTour = (): void => {
+  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!window || window.isDestroyed()) return
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+  window.webContents.send(tourAskChannel)
 }
 
 // Shows the logs folder in the system's file manager, its host.log selected, which a bug
@@ -754,9 +766,7 @@ app.whenReady().then(() => {
     )
   // macOS shows its menu bar: Help opens the logs folder. Elsewhere Preferences does.
   if (process.platform === "darwin")
-    // Help offers no tour while the page holds it back (`Tour.offered`): passing `askTour`
-    // here offers it.
-    Menu.setApplicationMenu(Menu.buildFromTemplate(macMenu(openLogs)))
+    Menu.setApplicationMenu(Menu.buildFromTemplate(macMenu(openLogs, askTour)))
   limitPermissions(
     session.defaultSession,
     isAppPage,

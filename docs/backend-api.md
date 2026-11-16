@@ -1815,6 +1815,17 @@ one from an earlier runner.
   nothing written to the agent's own settings. `brief` says where its first line goes: on
   the command itself (`launch`, Claude Code and Codex), or rung by the doorbell (`doorbell`,
   Antigravity, whose prompt on the command line would start before its tools load).
+  The brief is composed for each run: it calls the person by the first word of their global
+  git name (`git config --global user.name`, read by the runner with a short timeout, never
+  over a network), else their OS account's first name capitalized, else "you", and the name
+  is written into that file, and goes on from there: into the teammates' briefs (which Novadeck
+  keeps and shows in Messages), into the card, and to each agent's model provider through the
+  person's own account. It has the lead open two teammates with `open_agent`, a copywriter
+  on the lead's own agent and a designer on the first other connected agent whose cheapest model
+  is listed (else the lead's), each on that agent's cheapest model at its lowest effort, as
+  above; teammates get no write flags, and only the lead writes the card, `welcome.svg` (an SVG image the side pane shows as an image). The folder also holds a project
+  `.claude/settings.json` (`defaultMode: acceptEdits`), so Claude Code teammates, given no launch
+  flags, take edits unasked and a plan mode in the person's own settings doesn't hold them.
   `removed` names the projects it removed. A folder there that is no folder, or that holds
   files without the marker, is the person's and is never emptied: `CONFLICT`, as are an
   agent Novadeck isn't connected to and a second run while one is being readied. An agent

@@ -606,24 +606,31 @@ App:
   "Finish held install"; "Fail next install" ends the next in a network error in its terminal and
   leaves the agent not installed (nothing starts). The address does the same for a spec:
   `&agentInstall=held` holds the first install, `&agentInstall=fails` fails it.
-- **Tour:** held back from everyone until its story is whole (`Tour.offered`; the runner's
-  adapter never offers it). "Offer the tour" takes the hold off, so the welcome dialog's "Take
-  the tour" and Preferences' About offer it, and opens its consent as the macOS Help menu will,
-  on the first connected agent (with a choice where several are); Start the tour opens a "Tour"
-  project with one terminal starting that agent on its cheapest model. "Hold the tour back"
-  hides it again. "Fail next start" makes the next Start the tour fail as a folder of the
-  person's own at `~/.novadeck/tour` does, the consent staying open with why; "Next start:
-  models unlisted" fails it as Codex not signed in yet does, with a Start button that opens the
-  agent in a terminal. A spec asks with the address: `&tour=on` offers it, `&tourStart=fails`
-  and `&tourStart=unlisted` fail the first start.
+- **Tour:** "Offer the tour" opens its consent as the macOS Help menu does, on the first
+  connected agent (with a choice where several are); Start the tour opens a "Tour" project with
+  one terminal starting that agent on its cheapest model. "Fail next start" makes the next Start
+  the tour fail as a folder of the person's own at `~/.novadeck/tour` does, the consent staying
+  open with why; "Next start: models unlisted" fails it as Codex not signed in yet does, with a
+  Start button that opens the agent in a terminal. A spec asks with the address:
+  `&tourStart=fails` and `&tourStart=unlisted` fail the first start.
   The tour's terminal runs a scripted agent (`frontend/demo/src/tour/player.ts`): after a few
-  hundred ms it binds, works, names its terminal "Tour lead" (as its own describe) and finishes
-  its turn; Antigravity starts working only once the UI rang `brief`. "Tour agent: hold at
-  folder trust" / "sign-in" / "hooks" hold the next one at that startup screen until "Answer the
-  startup screen"; "Tour agent: quiet until nudged" has the next one sit idle at its prompt,
-  no turn begun, until `Tour.nudge`, then work and name itself. Addresses: `&tourScreen=startup|sign-in|hooks` (`&tourScreenMs=<n>`
-  answers the screen after n ms), `&tourAgent=quiet`, `&tourPatienceMs=<n>` (the UI's wait
-  before nudging).
+  hundred ms it binds, works and names its terminal "Tour lead" (as its own describe);
+  Antigravity starts working only once the UI rang `brief`. Then the story
+  (`frontend/demo/src/tour/story.ts`, as a runner would report it): the lead opens two
+  teammates (terminals with `ledBy` = the lead), "Copywriter" and "Designer", the designer on
+  another connected harness where there is one; they message one another and the lead (the
+  demo's messages); the copywriter asks the Inbox "Which tagline for the welcome card?" (options
+  A and B) and waits for the person; once answered it tells the lead, who shows a "Welcome card"
+  page (`by: "agent"`, asked to open) and finishes its turn. "Tour story: answer the tagline ask
+  (A)" answers it as the person would; "Tour story: teammates stay quiet until nudged" has the
+  next lead wait for `Tour.nudge` before opening its team; "Tour agent: stop" exits the lead's
+  process (the UI's "Your agent stopped"). "Tour agent: hold at folder trust" / "sign-in" /
+  "hooks" hold the next one at that startup screen until "Answer the startup screen"; "Tour
+  agent: quiet until nudged" has the next one sit idle at its prompt, no turn begun, until
+  `Tour.nudge`, then work and name itself. Addresses: `&tourScreen=startup|sign-in|hooks`
+  (`&tourScreenMs=<n>` answers the screen after n ms), `&tourAgent=quiet`,
+  `&tourStory=off` (stop after the lead names itself), `&tourTeam=quiet`,
+  `&tourPatienceMs=<n>` (the UI's wait before nudging).
   As the agent goes, the tour's driver (`frontend/ui/src/tour/driver.ts`, `app/useTourDriver.ts`)
   draws a ring around what its step points at and a coach card beside it: "Your agent is
   starting", or, while a startup screen holds, "Your agent is asking you something first" in

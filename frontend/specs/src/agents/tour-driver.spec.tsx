@@ -11,8 +11,8 @@ import { closeConfirmation, confirmClose, tabAction } from "../support/terminals
 import { expectSelected, openWorkspace, press, terminalTabNames } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
-// Held back from everyone until its story is whole; the demo offers it on `&tour=on`.
-const offered = "/?tour=on"
+// Its demo agent stops after the first step: these specs are about the driver, not the story.
+const offered = "/?tourStory=off"
 
 const consent = (): Locator => page.getByRole("dialog", { name: "Take the tour" })
 const coach = (): Locator => page.getByRole("region", { name: "Tour step" })
@@ -43,13 +43,13 @@ const startTour = async (address = offered): Promise<void> => {
 const leadNamed = { timeout: 10_000 }
 
 describe("The tour's driver", () => {
-  it("points at the agent as it starts, and goes once it has taken its brief", async () => {
+  it("points at the agent as it starts, and moves on once it has taken its brief", async () => {
     await startTour()
     await coachSays("Your agent is starting")
-    await coachSays("Tour · 1 of 1")
+    await coachSays("Tour · 1 of 7")
     // The agent describes itself as the tour's lead: its step is done.
     await expect.poll(terminalTabNames, leadNamed).toContain("Tour lead")
-    await expect.element(coach()).not.toBeInTheDocument()
+    await coachSays("Your agent opens a team")
   })
 
   it("leaves the keyboard's focus where it was", async () => {
@@ -105,11 +105,10 @@ describe("The tour's driver", () => {
       await coachSays("Your agent is starting")
     })
 
-    it("skips its step, ending a story of one", async () => {
+    it("skips a step, on to the next", async () => {
       await startTour(`${offered}&tourAgent=quiet&tourPatienceMs=60000`)
       await coach().getByRole("button", { name: "Skip step" }).click()
-      await expect.element(coach()).not.toBeInTheDocument()
-      expect(bar().query()).toBeNull()
+      await coachSays("Tour · 2 of 7")
     })
 
     it("ends, leaving its terminal as it is", async () => {

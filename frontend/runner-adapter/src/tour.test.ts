@@ -50,13 +50,4 @@ describe("The runner's tour", () => {
     )
     await expect(tour.prepare("claude")).rejects.toBe(conflict)
   })
-
-  it("offers the tour only where the backend says to, which the runner doesn't yet", () => {
-    const tour = runnerTour(
-      tourAnswering(() => Promise.resolve(run)),
-      track,
-      undefined,
-    )
-    expect(tour.offered).toBeUndefined()
-  })
 })

@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { briefFiles, startLine } from "../tour/brief.js"
+import { startLine } from "../tour/brief.js"
 import { tourMarker } from "../tour/folder.js"
 import { tourWrites } from "../tour/launch.js"
 import { setups } from "./agents/index.js"
@@ -106,9 +106,9 @@ for (const setup of setups) {
       else expect(prepared.command).not.toContain(startLine)
 
       // Its folder: the brief, a Claude Code file that imports it, and the marker.
-      for (const [name, text] of Object.entries(briefFiles))
-        // eslint-disable-next-line no-await-in-loop -- A few small files.
-        expect(await readFile(join(prepared.directory, name), "utf8")).toBe(text)
+      const instructions = await readFile(join(prepared.directory, "AGENTS.md"), "utf8")
+      expect(instructions).toContain("Tour lead")
+      expect(instructions).toContain("open_agent")
       expect(await readFile(join(prepared.directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
       await expect(readFile(join(prepared.directory, tourMarker), "utf8")).resolves.toContain(
         "Novadeck's tour",

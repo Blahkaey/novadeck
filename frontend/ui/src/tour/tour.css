@@ -47,3 +47,11 @@
   position: fixed;
   z-index: 40;
 }
+/* The closing card: centred near the bottom, over the page, as the tour ends. */
+.tour-closing {
+  position: fixed;
+  bottom: 44px;
+  left: 50%;
+  z-index: 40;
+  translate: -50% 0;
+}

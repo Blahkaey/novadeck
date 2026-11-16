@@ -22,6 +22,7 @@ import { installShellFiles } from "./shell/install.js"
 import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
 import { Uploads } from "./terminals/uploads.js"
+import { readAccount, readGitName } from "./tour/name.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
@@ -370,6 +371,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
     cwdOf: (terminalId) => terminals.get(terminalId).cwd,
+    gitName: () => readGitName(options.agents?.home),
+    account: readAccount,
   })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees
