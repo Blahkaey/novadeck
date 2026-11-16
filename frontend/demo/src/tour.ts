@@ -167,13 +167,17 @@ export const tourHarness = (command: string): AgentName | undefined => {
 // The backend with the tour's agent played in the terminals the UI adds in the tour's folder,
 // as a runner would report one (see `tour/player.ts`, loaded as the first one starts).
 export const withTourAgent = (backend: Backend, turns: DemoTurns): Backend => {
-  const tour = backend.tour
-  if (!isDemoTour(tour)) return backend
-  let sink: Parameters<NonNullable<Backend["start"]>>[0] | undefined
   let latest: Workspace | undefined
+  // The demo's tour, on its own agents, joins here, not in every demo: the website's visitor
+  // demo, which offers no tour, carries none of it.
+  const tour = isDemoTour(backend.tour)
+    ? backend.tour
+    : demoTour(backend.agents?.state ?? createStore<readonly AgentConnection[]>([]), () => latest)
+  let sink: Parameters<NonNullable<Backend["start"]>>[0] | undefined
   const stops = new Set<() => void>()
   return {
     ...backend,
+    tour,
     commit: (workspace, actions) => {
       latest = workspace
       backend.commit(workspace, actions)

@@ -58,7 +58,7 @@ import {
   type DemoTerminalSetup,
 } from "./terminals/screens"
 import { demoWakes } from "./terminals/wakes"
-import { demoTour, isDemoTour, tourScreens, withTourAgent, type TourScreen } from "./tour"
+import { isDemoTour, tourScreens, withTourAgent, type TourScreen } from "./tour"
 import { babciaIntroOf, createBabcia } from "./videos/babcia"
 import { chirpIntroOf, chirpSeed, chirpTranscripts } from "./videos/chirp"
 import { createLaunch } from "./videos/launch"
@@ -184,7 +184,6 @@ export const demoBackend = (
       welcome: welcomeOpen,
       finishWelcome: () => welcomeOpen.update(() => false),
     },
-    tour: demoTour(agents, () => latest),
   }
   terminalsOf.set(terminals.mountTerminal, terminals)
   return backend
