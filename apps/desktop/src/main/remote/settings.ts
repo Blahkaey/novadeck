@@ -1,7 +1,10 @@
-import { readFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { readFile, rename, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 
 /** The file in the app's data folder that names a runner on another machine. */
 export const remoteSettingsFile = "remote-runner.json"
+export const remoteOffFile = "remote-runner.off.json"
 
 /**
  * A runner on another machine, which the app connects to in place of starting its own: its
@@ -39,6 +42,30 @@ const runnerUrl = (value: unknown): string => {
       `"url" reaches ${url.hostname} unencrypted: use an SSH tunnel to this machine (ws://127.0.0.1:…) or a wss: address`,
     )
   return url.href
+}
+
+/** Saves checked settings atomically, with no interval where a partial file can be read. */
+export const writeRemoteSettings = async (
+  folder: string,
+  settings: RemoteSettings,
+): Promise<void> => {
+  const checked = remoteSettingsOf(JSON.stringify(settings))
+  const temporary = join(folder, `.remote-runner-${randomUUID()}.tmp`)
+  try {
+    await writeFile(temporary, `${JSON.stringify(checked, null, 2)}\n`, { mode: 0o600, flag: "wx" })
+    await rename(temporary, join(folder, remoteSettingsFile))
+  } finally {
+    await rm(temporary, { force: true })
+  }
+}
+
+/** Keeps the remote settings for switching back, in place of deleting them. */
+export const disableRemoteSettings = async (folder: string): Promise<void> => {
+  try {
+    await rename(join(folder, remoteSettingsFile), join(folder, remoteOffFile))
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+  }
 }
 
 const runnerToken = (value: unknown): string => {

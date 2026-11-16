@@ -660,6 +660,11 @@ App:
   you toggle it back; or count four crashes, which opens the dialog, puts Restart terminals
   in the footer and fails the selected terminal's session's terminals (Try again or Restart
   terminals clears the count and restarts them, in every session a trip failed).
+- **Remote Runner:** browser stand-ins for the native settings window: local setup, a
+  saved connection with its host connected, connecting or disconnected, a connection check
+  in progress, invalid fields, a refused token, a failed save, and bad settings at launch.
+  These use sample addresses only and save no credentials or desktop settings. Save and
+  Restart and Use this computer's runner show what the desktop app would do.
 - **Sandbox:** boot as a desktop app running without Electron's sandbox, for the footer's No
   sandbox chip and its fix command; "No sandbox, no fix" as one with no command to offer;
   and "Sandboxed" back to normal.

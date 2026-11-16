@@ -199,6 +199,15 @@ PowerShell running a `.cmd` program drops those quotes, so cmd can still split i
 
 ## Terminal Runner
 
+The desktop app's **Runner → Remote Runner…** form runs no script, has no preload or
+Node access, and uses an in-memory session. The saved token never appears in its page;
+the password field stays blank to keep it. A submitted token crosses an intercepted
+navigation inside the host, which is never sent to the network or logged. URL-bearing
+page diagnostics are restricted to the app's default session, excluding these private
+forms. Settings are checked and the connection authenticated before an owner-only
+temporary file replaces `remote-runner.json`. Switching to local keeps the settings as
+`remote-runner.off.json`, so that file also holds the token and must remain private.
+
 The standalone terminal API is a personal/self-hosted shell capability, not a
 multi-user sandbox. Anyone holding `NOVADECK_TOKEN` can execute programs and read
 or modify files as the runner's OS account. Projects and sessions organize work;

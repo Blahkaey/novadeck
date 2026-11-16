@@ -2,7 +2,9 @@ import type { ConnectFailure } from "@novadeck/core/port"
 
 import { bootFailures } from "./boot-failures"
 import type { DemoLaunch, DemoShell } from "./debug-demo"
+import { showRemoteSettings } from "./desktop/remote"
 import { sampleFix } from "./desktop/sandbox"
+import { remoteScenarios } from "./desktop/scenarios"
 import { pageUpdateChannel } from "./desktop/updates"
 import { iconGuidesGroup } from "./icon-guides"
 import { paneTurnsGroup } from "./pane-turns"
@@ -33,6 +35,15 @@ export const shellGroups = ({
 }): readonly DemoActionGroup[] => {
   const { rehearsals } = launch
   return [
+    {
+      section: "App",
+      title: "Remote Runner",
+      actions: Object.values(remoteScenarios).map((scenario) => ({
+        label: scenario.label,
+        hint: scenario.hint,
+        run: () => showRemoteSettings(scenario),
+      })),
+    },
     {
       section: "App",
       title: "Startup",

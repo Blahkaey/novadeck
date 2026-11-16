@@ -1,5 +1,16 @@
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { context, describe, expect, it } from "../../test"
-import { readRemoteSettings, remoteSettingsOf } from "./settings"
+import {
+  disableRemoteSettings,
+  readRemoteSettings,
+  remoteOffFile,
+  remoteSettingsFile,
+  remoteSettingsOf,
+  writeRemoteSettings,
+} from "./settings"
 
 const token = "desktop-tests-only-not-a-production-credential"
 const url = "ws://127.0.0.1:8787/api/rpc"
@@ -53,6 +64,46 @@ describe("remoteSettingsOf", () => {
         expect.objectContaining({ message: expect.not.stringContaining(token) as string }),
       )
     })
+  })
+})
+
+describe("saving and disabling remote settings", () => {
+  it("replaces the settings atomically with an owner-only file and keeps the disabled copy", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "novadeck-settings-"))
+    try {
+      const file = join(folder, remoteSettingsFile)
+      await writeFile(file, "old settings", { mode: 0o644 })
+      await writeRemoteSettings(folder, { url, token })
+      expect(await readRemoteSettings(file)).toEqual({ url, token })
+      if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600)
+      expect(await readdir(folder)).toEqual([remoteSettingsFile])
+      await disableRemoteSettings(folder)
+      expect(await readRemoteSettings(file)).toBeUndefined()
+      expect(await readRemoteSettings(join(folder, remoteOffFile))).toEqual({ url, token })
+      await disableRemoteSettings(folder)
+      expect(await readRemoteSettings(join(folder, remoteOffFile))).toEqual({ url, token })
+      await writeRemoteSettings(folder, { url, token: `${token}-new` })
+      await disableRemoteSettings(folder)
+      expect(await readRemoteSettings(join(folder, remoteOffFile))).toEqual({
+        url,
+        token: `${token}-new`,
+      })
+    } finally {
+      await rm(folder, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves existing settings untouched when validation fails", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "novadeck-settings-"))
+    try {
+      const file = join(folder, remoteSettingsFile)
+      await writeFile(file, "old settings")
+      await expect(writeRemoteSettings(folder, { url, token: "short" })).rejects.toThrow('"token"')
+      expect(await readFile(file, "utf8")).toBe("old settings")
+      expect(await readdir(folder)).toEqual([remoteSettingsFile])
+    } finally {
+      await rm(folder, { recursive: true, force: true })
+    }
   })
 })
 

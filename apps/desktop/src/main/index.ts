@@ -78,10 +78,18 @@ import {
   type QuitSteps,
 } from "./quit.js"
 import { notQuitting } from "./quitting.js"
-import { remoteClient, remoteFolders } from "./remote/check.js"
+import { checkRemoteSettings, remoteClient, remoteFolders } from "./remote/check.js"
 import { askRemoteFolder } from "./remote/folder.js"
-import { remoteRunner } from "./remote/runner.js"
-import { readRemoteSettings, remoteSettingsFile, type RemoteSettings } from "./remote/settings.js"
+import { askRemoteSettings } from "./remote/preferences.js"
+import { remoteRunner, type RemoteState } from "./remote/runner.js"
+import {
+  disableRemoteSettings,
+  readRemoteSettings,
+  remoteOffFile,
+  remoteSettingsFile,
+  writeRemoteSettings,
+  type RemoteSettings,
+} from "./remote/settings.js"
 import {
   developmentOrigin,
   murmurEngine,
@@ -111,7 +119,7 @@ import {
 } from "./window/app-window.js"
 import { keepAppearance, registerAppearanceIpc } from "./window/appearance.js"
 import { registerWindowFocusIpc } from "./window/focus.js"
-import { linuxMenu, macMenu } from "./window/menu.js"
+import { linuxMenu, macMenu, runnerMenu } from "./window/menu.js"
 import { registerPanePictureIpc } from "./window/pane-pictures.js"
 import { limitPermissions } from "./window/permissions.js"
 import { keepSpellcheckOffline } from "./window/spellcheck.js"
@@ -270,6 +278,9 @@ let runner: RunnerProcess | undefined
 // The runner on another machine this launch connects to, where the data folder names one
 // (see ./remote/settings.ts); the app then starts none of its own.
 let remote: RemoteSettings | undefined
+let remoteState: RemoteState = "connecting"
+let connectionRestart = false
+let settingsWindow: Promise<void> | undefined
 // Names this run of the app; see `PortableHost.run`.
 const run = randomUUID()
 
@@ -340,6 +351,7 @@ const badgeOf = (window: BrowserWindow, badge: DesktopBadge): void =>
 const createWindow = (origin: string): BrowserWindow => {
   const apiUrl = new URL("/api/", origin).href
   const window = openAppWindow({
+    ...(remote && { runnerHost: new URL(remote.url).hostname }),
     ground: appearance.current()?.ground ?? "#ffffff",
     preloadArguments: [
       `${apiUrlArgumentPrefix}${apiUrl}`,
@@ -391,22 +403,88 @@ const loadKey = (): Promise<string | null> =>
 // The settings of a remote runner, if the data folder holds any. Settings that can't be
 // used stop the launch, and say why: the person asked for another machine's runner, and
 // must not find themselves in this one's.
-const remoteSettings = async (): Promise<RemoteSettings | undefined> => {
+const openRemotePreferences = (problem?: string): Promise<void> => {
+  if (settingsWindow) return settingsWindow
+  const folder = app.getPath("userData")
+  settingsWindow = (async () => {
+    const active = existsSync(join(folder, remoteSettingsFile))
+    const saved = await readRemoteSettings(
+      join(folder, active ? remoteSettingsFile : remoteOffFile),
+    ).catch(() => undefined)
+    await askRemoteSettings(
+      BrowserWindow.getFocusedWindow() ?? appWindows()[0],
+      (options) => new BrowserWindow(options),
+      {
+        ...(saved && { saved }),
+        active,
+        ...(problem && { problem }),
+        check: checkRemoteSettings,
+        save: (settings) => writeRemoteSettings(folder, settings),
+        local: () => disableRemoteSettings(folder),
+        restart: () => {
+          connectionRestart = true
+          updates.installNothing()
+          app.quit()
+        },
+      },
+    )
+  })().finally(() => {
+    settingsWindow = undefined
+  })
+  return settingsWindow
+}
+
+const quitFromMenu = (): void => {
+  quitting.orderly = true
+  app.quit()
+}
+const refreshMenu = (): void => {
+  const template = process.platform === "darwin" ? macMenu(openLogs) : linuxMenu(quitFromMenu)
+  template.splice(
+    1,
+    0,
+    runnerMenu({
+      ...(remote && { host: new URL(remote.url).hostname }),
+      state: remoteState,
+      open: () => {
+        void openRemotePreferences()
+      },
+    }),
+  )
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+const remoteSettings = async (): Promise<RemoteSettings | undefined | null> => {
   try {
     return await readRemoteSettings(join(app.getPath("userData"), remoteSettingsFile))
   } catch (error) {
-    dialog.showErrorBox(
-      "Novadeck can't connect to its remote runner",
-      error instanceof Error ? error.message : String(error),
-    )
-    throw error
+    const problem =
+      error instanceof Error ? error.message : "The connection settings could not be read."
+    const { response } = await dialog.showMessageBox({
+      type: "error",
+      title: "Novadeck can't connect to its remote runner",
+      message: problem,
+      buttons: ["Open Settings…", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) await openRemotePreferences(problem)
+    if (!connectionRestart) app.quit()
+    return null
   }
 }
 
 // A remote runner's connections are dropped as the system wakes: one that slept can look
 // open while nothing reaches the runner, and the page asks for fresh ones.
 const linkRemote = (settings: RemoteSettings): RunnerProcess => {
-  const linked = remoteRunner({ settings, log: logger.for("remote") })
+  const linked = remoteRunner({
+    settings,
+    log: logger.for("remote"),
+    state: (state) => {
+      remoteState = state
+      refreshMenu()
+    },
+  })
   powerMonitor.on("resume", () => linked.reconnect())
   return linked
 }
@@ -457,7 +535,10 @@ const launch = async (): Promise<void> => {
   // Settled before the runner makes its database, which marks a data folder as used: a
   // launch that dies in between must not make the next one look like an update.
   await news.settleLaunch()
-  remote = await remoteSettings()
+  const settings = await remoteSettings()
+  if (settings === null || quitting.stopping) return
+  remote = settings
+  refreshMenu()
   // The companion pane's pages load from the runner's machine, where the agents' servers
   // run: this machine's own addresses are reached through the proxy too.
   if (remote?.pagesProxy)
@@ -792,20 +873,10 @@ app.whenReady().then(() => {
   quitOnShutdown(powerMonitor, updates.quitOnSessionEnd)
   // Ctrl+Q and the menu's Quit are the person's quit, which installs a waiting update; a
   // signal's is not. See ./window/menu.ts.
-  if (process.platform === "linux")
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate(
-        linuxMenu(() => {
-          quitting.orderly = true
-          app.quit()
-        }),
-      ),
-    )
   // macOS shows its menu bar: Help opens the logs folder. Elsewhere Preferences does.
-  if (process.platform === "darwin")
-    // Help offers no tour while the page holds it back (`Tour.offered`): passing `askTour`
-    // here offers it.
-    Menu.setApplicationMenu(Menu.buildFromTemplate(macMenu(openLogs)))
+  // Help offers no tour while the page holds it back (`Tour.offered`): passing `askTour`
+  // here offers it.
+  refreshMenu()
   limitPermissions(
     session.defaultSession,
     isAppPage,
@@ -814,7 +885,11 @@ app.whenReady().then(() => {
       ? () => systemPreferences.askForMediaAccess("microphone")
       : undefined,
   )
-  pages.watch(log, (contents) => watchAppPage(contents, pageLog))
+  pages.watch(log, (contents) => {
+    // Private host forms carry credentials in intercepted navigations. Only the app's
+    // own default session gets URL-bearing page diagnostics.
+    if (contents.session === session.defaultSession) watchAppPage(contents, pageLog)
+  })
 
   void launch().catch((error: unknown) => {
     log.fatal("host.launch-failed", "The app could not start.", { err: error })
@@ -836,11 +911,20 @@ const quitSteps: QuitSteps = {
   announce: () =>
     log.info("app.quit", "The app is quitting.", { data: { orderly: quitting.orderly } }),
   begin: updates.quitBegins,
-  hosting: () => Boolean(server || runner),
+  hosting: () => Boolean(server || runner || connectionRestart),
   shutDown,
-  installMacUpdate: updates.installMacUpdateOnQuit,
-  reopenAppImage: updates.openAppImageAfterQuit,
-  reopenCurrent: updates.openCurrentAfterQuit,
+  installMacUpdate: () =>
+    connectionRestart ? Promise.resolve() : updates.installMacUpdateOnQuit(),
+  reopenAppImage: () => (connectionRestart ? Promise.resolve() : updates.openAppImageAfterQuit()),
+  reopenCurrent: async () => {
+    if (connectionRestart) {
+      if (process.platform === "linux" && process.env.APPIMAGE)
+        await copies.startInstalledImage(process.env.APPIMAGE, process.pid)
+      else app.relaunch()
+      return
+    }
+    return updates.openCurrentAfterQuit()
+  },
   keepUpdate: updates.keepUpdateOnQuit,
   quit: () => app.quit(),
 }

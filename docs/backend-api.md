@@ -101,7 +101,17 @@ the service. There is no TLS, login page, or public multi-user hosting layer her
 
 The desktop app connects to a standalone runner on another machine, in place of starting
 its own, when its data folder holds a `remote-runner.json` (`~/Library/Application
-Support/novadeck` on macOS, `~/.config/novadeck` on Linux, `%APPDATA%\novadeck` on Windows):
+Support/novadeck` on macOS, `~/.config/novadeck` on Linux, `%APPDATA%\novadeck` on Windows).
+Choose **Runner → Remote Runner…** to set it up, including from local mode. The form asks
+for the address, token and optional pages proxy; a blank token keeps the saved one.
+**Save and Restart** checks the fields and an authenticated connection (up to ten seconds),
+then saves with owner-only permissions and restarts after the workspace saves. A failure
+stays in the form with its reason. **Use this computer's runner** keeps the file as
+`remote-runner.off.json` and restarts locally; opening settings again reads that saved copy.
+The menu names the remote host and its connection state, and the native window title names
+the host too.
+
+The same file can still be written by hand:
 
 ```json
 {
@@ -117,8 +127,8 @@ user@machine` forwards the runner's port, and opens the SOCKS proxy `pagesProxy`
 refuses an unencrypted address anywhere else, as the token crosses in the handshake. The
 main process carries each port its page asks for to that WebSocket (`tunnelPort` in
 `@novadeck/wire/electron`) and adds the token there, so the page never holds it. A file
-that can't be read or understood stops the launch with a message; the app never falls back
-to a runner of its own. Keep the file readable by its owner only.
+that can't be read or understood stops the launch with **Open Settings…** and **Quit**;
+the app never falls back to a runner of its own. Keep the file readable by its owner only.
 
 With a remote runner:
 

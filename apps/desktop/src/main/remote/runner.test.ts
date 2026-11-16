@@ -3,7 +3,7 @@ import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../../test"
 import { appLog } from "../logs/logs.test-support"
-import { answerMs, pingMs, remoteRunner, type RunnerSocket } from "./runner"
+import { answerMs, pingMs, remoteRunner, type RemoteState, type RunnerSocket } from "./runner"
 
 const settings = {
   url: "ws://127.0.0.1:8787/api/rpc",
@@ -79,10 +79,12 @@ const port = () => {
 /** A remote runner on fake sockets, with what it logged. */
 const start = () => {
   const sockets: FakeSocket[] = []
+  const states: RemoteState[] = []
   const { logger, lines } = appLog()
   const runner = remoteRunner({
     settings,
     log: logger.for("remote"),
+    state: (state) => states.push(state),
     open: (url) => {
       const socket = new FakeSocket(url)
       sockets.push(socket)
@@ -90,10 +92,23 @@ const start = () => {
     },
   })
   const events = () => lines().map((line) => line.evt)
-  return { runner, sockets, lines, events }
+  return { runner, sockets, lines, events, states }
 }
 
 describe("remoteRunner", () => {
+  it("reports the connection state while any window still has an open connection", () => {
+    const { runner, sockets, states } = start()
+    runner.deliver(port().port)
+    runner.deliver(port().port)
+    sockets[0]!.raise("open")
+    sockets[1]!.raise("open")
+    sockets[0]!.raise("close")
+    expect(states).toEqual(["connecting", "connected"])
+    sockets[1]!.raise("close")
+    expect(states).toEqual(["connecting", "connected", "disconnected"])
+    runner.reconnect()
+    expect(states.at(-1)).toBe("connecting")
+  })
   it("opens a socket to the runner for each port the page asks for", () => {
     const { runner, sockets } = start()
     expect(runner.deliver(port().port)).toBe(true)

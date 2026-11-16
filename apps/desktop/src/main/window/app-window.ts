@@ -98,9 +98,11 @@ export const watchAppPage = (contents: WebContents, log: Log): void => {
 export const openAppWindow = ({
   ground,
   preloadArguments,
+  runnerHost,
 }: {
   readonly ground: string
   readonly preloadArguments: readonly string[]
+  readonly runnerHost?: string
 }): BrowserWindow => {
   const window = new BrowserWindow({
     width: 1120,
@@ -120,6 +122,15 @@ export const openAppWindow = ({
       webviewTag: true,
     },
   })
+
+  if (runnerHost) {
+    const title = `Novadeck — ${runnerHost}`
+    window.setTitle(title)
+    window.on("page-title-updated", (event) => {
+      event.preventDefault()
+      window.setTitle(title)
+    })
+  }
 
   window.once("ready-to-show", () => window.show())
   window.on("focus", () => tellWindowFocus(window))

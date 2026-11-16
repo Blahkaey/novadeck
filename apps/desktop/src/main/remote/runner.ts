@@ -26,6 +26,8 @@ export type RemoteRunner = RunnerProcess & {
   reconnect(): void
 }
 
+export type RemoteState = "connecting" | "connected" | "disconnected"
+
 /** How often each connection pings the runner, and how long it waits for the answer. */
 export const pingMs = 20_000
 export const answerMs = 10_000
@@ -82,12 +84,21 @@ export const remoteRunner = (options: {
   readonly log: Log
   /** How a socket to the runner is opened: `ws`'s, or a test's stand-in. */
   readonly open?: (url: string) => RunnerSocket
+  readonly state?: (state: RemoteState) => void
 }): RemoteRunner => {
   const { settings, log, open = openSocket } = options
   // Named in the log by its origin alone: never the token.
   const origin = new URL(settings.url).origin
   const tunnels = new Map<object, { readonly end: () => void; readonly socket?: RunnerSocket }>()
   let closed = false
+  let state: RemoteState = "connecting"
+  const tell = (next: RemoteState): void => {
+    if (state === next) return
+    state = next
+    options.state?.(next)
+  }
+  const live = new Set<object>()
+  options.state?.(state)
   // Whether the last tunnel reached the runner, so a runner that stays out of reach, which
   // the page asks for again and again, is logged once, and so is its coming back. A stall
   // counts as out of reach, so every connection that stalls with it says it once.
@@ -95,6 +106,7 @@ export const remoteRunner = (options: {
   const stalled = (): void => {
     if (reached === false) return
     reached = false
+    tell("disconnected")
     log.warn("remote.stalled", "The remote runner stopped answering.", { data: { origin } })
   }
   return {
@@ -109,6 +121,8 @@ export const remoteRunner = (options: {
           const socket = open(settings.url)
           tunnel.socket = socket
           socket.addEventListener("open", () => {
+            live.add(key)
+            tell("connected")
             if (reached !== true)
               log.info("remote.connected", "The remote runner answered.", { data: { origin } })
             reached = true
@@ -120,6 +134,8 @@ export const remoteRunner = (options: {
         ended: (opened) => {
           over = true
           tunnels.delete(key)
+          live.delete(key)
+          if (live.size === 0) tell("disconnected")
           if (opened || closed || reached === false) return
           reached = false
           log.warn("remote.unreachable", "The remote runner could not be reached.", {
@@ -135,6 +151,7 @@ export const remoteRunner = (options: {
         socket?.terminate()
         end()
       }
+      tell("connecting")
     },
     persist() {},
     close() {

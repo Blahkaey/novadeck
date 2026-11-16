@@ -73,10 +73,10 @@ export type PageWindowOptions = {
 
 /** The window: over the app's, without script, a preload or anything of Node. */
 export const pageWindowOptions = (
-  parent: BrowserWindow,
+  parent: BrowserWindow | undefined,
   options: PageWindowOptions,
 ): BrowserWindowConstructorOptions => ({
-  parent,
+  ...(parent && { parent }),
   modal: true,
   width: options.width,
   height: options.height,
@@ -115,7 +115,7 @@ export type PageWindow = {
  * logged here.
  */
 export const openPageWindow = (
-  parent: BrowserWindow,
+  parent: BrowserWindow | undefined,
   create: (options: BrowserWindowConstructorOptions) => BrowserWindow,
   options: PageWindowOptions & {
     readonly origin: string

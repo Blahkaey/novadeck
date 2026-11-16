@@ -80,3 +80,26 @@ export const remoteClient =
       signal: AbortSignal.timeout(checkMs),
       timeoutMs: checkMs,
     })
+
+/** An authenticated handshake, bounded to ten seconds, on a disposable connection. */
+export const checkRemoteSettings = async (settings: RemoteSettings): Promise<void> => {
+  try {
+    const runner = await remoteClient(settings)()
+    await runner.close()
+  } catch (error) {
+    if (hasCode(error, "UNAUTHORIZED"))
+      throw new Error(
+        "The runner refused the token. Check that it matches the runner's NOVADECK_TOKEN.",
+        { cause: error },
+      )
+    if (hasCode(error, "INCOMPATIBLE_PROTOCOL"))
+      throw new Error(
+        "This runner is incompatible. Build the app and runner from the same commit.",
+        { cause: error },
+      )
+    throw new Error(
+      "The runner could not be reached within 10 seconds. Check its address, that it is running, and your network connection.",
+      { cause: error },
+    )
+  }
+}
