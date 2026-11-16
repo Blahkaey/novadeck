@@ -188,8 +188,10 @@ export const tourSignals = (
           named: teammates.filter(({ titleSource }) => titleSource?.kind === "agent").length,
         },
         talks: talksOf(sources.messages, mates, team),
-        asking: askingOf(sources.inbox, team),
-        answered: answeredOf(sources.messages, sources.inbox, team),
+        // The teammates' questions only: one of the lead's own, as for something it lacks, isn't
+        // the story's question.
+        asking: askingOf(sources.inbox, mates),
+        answered: answeredOf(sources.messages, sources.inbox, mates),
         teamScreen:
           held && held.lead.kind === "screen"
             ? {

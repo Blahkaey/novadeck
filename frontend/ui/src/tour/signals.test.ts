@@ -217,6 +217,15 @@ describe("The tour's story signals", () => {
     expect(none(row({}, "04"))).toBeNull()
   })
 
+  it("leave out a question of the lead's own, and an answer to it", () => {
+    const asking = { items: [askRow("01")] } as unknown as InboxState
+    expect(tourSignals(teamWorkspace(), "01", { inbox: asking }).asking).toBe(false)
+    const settled = {
+      items: [{ ...askRow("01"), settled: { how: "answered", at: 1 } }],
+    } as unknown as InboxState
+    expect(tourSignals(teamWorkspace(), "01", { inbox: settled }).answered).toBe(false)
+  })
+
   it("see a teammate's question asked with its harness's own tool", () => {
     const question = {
       ...askRow("02"),
