@@ -1,4 +1,6 @@
-import { page, type Locator } from "vitest/browser"
+import { onTestFinished } from "vitest"
+import { cleanup } from "vitest-browser-react"
+import { page, userEvent, type Locator } from "vitest/browser"
 
 import { helpButton, takeTourFromHelp } from "../support/help"
 import { closePreferences, openPreferencesOn, preferencesDialog } from "../support/keyboard"
@@ -120,5 +122,52 @@ describe("The tour", () => {
     await consent().getByRole("button", { name: "Start Claude Code" }).click()
     await expect.element(consent()).not.toBeInTheDocument()
     await expectSelected("claude")
+  })
+})
+
+describe("The footer's Help chip", () => {
+  const chip = (): Locator => page.getByRole("button", { name: "Help", exact: true })
+  const url = "/?tourStory=off&channel=experimental"
+  // Opens the menu once and closes it again.
+  const openOnce = async (): Promise<void> => {
+    await chip().click()
+    await expect.element(page.getByRole("menuitem", { name: "Take the tour" })).toBeVisible()
+    await userEvent.keyboard("{Escape}")
+    await expect
+      .element(page.getByRole("menuitem", { name: "Take the tour" }))
+      .not.toBeInTheDocument()
+  }
+
+  it("keeps Help and Feedback named at a narrow width, their words hidden", async () => {
+    onTestFinished(() => page.viewport(1440, 900))
+    await page.viewport(600, 800)
+    await openWorkspace(url)
+    await expect.element(chip()).toBeVisible()
+    await expect.element(chip().getByText("Help")).not.toBeVisible()
+    const feedback = page.getByRole("button", { name: "Feedback", exact: true })
+    await expect.element(feedback).toBeVisible()
+  })
+
+  it("shows its word while new", async () => {
+    await openWorkspace(url)
+    await expect.element(chip()).toHaveTextContent("Help")
+    // Named Help either way, as narrow footers hide the word.
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+  })
+
+  it("is the icon alone, still named Help, once opened", async () => {
+    await openWorkspace(url)
+    await openOnce()
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+    await expect.element(chip()).not.toHaveTextContent("Help")
+  })
+
+  it("stays the icon alone across a reload", async () => {
+    await openWorkspace(url)
+    await openOnce()
+    await cleanup()
+    await openWorkspace(url)
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+    await expect.element(chip()).not.toHaveTextContent("Help")
   })
 })

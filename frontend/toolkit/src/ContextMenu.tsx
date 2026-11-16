@@ -146,6 +146,8 @@ export type ContextMenuProps = {
   // What the trigger's tooltip says while the menu is closed, for a `click` trigger. The trigger's
   // Ark data attributes are then the tooltip's: style its open state by aria-expanded.
   readonly tooltip?: string
+  // Told when the menu opens and when it has closed.
+  readonly onOpenChange?: (open: boolean) => void
 }
 
 export const ContextMenu = ({
@@ -154,6 +156,7 @@ export const ContextMenu = ({
   items,
   opensOn = "context",
   tooltip,
+  onOpenChange,
 }: ContextMenuProps): React.JSX.Element => {
   const labelId = useId()
   // One id for the trigger, which a tooltip around it shares.
@@ -183,6 +186,7 @@ export const ContextMenu = ({
       immediate
       onOpenChange={({ open: next }) => {
         setOpen(next)
+        onOpenChange?.(next)
         if (next && clicked) opener.current = button.current
         if (!next) closed()
       }}
