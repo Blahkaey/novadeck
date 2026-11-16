@@ -850,8 +850,12 @@ export const contract = {
     prepare: procedure.input(z.strictObject({ agent: agentName })).output(tourPrepared),
     // Rings the tour's start line to the agent in the terminal, where its launch line took
     // none (`brief: "doorbell"`): the doorbell delivers it once the agent's prompt shows. One
-    // whose agent hasn't shown in the terminal yet is a CONFLICT.
+    // whose agent hasn't shown in the terminal yet, or that isn't in the tour's folder, is a CONFLICT.
     brief: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
+    // Rings the agent in one of the tour's terminals (in its folder) a fixed line to carry on
+    // with its brief from the step it is on, where it has gone quiet. A terminal elsewhere, or
+    // whose agent hasn't shown yet, is a CONFLICT.
+    nudge: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
   },
 }
 

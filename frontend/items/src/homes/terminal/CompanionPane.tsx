@@ -648,6 +648,7 @@ export const CompanionPane = ({
         tabIndex={-1}
         className="pane-reader"
         data-workspace-companion
+        data-tour="side-pane"
         aria-label={messages ? "Messages" : `What ${agent} showed you`}
         onKeyDown={(event) => {
           if (event.key === "Escape") {

@@ -500,7 +500,7 @@ export const MessagesView = ({
     returnTo.current = null
   }, [opened])
   return (
-    <div className="message-view">
+    <div className="message-view" data-tour="messages">
       <ArtifactMeta className="message-meta" actions={actions}>
         <code>Messages</code>
         {messagesHandle.threads && <span>{handleText(messagesHandle.threads.handle)}</span>}

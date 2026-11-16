@@ -58,7 +58,7 @@ import {
   type DemoTerminalSetup,
 } from "./terminals/screens"
 import { demoWakes } from "./terminals/wakes"
-import { demoTour, isDemoTour } from "./tour"
+import { isDemoTour, tourScreens, withTourAgent, type TourScreen } from "./tour"
 import { babciaIntroOf, createBabcia } from "./videos/babcia"
 import { chirpIntroOf, chirpSeed, chirpTranscripts } from "./videos/chirp"
 import { createLaunch } from "./videos/launch"
@@ -184,7 +184,6 @@ export const demoBackend = (
       welcome: welcomeOpen,
       finishWelcome: () => welcomeOpen.update(() => false),
     },
-    tour: demoTour(agents, () => latest),
   }
   terminalsOf.set(terminals.mountTerminal, terminals)
   return backend
@@ -661,7 +660,10 @@ export const plainDemo = (
   const backend = plainBackend(variant, terminals, turns)
   // The cues of Babcia and Launch are kept by the backend their own wrapper returns: their
   // feedback joins inside.
-  return variant === "babcia" || variant === "launch" ? backend : withFeedback(backend, turns)
+  // The videos' one-offs have no tour.
+  return variant === "babcia" || variant === "launch"
+    ? backend
+    : withTourAgent(withFeedback(backend, turns), turns)
 }
 
 const plainBackend = (
@@ -826,8 +828,20 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
   )
   // `&tour=on` offers the tour, held back from everyone until its story is whole, and
   // `&tourStart=fails` makes its first start fail, as a folder of the person's own does, and
-  // `&tourStart=unlisted` as Codex not signed in yet does.
+  // `&tourStart=unlisted` as Codex not signed in yet does. Its agent is played as a runner
+  // would report one: `&tourScreen=startup|sign-in|hooks` holds it at that screen until it's
+  // answered (`&tourScreenMs=<n>` answers after n ms), `&tourAgent=quiet` has it never describe
+  // itself until nudged, and `&tourPatienceMs=<n>` is how long the UI waits before nudging.
   if (isDemoTour(backend.tour)) {
+    const screen = params.get("tourScreen")
+    if (tourScreens.includes(screen as TourScreen)) backend.tour.holdAt(screen as TourScreen)
+    if (params.get("tourAgent") === "quiet") backend.tour.goQuiet()
+    const positive = (name: string) =>
+      Number(params.get(name)) > 0 ? Number(params.get(name)) : undefined
+    backend.tour.configure({
+      ...(positive("tourPatienceMs") !== undefined && { patienceMs: positive("tourPatienceMs")! }),
+      ...(positive("tourScreenMs") !== undefined && { screenMs: positive("tourScreenMs")! }),
+    })
     if (params.get("tour") === "on") backend.tour.offered.update(() => true)
     if (params.get("tourStart") === "fails") backend.tour.failNext()
     if (params.get("tourStart") === "unlisted") backend.tour.failNext("unlisted")

@@ -5,7 +5,7 @@ import type { AgentName, Project, TourPrepared } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { agentLabel } from "../messaging/messages.js"
-import { briefFiles, startLine } from "./brief.js"
+import { briefFiles, nudgeLine, startLine } from "./brief.js"
 import { resetTourFolder, tourFolder } from "./folder.js"
 import { tourChoice, tourLaunch } from "./launch.js"
 
@@ -22,6 +22,8 @@ export type TourHost = {
   }
   /** Rings `text` to the terminal's agent as Novadeck's notice; false where it has none yet. */
   readonly notice: (terminalId: string, text: string) => boolean
+  /** The terminal's folder now; throws for a terminal the runner doesn't have. */
+  readonly cwdOf: (terminalId: string) => string
 }
 
 /**
@@ -100,7 +102,24 @@ export class Tour {
    * asks once it has.
    */
   brief(terminalId: string): void {
-    if (!this.host.notice(terminalId, startLine))
+    this.ring(terminalId, startLine)
+  }
+
+  /**
+   * Rings the agent in `terminalId` to carry on with its brief from the step it is on, where it
+   * has gone quiet: a fixed line, as Novadeck's notice. Refused as `brief` is.
+   */
+  nudge(terminalId: string): void {
+    this.ring(terminalId, nudgeLine)
+  }
+
+  // Only the tour's own terminals, those in its folder, are rung; one elsewhere is a
+  // `CONFLICT`, as is one whose agent hasn't shown yet.
+  private ring(terminalId: string, line: string): void {
+    const cwd = this.host.cwdOf(terminalId)
+    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform))
+      throw new DomainError("CONFLICT", "The terminal isn't one of the tour's.")
+    if (!this.host.notice(terminalId, line))
       throw new DomainError("CONFLICT", "The terminal's agent hasn't started yet.")
   }
 }

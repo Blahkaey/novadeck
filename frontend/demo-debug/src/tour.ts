@@ -2,6 +2,12 @@ import type { DemoTour } from "@novadeck/demo/tour"
 
 import type { DemoActionGroup } from "./types"
 
+const screens = {
+  startup: { label: "folder trust", what: "its folder-trust screen" },
+  "sign-in": { label: "sign-in", what: "its sign-in screen" },
+  hooks: { label: "hooks", what: "its prompt with Novadeck's hooks off" },
+} as const
+
 // Novadeck's tour: its consent, as the welcome dialog, Preferences' About or the desktop app's
 // Help menu offers it, and a start the backend refuses.
 export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
@@ -31,6 +37,21 @@ export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
         label: "Next start: models unlisted",
         hint: "The next Start the tour says the agent hasn't listed its models yet (Codex before it signs in), with a Start button that opens it in a terminal",
         run: () => tour.failNext("unlisted"),
+      },
+      ...(["startup", "sign-in", "hooks"] as const).map((screen) => ({
+        label: `Tour agent: hold at ${screens[screen].label}`,
+        hint: `The next tour agent waits at ${screens[screen].what} before Novadeck reaches it: its terminal shows the held-agent mark until "Answer the startup screen"`,
+        run: () => tour.holdAt(screen),
+      })),
+      {
+        label: "Answer the startup screen",
+        hint: 'The tour agent held at a startup screen goes on: it binds, works, names its terminal "Tour lead" and finishes its turn',
+        run: () => tour.answer(),
+      },
+      {
+        label: "Tour agent: quiet until nudged",
+        hint: "The next tour agent binds but sits idle at its prompt, no turn begun, until the tour nudges it (the UI does after its wait); then it works and names its terminal",
+        run: () => tour.goQuiet(),
       },
     ],
   },

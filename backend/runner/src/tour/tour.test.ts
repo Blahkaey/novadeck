@@ -8,7 +8,7 @@ import type { AgentName, Project } from "@novadeck/protocol"
 import { DomainError } from "../errors.js"
 import { harnesses } from "../harnesses/registry.js"
 import { describe, expect, it } from "../test.js"
-import { startLine } from "./brief.js"
+import { nudgeLine, startLine } from "./brief.js"
 import { tourFolder, tourMarker } from "./folder.js"
 import { Tour, withinFolder, type TourHost } from "./tour.js"
 
@@ -28,6 +28,8 @@ const tourIn = (
     models?: readonly Model[]
     // How each removal goes; at once by default.
     removal?: () => Promise<void>
+    // Each terminal's folder; the tour's own by default.
+    cwds?: Readonly<Record<string, string>>
   } = {},
 ) => {
   const projects = options.projects ?? []
@@ -51,6 +53,7 @@ const tourIn = (
       options.notices?.push([terminalId, text])
       return true
     },
+    cwdOf: (terminalId) => options.cwds?.[terminalId] ?? tourFolder(home),
   }
   return { tour: new Tour(host), removed }
 }
@@ -171,6 +174,27 @@ describe("ringing the tour's brief", () => {
   it("refuses a terminal whose agent hasn't shown yet", () => {
     const { tour } = tourIn("/nowhere")
     expect(() => tour.brief("t1")).toThrow(DomainError)
+  })
+
+  it("rings only the tour's own terminals", () => {
+    const notices: [string, string][] = []
+    const { tour } = tourIn("/h", { notices, shown: ["mine"], cwds: { mine: "/h/code" } })
+    expect(() => tour.brief("mine")).toThrow(/isn't one of the tour's/)
+    expect(notices).toEqual([])
+  })
+})
+
+describe("nudging the tour's agent", () => {
+  it("rings it a fixed line to carry on from its step, in the tour's folder only", () => {
+    const notices: [string, string][] = []
+    const { tour } = tourIn("/h", {
+      notices,
+      shown: ["lead", "elsewhere"],
+      cwds: { elsewhere: "/h/code" },
+    })
+    tour.nudge("lead")
+    expect(notices).toEqual([["lead", nudgeLine]])
+    expect(() => tour.nudge("elsewhere")).toThrow(DomainError)
   })
 })
 

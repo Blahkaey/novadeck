@@ -1,7 +1,5 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { AgentConnection, Backend } from "@novadeck/core/port"
-import type { Store } from "@novadeck/core/store"
-import type { Workspace } from "@novadeck/core/types"
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 import {
@@ -14,30 +12,8 @@ import {
   tourFailed,
   type TourConsent,
 } from "../tour/consent"
-import { agentShownIn, startTour, type TourEffects } from "../tour/start"
+import { startTour, type TourEffects, type TourStarted } from "../tour/start"
 import { useWorkspaceServices } from "./controller/context"
-
-// Every terminal of the workspace, in every project and session.
-const everyTerminal = (workspace: Workspace) =>
-  workspace.projects.flatMap((project) =>
-    project.history.flatMap((session) => session.state.roster.terminals),
-  )
-
-// Resolves once the terminal's agent shows in the workspace, true, or once the terminal is
-// gone, false: a signal, however long it takes.
-const whenAgentShows = (workspace: Store<Workspace>, terminalId: string): Promise<boolean> =>
-  new Promise((resolve) => {
-    const check = (): boolean => {
-      const shown = agentShownIn(everyTerminal(workspace.getSnapshot()), terminalId)
-      if (shown === undefined) return false
-      resolve(shown)
-      return true
-    }
-    if (check()) return
-    const unsubscribe = workspace.subscribe(() => {
-      if (check()) unsubscribe()
-    })
-  })
 
 // A store that never changes, for a backend without one.
 const never = (): (() => void) => () => {}
@@ -67,8 +43,10 @@ export type TourOffer = {
 export const useTour = (
   backend: Pick<Backend, "tour">,
   connections: readonly AgentConnection[],
+  // A run started, for the tour's driver to follow.
+  onStarted: (agent: AgentName, started: TourStarted) => void,
 ): TourOffer | undefined => {
-  const { commands, workspace } = useWorkspaceServices()
+  const { commands } = useWorkspaceServices()
   const [offered, setConsent] = useState<TourConsent | null>(null)
   // Held back until the tour's story is whole (`Tour.offered`).
   const held = useSyncExternalStore(
@@ -98,18 +76,16 @@ export const useTour = (
       tour,
       openTour: commands.openTour,
       add: (options) => commands.add(options),
-      agentShown: (terminalId) => whenAgentShows(workspace, terminalId),
     }
-    startTour(consent.agent, effects).then(
-      ({ briefed }) => {
+    const agent = consent.agent
+    startTour(agent, effects).then(
+      (started) => {
         setConsent(null)
-        briefed.catch((error: unknown) =>
-          console.error("Novadeck couldn't give the tour's agent its brief:", error),
-        )
+        onStarted(agent, started)
       },
       (error: unknown) => setConsent((current) => current && tourFailed(current, error)),
     )
-  }, [tour, consent, connections, commands, workspace])
+  }, [tour, consent, connections, commands, onStarted])
   const agents = useMemo(() => tourAgents(connections), [connections])
   const connecting = connectingAgent(connections, consent?.agent ?? null)
   return useMemo(

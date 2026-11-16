@@ -369,6 +369,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     // Every project, those being removed too, whose removal the tour waits for.
     projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
+    cwdOf: (terminalId) => terminals.get(terminalId).cwd,
   })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees

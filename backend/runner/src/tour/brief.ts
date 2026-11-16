@@ -9,6 +9,10 @@
  */
 export const startLine = "Start the Novadeck tour: follow AGENTS.md in this folder."
 
+/** What the tour rings its agent where it has gone quiet at a step (`tour.nudge`). */
+export const nudgeLine =
+  "Novadeck's tour is waiting on you: carry on with AGENTS.md in this folder, from the step you're on."
+
 const brief = `# Novadeck tour
 
 You are the lead agent in Novadeck's tour. The person just started the tour to see how

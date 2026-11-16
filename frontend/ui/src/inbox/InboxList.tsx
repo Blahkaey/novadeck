@@ -122,6 +122,7 @@ const Row = ({
       role="listitem"
       className="item inbox-row"
       data-inbox-row={row.id}
+      data-tour="inbox-card"
       data-type={type}
       data-tint={answered ? "muted" : tintOf(row)}
       data-seen={row.seen}
