@@ -19,10 +19,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Either runner builds the same app, for both chips. GitHub's macOS runners are short at
+  # times, the Apple silicon ones most of all (a job no runner takes within a quarter of an
+  # hour fails), so both are asked and whichever is taken keeps its disk image.
   package:
-    name: macOS
-    runs-on: macos-latest
+    name: macOS (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple silicon runner
+            os: macos-latest
+          - name: Intel runner
+            os: macos-15-intel
     steps:
       - name: Check Out Source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +73,7 @@ jobs:
       - name: Upload App
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: novadeck-mac-universal
+          name: novadeck-mac-universal-from-${{ matrix.os }}
           path: apps/desktop/release/novadeck-mac-universal.dmg
           if-no-files-found: error
           compression-level: 0
