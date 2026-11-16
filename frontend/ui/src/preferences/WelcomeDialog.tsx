@@ -1,11 +1,21 @@
 import { harnesses } from "@novadeck/core/harnesses"
+import type { SchemePreference } from "@novadeck/core/types"
 import { Checkbox } from "@novadeck/toolkit/Checkbox"
 import { Dialog, DialogDescription, DialogTitle } from "@novadeck/toolkit/Dialog"
 import { AntigravityIcon } from "@novadeck/toolkit/icons/AntigravityIcon"
 import { ClaudeIcon } from "@novadeck/toolkit/icons/ClaudeIcon"
 import { CodexIcon } from "@novadeck/toolkit/icons/CodexIcon"
 import { brandName, NovaMark, NovaPattern, Wordmark } from "@novadeck/toolkit/NovaLogo"
-import { ArrowRight, ScrollText, type LucideIcon } from "lucide-react"
+import { SegmentGroup } from "@novadeck/toolkit/SegmentGroup"
+import {
+  ArrowRight,
+  MessagesSquare,
+  Monitor,
+  Moon,
+  ScrollText,
+  Sun,
+  type LucideIcon,
+} from "lucide-react"
 import { useRef, useState, type ComponentType, type CSSProperties, type RefObject } from "react"
 
 import { agentLabels, agentNote, type AgentSwitch } from "./agent-switches"
@@ -25,6 +35,25 @@ type TranscriptsSetting = {
   readonly available: boolean
   readonly onChange: (enabled: boolean) => void
 }
+
+// The chat view, offered where the backend reads agents' conversations.
+type ChatViewSetting = {
+  readonly enabled: boolean
+  readonly onChange: (enabled: boolean) => void
+}
+
+// The page's scheme, which the dialog changes at once, as Preferences does: the person sees
+// what they pick, and it stays however the dialog closes.
+type SchemeSetting = {
+  readonly value: SchemePreference
+  readonly onChange: (scheme: SchemePreference) => void
+}
+
+const schemeItems = [
+  { label: "System", value: "system", icon: <Monitor size={13} aria-hidden="true" /> },
+  { label: "Light", value: "light", icon: <Sun size={13} aria-hidden="true" /> },
+  { label: "Dark", value: "dark", icon: <Moon size={13} aria-hidden="true" /> },
+] as const
 
 const icons = { claude: ClaudeIcon, codex: CodexIcon, agy: AntigravityIcon }
 
@@ -66,6 +95,7 @@ const ChoiceCard = ({
   disabled = false,
   installable,
   onChange,
+  onLook,
 }: {
   readonly icon: LucideIcon | ComponentType<{ size?: number; strokeWidth?: number }>
   readonly label: string
@@ -79,10 +109,20 @@ const ChoiceCard = ({
   // Given, the card offers installing instead of choosing, and `note` is left out.
   readonly installable?: Installable | undefined
   readonly onChange: (checked: boolean) => void
+  // Told whether the pointer is over the card, or focus in it: the card is looked at while either is.
+  readonly onLook?: ((how: "pointer" | "focus", looking: boolean) => void) | undefined
 }): React.JSX.Element => {
   const Card = installable ? "div" : "label"
   return (
     <Card
+      {...(onLook
+        ? {
+            onPointerEnter: () => onLook("pointer", true),
+            onPointerLeave: () => onLook("pointer", false),
+            onFocus: () => onLook("focus", true),
+            onBlur: () => onLook("focus", false),
+          }
+        : {})}
       className={`choice-card solid flex min-h-[60px] min-w-0 items-center gap-3 px-3 py-2.5 ${disabled ? "cursor-not-allowed" : installable ? "" : "cursor-pointer"}`}
       data-state={checked ? "checked" : "unchecked"}
       data-disabled={disabled || undefined}
@@ -148,6 +188,8 @@ const WelcomeForm = ({
   onChange,
   onInstall,
   transcripts,
+  chatView,
+  scheme,
   onDone,
   heading,
 }: {
@@ -155,6 +197,8 @@ const WelcomeForm = ({
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
+  readonly chatView?: ChatViewSetting | undefined
+  readonly scheme?: SchemeSetting | undefined
   readonly onDone: () => void
   readonly heading: RefObject<HTMLHeadingElement | null>
 }): React.JSX.Element => {
@@ -162,6 +206,11 @@ const WelcomeForm = ({
   // Transcripts start on; the person opts out.
   const [keepTranscripts, setKeepTranscripts] = useState(true)
   const offerTranscripts = transcripts?.available === true
+  // The chat view starts on too.
+  const [showChat, setShowChat] = useState(true)
+  // While the person looks at that choice, the preview marks what it changes.
+  const [lookingAtChat, setLookingAtChat] = useState({ pointer: false, focus: false })
+  const offerSettings = offerTranscripts || chatView !== undefined
 
   // As "Let’s build something" applies the choices; `install` then also starts installing
   // an agent that isn't here, whose terminal opens as the dialog closes.
@@ -174,6 +223,7 @@ const WelcomeForm = ({
     }
     if (transcripts?.available && keepTranscripts !== transcripts.enabled)
       transcripts.onChange(keepTranscripts)
+    if (chatView && showChat !== chatView.enabled) chatView.onChange(showChat)
     onDone()
     if (install) onInstall?.(install.agent, install.command)
   }
@@ -187,11 +237,29 @@ const WelcomeForm = ({
     >
       <div className="welcome-intro relative isolate min-w-0 overflow-hidden px-8 pt-8 pb-6 min-[820px]:px-10 min-[820px]:pt-10 max-[420px]:px-5">
         <NovaPattern className="welcome-pattern pointer-events-none absolute top-0 right-0 -z-10 h-[230px] w-[72%]" />
-        <div className="flex items-center gap-2.5 text-[23px]" role="img" aria-label={brandName}>
-          <NovaMark size={35} animated />
-          {/* With no descenders the letters ride high in their line; this centres their
-              capitals and baseline on the mark. */}
-          <Wordmark animated className="translate-y-[0.07em]" />
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div className="flex items-center gap-2.5 text-[23px]" role="img" aria-label={brandName}>
+            <NovaMark size={35} animated />
+            {/* With no descenders the letters ride high in their line; this centres their
+                capitals and baseline on the mark. */}
+            <Wordmark animated className="translate-y-[0.07em]" />
+          </div>
+          {scheme && (
+            <div className="welcome-enter" style={at(1100)}>
+              <SegmentGroup
+                label="Appearance"
+                items={schemeItems}
+                value={scheme.value}
+                onValueChange={(next) => {
+                  const chosen = schemeItems.find((item) => item.value === next)?.value
+                  if (chosen) scheme.onChange(chosen)
+                }}
+                className="flex shrink-0 gap-1"
+                itemClassName="flex h-7 items-center justify-center gap-1.5 px-2.5 text-control"
+                indicatorClassName="absolute"
+              />
+            </div>
+          )}
         </div>
         <div className="mt-10 max-[819px]:mt-6">
           <DialogTitle
@@ -228,11 +296,15 @@ const WelcomeForm = ({
           </DialogDescription>
         </div>
         <div className="welcome-enter" style={at(500)}>
-          <WelcomePreview connected={choices} />
+          <WelcomePreview
+            connected={choices}
+            chat={chatView !== undefined && showChat}
+            spotlight={chatView !== undefined && (lookingAtChat.pointer || lookingAtChat.focus)}
+          />
         </div>
       </div>
 
-      <div className="flex min-w-0 flex-col px-8 pt-10 pb-7 max-[819px]:pt-7 max-[420px]:px-5">
+      <div className="flex min-w-0 flex-col px-8 pt-10 max-[819px]:pt-7 max-[420px]:px-5">
         <div className="my-auto">
           <div className="welcome-enter mb-6" style={at(600)}>
             <h3 className="welcome-heading m-0 text-[25px] leading-[1.2] font-medium">
@@ -282,7 +354,7 @@ const WelcomeForm = ({
           </fieldset>
 
           <p
-            className={`modal-description welcome-enter mt-3 min-h-[2lh] text-caption leading-[1.65] ${offerTranscripts ? "mb-5" : "mb-8"}`}
+            className={`modal-description welcome-enter mt-3 min-h-[2lh] text-caption leading-[1.65] ${offerSettings ? "mb-5" : "mb-8"}`}
             style={at(850)}
           >
             {pluginNote(
@@ -292,26 +364,49 @@ const WelcomeForm = ({
             )}
           </p>
 
-          {offerTranscripts && (
+          {offerSettings && (
             <fieldset
               className="settings-fieldset welcome-enter m-0 mb-8 min-w-0 p-0"
               style={at(900)}
             >
-              <legend className="sr-only">Terminals</legend>
-              <ChoiceCard
-                icon={ScrollText}
-                label="Transcripts"
-                note="Show recent output again after a restart. Saved encrypted on this computer."
-                noteId="welcome-transcripts-description"
-                name="transcripts"
-                value="on"
-                checked={keepTranscripts}
-                onChange={setKeepTranscripts}
-              />
+              <legend className="sr-only">Settings</legend>
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+                {chatView && (
+                  <ChoiceCard
+                    icon={MessagesSquare}
+                    label="Agent Chat"
+                    note="Read and reply to agents in a chat instead of their terminal."
+                    noteId="welcome-chat-view-description"
+                    name="chat-view"
+                    value="on"
+                    checked={showChat}
+                    onChange={setShowChat}
+                    onLook={(how, looking) =>
+                      setLookingAtChat((current) => ({ ...current, [how]: looking }))
+                    }
+                  />
+                )}
+                {offerTranscripts && (
+                  <ChoiceCard
+                    icon={ScrollText}
+                    label="Transcripts"
+                    note="Show recent output again after a restart. Saved encrypted on this computer."
+                    noteId="welcome-transcripts-description"
+                    name="transcripts"
+                    value="on"
+                    checked={keepTranscripts}
+                    onChange={setKeepTranscripts}
+                  />
+                )}
+              </div>
             </fieldset>
           )}
         </div>
-        <div className="welcome-enter" style={at(1000)}>
+        {/* Stays in view at the column's foot while a short window scrolls the dialog. */}
+        <div
+          className="welcome-enter welcome-actions -mx-8 px-8 pb-7 max-[420px]:-mx-5 max-[420px]:px-5"
+          style={at(1000)}
+        >
           <button
             type="submit"
             className="button primary welcome-start relative min-h-11 w-full justify-between gap-3 overflow-hidden px-4 py-3 text-body font-medium"
@@ -332,14 +427,16 @@ const WelcomeForm = ({
   )
 }
 
-// Choices stay local until submission. Dismissing changes no agent or transcript
-// setting; Preferences keeps its immediate switches.
+// Choices stay local until submission. Dismissing changes no agent, chat view or transcript
+// setting; Preferences keeps its immediate switches. The scheme alone applies at once.
 export const WelcomeDialog = ({
   open,
   agents,
   onChange,
   onInstall,
   transcripts,
+  chatView,
+  scheme,
   onDone,
 }: {
   readonly open: boolean
@@ -347,6 +444,10 @@ export const WelcomeDialog = ({
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
+  // Given, the person chooses here whether agents show as a chat, as starting applies.
+  readonly chatView?: ChatViewSetting | undefined
+  // Given, the person picks the page's scheme here, at once; left out where the theme has one.
+  readonly scheme?: SchemeSetting | undefined
   readonly onDone: () => void
 }): React.JSX.Element => {
   const heading = useRef<HTMLHeadingElement>(null)
@@ -368,6 +469,8 @@ export const WelcomeDialog = ({
         onChange={onChange}
         onInstall={onInstall}
         transcripts={transcripts}
+        chatView={chatView}
+        scheme={scheme}
         onDone={onDone}
         heading={heading}
       />

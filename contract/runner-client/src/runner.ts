@@ -338,9 +338,10 @@ export type Runner = {
     /**
      * Follows the terminal's live slice: a snapshot, then another on each change, across
      * reconnections, with a fresh one when the stream is opened again; `slice` is null while
-     * nothing shows. Iteration ends as `detail`'s does.
+     * nothing shows. With `screen`, each change carries the whole screen too. Iteration ends
+     * as `detail`'s does.
      */
-    slice(terminalId: string): AsyncIterableIterator<SliceChange, undefined>
+    slice(terminalId: string, screen?: boolean): AsyncIterableIterator<SliceChange, undefined>
     /**
      * Follows an actor's conversation, by the ref `detail` names it by: every item its
      * harness recorded, then each later one. After a reconnection the items follow again
@@ -431,7 +432,7 @@ export type Runner = {
      */
     set(agent: AgentName, connected: boolean): Promise<AgentIntegration>
   }
-  /** The forges whose pull requests the Changes panel shows (Experimental). */
+  /** The forges whose pull requests the Worktrees panel shows (Experimental). */
   readonly forges: {
     /**
      * Where each forge stands. With `fresh` the runner reads the person's login environment
@@ -458,7 +459,7 @@ export type Runner = {
      */
     watch(): AsyncIterableIterator<HistoryWatchItem, undefined>
   }
-  /** Each tracked git worktree against its repository's main branch (Changes panel). */
+  /** Each tracked git worktree against its repository's main branch (Worktrees panel). */
   readonly works: {
     /**
      * Follows every work on the runner, as `history.watch()` follows closed terminals: each
@@ -836,9 +837,9 @@ export const connectRunner = async (
         followRestarting(connection, (client, signal) =>
           client.agents.detail({ terminalId }, { signal }),
         ),
-      slice: (terminalId) =>
+      slice: (terminalId, screen) =>
         followRestarting(connection, (client, signal) =>
-          client.agents.slice({ terminalId }, { signal }),
+          client.agents.slice({ terminalId, ...(screen && { screen }) }, { signal }),
         ),
       transcript: (terminalId, actor) =>
         followRestarting<TranscriptChange>(

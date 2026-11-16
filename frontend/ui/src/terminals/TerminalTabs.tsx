@@ -24,6 +24,7 @@ import {
 } from "react"
 
 import { TabListContext } from "./tab-list"
+import { restOffscreenTabs } from "./tab-sight"
 
 const sensors = [
   PointerSensor.configure({
@@ -121,7 +122,9 @@ export const TerminalTabs = ({
     (node: HTMLDivElement) => {
       setList(node)
       tabList?.update(() => node)
+      const stopResting = restOffscreenTabs(node)
       return () => {
+        stopResting()
         setList(null)
         tabList?.update((current) => (current === node ? null : current))
       }
@@ -185,7 +188,7 @@ export const TerminalTabs = ({
           {terminals.map((terminal, index) => renderTab(terminal, index))}
         </Fragment>
         {!terminals.length && (
-          <p className="terminal-tab-empty px-3 py-3 text-control">No open sessions</p>
+          <p className="terminal-tab-empty px-3 py-3 text-control">No open terminals</p>
         )}
       </div>
     </DragDropProvider>

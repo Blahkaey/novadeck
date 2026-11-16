@@ -178,7 +178,7 @@ export const Preferences = ({
     readonly enabled: boolean
     readonly onChange: (enabled: boolean) => void
   }
-  // The forges whose pull requests Changes shows, an Experimental feature the backend keeps;
+  // The forges whose pull requests the Worktrees panel shows, an Experimental feature the backend keeps;
   // absent where the backend has none.
   forges?: {
     readonly list: readonly ForgeSwitch[]
@@ -277,7 +277,7 @@ export const Preferences = ({
   // About is the app itself: its version, updates, logs and removal; a backend with none of
   // them has no tab for it.
   const hasAbout = version !== undefined || experimental !== undefined || !!logs || !!uninstall
-  // The Experimental tab, with the chat view, is there only while its switch is on.
+  // The Experimental tab is there only while its switch is on.
   const hasExperimental = experimental?.on === true
   const hidden = (id: PreferencesTab): boolean =>
     (id === "addons" && !hasAddons) ||
@@ -286,16 +286,6 @@ export const Preferences = ({
   const shown = hidden(tab) ? "general" : tab
   // The Experimental tab's switches, one row each.
   const experimentalToggles = [
-    {
-      id: "chat-view",
-      label: "Chat view",
-      description: chat
-        ? "Read and reply to agents in a chat instead of their terminal. When the chat can't handle something, answer in the terminal."
-        : "Not available here.",
-      checked: value.chatView,
-      onToggle: (chatView: boolean) => onChange({ ...value, chatView }),
-      disabled: !chat,
-    },
     {
       id: "agent-avatars",
       label: "Agent avatars",
@@ -307,9 +297,9 @@ export const Preferences = ({
     },
     {
       id: "agent-worktrees",
-      label: "Agent worktrees and Changes",
+      label: "Agent worktrees",
       description: worktrees
-        ? "Agents work in their own git worktrees, and the sidebar gets a Changes panel that lists each one with what it changed since main. Novadeck cleans a worktree up once it's merged or its terminal is closed."
+        ? "Agents work in their own git worktrees, and the sidebar gets a Worktrees panel that lists each one with what it changed since main. Novadeck cleans a worktree up once it's merged or its terminal is closed."
         : "Not available here.",
       checked: worktrees?.enabled ?? false,
       onToggle: (enabled: boolean) => worktrees?.onChange(enabled),
@@ -643,7 +633,7 @@ export const Preferences = ({
                 </div>
               </div>
             </Section>
-            {(agents || hibernation) && (
+            {(agents || hibernation || chat) && (
               <Section title="Agents" {...(agents ? { description: agentsExplanation } : {})}>
                 {agents && (
                   <AgentSwitches
@@ -653,22 +643,40 @@ export const Preferences = ({
                     installing={agents.installing}
                   />
                 )}
-                {hibernation && (
+                {(chat || hibernation) && (
                   <div className={settingsCardClasses}>
-                    <Select
-                      className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-36`}
-                      label="Stop idle agents after"
-                      items={idleChoices}
-                      // A saved wait the list doesn't have shows as it is, without being chosen.
-                      value={idleChoice(hibernation.minutes)}
-                      placeholder={`${hibernation.minutes} minutes`}
-                      onValueChange={(choice) =>
-                        hibernation.onChange(choice === "off" ? null : Number(choice))
-                      }
-                      open={open && shown === "general" && openSelect === "idle-agents"}
-                      onOpenChange={(expanded) => setOpenSelect(expanded ? "idle-agents" : null)}
-                      portalContainer={dialog}
-                    />
+                    {chat && (
+                      <div className={`preference-row ${settingRowClasses}`}>
+                        <SettingText
+                          id="chat-view-label"
+                          label="Agent Chat"
+                          description="Read and reply to agents in a chat instead of their terminal. When the chat can't handle something, answer in the terminal."
+                          descriptionId="chat-view-description"
+                        />
+                        <Switch
+                          checked={value.chatView}
+                          onChange={(chatView) => onChange({ ...value, chatView })}
+                          labelledBy="chat-view-label"
+                          describedBy="chat-view-description"
+                        />
+                      </div>
+                    )}
+                    {hibernation && (
+                      <Select
+                        className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-36`}
+                        label="Stop idle agents after"
+                        items={idleChoices}
+                        // A saved wait the list doesn't have shows as it is, without being chosen.
+                        value={idleChoice(hibernation.minutes)}
+                        placeholder={`${hibernation.minutes} minutes`}
+                        onValueChange={(choice) =>
+                          hibernation.onChange(choice === "off" ? null : Number(choice))
+                        }
+                        open={open && shown === "general" && openSelect === "idle-agents"}
+                        onOpenChange={(expanded) => setOpenSelect(expanded ? "idle-agents" : null)}
+                        portalContainer={dialog}
+                      />
+                    )}
                   </div>
                 )}
               </Section>

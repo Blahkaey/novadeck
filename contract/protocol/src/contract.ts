@@ -387,7 +387,11 @@ export const contract = {
     // agent and ends when the terminal is closed; an unknown terminal is TERMINAL_NOT_FOUND.
     // Its own stream, apart from `detail`: it changes on every key, and costs a look at the
     // screen only while someone reads it.
-    slice: procedure.input(z.strictObject({ terminalId: id })).output(eventIterator(sliceChange)),
+    // With `screen`, each change carries the whole screen too (`sliceChange`), which costs a read
+    // of all its rows on each change: for a chat with nothing yet to show, that is all.
+    slice: procedure
+      .input(z.strictObject({ terminalId: id, screen: z.boolean().optional() }))
+      .output(eventIterator(sliceChange)),
     // Gives the terminal's agent a prompt as the person would: the text pasted into its own
     // input box as one bracketed paste, then Enter once the paste shows there, the person's
     // keys held meanwhile. A terminal without an agent bound, or one that takes no
@@ -525,7 +529,7 @@ export const contract = {
       .input(z.strictObject({ agent: agentName, connected: z.boolean() }))
       .output(agentIntegration),
   },
-  // Forges whose pull requests the Changes panel shows, through each one's own signed-in
+  // Forges whose pull requests the Worktrees panel shows, through each one's own signed-in
   // command-line tool (forges.ts): an Experimental feature.
   forges: {
     // Where each forge stands. With `fresh` the runner reads the person's login environment
@@ -555,7 +559,7 @@ export const contract = {
     // terminals. An availability found by checking files is only as of when the list was read.
     watch: procedure.input(z.void()).output(eventIterator(historyChange)),
   },
-  // Each tracked git worktree against its repository's main branch, for the Changes panel
+  // Each tracked git worktree against its repository's main branch, for the Worktrees panel
   // (works.ts). A work is keyed by its worktree's root.
   works: {
     // Every project's works: each `changed`, `synced`, then later changes (new lines, a
@@ -631,7 +635,7 @@ export const contract = {
       .output(changeFileDiff),
     // The person read a file of a changes item, by the name its content lists it under: the
     // item's content names it in `read` until the file changes again. Kept across restarts
-    // with the Changes panel's memory. A file the change as a whole does not list is not
+    // with the Worktrees panel's memory. A file the change as a whole does not list is not
     // marked. An unknown item, or one that is no change, is NOT_FOUND.
     changeRead: procedure
       .input(z.strictObject({ itemId: id, path: z.string().min(1).max(companionLimits.path) }))

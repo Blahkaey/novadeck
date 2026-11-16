@@ -953,6 +953,13 @@ one from an earlier runner.
   agent to agent, covers an agent shown at its prompt before a session binds (Antigravity
   and Codex bind at a first prompt), and ends when the terminal is closed; an unknown one is
   `TERMINAL_NOT_FOUND`.
+  Each change also says `rest`: whether the harness sits at its own idle (`readSlice`'s
+  `idle`): at rest, its input box empty, no request holding it, nothing else of its own
+  drawn (Claude Code's "Not logged in" footer is drawn: `SliceProfile.notice`). A dialog drawn where the box reader takes it for the box has text in it (as Codex's
+  question panel does), so it is no idle. The first snapshot comes with the first look, so
+  it always says; a look that read no screen says `rest: false`. With `screen: true` in the
+  call, each change carries the whole screen as a `view`-shaped slice too, which the chat
+  asks for only while it has nothing to show.
 - `agents.keys({ terminalId, keys })` writes keys to the terminal's agent as the person's, for
   what shows in `agents.slice`: a chat holds no control of the terminal, so `terminals.write`
   isn't its way in. They wait out what holds the terminal's input, as a prompt's paste, as the
@@ -1043,6 +1050,13 @@ one from an earlier runner.
   whether it is inside the conversation, never the line. The runner reads no further ahead than it has sent, but a remote client's own
   pace is not tracked: a large record on a slow link fills the socket's buffer like any
   other output.
+  Whenever the record has been read to its end for now and has given no item, the stream says
+  what it holds as `{ type: "read", found, lines, unread }`: whether its file is there, how
+  many lines it has, and how many of those gave no item and hold no shape the decoder knows
+  to read or skip (`unread`). It is what lets a client call a conversation empty: a record
+  that is read, with `unread` 0, or not there yet, is one; a `NOT_FOUND` or an `unread` over
+  0 is not known to be. The record alone doesn't make a chat empty: the client also needs `rest` from
+  `agents.slice` and no turn seen in `agents.detail`'s activity.
   An actor the terminal's session does not have, or without a transcript Novadeck reads,
   is `NOT_FOUND`; the stream ends when the terminal's agent leaves that session. The
   client's `agents.transcript(terminalId, actor)` resubscribes across reconnections,
@@ -1680,7 +1694,7 @@ one from an earlier runner.
     every 2 seconds while followed (less often after slow reads, keeping the last good
     content through a failed read or two), and `reveal` has no effect on it; a repository that is
     gone is `missing`, and a failing git `unreadable`. A checkout is read through a private
-    index: the person's own is never written. Its snapshot is shared with the Changes panel
+    index: the person's own is never written. Its snapshot is shared with the Worktrees panel
     (`works.watch`): one taken in the last 1.5 seconds serves both. A `shells` item is the
     `agent` and the `shells` its terminal's bound agent lists now, in the order it lists them, each
     with its `id`, `command`, `since`, `exit` and `output`: `ready` with the last 400 lines
@@ -1711,7 +1725,7 @@ one from an earlier runner.
     that may hold secrets is never hashed.
   - `companions.changeRead({ itemId, path })` marks a file of a changes item read, by the path
     its content lists it under: the item's content names it in `read` until the file changes
-    again, across restarts (the runner keeps it beside the Changes panel's memory). A file the
+    again, across restarts (the runner keeps it beside the Worktrees panel's memory). A file the
     change as a whole did not list when last read is not marked. An unknown item, or one that is
     no change, is `NOT_FOUND`.
   - `companions.save({ itemId, text, basedOn })` writes the person's edit to a plan kept in

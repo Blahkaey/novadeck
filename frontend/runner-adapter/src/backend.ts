@@ -59,6 +59,7 @@ import { createRunnerMessages } from "./agents/messages"
 import { createRunnerCompanions } from "./companions/content"
 import { createRunnerItems } from "./companions/items"
 import { answerLook, type Looks } from "./companions/looks"
+import { createRunnerFiles } from "./files"
 import { createRunnerHistory } from "./history"
 import { createSessionSaves } from "./sessions/saves"
 import {
@@ -72,7 +73,6 @@ import {
   terminalRuns,
   type RunnerListing,
 } from "./sessions/seed"
-import { createRunnerSource } from "./source"
 import { consume, reportCaught } from "./streams"
 import { runnerSwitches } from "./switches"
 import {
@@ -1410,7 +1410,7 @@ export const runnerBackend = (
   const conversations = createRunnerConversations(
     {
       detail: (terminalId) => runner.agents.detail(terminalId),
-      slice: (terminalId) => runner.agents.slice(terminalId),
+      slice: (terminalId, screen) => runner.agents.slice(terminalId, screen),
       transcript: (terminalId, actor) => runner.agents.transcript(terminalId, actor),
       transcriptImage: (terminalId, image) => runner.agents.transcriptImage(terminalId, image),
       prompt: (terminalId, text, given) => runner.agents.prompt(terminalId, text, given),
@@ -1478,7 +1478,7 @@ export const runnerBackend = (
   const murmur = createRunnerMurmur(runner.murmur, track)
   // History, followed the same way.
   const history = createRunnerHistory(runner.history, track)
-  // Works, read once at the start and followed while the Changes panel is watched.
+  // Works, read once at the start and followed while the Worktrees panel is watched.
   const works = createRunnerWorks(runner.works, track)
   let following = false
   // Follows a terminal's messages once the runner has it: it answers "not found" before
@@ -2027,7 +2027,7 @@ export const runnerBackend = (
           await untilAnswered(() => runner.projects.arrange(arrangement))
         }),
       ),
-    source: createRunnerSource(runner.projects),
+    files: createRunnerFiles(runner.projects),
     history: history.history,
     // Once the session it goes to exists on the runner, as one the person just made does
     // after a moment; the runner's `changed` then moves it here (`moveEntry`).

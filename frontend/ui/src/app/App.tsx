@@ -21,12 +21,12 @@ import { cancelTerminalTransition } from "../layouts/transition"
 import { elsewhereSessionsText } from "../projects/session-marks"
 import { useDesktop } from "../shell/desktop"
 import { HistoryDropNotice } from "../shell/HistoryDot"
-import { panelLabels } from "../shell/panels"
 import { sidebarVisible } from "../shell/shell-state"
 import { readSidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
 import { SidebarRail } from "../shell/SidebarRail"
 import { WorkspacePanels } from "../shell/WorkspacePanels"
 import { ZenDock } from "../shell/ZenDock"
+import { panelLabels } from "../sidebar/panel-labels"
 import { createTabListStore, TabListContext, type TabListStore } from "../terminals/tab-list"
 import { TeamWire } from "../terminals/TeamWire"
 import { DictationOverlay } from "../voice/DictationOverlay"
@@ -43,12 +43,12 @@ import { HeaderSection } from "./HeaderSection"
 import { dropWords } from "./history-drops"
 import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
-import { historyShown, sourceShown } from "./routing"
+import { historyShown, filesShown } from "./routing"
 import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
 import { TourProvider } from "./TourProvider"
-import { useChangesShown, useLeaveHiddenChanges } from "./use-changes-shown"
+import { useWorktreesShown, useLeaveHiddenWorktrees } from "./use-worktrees-shown"
 import { useInboxBadge } from "./useInboxBadge"
 import { useSessionMarks } from "./useSessionMarks"
 import { VisitorBar, VisitorCover } from "./Visitor"
@@ -278,8 +278,8 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   const voice = useDictationController(services)
   useKeyboard(voice?.dictation)
   const { backend } = services
-  const changesShown = useChangesShown()
-  useLeaveHiddenChanges(changesShown)
+  const worktreesShown = useWorktreesShown()
+  useLeaveHiddenWorktrees(worktreesShown)
   // The terminals' font follows Preferences.
   useEffect(() => {
     backend.setFont({ size: fontSize })
@@ -294,9 +294,9 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
       sidebarPanel={sidebarPanel}
       sidebarBack={shell.sidebarBack}
       zen={zen}
-      hasSource={sourceShown(services.backend)}
+      hasFiles={filesShown(services.backend)}
       hasHistory={historyShown(services.backend)}
-      hasChanges={changesShown}
+      hasWorktrees={worktreesShown}
       order={railOrder}
       onOrder={(order) => {
         setRailOrder(order)

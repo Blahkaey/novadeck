@@ -33,11 +33,11 @@ import { context, describe, expect, it } from "../test"
 const answerMs = 400
 const answeredMs = 500
 
-// Turns the chat view on or off in Preferences → Experimental, and closes Preferences.
+// Turns the chat view on or off in Preferences → General, and closes Preferences.
 const setChatView = async (on: boolean): Promise<void> => {
-  await openPreferencesOn("Experimental")
+  await openPreferencesOn("General")
   const dialog = preferencesDialog()
-  const chatView = dialog.getByRole("switch", { name: "Chat view" })
+  const chatView = dialog.getByRole("switch", { name: "Agent Chat" })
   await chatView.click()
   await expect.element(chatView).toHaveAttribute("aria-checked", String(on))
   await userEvent.keyboard("{Escape}")
@@ -60,15 +60,8 @@ describe("The chat view", () => {
     await expect.element(chatOf("Build")).not.toBeInTheDocument()
   })
 
-  it("shows no chat without Experimental, though it was turned on", async () => {
-    await openChatDemo("/", { experimental: false })
-    await terminalTab("Build").click()
-    await expect.element(commandInput("Build")).toBeVisible()
-    await expectStaysAbsent(chatOf("Build"))
-  })
-
-  it("goes back to the terminal's output once Experimental is turned off", async () => {
-    await openChatDemo()
+  it("stays once Experimental is turned off, as it isn't one of the experimental features", async () => {
+    await openChatDemo("/", { experimental: true })
     await openChat("Build")
     await openPreferencesOn("About")
     const dialog = preferencesDialog()
@@ -77,11 +70,12 @@ describe("The chat view", () => {
     await experimental.click()
     await expect.element(dialog.getByRole("tab", { name: "Experimental" })).not.toBeInTheDocument()
     await userEvent.keyboard("{Escape}")
-    await expect.element(chatOf("Build")).not.toBeInTheDocument()
-    await expect.poll(() => terminalText("Build")).toContain("Added the order summary")
+    await expect.element(dialog).not.toBeInTheDocument()
+    await expectStaysAbsent(commandInput("Build"))
+    await expect.element(chatOf("Build")).toBeVisible()
   })
 
-  it("turns on from Preferences → Experimental, and off again back to the terminal's output", async () => {
+  it("turns on from Preferences → General, and off again back to the terminal's output", async () => {
     await openChatDemo("/", { chatView: false })
     await terminalTab("Build").click()
     await setChatView(true)
@@ -515,9 +509,7 @@ describe("Focus coming back to the chat's box", () => {
 describe("A chat beside what its agent showed", () => {
   it("takes focus back into its box once a click on the taskbar opens a pane", async () => {
     localStorage.setItem("novadeck.preferences", JSON.stringify({ chatView: true }))
-    await openWorkspace(
-      "/projects/studio/sessions/initial/focus?demo=showcase&channel=experimental",
-    )
+    await openWorkspace("/projects/studio/sessions/initial/focus?demo=showcase")
     const chat = await openChat("Build Studio")
     await taskbarIcon("Build Studio", "Plan: A home for Studio").click()
     await expect.element(companionPane("Build Studio")).toBeVisible()
@@ -609,18 +601,21 @@ describe("A request that waits on the person", () => {
         .not.toBeInTheDocument()
     })
 
-    it("takes the keys of a terminal's menu, and leaves the box's words alone", async () => {
+    it("takes the keyboard before the box, as a terminal's menu takes the keys", async () => {
       await openChatDemo()
       const chat = await openChat("Checkout review")
       const card = requestCard(chat, /^Needs your permission/)
-      await expect.element(composer(chat)).toHaveFocus()
+      await expect.element(card.getByRole("button", { name: "Yes, proceed" })).toHaveFocus()
+      await userEvent.keyboard("{ArrowDown}")
+      const always = card.getByRole("button", { name: /^Yes, and don't ask again/ })
+      await expect.element(always).toHaveFocus()
+      // Once it has had the keyboard, the box takes the person's words, and leaves the card be.
+      await composer(chat).click()
       await userEvent.keyboard("hello")
       await expect.element(composer(chat)).toHaveValue("hello")
-      card.getByRole("button", { name: "Yes, proceed" }).element().focus()
-      await userEvent.keyboard("{ArrowDown}")
-      await expect
-        .element(card.getByRole("button", { name: /^Yes, and don't ask again/ }))
-        .toHaveFocus()
+      // A click anywhere on the card brings the keyboard back to the row the person is on.
+      await card.getByRole("heading").click()
+      await expect.element(always).toHaveFocus()
     })
   })
 
@@ -759,6 +754,9 @@ describe("A request that waits on the person", () => {
       const card = requestCard(chat, /^Has a question: ask_question/)
       const unit = card.getByRole("checkbox", { name: "Unit tests" })
       unit.element().focus()
+      // The card took the keyboard as the chat opened, holding its answering keys a moment, so
+      // nothing typed on into it answers.
+      await new Promise((resolve) => setTimeout(resolve, 450))
       await userEvent.keyboard(" ")
       await expect.element(unit).toBeChecked()
       await userEvent.keyboard("{ArrowDown}")
@@ -782,7 +780,9 @@ describe("A request that waits on the person", () => {
       await userEvent.keyboard("{Enter}")
       await expect.element(card.getByRole("button", { name: "Submit answers" })).toHaveFocus()
       await userEvent.keyboard("{Enter}")
-      await expect.element(composer(chat)).toHaveFocus()
+      // The keyboard goes on to the agent's form, which never had it, before the box.
+      const form = requestCard(chat, /^Has a question: mcp_deploy/)
+      await expect.element(form.getByRole("textbox", { name: /^Target name/ })).toHaveFocus()
       await expect.element(card).not.toBeInTheDocument()
       await expect
         .element(chat.getByText("Noted: Unit tests; The README", { exact: false }), {

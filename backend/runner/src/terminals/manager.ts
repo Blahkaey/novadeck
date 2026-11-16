@@ -1412,7 +1412,7 @@ export class Terminals {
     return this.companion.place(terminalId)
   }
 
-  /** The git checkout each open terminal works in now, for the Changes panel. */
+  /** The git checkout each open terminal works in now, for the Worktrees panel. */
   checkouts(): Promise<Checkout[]> {
     return this.companion.checkouts(this.list())
   }
@@ -1516,9 +1516,9 @@ export class Terminals {
   }
 
   /** The terminal's live slice, then another on each change (see `slices.ts`). */
-  async *slice(terminalId: string, signal?: AbortSignal): AsyncGenerator<SliceChange> {
+  async *slice(id: string, signal?: AbortSignal, screen?: boolean): AsyncGenerator<SliceChange> {
     if (this.stopping) throw new DomainError("CLOSING")
-    yield* this.streams.watchSlice(this.record(terminalId).summary.id, signal)
+    yield* this.streams.watchSlice(this.record(id).summary.id, signal, screen)
   }
 
   /** The terminals whose shell holds work a restart would end, read now (see `busyTerminals`). */

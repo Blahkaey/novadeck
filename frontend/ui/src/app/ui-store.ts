@@ -45,12 +45,12 @@ export type UiState = {
   // The terminal created last, highlighted briefly in its session.
   readonly created: { readonly context: string; readonly id: string } | null
   // The file each session's project window shows as a preview of what the agents' work merges to
-  // (the Source tree and the Changes panel open files so), by session context; a session
+  // (the Files tree and the Worktrees panel open files so), by session context; a session
   // without one shows the file as it is in main. Never persisted.
   readonly filePreviews: Readonly<Record<string, FilePreviewRequest>>
-  // The agents the Source panel lights while it shows, by handle: the kept ones, else the
+  // The agents the Files panel lights while it shows, by handle: the kept ones, else the
   // selected terminal's: what the file preview emphasizes. Never persisted.
-  readonly sourceLit: ReadonlySet<string>
+  readonly filesLit: ReadonlySet<string>
   // A close waiting for the person to confirm it, since a program runs in the terminal.
   readonly closing: { readonly context: string; readonly id: string } | null
   // A terminal on its way to another session while the person picks where (`move-state.ts`).
@@ -170,7 +170,7 @@ export const initialUi = ({
   recent: { switcher: null, byContext: {} },
   created: null,
   filePreviews: {},
-  sourceLit: noLit,
+  filesLit: noLit,
   closing: null,
   moving: null,
   moveAsk: null,
@@ -353,10 +353,9 @@ export const watchUpdates = (updates: Backend["updates"], ui: UiStore): (() => v
     }))
   }) ?? (() => {})
 
-// Whether terminals show their agents' chat: the person turned the chat view on, and it is
-// one of the experimental features, so it shows only while IS_EXPERIMENTAL is on.
-export const chatViewOn = (state: Pick<UiState, "preferences" | "flags">): boolean =>
-  state.flags.IS_EXPERIMENTAL && state.preferences.chatView
+// Whether terminals show their agents' chat: the person turned the chat view on.
+export const chatViewOn = (state: Pick<UiState, "preferences">): boolean =>
+  state.preferences.chatView
 
 // Whether tabs and window headers show terminals' critters: the person turned Agent avatars
 // on, one of the experimental features, so they show only while IS_EXPERIMENTAL is on.

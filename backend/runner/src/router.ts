@@ -116,7 +116,7 @@ export const createRouter = (options: {
   items: CompanionItems
   /** Closed terminals; without it History is empty. */
   history?: History
-  /** Each terminal's work against main; without it the Changes panel is empty. */
+  /** Each terminal's work against main; without it the Worktrees panel is empty. */
   works?: Works
   agents: Harnesses
   /** The forges pull requests come from; without it none is offered. */
@@ -251,7 +251,7 @@ export const createRouter = (options: {
         terminals.detail(input.terminalId, signal),
       ),
       slice: api.agents.slice.handler(({ input, signal }) =>
-        terminals.slice(input.terminalId, signal),
+        terminals.slice(input.terminalId, signal, input.screen),
       ),
       transcript: api.agents.transcript.handler(({ input, signal }) =>
         terminals.transcript(input.terminalId, input.actor, signal),

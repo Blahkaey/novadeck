@@ -4,6 +4,7 @@ import {
   noDoorbell,
   type ChatAnswer,
   type ChatItem,
+  type ChatRequest,
   type BoxReturn,
   type ChatPrompt,
   type Conversation,
@@ -19,6 +20,7 @@ import { afterEach, vi } from "vitest"
 
 import { ChatView } from "./ChatView"
 import { createChatCommands } from "./commands"
+import { forgetClaimed } from "./Requests"
 import {
   chatAttachmentsOf,
   chatDraftOf,
@@ -31,7 +33,10 @@ import { describe, expect, it } from "./test"
 import { useChat } from "./use-chat"
 
 const unmounts: (() => void)[] = []
-afterEach(() => unmounts.splice(0).forEach((unmount) => unmount()))
+afterEach(() => {
+  unmounts.splice(0).forEach((unmount) => unmount())
+  forgetClaimed()
+})
 
 const key = { projectId: "project", workspaceSessionId: "initial", terminalId: "01" }
 const context = "project/initial"
@@ -53,7 +58,10 @@ const inApp = (
     takeBox,
     refuse = [],
     personFace,
+    terminal = () => {},
   }: {
+    // Called as the person asks for the terminal.
+    readonly terminal?: () => void
     // The person's face, as the app gives it.
     readonly personFace?: React.ReactNode
     readonly draft?: string
@@ -107,7 +115,14 @@ const inApp = (
     context: () => context,
   })
   commands.setChatDraft("01", draft)
-  const App = ({ mounted }: { readonly mounted: boolean }): React.JSX.Element | null => {
+  const App = ({
+    mounted,
+    focusInput = false,
+  }: {
+    readonly mounted: boolean
+    // The workspace asks for the keyboard to come to the chat.
+    readonly focusInput?: boolean
+  }): React.JSX.Element | null => {
     const state = useChat(chat, (each) => each)
     return mounted
       ? createElement(ChatView, {
@@ -133,8 +148,8 @@ const inApp = (
           onClearBox: async () => {},
           onAnswer: (request, reply) => conversations.answer(key, request, reply),
           onWordsLost: (words) => commands.appendChatDraft(context, "01", words),
-          onAnswerInTerminal: () => {},
-          focusInput: false,
+          onAnswerInTerminal: terminal,
+          focusInput,
           onInputFocused: () => {},
           refused: conversations.refused,
           ...(onKeys && { onKeys }),
@@ -151,7 +166,13 @@ const inApp = (
     sentAt,
     setAside,
     answered,
-    show: (mounted: boolean) => rerender(createElement(App, { mounted })),
+    show: (mounted: boolean, focusInput = false) =>
+      rerender(createElement(App, { mounted, focusInput })),
+    // The workspace asks for the keyboard once, as selecting the terminal by keys does.
+    wantFocus: () => {
+      rerender(createElement(App, { mounted: true, focusInput: true }))
+      rerender(createElement(App, { mounted: true, focusInput: false }))
+    },
     draft: () => chatDraftOf(chat.store.getSnapshot().drafts, context, "01"),
     attachments: () => chatAttachmentsOf(chat.store.getSnapshot().attachments, context, "01"),
     replyTo: () => chatReplyOf(chat.store.getSnapshot().replies, context, "01"),
@@ -295,6 +316,165 @@ describe("a chat whose answer's words didn't reach the agent", () => {
     await act(async () => failures[1]!(new WordsLost()))
     await act(async () => sends[0]!())
     expect(container.querySelector(".chat-lost")).not.toBeNull()
+  })
+})
+
+describe("a chat with nothing to show", () => {
+  // What the runner says of a new session: its record read to its end with nothing in it, no
+  // turn, the agent at its idle box.
+  const fresh: Conversation = {
+    ...noConversation,
+    agent: "claude",
+    session: "s",
+    loaded: true,
+    records: { state: "read", lines: 0, unread: 0 },
+    rest: true,
+  }
+  const rows = (...lines: string[]) => ({
+    reason: "view" as const,
+    columns: 40,
+    rows: lines.map((text) => [
+      {
+        text,
+        width: 40,
+        fg: null,
+        bg: null,
+        bold: false,
+        dim: false,
+        italic: false,
+        underline: false,
+        inverse: false,
+      },
+    ]),
+    cursor: null,
+    secret: false,
+  })
+  const shows = (given: Partial<Conversation>, terminal = () => {}) => {
+    const { container } = inApp(createStore({ ...fresh, ...given }), { terminal })
+    return {
+      container,
+      words: container.querySelector(".chat-empty")?.textContent ?? "",
+      screen: container.querySelector(".chat-live[data-inline]"),
+    }
+  }
+
+  it("says so plainly once the runner proved the conversation empty", () => {
+    const { words, screen } = shows({})
+    expect(words).toBe("Nothing said yet. Send a prompt below.")
+    expect(screen).toBeNull()
+  })
+
+  it("says it loads while the record is being read, and while the screen is not looked at", () => {
+    expect(shows({ loaded: false, records: { state: "reading" } }).words).toBe(
+      "Loading the conversation…",
+    )
+    expect(shows({ rest: null }).words).toBe("Loading the conversation…")
+  })
+
+  it("takes a record not there yet for an empty conversation", () => {
+    expect(shows({ records: { state: "absent" } }).words).toBe(
+      "Nothing said yet. Send a prompt below.",
+    )
+  })
+
+  it("says the conversation isn't showing, with the agent's screen and the terminal, where it can't tell", () => {
+    const asked = vi.fn<() => void>()
+    const { container, words, screen } = shows(
+      { records: { state: "lost" }, screen: rows("Welcome", "> ") },
+      asked,
+    )
+    expect(words).toContain("The conversation isn't showing here")
+    expect(words).toContain("can't find or read")
+    expect(screen?.textContent).toContain("Welcome")
+    expect(screen?.getAttribute("aria-label")).toBe("Claude's own screen")
+    press(container, "terminal")
+    expect(asked).toHaveBeenCalledTimes(1)
+  })
+
+  it("draws the screen once where its rows show as a view of their own, the copy that takes keys", () => {
+    const view = rows("Trust this folder?", "1. Yes")
+    const { container, words } = shows({ rest: false, screen: view, slice: view })
+    expect(words).toContain("Its rows are below.")
+    expect(container.querySelectorAll(".chat-slice")).toHaveLength(1)
+    expect(container.querySelector(".chat-live[data-inline]")).toBeNull()
+    expect(container.querySelector(".chat-live")?.textContent).toContain("Trust this folder?")
+  })
+
+  it("offers the terminal as a button the person can read", () => {
+    const { container } = shows({ records: { state: "lost" } })
+    expect(button(container, "Show terminal").className).toContain("button")
+  })
+
+  it("says why, by what the runner read", () => {
+    expect(shows({ records: { state: "read", lines: 5, unread: 5 } }).words).toContain(
+      "records Novadeck couldn't read",
+    )
+    expect(shows({ turned: true }).words).toContain("has worked in this session")
+    expect(shows({ rest: false, screen: rows("Update available") }).words).toContain(
+      "something of Claude's own may be on its screen",
+    )
+  })
+
+  it("shows the screen too before a session binds, where the agent is not at its idle box", () => {
+    const unbound = {
+      agent: null,
+      session: null,
+      loaded: false,
+      records: { state: "reading" },
+    } as const
+    expect(shows({ ...unbound, rest: true }).words).toBe(
+      "No conversation yet. It shows here once Claude starts its session.",
+    )
+    const { words, screen } = shows({ ...unbound, rest: false, screen: rows("Update available") })
+    expect(words).toContain("something of Claude's own may be on its screen")
+    expect(screen?.textContent).toContain("Update available")
+  })
+
+  it("leaves the keys where they are as the screen shows, and passes them once it is clicked", () => {
+    const keys: string[] = []
+    const { container } = inApp(
+      createStore({ ...fresh, rest: false, screen: rows("Trust this folder?", "1. Yes") }),
+      {
+        onKeys: async (written) => {
+          keys.push(written)
+        },
+      },
+    )
+    const screen = container.querySelector<HTMLElement>(".chat-live[data-inline] .chat-slice")!
+    expect(document.activeElement).not.toBe(screen)
+    act(() => {
+      screen.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+    })
+    expect(keys).toEqual(["\r"])
+  })
+
+  it("shows no verdict once there is something said", () => {
+    const { container } = inApp(
+      createStore({
+        ...fresh,
+        records: { state: "lost" },
+        items: [
+          {
+            id: "s:0",
+            at: 1,
+            role: "assistant",
+            kind: "text",
+            text: "Hello",
+            truncated: false,
+            tool: null,
+            call: null,
+            author: null,
+            run: null,
+            outcome: null,
+            scripted: false,
+            interrupted: false,
+            ring: null,
+          },
+        ],
+      }),
+    )
+    expect(container.querySelector(".chat-empty")).toBeNull()
+    expect(container.querySelector(".chat-unproven")).toBeNull()
   })
 })
 
@@ -1955,5 +2135,75 @@ describe("a chat with images pasted into its box", () => {
     expect(chat.sent).toHaveBeenCalledWith("!ls")
     expect(chat.sentImages).toEqual([undefined])
     expect(chips(container)).toEqual([])
+  })
+})
+
+describe("a request's card and the chat's box", () => {
+  const yesNo = (id: string, dialog = "d1"): ChatRequest => ({
+    ...asking.requests[0]!,
+    id,
+    dialog: {
+      type: "choices",
+      id: dialog,
+      title: null,
+      detail: null,
+      options: [
+        { id: "1", label: `Yes ${id}`, text: null },
+        { id: "2", label: "No", text: null },
+      ],
+    },
+  })
+  const arrive = (
+    store: ReturnType<typeof createStore<Conversation>>,
+    ...requests: ChatRequest[]
+  ): void =>
+    act(() => {
+      store.update((current) => ({ ...current, requests }))
+    })
+  const turn = (): Promise<void> => act(() => new Promise<void>((resolve) => setTimeout(resolve)))
+
+  it("takes the keyboard from the empty box as it first shows, and the box has it after", async () => {
+    const store = createStore<Conversation>({ ...asking, requests: [] })
+    const chat = inApp(store)
+    box(chat.container).focus()
+    arrive(store, yesNo("r1"))
+    expect(document.activeElement).toBe(button(chat.container, "Yes r1"))
+    await turn()
+    box(chat.container).focus()
+    chat.wantFocus()
+    expect(document.activeElement).toBe(box(chat.container))
+  })
+
+  it("leaves the person writing in the box, and comes first as the keyboard next comes", () => {
+    const store = createStore<Conversation>({ ...asking, requests: [] })
+    const chat = inApp(store)
+    set(box(chat.container), "half a thought")
+    box(chat.container).focus()
+    arrive(store, yesNo("r1"))
+    expect(document.activeElement).toBe(box(chat.container))
+    chat.wantFocus()
+    expect(document.activeElement).toBe(button(chat.container, "Yes r1"))
+  })
+
+  it("takes the keyboard over the box as the chat comes on screen with it", () => {
+    const store = createStore<Conversation>({ ...asking, requests: [yesNo("r1")] })
+    const chat = inApp(store)
+    chat.show(false)
+    forgetClaimed()
+    chat.show(true, true)
+    expect(document.activeElement).toBe(button(chat.container, "Yes r1"))
+  })
+
+  it("hands the keyboard on to the next card that never had it as one is answered", async () => {
+    const store = createStore<Conversation>({ ...asking, requests: [] })
+    const chat = inApp(store, { answer: () => new Promise<void>(() => {}) })
+    arrive(store, yesNo("r1"))
+    arrive(store, yesNo("r1"), yesNo("r2", "d2"))
+    // The person is on the first: the second waits.
+    expect(document.activeElement).toBe(button(chat.container, "Yes r1"))
+    press(chat.container, "Yes r1")
+    expect(chat.answered).toHaveBeenCalledWith("r1", { type: "choice", dialog: "d1", option: "1" })
+    expect(document.activeElement).toBe(button(chat.container, "Yes r2"))
+    await turn()
   })
 })

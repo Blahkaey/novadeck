@@ -1,5 +1,5 @@
 import { render, type Rendered } from "@novadeck/test-kit/render"
-import { createElement, type ComponentProps } from "react"
+import { act, createElement, type ComponentProps } from "react"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { describe, expect, it } from "../test"
@@ -62,5 +62,87 @@ describe("an agent that is not installed, in the welcome dialog", () => {
     expect(install()).toBeNull()
     expect(checkbox("agy")?.disabled).toBe(true)
     expect(checkbox("claude")?.disabled).toBe(false)
+  })
+})
+
+describe("the chat view, in the welcome dialog", () => {
+  const chatView = (): HTMLInputElement | null =>
+    document.querySelector('input[type="checkbox"][name="chat-view"]')
+  const button = (text: string): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll("button")].find((each) => each.textContent?.includes(text))
+
+  it("isn't offered where the backend reads no conversations", () => {
+    show({})
+    expect(chatView()).toBeNull()
+  })
+
+  it("starts chosen, and turns the chat view on as the person starts", () => {
+    const changes: boolean[] = []
+    show({ chatView: { enabled: false, onChange: (on) => changes.push(on) } })
+    expect(chatView()?.checked).toBe(true)
+    button("Let’s build something")!.click()
+    expect(changes).toEqual([true])
+  })
+
+  it("leaves it off when the person unchecks it", () => {
+    const changes: boolean[] = []
+    show({ chatView: { enabled: false, onChange: (on) => changes.push(on) } })
+    chatView()!.click()
+    expect(chatView()?.checked).toBe(false)
+    button("Let’s build something")!.click()
+    expect(changes).toEqual([])
+  })
+
+  it("changes nothing when the person skips", () => {
+    const changes: boolean[] = []
+    show({ chatView: { enabled: false, onChange: (on) => changes.push(on) } })
+    button("Skip for now")!.click()
+    expect(changes).toEqual([])
+  })
+})
+
+describe("the chat view's preview, in the welcome dialog", () => {
+  const spotlit = (): boolean =>
+    document.querySelector(".welcome-stage")?.getAttribute("data-spotlight") === "chat"
+  const card = (): HTMLElement =>
+    document.querySelector('input[name="chat-view"]')!.closest<HTMLElement>(".choice-card")!
+
+  it("shows the agents as a chat while the choice is checked, and terminals once it isn't", () => {
+    show({ chatView: { enabled: false, onChange: () => {} } })
+    expect(document.querySelector(".welcome-chat")).not.toBeNull()
+    act(() => document.querySelector<HTMLInputElement>('input[name="chat-view"]')!.click())
+    expect(document.querySelector(".welcome-chat")).toBeNull()
+  })
+
+  it("marks what the choice changes while it has focus, though the pointer leaves it", () => {
+    show({ chatView: { enabled: false, onChange: () => {} } })
+    expect(spotlit()).toBe(false)
+    act(() => card().dispatchEvent(new PointerEvent("pointerover", { bubbles: true })))
+    act(() => document.querySelector<HTMLInputElement>('input[name="chat-view"]')!.focus())
+    expect(spotlit()).toBe(true)
+    act(() => card().dispatchEvent(new PointerEvent("pointerout", { bubbles: true })))
+    expect(spotlit()).toBe(true)
+    act(() => document.querySelector<HTMLInputElement>('input[name="chat-view"]')!.blur())
+    expect(spotlit()).toBe(false)
+  })
+})
+
+describe("the scheme, in the welcome dialog", () => {
+  const scheme = (label: string): HTMLInputElement | null =>
+    document.querySelector(
+      `[role="radiogroup"][aria-label="Appearance"] input[aria-label="${label}"]`,
+    )
+
+  it("isn't offered where the theme comes in one scheme", () => {
+    show({})
+    expect(document.querySelector('[role="radiogroup"][aria-label="Appearance"]')).toBeNull()
+  })
+
+  // Picking one, and its applying at once, is the welcome spec's: the group answers pointer
+  // events, which jsdom doesn't send.
+  it("shows the chosen scheme where the theme comes in more than one", () => {
+    show({ scheme: { value: "dark", onChange: () => {} } })
+    expect(scheme("Dark")?.checked).toBe(true)
+    expect(scheme("System")?.checked).toBe(false)
   })
 })
