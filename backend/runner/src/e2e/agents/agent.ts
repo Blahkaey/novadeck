@@ -19,6 +19,11 @@ export type Seed = {
    * alone and not those inside it (Antigravity's `trustedWorkspaces`).
    */
   readonly trustedInside?: readonly string[]
+  /**
+   * Folders of the sandbox's home, relative to it, trusted too (the tour's `.novadeck/tour`),
+   * for a harness that asks for any folder it doesn't know; those that never ask ignore it.
+   */
+  readonly trustedInHome?: readonly string[]
   /** False: Novadeck's hooks are not trusted (Codex's "Hooks need review"), so they don't run. */
   readonly hooksTrusted?: boolean
   /**

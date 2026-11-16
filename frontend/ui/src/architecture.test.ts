@@ -39,6 +39,7 @@ const features = [
   "projects/",
   "search/",
   "sidebar/",
+  "tour/",
   "voice/",
 ]
 // The chat's parts a feature draws as the chat does, each named: the Inbox's sheet draws an

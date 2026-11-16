@@ -1,0 +1,10 @@
+/* The tour's consent: what running the tour spends, a line each, with its icon. */
+.tour-fact-icon {
+  color: var(--color-muted);
+}
+.tour-error {
+  color: var(--color-danger-fg);
+}
+.tour-facts {
+  list-style: none;
+}

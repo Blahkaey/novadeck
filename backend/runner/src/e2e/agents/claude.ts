@@ -248,7 +248,14 @@ export const claude: AgentSetup = {
         }),
         // Keyed by the project's path, which on Windows it writes with forward slashes.
         projects: Object.fromEntries(
-          [...new Set([sandbox.project, sandbox.project.replaceAll("\\", "/")])].map((path) => [
+          [
+            ...new Set(
+              [
+                sandbox.project,
+                ...(seed.trustedInHome ?? []).map((one) => join(sandbox.home, one)),
+              ].flatMap((path) => [path, path.replaceAll("\\", "/")]),
+            ),
+          ].map((path) => [
             path,
             {
               hasTrustDialogAccepted: seed.folderTrusted ?? true,

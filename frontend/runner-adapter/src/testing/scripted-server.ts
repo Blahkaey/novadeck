@@ -349,6 +349,10 @@ export const scriptedRunner = ({
       set: api.murmur.set.handler(unplayed("murmur.set")),
       noteOffered: api.murmur.noteOffered.handler(unplayed("murmur.noteOffered")),
     },
+    tour: {
+      prepare: api.tour.prepare.handler(unplayed("tour.prepare")),
+      brief: api.tour.brief.handler(unplayed("tour.brief")),
+    },
     settings: {
       get: api.settings.get.handler(() => ({
         transcripts: true,

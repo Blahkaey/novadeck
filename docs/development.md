@@ -606,6 +606,16 @@ App:
   "Finish held install"; "Fail next install" ends the next in a network error in its terminal and
   leaves the agent not installed (nothing starts). The address does the same for a spec:
   `&agentInstall=held` holds the first install, `&agentInstall=fails` fails it.
+- **Tour:** held back from everyone until its story is whole (`Tour.offered`; the runner's
+  adapter never offers it). "Offer the tour" takes the hold off, so the welcome dialog's "Take
+  the tour" and Preferences' About offer it, and opens its consent as the macOS Help menu will,
+  on the first connected agent (with a choice where several are); Start the tour opens a "Tour"
+  project with one terminal starting that agent on its cheapest model. "Hold the tour back"
+  hides it again. "Fail next start" makes the next Start the tour fail as a folder of the
+  person's own at `~/.novadeck/tour` does, the consent staying open with why; "Next start:
+  models unlisted" fails it as Codex not signed in yet does, with a Start button that opens the
+  agent in a terminal. A spec asks with the address: `&tour=on` offers it, `&tourStart=fails`
+  and `&tourStart=unlisted` fail the first start.
 - **Boot failures:** each fails the first attempt as the runner would, so a transient one
   retries on its own and the others wait for Retry (an incompatible runner, or a workspace
   a newer Novadeck has used, only for Quit). Each hint carries the error code, so the search

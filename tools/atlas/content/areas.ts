@@ -113,6 +113,11 @@ export const notes: Record<string, Note> = {
       "The forges the person switched on (Experimental): each tracked repository's branches asked of GitHub, GitLab or Azure DevOps for their pull requests, with a token from the forge's own signed-in command-line tool, kept in memory for the works; and where each forge's tool and hosts stand, for Preferences.",
     entries: [{ file: `${runner}/forges/service.ts`, text: "export class Forges" }],
   },
+  "backend/runner/tour": {
+    purpose:
+      "Novadeck's tour on the runner's side: its folder, ~/.novadeck/tour, emptied and briefed for each run (and never one of the person's own), the projects open there removed first, and the launch line that starts the person's agent there on its cheapest model, taking edits; and the start line rung by the doorbell where a harness takes none on its launch line.",
+    entries: [{ file: `${runner}/tour/tour.ts`, text: "export class Tour" }],
+  },
   "backend/runner/works": {
     purpose:
       "Each open terminal's work against its repository's main branch for the Changes panel: a snapshot of its checkout merged in memory into main, the lines changed per file and the part unread since the person's last look, conflicts with main and with other terminals' works, kept current while a client watches; and the files of a change the person read, kept across restarts.",
@@ -334,6 +339,11 @@ export const notes: Record<string, Note> = {
     purpose: "Preferences, the welcome dialog and the voice and murmur add-ons.",
   },
   "frontend/ui/search": { purpose: "Finding a terminal." },
+  "frontend/ui/tour": {
+    purpose:
+      "The tour: its consent, and starting a run, which opens the tour's folder as a project of its own with one terminal starting the person's agent.",
+    entries: [{ file: `${ui}/tour/start.ts` }],
+  },
   "frontend/ui/inbox": {
     purpose:
       "The Inbox: what agents ask of the person, as sidebar rows and the sheet that answers.",

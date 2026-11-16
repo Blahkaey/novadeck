@@ -25,6 +25,7 @@ import type { Feedback } from "./messaging/feedback.js"
 import type { Murmur } from "./murmur/service.js"
 import type { Terminals } from "./terminals/index.js"
 import type { Uploads } from "./terminals/uploads.js"
+import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
 import { listFolder } from "./workspaces/folder.js"
@@ -93,6 +94,13 @@ const noWorks = {
   preview: () => Promise.resolve({ main: null, works: [], renames: [] }),
 }
 
+const noTour: Pick<Tour, "prepare" | "brief"> = {
+  prepare: () => Promise.reject(new DomainError("CONFLICT", "No tour is offered.")),
+  brief: () => {
+    throw new DomainError("CONFLICT", "No tour is offered.")
+  },
+}
+
 /**
  * The runner's procedures. Its sessions serve them (`createSessions`): only to authenticated
  * sessions, and mapping their failures with `apiError`.
@@ -119,11 +127,14 @@ export const createRouter = (options: {
   closing: () => boolean
   /** The runner settings were saved. */
   settingsSaved?: () => void
+  /** Novadeck's tour; without it, starting one is a CONFLICT. */
+  tour?: Tour
 }) => {
   const { store, terminals, feedback, projects, items, agents, uploads, voice, murmur } = options
   const history = options.history ?? noHistory
   const works = options.works ?? noWorks
   const forges = options.forges ?? noForges
+  const tour: Pick<Tour, "prepare" | "brief"> = options.tour ?? noTour
   // A plan's content says whether Novadeck's plugin is installed into its agent, which the
   // companions can't know: it is looked up as the content leaves.
   const withSkill = async (content: ItemContent, agent: AgentName | undefined) =>
@@ -419,6 +430,10 @@ export const createRouter = (options: {
         options.settingsSaved?.()
         if (input.transcripts !== undefined) terminals.keepTranscripts(input.transcripts)
       }),
+    },
+    tour: {
+      prepare: api.tour.prepare.handler(({ input }) => tour.prepare(input.agent)),
+      brief: api.tour.brief.handler(({ input }) => tour.brief(input.terminalId)),
     },
   })
 }

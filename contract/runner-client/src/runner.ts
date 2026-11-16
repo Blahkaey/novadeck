@@ -33,6 +33,7 @@ import {
   type RequestAnswer,
   type RunnerSettings,
   type RunnerSettingsState,
+  type TourPrepared,
   type SliceChange,
   type TerminalChange,
   type TerminalMessages,
@@ -722,6 +723,13 @@ export type Runner = {
     /** Changes the settings given; the others stay. */
     set(settings: Partial<RunnerSettings>): Promise<void>
   }
+  /** Novadeck's tour, a live run of the person's own agent in a folder of Novadeck's. */
+  readonly tour: {
+    /** Readies a run with `agent` (`tour.prepare`): its folder emptied and briefed, its launch line. */
+    prepare(agent: AgentName): Promise<TourPrepared>
+    /** Rings the tour's start line to the agent in the terminal (`tour.brief`). */
+    brief(terminalId: string): Promise<void>
+  }
   /** Disconnects. Attached terminals finish; their shells keep running on the runner. */
   close(): Promise<void>
 }
@@ -978,6 +986,10 @@ export const connectRunner = async (
     settings: {
       get: () => call((client) => client.settings.get()),
       set: (settings) => call((client) => client.settings.set(settings)),
+    },
+    tour: {
+      prepare: (agent) => call((client) => client.tour.prepare({ agent })),
+      brief: (terminalId) => call((client) => client.tour.brief({ terminalId })),
     },
     close: () => Promise.resolve(connection.close()),
   }

@@ -16,6 +16,7 @@ import {
   badgeChannel,
   noticeChannel,
   noticeClickChannel,
+  tourAskChannel,
   notificationsQuietChannel,
   noticeCloseChannel,
   dismissWhatsNewChannel,
@@ -397,6 +398,19 @@ describe("a notice about a terminal", () => {
     stop()
     electron.renderer.emit(noticeClickChannel, {}, "03")
     expect(clicks).toEqual(["01"])
+  })
+})
+
+describe("the Help menu's tour", () => {
+  it("comes to the page as an ask with nothing in it, until the page stops", () => {
+    let asks = 0
+    const stop = electron.exposed.onTourAsked!(() => {
+      asks += 1
+    })
+    electron.renderer.emit(tourAskChannel, {}, "anything")
+    stop()
+    electron.renderer.emit(tourAskChannel, {})
+    expect(asks).toBe(1)
   })
 })
 

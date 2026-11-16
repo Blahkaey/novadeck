@@ -22,6 +22,7 @@ import { installShellFiles } from "./shell/install.js"
 import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
 import { Uploads } from "./terminals/uploads.js"
+import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
 import { Projects } from "./workspaces/projects.js"
@@ -359,6 +360,16 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     ...options.terminals,
   })
   const projects = new Projects(store, terminals, items, worktrees)
+  // In the person's home, where the agents are looked for too.
+  const tour = new Tour({
+    ...(options.agents?.home !== undefined && { home: options.agents.home }),
+    connected: (agent) => agents.connected(agent),
+    models: (agent) => agents.models(agent),
+    install: (agent) => agents.install(agent),
+    // Every project, those being removed too, whose removal the tour waits for.
+    projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
+    notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
+  })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees
     .reconcile()
@@ -456,6 +467,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     murmur,
     sealer,
     rootFolder,
+    tour,
   }
 }
 
@@ -531,6 +543,7 @@ const startRunner = (options: RunnerOptions): Runner => {
     murmur,
     sealer,
     rootFolder,
+    tour,
   } = wire(options)
   let closing: Promise<void> | undefined
   return {
@@ -552,6 +565,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         transcriptsAvailable: () => transcriptsAvailable(sealer),
         closing: () => closing !== undefined,
         settingsSaved: () => rootFolder.ensure(),
+        tour,
       }),
       error: apiError,
       failed: logFailure,

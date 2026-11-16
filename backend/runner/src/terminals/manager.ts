@@ -254,7 +254,7 @@ export class Terminals {
   /** Saves terminals for restoring, and reads them back. */
   private readonly saves: Saves
   /** Agents' messages to each other, and how each terminal's agent takes them. */
-  private readonly messaging: Messaging
+  readonly messaging: Messaging
   private readonly inbox: Inbox
   /** Agents' feedback drafts, held in memory for the app's feedback card. */
   readonly feedback: Feedback

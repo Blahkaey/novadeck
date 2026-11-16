@@ -27,6 +27,8 @@
     "./source": "./src/source.ts",
     "./terminals/runtime": "./src/terminals/runtime.ts",
     "./terminals/wakes": "./src/terminals/wakes.ts",
+    "./tour": "./src/tour.ts",
+    "./tour-runs": "./src/tour-runs.ts",
     "./variants": "./src/variants.ts",
     "./videos/babcia": "./src/videos/babcia.ts",
     "./videos/launch": "./src/videos/launch.ts",
