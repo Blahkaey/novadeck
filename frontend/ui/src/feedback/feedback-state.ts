@@ -1,6 +1,6 @@
 import type { AgentFeedbackDraft, FeedbackAbout, FeedbackKind } from "@novadeck/core/feedback"
 
-import { readFirstUse, writeFirstUse } from "../shell/first-use"
+import { readFirstUse, writeFirstUse } from "../interaction/first-use"
 
 // What the feedback card holds and says, apart from how it looks: the kinds and their
 // prompts, the text's limit, the send's states and which keys send.

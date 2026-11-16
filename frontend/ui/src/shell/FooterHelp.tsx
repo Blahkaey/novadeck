@@ -2,7 +2,7 @@ import { ContextMenu, type ContextMenuAction } from "@novadeck/toolkit/ContextMe
 import { CircleHelp } from "lucide-react"
 import { useState } from "react"
 
-import { readFirstUse, writeFirstUse } from "./first-use"
+import { readFirstUse, writeFirstUse } from "../interaction/first-use"
 
 export const helpOpenedStorageKey = "novadeck.help-opened"
 
