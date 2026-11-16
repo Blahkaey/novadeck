@@ -62,10 +62,8 @@ const show = (
     // The titles of terminals still open; every owner's by default.
     open?: readonly string[]
     selectedId?: string
-    // The projects' names by id; the one project of the works' by default.
-    projects?: ReadonlyMap<string, string>
-    // The open project, whose files open as previews; the one project of the works' by default.
-    openProject?: string
+    // Whether a work's files open as previews (main has them); they do by default.
+    canOpen?: boolean
     // Whether the backend has reported the works yet; it has by default.
     reported?: boolean
   } = {},
@@ -77,36 +75,37 @@ const show = (
   const onCloseWork = vi.fn<(root: string, force: boolean) => Promise<WorkClosing>>(
     options.close ?? (async () => ({ closed: true, branchDeleted: false })),
   )
-  const page = render(
-    createElement(ChangesPanel, {
-      works,
-      reported: options.reported ?? true,
-      watch: () => () => {},
-      titles: new Map(
-        works.flatMap((each) =>
-          each.terminalId && (options.open ?? [each.terminalId]).includes(each.terminalId)
-            ? [[each.terminalId, `Title ${each.terminalId}`] as const]
-            : [],
-        ),
+  const props = {
+    works,
+    reported: options.reported ?? true,
+    watch: () => () => {},
+    titles: new Map(
+      works.flatMap((each) =>
+        each.terminalId && (options.open ?? [each.terminalId]).includes(each.terminalId)
+          ? [[each.terminalId, `Title ${each.terminalId}`] as const]
+          : [],
       ),
-      projects: options.projects ?? new Map([["p", "Storefront"]]),
-      selectedId: options.selectedId,
-      active: true,
-      watching: true,
-      onClose: () => {},
-      onSelect,
-      canOpenFile: (each: Work) => each.projectId === (options.openProject ?? "p"),
-      onOpenFile,
-      onCloseWork,
-    }),
-  )
+    ),
+    selectedId: options.selectedId,
+    active: true,
+    watching: true,
+    onClose: () => {},
+    onSelect,
+    canOpenFile: () => options.canOpen ?? true,
+    onOpenFile,
+    onCloseWork,
+  }
+  const page = render(createElement(ChangesPanel, props))
   mounted.push(page)
+  // The panel again with other works, as another project's, or after a worktree closed.
+  const listing = (next: readonly Work[]) =>
+    page.rerender(createElement(ChangesPanel, { ...props, works: next }))
   const rows = () => [...page.container.querySelectorAll<HTMLElement>("[data-changes-row]")]
   const row = (name: string) =>
     page.container.querySelector<HTMLElement>(`[data-changes-row="/w/${name}"]`)!
   const cross = (name: string) =>
     row(name).querySelector<HTMLButtonElement>(".sidebar-item-actions button")!
-  return { page, rows, row, cross, onSelect, onOpenFile, onCloseWork }
+  return { page, rows, row, cross, listing, onSelect, onOpenFile, onCloseWork }
 }
 
 const dialog = () => document.querySelector<HTMLElement>("[role=alertdialog]")
@@ -126,7 +125,7 @@ describe("the Changes panel's rows", () => {
     expect(onSelect).not.toHaveBeenCalled()
   })
 
-  it("marks a work's pull request with a link to its page, beside the row's select button", () => {
+  it("marks a work's pull request with a link to its page, among the row's actions", () => {
     const pullRequest = {
       number: 812,
       url: "https://github.com/acme/shop/pull/812",
@@ -135,13 +134,19 @@ describe("the Changes panel's rows", () => {
     }
     const { row, onSelect } = show([work("a", { pullRequest }), work("b")])
     const link = row("a").querySelector<HTMLAnchorElement>("a.changes-pr")!
-    expect(link.textContent).toBe("Draft #812")
-    expect(link.getAttribute("aria-label")).toBe("Draft #812, pull request, opens in browser")
+    expect(link.textContent).toBe("#812")
+    expect(link.getAttribute("aria-label")).toBe("#812, draft pull request, opens in browser")
     expect(link.href).toBe(pullRequest.url)
     expect(link.target).toBe("_blank")
     expect(link.rel).toBe("noopener noreferrer")
-    // Not inside the select button, so it is a control of its own, reached by Tab.
+    // Not inside the select button, so it is a control of its own, reached by Tab; on the
+    // detail line's end, before the ×, which keeps its place at the row's end.
     expect(link.closest("button")).toBeNull()
+    expect(link.closest(".sidebar-item-actions")).not.toBeNull()
+    expect(link.nextElementSibling?.matches("button.terminal-tab-action")).toBe(true)
+    // The detail line keeps room for it; a row without one keeps the usual room.
+    expect(row("a").style.getPropertyValue("--_sidebar-actions-space")).toBe("calc(4ch + 46px)")
+    expect(row("b").style.getPropertyValue("--_sidebar-actions-space")).toBe("")
     expect(row("a").dataset.pullRequest).toBe("draft")
     link.addEventListener("click", (event) => event.preventDefault())
     link.click()
@@ -149,7 +154,7 @@ describe("the Changes panel's rows", () => {
     expect(row("b").querySelector(".changes-pr")).toBeNull()
   })
 
-  it("marks each state in words, and keeps a merged work's own merged state", () => {
+  it("marks each state by its glyph, and keeps a merged work's own merged state", () => {
     const state = (name: "open" | "merged" | "closed") => ({
       number: 7,
       url: "https://example.dev/7",
@@ -161,13 +166,22 @@ describe("the Changes panel's rows", () => {
       work("b", { merged: true, pullRequest: state("merged") }),
       work("c", { pullRequest: state("closed") }),
     ])
-    const mark = (name: string) => row(name).querySelector(".changes-pr")?.textContent
-    expect([mark("a"), mark("b"), mark("c")]).toEqual(["Open #7", "Merged #7", "Closed #7"])
+    const glyph = (name: string) =>
+      row(name)
+        .querySelector(".changes-pr svg")
+        ?.getAttribute("class")
+        ?.match(/lucide-git-[a-z-]+/)?.[0]
+    expect([glyph("a"), glyph("b"), glyph("c")]).toEqual([
+      "lucide-git-pull-request",
+      "lucide-git-merge",
+      "lucide-git-pull-request-closed",
+    ])
+    expect(row("a").querySelector(".changes-pr")?.textContent).toBe("#7")
     expect(row("b").dataset.merged).toBe("true")
   })
 
-  it("offers no preview of the files of another project's work", () => {
-    const { row } = show([work("a")], { openProject: "elsewhere" })
+  it("offers no preview of files it can't open", () => {
+    const { row } = show([work("a")], { canOpen: false })
     expect(row("a").querySelector(".changes-file-open")).toBeNull()
   })
 
@@ -280,33 +294,6 @@ describe("a merged work's row", () => {
   })
 })
 
-describe("the projects of the rows", () => {
-  const projects = new Map([
-    ["p", "Storefront"],
-    ["q", "Api"],
-  ])
-
-  it("names each row's project beside its branch where the panel lists several", () => {
-    const { row } = show([work("a"), work("b", { projectId: "q" })], { projects })
-    expect(row("a").querySelector(".changes-project")?.textContent).toBe("Storefront")
-    expect(row("b").querySelector(".changes-project")?.textContent).toBe("Api")
-  })
-
-  it("names none while the panel lists one project", () => {
-    const { row } = show([work("a")])
-    expect(row("a").querySelector(".changes-project")).toBeNull()
-  })
-
-  it("shows another project's work on its owner's bar", () => {
-    const { row, onSelect } = show([work("a"), work("b", { projectId: "q" })], { projects })
-    act(() => row("b").querySelector<HTMLButtonElement>(".sidebar-item-select")!.click())
-    expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ root: "/w/b", projectId: "q" }),
-      "t-b",
-    )
-  })
-})
-
 describe("the × on a row", () => {
   const holding = async () =>
     ({ closed: false, holds: "2 changed files and 1 commit the main branch doesn't have" }) as const
@@ -395,6 +382,26 @@ describe("the × on a row", () => {
     expect(alert.textContent).toContain("Novadeck couldn't read git status, so it stays.")
     act(() => alert.querySelector("button")!.click())
     expect(page.container.querySelector("[role=alert]")).toBeNull()
+  })
+
+  it("lets a refusal and a question go with their row, as when another project opens", async () => {
+    const { cross, page, listing } = show([clean("a")], {
+      close: () => Promise.reject(new Error("Novadeck couldn't read git status, so it stays.")),
+    })
+    act(() => cross("a").click())
+    await eventually(() => expect(page.container.querySelector("[role=alert]")).not.toBeNull())
+    listing([work("b", { projectId: "q" })])
+    expect(page.container.querySelector("[role=alert]")).toBeNull()
+    listing([clean("a")])
+    expect(page.container.querySelector("[role=alert]")).toBeNull()
+
+    const asked = show([work("c")], {
+      close: async () => ({ closed: false, holds: "1 commit the main branch doesn't have" }),
+    })
+    act(() => asked.cross("c").click())
+    await eventually(() => expect(dialog()).not.toBeNull())
+    asked.listing([work("d", { projectId: "q" })])
+    await eventually(() => expect(dialog()).toBeNull())
   })
 })
 

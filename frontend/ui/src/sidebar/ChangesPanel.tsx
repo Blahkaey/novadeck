@@ -3,8 +3,16 @@ import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import { SidebarItem, sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { GitCompare, GitMerge, X } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import {
+  GitCompare,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  X,
+  type LucideIcon,
+} from "lucide-react"
+import { useEffect, useMemo, useState, type CSSProperties } from "react"
 
 import {
   changeRows,
@@ -116,30 +124,35 @@ const busyTip = "Its agent is working in this worktree. Close it once the turn e
 const closeTip = (row: ChangeRow): string =>
   row.close === "busy" ? busyTip : `Close the ${row.branch} worktree`
 
-// The row's project (where the panel lists more than one) and branch, on its detail line.
+// The row's branch, on its detail line.
 const BranchLine = ({ row }: { row: ChangeRow }): React.JSX.Element => (
   <>
     <span aria-hidden className="terminal-glyph inline-block w-[1ch] shrink-0 text-center" />
-    {row.project !== undefined && (
-      <>
-        <span className="changes-project min-w-0 max-w-[45%] shrink-0 truncate" title={row.project}>
-          {row.project}
-        </span>
-        {/* Outside the name, so a cut name keeps it. */}
-        <span className="changes-sep shrink-0">·</span>
-      </>
-    )}
     <span className="changes-branch min-w-0 truncate" title={row.branch}>
       {row.branch}
     </span>
   </>
 )
 
-// The work's pull request, a link to its page on a line under the row's detail, outside its select
-// button (a link inside it would be a control in a control), so it is reached by Tab and a click
-// does not select the row.
+// The glyph of a pull request's state, as the forges draw them.
+const pullGlyphs: Readonly<Record<PullMark["state"], LucideIcon>> = {
+  draft: GitPullRequestDraft,
+  open: GitPullRequest,
+  merged: GitMerge,
+  closed: GitPullRequestClosed,
+}
+
+// The work's pull request, "#812" after its state's glyph: a link to its page at the end of the
+// row's detail line, among the row's actions rather than in its select button (a link inside it
+// would be a control in a control), so it is reached by Tab and a click does not select the row.
 const PullMarkLink = ({ mark }: { mark: PullMark }): React.JSX.Element => {
-  const body = <span className="changes-pr-text">{mark.text}</span>
+  const Glyph = pullGlyphs[mark.state]
+  const body = (
+    <>
+      <Glyph size={12} strokeWidth={1.5} aria-hidden />
+      <span className="changes-pr-text">{mark.text}</span>
+    </>
+  )
   return mark.url ? (
     <a
       className="changes-pr"
@@ -179,7 +192,6 @@ const ChangeItem = ({
   const label = [
     row.title,
     row.branch,
-    row.project === undefined ? undefined : `in ${row.project}`,
     files,
     linesWords(work),
     row.conflictWords?.replace(/^C/, "c"),
@@ -203,12 +215,7 @@ const ChangeItem = ({
         )
       }
       detail={<BranchLine row={row} />}
-      after={
-        <>
-          {row.pullRequest && <PullMarkLink mark={row.pullRequest} />}
-          <Branches row={row} canOpen={canOpen} onOpenFile={onOpenFile} />
-        </>
-      }
+      after={<Branches row={row} canOpen={canOpen} onOpenFile={onOpenFile} />}
       badge={
         work.added + work.removed > 0 ? (
           <span className="terminal-tab-kinds changes-size">
@@ -221,6 +228,7 @@ const ChangeItem = ({
       {...(tooltip ? { tooltip } : {})}
       actions={
         <div className="terminal-tab-actions flex items-center">
+          {row.pullRequest && <PullMarkLink mark={row.pullRequest} />}
           <Tooltip content={closeTip(row)}>
             <button
               className="terminal-tab-action icon-button small dim quiet terminal-tab-revealed"
@@ -242,6 +250,14 @@ const ChangeItem = ({
       data-conflict={row.conflict || undefined}
       data-merged={row.merged || undefined}
       data-pull-request={row.pullRequest?.state}
+      // The detail line keeps room for the mark beside the ×: its glyph and gaps, and its text.
+      style={
+        row.pullRequest
+          ? ({
+              "--_sidebar-actions-space": `calc(${row.pullRequest.text.length}ch + 46px)`,
+            } as CSSProperties)
+          : undefined
+      }
     />
   )
 }
@@ -280,9 +296,9 @@ const closeBar = ({ row }: Asking): React.JSX.Element => (
   </SubjectBar>
 )
 
-// The sidebar's Changes panel: every project's works, each a git worktree Novadeck tracks,
+// The sidebar's Changes panel: the open project's works, each a git worktree Novadeck tracks,
 // against main, drawn as the Terminals panel's tabs and named by the terminal that owns it (or
-// "No owner"), with its project where there are several. First come, first served. A merged
+// "No owner"). First come, first served. A merged
 // work (its changes already in main) has a green merge icon, which wins over a conflict; a
 // conflicting one a red icon. A click
 // shows the work on its owner's bar. The × asks the runner to close the worktree, which says what it holds when the
@@ -292,7 +308,6 @@ export const ChangesPanel = ({
   reported,
   watch,
   titles,
-  projects,
   selectedId,
   active,
   watching,
@@ -302,6 +317,7 @@ export const ChangesPanel = ({
   onOpenFile,
   onCloseWork,
 }: {
+  // The open project's works.
   works: readonly Work[]
   // The backend has reported every work at least once. Until then the panel lists what it has
   // and says neither how many nor that there are none: an empty list may only be unread.
@@ -310,8 +326,6 @@ export const ChangesPanel = ({
   watch: () => () => void
   // Each terminal's title, by id, in every project.
   titles: ReadonlyMap<string, string>
-  // Each project's name, by id.
-  projects: ReadonlyMap<string, string>
   // The selected terminal, where a work with no owner is shown.
   selectedId: string | undefined
   active: boolean
@@ -321,7 +335,7 @@ export const ChangesPanel = ({
   // Shows a work on the bar of the terminal named (its owner, or where it has none, or its
   // owner is closed, the selected one); rejects with why it can't.
   onSelect: (work: Work, on: string | undefined) => Promise<void>
-  // Whether a file of a work can be opened so: it is in the open project.
+  // Whether a file of a work can be opened so: main has it.
   canOpenFile: (work: Work, path: string) => boolean
   // Opens a file of a work in the project window, as a preview of what the works merge to.
   onOpenFile: (work: Work, path: string) => void
@@ -332,9 +346,22 @@ export const ChangesPanel = ({
   const [last, setLast] = useState<{ root: string; on: string | undefined } | undefined>()
   // What the dialog asks about, and what went wrong last, as one line under a name.
   const [asking, setAsking] = useState<Asking | null>(null)
-  const [refusal, setRefusal] = useState<{ title: string; text: string } | null>(null)
+  const [refusal, setRefusal] = useState<{
+    root: string
+    title: string
+    text: string
+  } | null>(null)
   useEffect(() => (watching ? watch() : undefined), [watching, watch])
-  const rows = useMemo(() => changeRows(works, titles, projects), [works, titles, projects])
+  const rows = useMemo(() => changeRows(works, titles), [works, titles])
+  // Both go with their row: once another project is open, or the worktree closed meanwhile,
+  // they would name a row the list no longer has. Settled as the works change, during render.
+  const [seen, setSeen] = useState(works)
+  if (seen !== works) {
+    setSeen(works)
+    const listed = (root: string): boolean => works.some((work) => work.root === root)
+    if (refusal && !listed(refusal.root)) setRefusal(null)
+    if (asking && !listed(asking.row.work.root)) setAsking(null)
+  }
   const selected = selectedRoot(works, selectedId, last)
   // Asks the runner to close the worktree. Unforced, it may answer with what the worktree holds,
   // which the person confirms before it is asked again with force: nothing is forced unasked.
@@ -348,6 +375,7 @@ export const ChangesPanel = ({
         // Closed already (by an agent, meanwhile): nothing is left to close.
         if ((error as { code?: unknown } | null)?.code === "NOT_FOUND") return
         setRefusal({
+          root: row.work.root,
           title: named(row),
           text: `stays: ${error instanceof Error ? error.message : "Novadeck could not close it."}`,
         })
@@ -360,6 +388,7 @@ export const ChangesPanel = ({
     setLast({ root: work.root, on })
     onSelect(work, on).catch((error: unknown) =>
       setRefusal({
+        root: work.root,
         title: named(row),
         text: `can't be shown: ${error instanceof Error ? error.message : "Novadeck could not show it."}`,
       }),
@@ -392,8 +421,8 @@ export const ChangesPanel = ({
           <div className="changes-empty">
             <h3 className="text-body">No worktrees</h3>
             <p className="text-control">
-              When an agent opens or takes a git worktree, it shows up here with its branch, and you
-              can close it.
+              When an agent opens or takes a git worktree in this project, it shows up here with its
+              branch, and you can close it.
             </p>
           </div>
         )

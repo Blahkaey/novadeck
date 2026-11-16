@@ -1,8 +1,8 @@
 import type { PullRequest } from "@novadeck/core/forges"
 import type { Work, WorkFile } from "@novadeck/core/works"
 
-// The Changes panel's rows, from every project's works (one per tracked worktree, keyed by its
-// root): which come first, what each row says and which files it lists. The component only
+// The Changes panel's rows, from the open project's works (one per tracked worktree, keyed by
+// its root): which come first, what each row says and which files it lists. The component only
 // draws them.
 
 // How many rows the selected work unfolds under its line before the last counts the rest.
@@ -28,10 +28,9 @@ export type BranchView =
 // mid-turn in it. Whether to ask is the runner's to say, not the row's files.
 export type CloseMode = "close" | "busy"
 
-// A work's pull request as its row's mark shows it: "Draft #812", the words a screen reader gets
-// ("Draft #812, pull request, opens in browser": its visible words first, so voice control finds
-// it) and the page it opens; none for an address that
-// is not a web page.
+// A work's pull request as its row's mark shows it: "#812" after a glyph of its state, the words
+// a screen reader gets ("#812, draft pull request, opens in browser": its visible words first, so
+// voice control finds it) and the page it opens; none for an address that is not a web page.
 export type PullMark = {
   readonly state: PullRequest["state"]
   readonly text: string
@@ -39,19 +38,12 @@ export type PullMark = {
   readonly url: string | undefined
 }
 
-const stateWords: Readonly<Record<PullRequest["state"], string>> = {
-  draft: "Draft",
-  open: "Open",
-  merged: "Merged",
-  closed: "Closed",
-}
-
 export const pullMark = ({ number, state, url }: PullRequest): PullMark => {
   const web = /^https?:\/\//i.test(url)
   return {
     state,
-    text: `${stateWords[state]} #${number}`,
-    label: `${stateWords[state]} #${number}, pull request${web ? ", opens in browser" : ""}`,
+    text: `#${number}`,
+    label: `#${number}, ${state} pull request${web ? ", opens in browser" : ""}`,
     url: web ? url : undefined,
   }
 }
@@ -60,8 +52,6 @@ export type ChangeRow = {
   readonly work: Work
   // The owner terminal's title, or "No owner".
   readonly title: string
-  // The name of the project the work belongs to, where the panel lists more than one.
-  readonly project: string | undefined
   // The branch, or "detached".
   readonly branch: string
   readonly close: CloseMode
@@ -119,7 +109,7 @@ export const branchViews = (
   return rows
 }
 
-// Whether the owner is a terminal still open (in any project), which has a bar to show a work on.
+// Whether the owner is a terminal still open, which has a bar to show a work on.
 export const ownerOpen = (
   terminalId: string | null,
   titles: ReadonlyMap<string, string>,
@@ -191,7 +181,6 @@ export const orderedWorks = (works: readonly Work[]): readonly Work[] =>
 export const changeRows = (
   works: readonly Work[],
   titles: ReadonlyMap<string, string>,
-  projects: ReadonlyMap<string, string> = new Map(),
   now = Date.now(),
 ): readonly ChangeRow[] =>
   orderedWorks(works).map((work) => {
@@ -200,7 +189,6 @@ export const changeRows = (
     return {
       work,
       title: ownerTitle(work.terminalId, titles),
-      project: projects.size > 1 ? projects.get(work.projectId) : undefined,
       branch: work.branch ?? "detached",
       close: closeMode(work),
       conflict: words !== undefined,

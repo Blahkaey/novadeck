@@ -289,12 +289,11 @@ Terminals:
   exited from keep their handles on their tabs; its other plain shells show none. Also a
   burst of 30, a quick failure, a spawn failure and the terminal limit.
 - **Changes:** acts on the selected terminal's first worktree in the Changes panel, which lists the
-  worktrees of every project, naming each row's project beside its branch (every demo seeds a few
-  from its own terminals, in several projects: one in conflict with main, two with each other, one
+  open project's worktrees (every demo seeds a few from its own terminals, in several projects, so
+  switching projects switches the list: one in conflict with main, two with each other, one
   merged; the plain demos' storefront also has one with no owner, one just made and one its owner is
   working in; a demo agent that starts a turn gains lines in the first worktree it owns and holds its
-  × disabled until the turn ends; clicking another project's row switches to that project and
-  selects its owner). New lines make a worktree at a terminal's first change; Many files changed
+  × disabled until the turn ends). New lines make a worktree at a terminal's first change; Many files changed
   gives the unfolded row its "+N more"; the conflict actions turn the icon and the file names red,
   with what it conflicts with on hover; Work merged empties the row (a worktree with no files
   stays, and its × closes it at once) and gives it the green merge icon and "Merged" on hover;
@@ -306,9 +305,9 @@ Terminals:
   "No owner" (click it to show it on the selected terminal's bar). Owner working in it and Owner
   done dim and restore the × (hover it for why). Worktrees not read yet empties the panel for 3 s,
   with no count and no empty state, as before the runner first reports the worktrees. Refuse the
-  next close shows the refusal above the list. Close every worktree closes the selected project's, leaving other projects' rows; with Agent
-  worktrees off in Preferences > Experimental (the demo starts with it off) the empty state, once
-  every project's are gone, points there. New worktree adds another clean worktree to the selected
+  next close shows the refusal above the list. Close every worktree closes the selected project's, leaving the list empty with
+  what appears there; other projects keep theirs. The demo starts with Agent worktrees off
+  (Preferences > Experimental), which hides Changes until it is turned on. New worktree adds another clean worktree to the selected
   terminal's, and the Changes toggle in the rail flares the History toggle's dot and ring for a
   moment (close Changes first: it shows nothing while Changes is open); any first change that makes a
   terminal's worktree flares it too. "Every state in Changes"
@@ -513,9 +512,16 @@ App:
   the next answer to any row fail, so its sheet shows why and keeps the row and draft for retry. Ask, Tell and Your reply
   also appear in the terminal's Messages pane, in the conversation You; replies show queued and delivered states.
   "Stale next answer" makes the next answer report that the ask is no longer available,
-  keeping the draft. "Ask withdrawn" and "Ask session ended" remove the sample preview ask
-  and keep its outcome in Messages; with the preview ask's sheet open, "Ask withdrawn" leaves
-  the sheet open, tagged Withdrawn, saying so in place of its answers. "Next reply not delivered" queues the next reply, then
+  keeping the draft. "Ask withdrawn" removes the sample preview ask from the Inbox, as its
+  agent's withdrawal does, and keeps its outcome in Messages; "Ask session ended" keeps it as a
+  resolved row, tagged Ended, saying so in place of its answers, and so does "Ask replied in
+  terminal" (Replied). "Resolved dialogs", "Resolved asks", "Resolved updates" and "Resolved
+  Novadeck rows" add the resolved rows of every way a row ends (answered with the words of the
+  answer, answered in the terminal, gone unanswered, dismissed, replied, ended, read, released,
+  stopped, and trouble the agent worked past or messages delivered), each opening as a
+  read-only card in gray; "Seventeen resolved rows" adds all of them at once, to see that the
+  list holds only the ten that resolved last. Answering any open row resolves it in place the
+  same way. "Next reply not delivered" queues the next reply, then
   shows the delivery failure in its Inbox receipt (on the sheet the Inbox moved on to, with
   Back to it) and Messages history. A box for your own words says when it is over 4,096
   characters, and won't send until it isn't. Pausing messages between agents leaves
@@ -652,8 +658,10 @@ App:
   reboot. In the demo, Sign in and Install close Preferences and run in a terminal that plays the
   command, then flips the host to Signed in, or the forge to installed (Install lists the command
   first). The "Pull request" actions (No pull request, draft, open, merged, closed) set the mark on
-  the selected terminal's worktree, or the project's first (one is made if it has none): the row shows
-  "Draft #812" and so on beside its ×, a link to the pull request's page.
+  the selected terminal's worktree, or the project's first (one is made if it has none): the row's
+  detail line ends in its state's glyph and "#812" beside its ×, a link to the pull request's page,
+  and the work's changes item (in the showcase with "On, with Changes", select its row) has
+  "PR #812" in its header, which opens the page in the browser.
 - **Guides:** "Toggle icon guides" draws a dashed box over every icon (`svg.lucide`) and a
   dashed line through its middle, 20 px past each side, both 1 px and half see-through
   (`--icon-guide-color` changes them), for checking how icons line up with their text;
@@ -975,7 +983,7 @@ folder of `frontend/ui/src/`:
 | `frontend/core/src/items/companion-bar.ts`                      | A bar as the person arranged it: order, hidden plans and Messages, the open tab.                                               |
 | `frontend/core/src/messages.ts`                                 | The contract for agents' messages: threads, states, the pause, and a tab's count.                                              |
 | `frontend/core/src/conversation.ts`                             | The contract for an agent's conversation: transcript items, requests, the port.                                                |
-| `frontend/core/src/inbox.ts`                                    | The contract for the Inbox: rows by source, their type and urgency, answers, the port.                                         |
+| `frontend/core/src/inbox.ts`                                    | The contract for the Inbox: rows by source, their type, how they ended, answers, the port.                                     |
 | `frontend/core/src/source.ts`                                   | The contract for the Source panel: a project's folders, listed one at a time, and what its agents changed.                     |
 | `frontend/core/src/conversation/picks.ts`                       | What the person has picked and written for a dialog's questions, and the answer it makes.                                      |
 | `frontend/core/src/conversation/turns.ts`                       | A conversation grouped into blocks, the turn's status.                                                                         |

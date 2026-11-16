@@ -4,11 +4,11 @@ import type { AgentName } from "../harnesses"
 import {
   ordered,
   type AgentAsk,
-  type AskSettled,
   type InboxContent,
   type InboxRow,
   type InboxSource,
   type InboxTurn,
+  type Settled,
 } from "../inbox"
 import {
   waitingFor,
@@ -58,8 +58,8 @@ export type WrittenEntry = {
     | { readonly kind: "ask"; readonly ask: AgentAsk }
     | { readonly kind: "tell"; readonly subject: string; readonly body: string }
     | { readonly kind: "done"; readonly subject: string; readonly body: string }
-  // Only on an ask that is no longer open.
-  readonly settled?: AskSettled | undefined
+  // Only on an entry that is no longer open.
+  readonly settled?: Settled | undefined
 }
 
 export type InboxInputs = {
@@ -262,8 +262,8 @@ const candidates = (
   return found
 }
 
-// Every row the Inbox now holds, the longest waiting among the most urgent first: each of a
-// terminal's rows, and each thread held for release.
+// Every row the Inbox now holds, the newest first: each of a terminal's rows, each thread held
+// for release, and the entries the runner lists resolved.
 export const inboxRows = (inputs: InboxInputs): InboxRow[] => {
   const where = whereOf(inputs.workspace)
   const all = where.flatMap((here) => candidates(inputs, here))
@@ -276,7 +276,9 @@ export const inboxRows = (inputs: InboxInputs): InboxRow[] => {
         (terminal.handle ?? "") === entry.handle &&
         (entry.content.kind !== "ask" || entry.settled || agentOf(terminal) === entry.agent),
     )
-    if (!here) continue
+    // A resolved entry outlives its terminal: it keeps its project, and says whose it was.
+    const project = inputs.workspace.projects.find(({ id }) => id === entry.projectId)
+    if (!here && !(entry.settled && project)) continue
     const { content: entryContent } = entry
     const content: InboxContent =
       entryContent.kind === "ask"
@@ -291,9 +293,20 @@ export const inboxRows = (inputs: InboxInputs): InboxRow[] => {
           }
     all.push({
       id: entry.id,
-      source: sourceOf(here, entry.agent),
+      source: here
+        ? sourceOf(here, entry.agent)
+        : {
+            projectId: entry.projectId,
+            workspaceSessionId: entry.workspaceSessionId,
+            terminalId: entry.terminalId,
+            handle: entry.handle,
+            agent: entry.agent,
+            title: "Closed terminal",
+            projectName: project!.name,
+          },
       at: entry.at,
-      stopped: entry.content.kind === "ask" && !entry.settled && !agentWorking(here.terminal),
+      stopped:
+        entry.content.kind === "ask" && !entry.settled && !!here && !agentWorking(here.terminal),
       seen: false,
       ...content,
       ...(entry.settled ? { settled: entry.settled } : {}),
