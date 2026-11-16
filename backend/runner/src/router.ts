@@ -58,6 +58,7 @@ export const apiError = (error: unknown): unknown => {
 const noHistory = {
   list: (_projectId: string) => [],
   watch: (_sessionId: string, signal?: AbortSignal) => noHistoryStream(signal),
+  erase: (_ids: readonly string[]) => undefined,
 }
 
 const noHistoryStream = async function* (signal?: AbortSignal): AsyncGenerator<HistoryChange> {
@@ -288,6 +289,7 @@ export const createRouter = (options: {
       watch: api.history.watch.handler(({ context, signal }) =>
         history.watch(context.session.id, signal),
       ),
+      remove: api.history.remove.handler(({ input }) => history.erase(input.ids)),
     },
     works: {
       watch: api.works.watch.handler(({ context, signal }) =>
@@ -381,6 +383,7 @@ export const createRouter = (options: {
       answer: api.inbox.answer.handler(({ input }) => terminals.answerAsk(input.id, input.answer)),
       read: api.inbox.read.handler(({ input }) => terminals.readTells(input.ids)),
       dismiss: api.inbox.dismiss.handler(({ input }) => terminals.dismissAsk(input.id)),
+      clear: api.inbox.clear.handler(() => terminals.clearInbox()),
     },
     feedback: {
       watch: api.feedback.watch.handler(({ signal }) => feedback.watch(signal)),

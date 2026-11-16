@@ -156,7 +156,11 @@ describe("route reconciliation", () => {
     expect(historyShown({})).toBe(false)
     expect(
       historyShown({
-        history: { state: createStore({ rows: [] }), list: () => Promise.resolve([]) },
+        history: {
+          state: createStore({ rows: [] }),
+          list: () => Promise.resolve([]),
+          remove: () => Promise.resolve(),
+        },
       }),
     ).toBe(true)
   })

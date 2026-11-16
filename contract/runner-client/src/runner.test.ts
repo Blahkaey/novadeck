@@ -238,6 +238,18 @@ describe("History", () => {
     }
     expect(seen).toEqual(["reset", "changed", "synced", "removed"])
   })
+
+  it("asks the runner to delete closed terminals by their ids", async () => {
+    const asked: unknown[] = []
+    const { runner } = await fakeRunner({
+      history: {
+        remove: api.history.remove.handler(({ input }) => void asked.push(input)),
+      },
+    })
+    const ids: readonly string[] = [row.id, row.projectId]
+    await expect(runner.history.remove({ ids })).resolves.toBeUndefined()
+    expect(asked).toEqual([{ ids }])
+  })
 })
 
 describe("Works", () => {

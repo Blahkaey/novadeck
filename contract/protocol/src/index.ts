@@ -92,6 +92,7 @@ export {
   historyChange,
   type HistoryChange,
   historyLimits,
+  maxHistoryRemoved,
 } from "./history.js"
 export {
   type PreviewHunk,

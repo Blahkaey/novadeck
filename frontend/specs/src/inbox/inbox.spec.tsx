@@ -642,7 +642,7 @@ describe("The Inbox's history", () => {
   const dismissButton = (subject: string) =>
     page.getByRole("button", { name: new RegExp(`^Dismiss: .*${subject}`) })
 
-  it("offers no Mark all read and no Clear settled", async () => {
+  it("offers no Mark all read", async () => {
     await openInbox()
     await lookAway()
     await rows().filter({ hasText: "webhooks" }).hover()
@@ -650,9 +650,6 @@ describe("The Inbox's history", () => {
 
     await expect
       .element(page.getByRole("button", { name: "Mark all read" }))
-      .not.toBeInTheDocument()
-    await expect
-      .element(page.getByRole("button", { name: "Clear settled" }))
       .not.toBeInTheDocument()
   })
 
@@ -689,6 +686,49 @@ describe("The Inbox's history", () => {
     await expect.element(open.getByRole("group", { name: "Answers" })).not.toBeInTheDocument()
     await expect.element(open.getByRole("button", { name: "Snooze" })).not.toBeInTheDocument()
     await expect.element(open.getByRole("button", { name: "Copy command" })).toBeVisible()
+  })
+})
+
+describe("Clearing the Inbox", () => {
+  const dismissButton = (subject: string) =>
+    page.getByRole("button", { name: new RegExp(`^Dismiss: .*${subject}`) })
+  const clear = () => page.getByRole("button", { name: "Clear updates and resolved rows" })
+  // The rows that ask nothing of the person: the updates and the resolved ones.
+  const askingNothing = (): number =>
+    document.querySelectorAll("[data-inbox-row][data-needs='false']").length
+
+  it("takes the updates and the resolved rows for good, and leaves every row that asks", async () => {
+    await openInbox()
+    await lookAway()
+    await expect.element(rows()).toHaveLength(settledRows)
+    await rows().filter({ hasText: "webhooks" }).hover()
+    await dismissButton("webhooks").click()
+    await expect.element(sidebarPanel("Inbox")).toHaveAccessibleName("Inbox, 11 waiting")
+    expect(askingNothing()).toBeGreaterThan(1)
+
+    await clear().click()
+
+    await expect.poll(askingNothing).toBe(0)
+    await expect.element(rows().filter({ hasText: "webhooks" })).not.toBeInTheDocument()
+    await expect.element(rows().filter({ hasText: "Search index rebuilt" })).not.toBeInTheDocument()
+    // What waits on the person is all still there, and still counted.
+    await expect.element(row("Seems stuck")).toBeVisible()
+    await expect.element(sidebarPanel("Inbox")).toHaveAccessibleName("Inbox, 11 waiting")
+    // With nothing left to clear, the button goes.
+    await expect.element(clear()).not.toBeInTheDocument()
+  })
+
+  it("closes the sheet of a resolved row it takes", async () => {
+    await openInbox()
+    await lookAway()
+    await expect.element(rows()).toHaveLength(settledRows)
+    await row("Search index rebuilt").click()
+    await expect.element(page.getByRole("dialog")).toMatchTextContent("Rebuilt the index")
+
+    await clear().click()
+
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument()
+    await expect.element(rows().filter({ hasText: "Search index rebuilt" })).not.toBeInTheDocument()
   })
 })
 

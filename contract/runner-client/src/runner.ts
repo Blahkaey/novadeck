@@ -462,10 +462,16 @@ export type Runner = {
      * Follows every closed terminal on the runner, across projects, as `terminals.watch()`
      * follows terminals: each time the stream opens it yields `reset`, every closed
      * terminal as `changed`, then `synced`; at `synced`, forget any not reported since.
-     * Later events report a close, a change of availability and `removed` for a restored
-     * or pruned row. Iteration ends only when the runner closes or on `return()`.
+     * Later events report a close, a change of availability and `removed` for a restored,
+     * pruned or removed row. Iteration ends only when the runner closes or on `return()`.
      */
     watch(): AsyncIterableIterator<HistoryWatchItem, undefined>
+    /**
+     * Deletes those closed terminals for good, at most `maxHistoryRemoved` a call: each row
+     * and the output saved for it. An id the runner doesn't have, and a row whose restore is
+     * under way, are passed over; `watch()` reports each one deleted as `removed`.
+     */
+    remove(input: { readonly ids: readonly string[] }): Promise<void>
   }
   /** Each tracked git worktree against its repository's main branch (Worktrees panel). */
   readonly works: {
@@ -647,6 +653,11 @@ export type Runner = {
      * told. Rejects with `NOT_FOUND` for one that isn't an open ask.
      */
     dismiss(id: string): Promise<void>
+    /**
+     * Clears the Inbox of what asks nothing of the person: reads every open tell and done
+     * report, and takes every resolved entry out of the listing for good.
+     */
+    clear(): Promise<void>
   }
   readonly feedback: {
     /** The agents' feedback drafts waiting for the app, oldest first, then again on each change. */
@@ -901,6 +912,7 @@ export const connectRunner = async (
       list: (input) => call((client) => client.history.list(input)),
       watch: () =>
         followAll(connection, (client, signal) => client.history.watch(undefined, { signal })),
+      remove: (input) => call((client) => client.history.remove({ ids: [...input.ids] })),
     },
     works: {
       watch: () =>
@@ -957,6 +969,7 @@ export const connectRunner = async (
       answer: (id, answer) => call((client) => client.inbox.answer({ id, answer })),
       read: (ids) => call((client) => client.inbox.read({ ids: [...ids] })),
       dismiss: (id) => call((client) => client.inbox.dismiss({ id })),
+      clear: () => call((client) => client.inbox.clear()),
     },
     feedback: {
       watch: () =>

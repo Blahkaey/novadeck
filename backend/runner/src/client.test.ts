@@ -823,6 +823,76 @@ describe("runner client session management", () => {
   )
 })
 
+describe("runner client History", () => {
+  it("deletes the closed terminals named for good, and tells whoever follows them", async ({
+    resources,
+  }) => {
+    const directory = await temporary(resources)
+    const database = join(directory, "workspace.sqlite")
+    const earlier = new WorkspaceStore(database)
+    const projectId = crypto.randomUUID()
+    const sessionId = crypto.randomUUID()
+    await earlier.createProject({ id: projectId, name: "P", cwd: directory })
+    earlier.createSession({ id: sessionId, projectId, name: "S" })
+    const closed = (closedAt: number, transcript: string | null) => {
+      const id = crypto.randomUUID()
+      earlier.insertClosed({
+        id,
+        projectId,
+        sessionId,
+        handle: earlier.giveHandle(sessionId),
+        naming: { person: null, opener: null, murmur: null, own: null, summary: null },
+        agent: null,
+        lastProgram: null,
+        command: null,
+        cwd: directory,
+        agents: {},
+        interruptions: [],
+        transcript,
+        closedAt,
+        closedBy: null,
+      })
+      return id
+    }
+    const now = Date.now()
+    const going = closed(now - 3, "screen")
+    const staying = closed(now - 2, null)
+    const alsoGoing = closed(now - 1, null)
+    earlier.close()
+
+    const app = await deployed(resources, { database })
+    const client = await app.connect()
+    const watch = client.history.watch()
+    resources.defer(async () => {
+      await watch.return?.()
+    })
+    const next = async () => (await watch.next()).value
+    let synced = false
+    while (!synced) {
+      // eslint-disable-next-line no-await-in-loop -- Changes are read in order.
+      synced = (await next())?.type === "synced"
+    }
+
+    await client.history.remove({ ids: [going, crypto.randomUUID(), alsoGoing] })
+    const removed = [await next(), await next()]
+    expect(removed).toEqual(
+      expect.arrayContaining([
+        { type: "removed", id: going, projectId },
+        { type: "removed", id: alsoGoing, projectId },
+      ]),
+    )
+    const listed = await client.history.list({ projectId })
+    expect(listed.map(({ id }) => id)).toEqual([staying])
+    // Not restorable after: the row is gone from the store.
+    await expect(
+      client.terminals.create({ ...shell(sessionId), closed: going }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    const kept = new DatabaseSync(database, { readOnly: true })
+    resources.defer(() => kept.close())
+    expect(kept.prepare("SELECT id FROM closed_terminals").all()).toEqual([{ id: staying }])
+  })
+})
+
 describe("runner client agent detail", () => {
   it("follows a terminal's agent, and ends once the terminal is gone", async ({ resources }) => {
     const app = await deployed(resources)

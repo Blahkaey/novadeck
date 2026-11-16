@@ -797,8 +797,11 @@ with every safety check again at that time:
     (`terminals.checkouts()`, read again just before the removal). An unmerged worktree is never
     removed by this: while its owner is in History it waits (a terminal restored from History
     finds it still there), and an orphaned one is listed as "No owner" for the person to close.
-    When the owner's History row is pruned (`ClosedTerminals.prune`, the only place that tells
-    cleanup; a restore also deletes a row but does not), its worktrees are removed with `force`
+    When the owner's History row leaves for good, pruned at 7 days (`ClosedTerminals.prune`) or
+    removed by the person in the History panel (`ClosedTerminals.erase`, `history.remove`), the
+    two places that tell cleanup (a restore also deletes a row but does not, and a removed row a
+    running terminal was restored from doesn't either: its worktrees wait for that restore, which
+    hands them over once confirmed), its worktrees are removed with `force`
     semantics: uncommitted work and a detached HEAD are kept on `refs/novadeck/kept/` refs and an
     unmerged branch is kept. If git couldn't read the worktree, it has submodules or an agent
     works in it, the row is orphaned instead, the folder stays, and a warning is logged. Each

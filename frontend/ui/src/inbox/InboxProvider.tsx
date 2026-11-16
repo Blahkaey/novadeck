@@ -1,4 +1,5 @@
 import {
+  clearable,
   rowKey,
   type Inbox,
   type InboxAnswer,
@@ -22,6 +23,7 @@ import {
 import { focusSheetSoon, rowOf } from "./inbox-dom"
 import {
   clearArrived,
+  cleared,
   closeSheet,
   held,
   asks,
@@ -97,6 +99,9 @@ export type InboxContextValue = {
   readonly change: (row: InboxRow, answer: InboxAnswer) => void
   // Dismisses an open ask; absent where the backend has no such.
   readonly dismiss: ((id: string) => void) | undefined
+  // Clears the Inbox of what asks nothing of the person: its updates, read, and its resolved
+  // rows; absent where the backend can't.
+  readonly clear: (() => void) | undefined
   // Keeps the rows that ask in the order the person dragged them into; absent where the
   // backend keeps no order, and the rows can't be dragged.
   readonly arrange: ((rows: readonly InboxRow[]) => void) | undefined
@@ -378,6 +383,22 @@ export const InboxProvider = ({
     [inbox],
   )
 
+  // A sheet open on a row that is cleared closes with it; a list another sheet holds still
+  // lets the cleared rows go at once.
+  const clear = useMemo(
+    () =>
+      inbox.clear
+        ? (): void => {
+            const { state: snapshot, view: before } = latest.current
+            const ids = snapshot.items.filter(clearable).map(({ id }) => id)
+            if (before.open !== null && ids.includes(before.open)) close()
+            else setView((frozen) => cleared(frozen, ids))
+            inbox.clear?.()
+          }
+        : undefined,
+    [inbox, close],
+  )
+
   const arrange = useMemo(
     () =>
       inbox.arrange
@@ -545,6 +566,7 @@ export const InboxProvider = ({
       submit,
       change,
       dismiss,
+      clear,
       arrange,
       snooze,
       reveal: revealRow,
@@ -571,6 +593,7 @@ export const InboxProvider = ({
       submit,
       change,
       dismiss,
+      clear,
       arrange,
       snooze,
       revealRow,

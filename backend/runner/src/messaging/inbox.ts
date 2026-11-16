@@ -59,7 +59,7 @@ export type StoredEntry = InboxEntry & {
   readonly cause?: "dismissed" | "withdrawn" | "replied"
   /** Ended for want of its session after a restart, not by a different one: it reopens if it binds. */
   readonly lapsed?: true
-  /** A settled ask the person cleared from the Inbox in a build that had Clear: not listed. */
+  /** A resolved entry the person cleared from the Inbox (`clear`): not listed there again. */
   readonly cleared?: true
   /** What the person answered an ask with: the option they chose, and the words they wrote. */
   readonly answer?: string
@@ -563,7 +563,7 @@ export class Inbox {
       .map(({ state: _state, ...entry }) => entry)
     // The latest resolved asks and tells, as the Inbox lists them as its history, whether or not
     // their terminal is still there: all but an ask its agent withdrew, whose row is gone, and
-    // one the person cleared in an older build.
+    // one the person cleared.
     const resolved = [...this.entries.values()]
       .flatMap((each) => {
         const how = this.resolution(each)
@@ -621,6 +621,31 @@ export class Inbox {
         asks: [note],
       })
     this.maintain(entry.terminalId)
+  }
+
+  /**
+   * The person clears the Inbox of what asks nothing of them: every open tell and done report
+   * is read, and every resolved entry the Inbox lists, or would once newer ones went, leaves
+   * its listing for good. An open ask and a finished turn are not touched. The entries stay in
+   * their terminals' history (`history`) until the usual retention drops them.
+   */
+  clear(): void {
+    if (this.closed) throw new DomainError("CLOSING")
+    const at = this.now()
+    const cleared = [...this.entries.values()].flatMap((entry): StoredEntry[] => {
+      const { kind } = entry.content
+      if (entry.state === "open" && (kind === "tell" || kind === "done"))
+        return [{ ...entry, state: "read", settledAt: at, cleared: true }]
+      return this.resolution(entry) ? [{ ...entry, cleared: true }] : []
+    })
+    if (cleared.length === 0) return
+    // One save and one listing for the lot, as a read of many.
+    this.save(() => this.records.saveEntries(cleared))
+    for (const entry of cleared) this.keep(entry)
+    for (const terminalId of new Set(cleared.map((entry) => entry.terminalId)))
+      this.host.changed(terminalId)
+    this.publish()
+    this.maintain()
   }
 
   /**

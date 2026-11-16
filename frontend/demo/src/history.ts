@@ -10,7 +10,8 @@ import { terminalsOf } from "./workspace"
 
 // The demo's History: the terminals closed in the storefront project, one row for
 // each state a row can be in, and the terminals the person closes here. It stands in for
-// the runner, which keeps the rows, checks them and takes one back once it has restored it.
+// the runner, which keeps the rows, checks them, takes one back once it has restored it, and
+// deletes those the person removes.
 
 const minute = 60_000
 const day = 24 * 60 * minute
@@ -19,6 +20,8 @@ const day = 24 * 60 * minute
 // and the row is gone.
 export const restoringMs = 120
 export const restoreMs = 900
+// How long before the runner says the rows the person removed are gone.
+export const removeMs = 60
 
 type Sample = Omit<
   ClosedTerminal,
@@ -156,12 +159,15 @@ const rowsOf = (projectId: string, samples: readonly Sample[], now: number): Clo
 }
 
 // What the debug panel changes: the demo's agents are all restorable, so this is the way to
-// see the close question for one that can't be (no session yet, or not connected).
+// see the close question for one that can't be (no session yet, or not connected); and the
+// demo deletes whatever it is asked to, so this is the way to see a removal fail.
 export type DemoHistoryControl = {
   readonly setRestorable: (terminalId: string, restorable: boolean) => void
   readonly isRestorable: (terminalId: string) => boolean
   // Called whenever a terminal's restorable state changes by `setRestorable`.
   readonly onRestorable: (listener: () => void) => void
+  // Makes the next `remove` reject, as a runner that couldn't delete the rows: they stay.
+  readonly failNextRemoval: () => void
 }
 
 // Whether a backend's History is the demo's, which the debug panel changes.
@@ -200,8 +206,12 @@ export const createDemoHistory = (now: number, withSamples = true): DemoHistory 
   let kept = 0
   const unrestorable = new Set<string>()
   let restorableChanged = nothing
+  let removalFails = false
   return {
     history: {
+      failNextRemoval: () => {
+        removalFails = true
+      },
       setRestorable: (terminalId, restorable) => {
         if (restorable) unrestorable.delete(terminalId)
         else unrestorable.add(terminalId)
@@ -214,6 +224,20 @@ export const createDemoHistory = (now: number, withSamples = true): DemoHistory 
       state,
       list: (projectId) =>
         Promise.resolve(state.getSnapshot().rows.filter((row) => row.projectId === projectId)),
+      remove: (ids) => {
+        if (removalFails) {
+          removalFails = false
+          return Promise.reject(new Error("The demo was told to fail this removal."))
+        }
+        // A row being restored stays, as the runner leaves it.
+        const going = new Set(ids)
+        later(removeMs, () =>
+          change((rows) =>
+            rows.filter((row) => !going.has(row.id) || row.availability.state === "restoring"),
+          ),
+        )
+        return Promise.resolve()
+      },
     },
     restore: (id) => {
       const row = state.getSnapshot().rows.find((each) => each.id === id)

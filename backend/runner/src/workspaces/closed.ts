@@ -49,4 +49,6 @@ export type ClosedRecords = {
   removeClosed(id: string): boolean
   /** Deletes the rows closed before `before` for good; their ids. */
   pruneClosed(before: number): readonly string[]
+  /** Deletes the rows of these ids for good, in one write; those there were, each with its project. */
+  eraseClosed(ids: readonly string[]): readonly Pick<ClosedRecord, "id" | "projectId">[]
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, vi } from "vitest"
 
-import { createDemoHistory, restoreMs, restoringMs } from "./history"
+import { createDemoHistory, removeMs, restoreMs, restoringMs } from "./history"
 import { context, describe, expect, it } from "./test"
 
 const now = new Date(2026, 10, 6, 18, 0).getTime()
@@ -62,6 +62,46 @@ describe("the demo's History", () => {
         closedAt: now,
         availability: { state: "ready" },
       })
+    })
+  })
+
+  context("when rows are removed", () => {
+    it("drops them a moment after, as the runner's word comes, and keeps the others", async () => {
+      const { history } = createDemoHistory(now)
+      const ids = () => history.state.getSnapshot().rows.map((row) => row.id)
+      const [first, second, third] = ids()
+      const before = ids().length
+      await history.remove([first!, third!, "no-such-row"])
+      expect(ids()).toHaveLength(before)
+      vi.advanceTimersByTime(removeMs)
+      expect(ids()).toHaveLength(before - 2)
+      expect(ids()[0]).toBe(second)
+    })
+
+    it("leaves a row that is being restored", async () => {
+      const demo = createDemoHistory(now)
+      const id = demo.history.state.getSnapshot().rows[0]!.id
+      demo.restore(id)
+      vi.advanceTimersByTime(restoringMs)
+      await demo.history.remove([id])
+      vi.advanceTimersByTime(removeMs)
+      expect(demo.history.state.getSnapshot().rows[0]).toMatchObject({
+        id,
+        availability: { state: "restoring" },
+      })
+    })
+
+    it("fails once when the debug panel says the next removal does, and keeps the rows", async () => {
+      const { history } = createDemoHistory(now)
+      const ids = () => history.state.getSnapshot().rows.map((row) => row.id)
+      const all = ids()
+      history.failNextRemoval()
+      await expect(history.remove(all)).rejects.toThrow()
+      vi.advanceTimersByTime(removeMs)
+      expect(ids()).toEqual(all)
+      await history.remove(all)
+      vi.advanceTimersByTime(removeMs)
+      expect(ids()).toEqual([])
     })
   })
 

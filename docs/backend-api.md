@@ -427,7 +427,13 @@ const entries = await runner.inbox.list()
 await runner.inbox.answer(askId, { type: "reply", option: null, text: "Use green" })
 await runner.inbox.answer(actionAskId, { type: "done" })
 await runner.inbox.read(updateIds)
+await runner.inbox.clear()
 ```
+
+`clear` is the person clearing the Inbox of what asks nothing of them: it reads every open tell
+and done report, and takes every resolved entry out of the listing for good, the ones past the
+ten too. Open asks and finished turns are not touched, and the entries stay in their terminals'
+messages.
 
 Listed entries are the open ones, and the ten that resolved last (an ask answered, dismissed or
 replied to, a tell or done read, either ended with its session or terminal, whether or not the
@@ -1696,8 +1702,18 @@ one from an earlier runner.
   - `history.list({ projectId })` answers the project's rows, newest first; a project with
     none, or one the runner doesn't have, answers none.
   - `history.watch()` streams every row across projects, `synced`, then `changed` (a close, or a
-    change of availability) and `removed` (a restored or pruned row). The client's
+    change of availability) and `removed` (a restored, pruned or removed row). The client's
     `history.watch()` yields `reset` before each fresh sequence, as `terminals.watch()` does.
+  - `history.remove({ ids })` deletes those rows for good on the person's say, 1 to 1000 ids
+    of any project (`maxHistoryRemoved`), as the prune deletes old ones: in one write through
+    the store's `forget`, with each row's `removed` to watchers, and with the same word to
+    worktree cleanup (see agent-workspace.md, "Worktrees"), except for a row a
+    running terminal was restored from, whose worktrees that restore hands over once
+    confirmed. It resolves with nothing. Passed over, and left as they are: an id the runner
+    doesn't have, a row that reads `restoring`, and a plain row restored whose new terminal has
+    yet to save the output it took over (it reads `open`, and goes by itself once that is
+    saved). A write that fails rejects, with no row gone. The UI's adapter sends more than
+    1000 ids as several calls, one after another, and stops at the first that fails.
   - `terminals.create({ id, sessionId, cols, rows, closed })` restores row `closed` as the
     new terminal `id`, with nothing else to say. An unknown row is `NOT_FOUND`; one that can't
     be restored now is `CONFLICT`.

@@ -98,7 +98,7 @@ An agent can open a page, an image, a plan or its changes in a pane right next t
 ![Novadeck starts again and its terminals come back as they were, Claude Code's session where it left off.](assets/highlights/restore.webp)
 
 Terminals reopen where they were, and agents pick up their sessions. Closed terminals stay in
-History for 7 days.
+History for 7 days, unless you remove them from it sooner.
 
 ## Shortcuts
 

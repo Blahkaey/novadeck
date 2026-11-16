@@ -8,14 +8,14 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
-import { inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
+import { clearable, inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import { NovaMark } from "@novadeck/toolkit/NovaLogo"
 import { sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { Bell, BellOff, LoaderCircle, X } from "lucide-react"
+import { Bell, BellOff, ListX, LoaderCircle, X } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 
-import { focusSheet, focusSheetSoon, nextRowButton, rowOf } from "./inbox-dom"
+import { focusPanelClose, focusSheet, focusSheetSoon, nextRowButton, rowOf } from "./inbox-dom"
 import { iconKey, icons, tintOf, typeWords } from "./inbox-icons"
 import { asks as asking, needing } from "./inbox-state"
 import { endedWords, readLabel, resumesLabel, subjectOf, waitLabel } from "./inbox-text"
@@ -333,6 +333,31 @@ export const HeldPill = (): React.JSX.Element | null => {
     <button type="button" className="inbox-held text-caption" onClick={showHeld}>
       {held.length} new · show
     </button>
+  )
+}
+
+// Beside the panel's Hide button while any row asks nothing of the person: clears the Inbox of
+// those, its updates, read, and its resolved rows, for good. What asks stays. Where the backend
+// can't clear, there is no button.
+export const InboxClear = (): React.JSX.Element | null => {
+  const { state, clear } = useInboxContext()
+  if (!clear || !state.items.some(clearable)) return null
+  return (
+    <Tooltip content="Clear updates and resolved">
+      <button
+        type="button"
+        className="icon-button dim quiet size-7"
+        aria-label="Clear updates and resolved rows"
+        onClick={(event) => {
+          // The button goes once nothing is left to clear: the keyboard moves on to Hide.
+          const keyboard = event.detail === 0
+          clear()
+          if (keyboard) focusPanelClose()
+        }}
+      >
+        <ListX size={14} strokeWidth={1.6} />
+      </button>
+    </Tooltip>
   )
 }
 

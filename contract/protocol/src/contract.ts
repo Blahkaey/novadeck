@@ -44,7 +44,7 @@ import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
 import { directory, id, name } from "./fields.js"
 import { forgeIntegration, forgeName } from "./forges.js"
-import { closedTerminal, historyChange } from "./history.js"
+import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
 import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
@@ -561,9 +561,18 @@ export const contract = {
     // A project with none, or that the runner doesn't have, lists none.
     list: procedure.input(z.strictObject({ projectId: id })).output(z.array(closedTerminal)),
     // Every project's closed terminals: each `changed`, `synced`, then later changes
-    // (a close, a restore's progress and outcome, a prune), as `terminals.watch` reports
-    // terminals. An availability found by checking files is only as of when the list was read.
+    // (a close, a restore's progress and outcome, a prune, a removal), as `terminals.watch`
+    // reports terminals. An availability found by checking files is only as of when the list
+    // was read.
     watch: procedure.input(z.void()).output(eventIterator(historyChange)),
+    // Deletes those closed terminals for good on the person's say, as the prune does when
+    // they are 7 days old: each row goes with the output saved for it, and watchers receive
+    // its `removed`. Passed over, and left as they are: an id the runner doesn't have, and a
+    // row whose restore is under way (it reads `restoring`, or its new terminal has yet to
+    // save the output it took over). At most `maxHistoryRemoved` ids.
+    remove: procedure
+      .input(z.strictObject({ ids: z.array(id).min(1).max(maxHistoryRemoved) }))
+      .output(z.void()),
   },
   // Each tracked git worktree against its repository's main branch, for the Worktrees panel
   // (works.ts). A work is keyed by its worktree's root.
@@ -742,6 +751,10 @@ export const contract = {
     // The person dismisses an open ask without answering it: it stays listed, resolved, and its
     // agent is told at its next hook. One that isn't an open ask is NOT_FOUND.
     dismiss: procedure.input(z.strictObject({ id })).output(z.void()),
+    // The person clears the Inbox of what asks nothing of them: every open tell and done report
+    // is read, and every resolved entry leaves the listing for good. An open ask and a finished
+    // turn are not touched. The entries stay in their terminals' messages.
+    clear: procedure.input(z.void()).output(z.void()),
   },
   // Agents' feedback drafts for the people building Novadeck (see `feedbackDraft`): the app
   // shows each in its feedback card for the person to send or discard.

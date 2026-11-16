@@ -7,7 +7,7 @@ import type { Work, WorkClosing } from "@novadeck/core/works"
 import { Plus } from "lucide-react"
 import type { ComponentProps } from "react"
 
-import { HeldPill, InboxCount, InboxList } from "../inbox/InboxList"
+import { HeldPill, InboxClear, InboxCount, InboxList } from "../inbox/InboxList"
 import { shortcutBindings } from "../interaction/shortcuts"
 import { sessionGlance, type SessionMark } from "../projects/session-marks"
 import { FilesPanel } from "../sidebar/FilesPanel"
@@ -48,8 +48,8 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
       }
     | undefined
   // Where the backend keeps closed terminals: this project's rows, how to read them afresh
-  // (stable, as it starts a read), the agents it can connect, and what a row's click does.
-  // Left out, there is no History panel.
+  // (stable, as it starts a read), the agents it can connect, what a row's click does, and
+  // how to delete rows for good. Left out, there is no History panel.
   history:
     | {
         rows: readonly ClosedTerminal[]
@@ -58,6 +58,7 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
         onRestore: (row: ClosedTerminal) => void
         onReveal: (terminalId: string) => void
         onConnect: (agent: AgentName) => void
+        onRemove: (ids: readonly string[]) => Promise<void>
       }
     | undefined
   // Where the backend reports each tracked worktree's work against main: the open project's
@@ -233,6 +234,7 @@ export const WorkspaceSidebar = ({
       titleExtra={<HeldPill />}
       active={sidebarPanel === "inbox"}
       onClose={onHide}
+      actions={<InboxClear />}
     >
       <InboxList />
     </SidebarPanel>

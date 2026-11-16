@@ -71,6 +71,9 @@ export type InboxHistory = {
   readonly note: (id: string, how: SettledHow, answer?: string) => void
   // Takes a note back, as the action it was for failed.
   readonly forget: (id: string) => void
+  // Forgets every resolved row it keeps, as the person cleared the Inbox: the next `view` lists
+  // none of them, and saves that.
+  readonly clear: () => void
 }
 
 export type InboxHistoryOptions = {
@@ -261,6 +264,9 @@ export const createInboxHistory = ({
   let steadySince: number | undefined
   let lastSaved = ""
   const notes = new Map<string, { how: SettledHow; answer: string | undefined; at: number }>()
+  // The rows the person cleared that the backend may still find: a failed turn that moved on,
+  // until its stored row is read, is not made resolved again.
+  let cleared: ReadonlySet<string> = new Set()
   // A copy listed under another id while its own is taken by a newer row, kept the same.
   const renamed = new WeakMap<InboxRow, InboxRow>()
 
@@ -306,7 +312,10 @@ export const createInboxHistory = ({
     const open = found.filter(
       (row) => !row.settled && !moved(row) && !resolvedKeys.has(rowKey(row)),
     )
-    const retiring = found.filter((row) => moved(row) && !resolvedKeys.has(rowKey(row)))
+    if (cleared.size > 0) cleared = new Set(found.map(rowKey).filter((key) => cleared.has(key)))
+    const retiring = found.filter(
+      (row) => moved(row) && !resolvedKeys.has(rowKey(row)) && !cleared.has(rowKey(row)),
+    )
     const read = found.filter((row) => moved(row)).map(({ id }) => id)
     const listed = new Set(found.filter((row) => row.settled).map(({ id }) => id))
     const openKeys = new Set(open.map(rowKey))
@@ -360,6 +369,10 @@ export const createInboxHistory = ({
     },
     forget: (id) => {
       notes.delete(id)
+    },
+    clear: () => {
+      cleared = new Set([...cleared, ...history.map(rowKey)])
+      history = []
     },
   }
 }

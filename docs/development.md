@@ -513,6 +513,14 @@ Agents:
 - **Agent connections:** make the next connect in Preferences fail, refresh the agents, or
   connect Antigravity with the note Preferences shows where its own status line keeps
   Novadeck's out, as on Windows.
+- **History:** only where the demo keeps closed terminals (`plain`, `agents`, `messages`,
+  `inbox` and `welcome`; the showcase and the videos' demos have no History panel). Storefront
+  starts with 14 rows, one in each state a row can be in but restoring, which a click on a row
+  shows for a moment; the other projects start with none, and closing a terminal something ran
+  in adds one. So the panel's Clear, its question and a row's trash button need no action.
+  "Selected agent can't be restored" and "Selected agent can be restored" set what closing the
+  selected agent's terminal asks. "Next History removal fails" makes the next removal, a row's
+  or Clear's, fail once: the rows stay, and a line above the list says they couldn't be removed.
 
 App:
 
@@ -543,7 +551,10 @@ App:
   stopped, and trouble the agent worked past or messages delivered), each opening as a
   read-only card in gray; "Seventeen resolved rows" adds all of them at once, to see that the
   list holds only the ten that resolved last. Answering any open row resolves it in place the
-  same way. "Next reply not delivered" queues the next reply, then
+  same way. The Inbox's header has Clear while any row is an update or resolved (the `inbox`
+  variant starts with a few): it reads the updates and takes them and the resolved rows away,
+  all seventeen of those too, leaving the rows that ask; with one of them open, its card
+  closes. "Next reply not delivered" queues the next reply, then
   shows the delivery failure in its Inbox receipt (on the sheet the Inbox moved on to, with
   Back to it) and Messages history. A box for your own words says when it is over 4,096
   characters, and won't send until it isn't. Pausing messages between agents leaves

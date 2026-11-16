@@ -265,6 +265,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
     history: {
       list: (input) => runner.history.list(input),
       watch: () => runner.history.watch(),
+      remove: (input) => note("remove closed", () => runner.history.remove(input)),
     },
     works: {
       watch: () => runner.works.watch(),

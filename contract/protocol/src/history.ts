@@ -7,6 +7,9 @@ import { handle, terminalTitle } from "./terminals.js"
 /** How long a closed terminal's summary and program run at most, in UTF-16 code units. */
 export const historyLimits = { summary: 4096, program: 256 } as const
 
+/** How many closed terminals one `history.remove` names at most. */
+export const maxHistoryRemoved = 1000
+
 // Whether a closed terminal can be restored, as the runner found when the list was read:
 // `ready`; `restoring`, a restore under way; `gone`, with `reason` the conversation's file
 // or the folder it ran in no longer there; `disconnected`, its `agent`'s harness not

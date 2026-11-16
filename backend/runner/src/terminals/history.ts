@@ -112,7 +112,10 @@ export type HistoryHost = {
   readonly ran: (terminalId: string) => boolean
   /** Tells watchers of the terminal's summary. */
   readonly announce: (record: Closing) => void
-  /** Called with the ids of the terminals pruned for good; a restore, which also removes a row, never calls it. */
+  /**
+   * Called with the ids of the terminals that left History for good, pruned or removed by the
+   * person; a restore, which also removes a row, never calls it.
+   */
   readonly pruned?: (terminalIds: readonly string[]) => void
   /** Called when a restore was confirmed, or a newer row of the conversation replaced the row: what `from` owned is `to`'s. */
   readonly restored?: (from: string, to: string) => void
@@ -215,7 +218,10 @@ const pooled = async <T, R>(items: readonly T[], work: (item: T) => Promise<R>):
   return out
 }
 
-/** The terminals closed in the last 7 days: kept at close, listed, restored, and pruned. */
+/**
+ * The terminals closed in the last 7 days: kept at close, listed, restored, removed on the
+ * person's say, and pruned.
+ */
 export class ClosedTerminals {
   private readonly times: HistoryTimes
   /** The rows whose restore is under way, by their id. */
@@ -535,6 +541,25 @@ export class ClosedTerminals {
     } catch (error) {
       log.error("history.prune-failed", "Novadeck could not prune closed terminals", { err: error })
     }
+  }
+
+  /**
+   * Deletes the rows of these ids on the person's say, as a prune does those grown old: in
+   * one write, telling watchers and the host. A row History doesn't keep is passed over. So
+   * is one that reads as restoring, which its restore or its screen's write settles, and one
+   * restored that waits for its new terminal's own saved screen, which ends it. The worktrees
+   * of a row a running terminal was restored from are left to that restore, which hands them
+   * over once it is confirmed. A write that fails throws, and no row is gone.
+   */
+  erase(ids: readonly string[]): void {
+    const { records } = this.host
+    if (!records) return
+    const settled = (id: string): boolean =>
+      !this.restoring.has(id) && !this.archiving.has(id) && !this.pending.has(id)
+    const gone = records.eraseClosed(ids.filter(settled))
+    for (const row of gone) this.remove(row)
+    const pruned = gone.map(({ id }) => id).filter((id) => !this.host.restoredBeside(id))
+    if (pruned.length > 0) this.host.pruned?.(pruned)
   }
 
   // Availability

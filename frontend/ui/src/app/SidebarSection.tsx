@@ -215,6 +215,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
             onRestore: commands.restoreClosed,
             onReveal: (terminalId: string) => commands.revealTerminal(terminalId, projectId),
             onConnect: commands.openAgentSettings,
+            onRemove: historyFeed.remove,
           }
         : undefined,
     [historyFeed, historyRows, readHistory, backend.agents, connections, commands, projectId],

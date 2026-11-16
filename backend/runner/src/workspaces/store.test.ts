@@ -2180,6 +2180,26 @@ describe("closed terminals", () => {
     expect(workspace.closedTerminal("c")).toBeUndefined()
   })
 
+  it("go by their ids, of any project, and say which there were", ({ kept }) => {
+    const workspace = kept()
+    workspace["database"].exec(
+      "INSERT INTO projects (id, name, cwd) VALUES ('q', 'Other', '/other')",
+    )
+    workspace.insertClosed(closedRecord("a", { transcript: "screen" }))
+    workspace.insertClosed(closedRecord("b"))
+    workspace.insertClosed(closedRecord("c", { projectId: "q" }))
+    const gone = workspace.eraseClosed(["a", "c", "nope", "a"])
+    expect(gone.toSorted((one, other) => one.id.localeCompare(other.id))).toEqual([
+      { id: "a", projectId: "p" },
+      { id: "c", projectId: "q" },
+    ])
+    expect(workspace.closedTerminal("a")).toBeUndefined()
+    expect(workspace.closed("p").map(({ id }) => id)).toEqual(["b"])
+    expect(workspace.closed("q")).toEqual([])
+    expect(workspace.eraseClosed(["a"])).toEqual([])
+    expect(workspace.eraseClosed([])).toEqual([])
+  })
+
   it("stay when their agent is disconnected, and outlive their session", ({ kept }) => {
     const workspace = kept()
     workspace.insertClosed(closedRecord("a"))
@@ -2598,6 +2618,20 @@ describe("saved terminals", () => {
             transcript: "SECRET_PRUNED_TRANSCRIPT",
           })
           workspace.pruneClosed(Date.now() + 1)
+        },
+      ],
+      [
+        "an erased closed terminal",
+        "SECRET_ERASED_TRANSCRIPT",
+        () => {
+          const id = randomUUID()
+          workspace.insertClosed({
+            ...closedRecord(id),
+            projectId: project.id,
+            sessionId: session.id,
+            transcript: "SECRET_ERASED_TRANSCRIPT",
+          })
+          workspace.eraseClosed([id])
         },
       ],
       [

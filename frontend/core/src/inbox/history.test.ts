@@ -366,6 +366,40 @@ describe("the Inbox's history", () => {
     )
   })
 
+  describe("cleared by the person", () => {
+    it("forgets every resolved row at the next view, and saves that", () => {
+      const { history, save } = setup()
+      history.view([request("r1"), held()], facts())
+      expect(history.view([held()], facts()).rows.map(({ id }) => id)).toEqual([
+        "held:th1",
+        "request:r1",
+      ])
+      history.clear()
+      expect(history.view([held()], facts()).rows.map(({ id }) => id)).toEqual(["held:th1"])
+      expect(save.mock.calls.at(-1)![0].map(({ id }) => id)).toEqual(["held:th1"])
+    })
+
+    it("keeps what resolves after it", () => {
+      const { history } = setup()
+      history.view([request("r1"), request("r2")], facts())
+      history.view([request("r2")], facts())
+      history.clear()
+      expect(history.view([], facts()).rows.map(({ id }) => id)).toEqual(["request:r2"])
+    })
+
+    it("doesn't resolve again a failed turn whose stored row is still to be read", () => {
+      const { history } = setup()
+      history.view([failed(true)], facts())
+      history.view([failed(false)], facts())
+      history.clear()
+      // The backend still finds the stored row until its read lands: it is read, not listed.
+      const next = history.view([failed(false)], facts())
+      expect(next.rows).toEqual([])
+      expect(next.read).toEqual(["turn:01:100"])
+      expect(history.view([], facts()).rows).toEqual([])
+    })
+  })
+
   it("comes back from what it saved, and drops what can't be read", () => {
     const { history, save } = setup()
     history.view([request("r1")], facts())

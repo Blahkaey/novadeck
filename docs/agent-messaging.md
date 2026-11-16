@@ -874,7 +874,9 @@ person's own prompt in its terminal) or its agent session ends. Of these only an
 withdrew leaves the Inbox: the others stay in its list as resolved rows (`settled`: `answered`
 with the person's answer, `dismissed`, `replied`, `ended`), as does a tell or `done` once read
 (`read`). The runner lists the ten of them that resolved last, across the Inbox, with its open
-entries; its own history above, for the Messages pane, stays as long as it was. A runner restart
+entries; its own history above, for the Messages pane, stays as long as it was. When the person
+clears the Inbox (`inbox.clear`), every open tell and `done` is read and every resolved entry is
+marked `cleared`: none of them is listed again, and the Messages pane keeps them as before. A runner restart
 keeps pending asks for the resumed session; one whose terminal has had no agent bound for
 two minutes after the runner starts ends as `gone`, and reopens, with its id and time, if
 that session binds after all; one whose terminal binds another session ends for good at

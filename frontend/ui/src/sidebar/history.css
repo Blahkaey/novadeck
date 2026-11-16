@@ -6,7 +6,10 @@
    focus) and a `.history-row-detail`: a plain terminal's `.history-row-folder`, in the tabs'
    program font, and the start of its summary, two lines at most, a search's match lit. A row
    that can't restore is hatched and quiet, as an ended terminal's tab, and says a word where
-   the time was; one that is restoring shows a spinner there.
+   the time was; one that is restoring shows a spinner there. Beside the select button, a
+   row's `.history-row-actions` hold its `.history-row-remove` button and, where its agent can
+   be connected, the `.history-row-connect` plug before it. The panel's header has
+   `.history-clear`, which removes every row.
 
    Hooks: on a row, data-state="ready" | "restoring" | "gone" | "disconnected" | "open"; on
    its end, data-end="time" | "restoring" | "handle" | "word".
@@ -78,9 +81,10 @@
   color: var(--color-strong);
 }
 
-/* Beside the select button, on the title's line: what a row that can't restore offers
-   instead. Hidden until the row is under the pointer or holds focus, and always there on a
-   screen with no pointer, where nothing hovers. */
+/* Beside the select button, at the end of the title's line: Remove, and before it what a
+   row that can't restore offers instead. Hidden until the row is under the pointer or holds
+   focus, and until then a press there is the row's own, so a tap on a row at rest never
+   removes it; always there on a screen with no pointer, where nothing hovers. */
 .history-row-actions {
   position: absolute;
   top: 6px;
@@ -88,29 +92,47 @@
   display: flex;
   align-items: center;
   opacity: 0;
+  pointer-events: none;
 }
 .history-row:is(:hover, :focus-within) .history-row-actions {
   opacity: 1;
+  pointer-events: auto;
 }
-/* Not connected is wider than a date, so with its plug showing it gives its room back to
-   the title. */
-.history-row[data-state="disconnected"]:has(.history-row-actions):is(:hover, :focus-within)
-  .history-row-end {
-  display: none;
+/* The room they take at the end of the title's line: a button's, or two with the plug. */
+.history-row:has(.history-row-actions) {
+  --_actions-room: 24px;
 }
-.history-row[data-state="disconnected"]:has(.history-row-actions):is(:hover, :focus-within)
-  .history-row-line {
-  padding-right: 24px;
+.history-row:has(.history-row-connect) {
+  --_actions-room: 48px;
 }
+/* While they show under a pointer, the line's end makes that room without the title losing
+   any: a date is hidden then, and Remove stands in its room after the restore icon; a word
+   gives its room back to the title, as it is wider than they are. Only a handle, which says
+   where the click goes, moves over for them. */
+@media (hover: hover) {
+  .history-row:has(.history-row-actions) .history-row-restore {
+    right: 24px;
+  }
+  .history-row:has(.history-row-actions):is(:hover, :focus-within)
+    .history-row-end[data-end="word"] {
+    display: none;
+  }
+  .history-row:not([data-state="ready"]):is(:hover, :focus-within) .history-row-line {
+    padding-right: var(--_actions-room, 0);
+  }
+}
+/* With no pointer they always show, so the line is always that much shorter, and only the
+   word a plug stands for is hidden. */
 @media (hover: none) {
   .history-row-actions {
     opacity: 1;
+    pointer-events: auto;
   }
-  .history-row[data-state="disconnected"]:has(.history-row-actions) .history-row-end {
+  .history-row-line {
+    padding-right: var(--_actions-room, 0);
+  }
+  .history-row:has(.history-row-connect) .history-row-end {
     display: none;
-  }
-  .history-row[data-state="disconnected"]:has(.history-row-actions) .history-row-line {
-    padding-right: 24px;
   }
 }
 

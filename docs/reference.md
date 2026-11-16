@@ -379,8 +379,8 @@ long; and an Update, an agent's `done` report or a `tell`. Click a
 row to read it and answer in place, or reveal its terminal. An `ask` returns immediately so
 the agent can keep working; your answer reaches that exact agent session later as a message.
 
-Every row is open, resolved or withdrawn, and only a withdrawn one disappears: an ask its own
-agent withdrew. Everything else that ends stays, as history, in gray, saying how it ended: an
+Every row is open, resolved or withdrawn. A withdrawn one disappears: an ask its own
+agent withdrew. Everything else that ends stays, as history, in gray, until you clear it (below), saying how it ended: an
 ask answered here (with your answer), dismissed, or replied to by you writing in its terminal; a
 tell or `done` report once you opened it, saw its row in the list or looked at its terminal; a dialog answered here, in
 the chat (with your answer) or in the terminal, or closed in the terminal with no word of
@@ -392,7 +392,11 @@ row outlives its terminal. A resolved
 row opens as a read-only card, with no controls that change anything. The list is one list, the
 row added last first, open and resolved rows together, with no lines between them; of the resolved
 rows only the ten that resolved last are listed, whatever their kind. Messages keeps its own,
-longer history. A turn that ends without a `done` call or an ask makes no row; its tab
+longer history. **Clear**, the button in the Inbox's header while any row asks nothing of you,
+takes those rows out of the Inbox for good: every update (a `tell` or a `done` report) is read,
+and the updates and every resolved row leave the list, the resolved ones past the ten too, so
+none comes back in their place. Rows that ask something of you stay, and so does what Messages
+keeps. A card open on a row Clear takes closes; a card open on a row that asks stays open. A turn that ends without a `done` call or an ask makes no row; its tab
 marks it (see above). A failed turn is a stored row that stays, across a reload and a runner
 restart, until the agent works again or you read it (viewing its terminal reads it); it is
 trouble that counts only while it is the agent's latest end and the agent isn't working. Asks,
@@ -474,9 +478,10 @@ so they stay after a reload, and the project opens the session you were in last.
 
 Closing a terminal doesn't end it for good. It moves to **History**, a panel on the
 sidebar's rail, last by default, with one list per project, newest first. A terminal comes
-back for 7 days; after that its row goes by itself. Closing a terminal no longer always
+back for 7 days; after that its row goes by itself, unless you remove it sooner (see
+"Removing rows" below). Closing a terminal no longer always
 asks (see "Closing asks first" below), because what it loses can be got back from here. A rail order you saved before History
-existed puts its toggle at the end. There is no button to delete one.
+existed puts its toggle at the end.
 Where a backend keeps no History, as in a browser demo without it, the panel isn't there
 and closing is final.
 
@@ -511,6 +516,20 @@ technology. Four other states stand where the date was:
 - **An @handle** (not hatched). The conversation is open in another terminal; clicking
   goes there.
 - **A spinner** (not hatched). The restore is under way.
+
+### Removing rows
+
+A row can go before its 7 days are up. Under the pointer, or with the keyboard on it, a
+row shows a trash button at the end of its line, after the restore icon: it removes that
+one row at once, without asking. **Clear**, beside the panel's Hide button while there is
+a row to remove, removes every row of the project, those a search leaves out too, once
+you confirm a question that says how many go.
+
+Either way the row is gone for good and can't be restored after. A plain terminal's saved
+output goes with it. An agent's conversation stays with the agent, as Novadeck never held
+it, but History no longer offers it. A row that is being restored has no trash button, and
+Clear leaves it. If a row couldn't be removed, a line above the list says so and the row
+stays.
 
 ### Closing asks first
 
@@ -609,7 +628,8 @@ agent.
 - **Transcripts.** Each terminal's recent output is kept, and a restored terminal shows
   it read-only above a separator and its fresh prompt (on Windows, scrolled up just above
   a fresh screen); a resumed agent shows its own history instead. A closed plain terminal's
-  output is kept for the 7 days its row stays in History; an agent's row keeps none.
+  output is kept for as long as its row stays in History, 7 days unless you remove it
+  sooner; an agent's row keeps none.
   Transcripts are on by default and can be turned off in Preferences,
   which also forgets the saved ones. A changed terminal's transcript is saved about every
   30 seconds, and when its shell exits or restarts. What looks like a secret (a known

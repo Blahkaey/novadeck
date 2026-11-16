@@ -4,7 +4,8 @@ import { isDemoHistory } from "@novadeck/demo/history"
 import type { DemoActionGroup } from "./types"
 
 // The panel's group for History's states the demo can't reach by itself: its agents are all
-// restorable, so closing one never asks for that reason.
+// restorable, so closing one never asks for that reason, and it deletes every row it is
+// asked to, so a removal never fails.
 export const historyGroups = (history: Backend["history"]): readonly DemoActionGroup[] =>
   isDemoHistory(history)
     ? [
@@ -27,6 +28,11 @@ export const historyGroups = (history: Backend["history"]): readonly DemoActionG
                 const key = selected()
                 if (key) history.setRestorable(key.terminalId, true)
               },
+            },
+            {
+              label: "Next History removal fails",
+              hint: "Remove a row in the History panel, or clear it: the rows stay, and a line above the list says they couldn't be removed",
+              run: () => history.failNextRemoval(),
             },
           ],
         },

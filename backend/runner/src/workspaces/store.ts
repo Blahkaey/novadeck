@@ -2571,6 +2571,15 @@ export class WorkspaceStore
     return rows.map(({ id }) => id)
   }
 
+  eraseClosed(ids: readonly string[]): { id: string; projectId: string }[] {
+    if (ids.length === 0) return []
+    return this.forget(
+      () => this.queries.all`
+        DELETE FROM closed_terminals WHERE id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+        RETURNING id, project_id AS projectId`,
+    ) as { id: string; projectId: string }[]
+  }
+
   insertWorktree(record: WorktreeRecord): void {
     void referencing(
       "NOT_FOUND",

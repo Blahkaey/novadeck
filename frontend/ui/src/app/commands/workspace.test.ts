@@ -420,7 +420,11 @@ describe("workspace commands", () => {
     })
 
     it("asks first where the backend keeps History too", () => {
-      const history = { state: createStore({ rows: [] }), list: () => Promise.resolve([]) }
+      const history = {
+        state: createStore({ rows: [] }),
+        list: () => Promise.resolve([]),
+        remove: () => Promise.resolve(),
+      }
       const app = openCommands({ workspace: withTeam(), history })
       app.commands.close("01")
       expect(app.ui.getSnapshot().closing).toMatchObject({ id: "01" })
@@ -457,7 +461,11 @@ describe("workspace commands", () => {
   })
 
   context("when the backend keeps closed terminals", () => {
-    const history = { state: createStore({ rows: [] }), list: () => Promise.resolve([]) }
+    const history = {
+      state: createStore({ rows: [] }),
+      list: () => Promise.resolve([]),
+      remove: () => Promise.resolve(),
+    }
     // The first terminal, with what the runner says of it.
     const asBackendSays = (parts: Partial<TerminalMetadata>) => {
       const workspace = workspaceFixture()
@@ -561,7 +569,13 @@ describe("workspace commands", () => {
         availability: { state: "ready" },
       } as const
       const rows = createStore({ rows: [row] as readonly ClosedTerminal[] })
-      const app = openCommands({ history: { state: rows, list: () => Promise.resolve([row]) } })
+      const app = openCommands({
+        history: {
+          state: rows,
+          list: () => Promise.resolve([row]),
+          remove: () => Promise.resolve(),
+        },
+      })
       app.commands.restoreClosed(row)
       app.commands.restoreClosed(row)
       expect(app.allocated).toHaveLength(1)
@@ -587,7 +601,13 @@ describe("workspace commands", () => {
         availability: { state: "ready" },
       } as const
       const rows = createStore({ rows: [row] as readonly ClosedTerminal[] })
-      const app = openCommands({ history: { state: rows, list: () => Promise.resolve([row]) } })
+      const app = openCommands({
+        history: {
+          state: rows,
+          list: () => Promise.resolve([row]),
+          remove: () => Promise.resolve(),
+        },
+      })
       app.commands.restoreClosed(row)
       const made = app.state().selected
       app.workspace.dispatch({
