@@ -133,7 +133,10 @@ With a remote runner:
   included, so `localhost:3000` is the runner's machine's. Without it they load from this
   machine. A link opened in the system's browser is always this machine's.
 - The standalone runner has no transcript key (see [SECURITY.md](../SECURITY.md#terminal-runner)),
-  so no transcript is saved or shown, and it caps terminals at 32.
+  so no transcript is saved or shown.
+- The standalone runner caps running and kept terminals together at 32, where the desktop
+  app's own runner has no cap. `NOVADECK_MAX_TERMINALS` sets another cap, a positive whole
+  number, or `none` for no cap; any other value stops the start.
 - The app and the runner must be the same build: the protocol's version doesn't change
   with every change to its calls.
 

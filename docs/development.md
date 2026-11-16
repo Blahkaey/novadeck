@@ -1356,8 +1356,9 @@ cp backend/runner/example.env backend/runner/.env
 
 - Runner: `HOST`, `PORT`, and `CORS_ORIGINS` control the listener and allowed frontend origins; a `HOST` that isn't loopback is refused unless `NOVADECK_ALLOW_REMOTE_HOST=1`.
 - Terminal API: `NOVADECK_TOKEN` enables authenticated WebSocket RPC;
-  `NOVADECK_DATABASE` optionally selects the SQLite metadata file. Without a token,
-  only the existing HTTP status API is available.
+  `NOVADECK_DATABASE` optionally selects the SQLite metadata file, and
+  `NOVADECK_MAX_TERMINALS` the cap on terminals (32 unless set; `none` for no cap). Without a
+  token, only the existing HTTP status API is available.
 - Electron: the host runs the runner in a utility process and hands each window a
   MessagePort through a sandboxed preload bridge. It also serves the status endpoint
   on a local, OS-selected port. Package `.env` files are not used.

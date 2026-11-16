@@ -81,6 +81,23 @@ describe("server configuration", () => {
     expect(readConfig({})).not.toHaveProperty("relay")
   })
 
+  it("reads a cap on terminals, or none, and leaves the server's own unless one is set", () => {
+    expect(readConfig({ NOVADECK_MAX_TERMINALS: "64" }).maxTerminals).toBe(64)
+    expect(readConfig({ NOVADECK_MAX_TERMINALS: " 1 " }).maxTerminals).toBe(1)
+    expect(readConfig({ NOVADECK_MAX_TERMINALS: "none" }).maxTerminals).toBeNull()
+    expect(readConfig({ NOVADECK_MAX_TERMINALS: "None" }).maxTerminals).toBeNull()
+    expect(readConfig({ NOVADECK_MAX_TERMINALS: " " })).not.toHaveProperty("maxTerminals")
+    expect(readConfig({})).not.toHaveProperty("maxTerminals")
+  })
+
+  it("refuses a cap on terminals that isn't a positive whole number or none", () => {
+    for (const value of ["0", "-3", "2.5", "1e3", "lots", "0x10", "99999999999999999999"]) {
+      expect(() => readConfig({ NOVADECK_MAX_TERMINALS: value })).toThrow(
+        "NOVADECK_MAX_TERMINALS must be a positive whole number or none",
+      )
+    }
+  })
+
   it("rejects empty, short, and oversized credentials", () => {
     for (const token of ["", " ", "short", "x".repeat(513)]) {
       expect(() => readConfig({ NOVADECK_TOKEN: token })).toThrow("NOVADECK_TOKEN")

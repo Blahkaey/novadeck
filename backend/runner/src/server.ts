@@ -18,6 +18,8 @@ export type ServerOptions = HttpOptions &
     voice?: RunnerOptions["voice"]
     /** Murmur's engine and where it installs; see `RunnerOptions.murmur`. */
     murmur?: RunnerOptions["murmur"]
+    /** The cap on running and retained terminals: 32 when omitted, none when `null`. */
+    maxTerminals?: number | null
     terminals?: TerminalOptions
   }>
 
@@ -30,6 +32,9 @@ export const startServer = async (options: ServerOptions = {}): Promise<HttpServ
     import("./index.js"),
     import("@novadeck/wire/server"),
   ])
+  // A shared, network-reachable runner keeps a cap unless told otherwise; the
+  // desktop runner has none. The manager reads an absent cap as none.
+  const cap = options.maxTerminals === undefined ? 32 : options.maxTerminals
   const runner = createRunner({
     ...(options.database !== undefined && { database: options.database }),
     ...(options.shell !== undefined && { shell: options.shell }),
@@ -37,8 +42,7 @@ export const startServer = async (options: ServerOptions = {}): Promise<HttpServ
     ...(options.relay !== undefined && { relay: options.relay }),
     ...(options.voice !== undefined && { voice: options.voice }),
     ...(options.murmur !== undefined && { murmur: options.murmur }),
-    // A shared, network-reachable runner keeps a cap; the desktop runner has none.
-    terminals: { maxTerminals: 32, ...options.terminals },
+    terminals: { ...(cap !== null && { maxTerminals: cap }), ...options.terminals },
   })
   let sockets: ReturnType<typeof serveWebSocket>
   try {
