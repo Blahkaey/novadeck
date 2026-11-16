@@ -4,7 +4,6 @@ import type { AgentName } from "@novadeck/protocol"
 import { harnesses } from "../harnesses/registry.js"
 import { commandWords } from "../terminals/commands.js"
 import { describe, expect, it } from "../test.js"
-import { startLine } from "./brief.js"
 import { tourChoice, tourLaunch } from "./launch.js"
 
 // Where a harness lives, for the model lists the tour picks from: Novadeck's own lists ignore it.
@@ -17,11 +16,7 @@ const codexModels: readonly Model[] = [
 ]
 
 const launchOf = async (agent: AgentName, models?: readonly Model[]) =>
-  tourLaunch(agent, {
-    models: models ?? (await harnesses[agent].launch.models(install)),
-    install: undefined,
-    cwd: "/home/x/.novadeck/tour",
-  })
+  tourLaunch(agent, { models: models ?? (await harnesses[agent].launch.models(install)) })
 
 describe("the tour's model", () => {
   it("is Claude Code's haiku at low effort", async () => {
@@ -55,9 +50,9 @@ describe("the tour's model", () => {
 })
 
 describe("the tour's launch line", () => {
-  it("starts Claude Code on haiku, taking edits, with the start line as its prompt", async () => {
+  it("starts Claude Code on haiku, taking edits, with no prompt, its brief left to the doorbell", async () => {
     const launch = await launchOf("claude")
-    expect(launch).toMatchObject({ brief: "launch", model: "haiku" })
+    expect(launch).toMatchObject({ brief: "doorbell", model: "haiku" })
     expect(commandWords(launch.command, "linux")).toEqual([
       "claude",
       "--model",
@@ -66,13 +61,12 @@ describe("the tour's launch line", () => {
       "low",
       "--permission-mode",
       "acceptEdits",
-      startLine,
     ])
   })
 
-  it("starts Codex in its workspace-write sandbox, with the start line as its prompt", async () => {
+  it("starts Codex in its workspace-write sandbox, with no prompt, its brief left to the doorbell", async () => {
     const launch = await launchOf("codex", codexModels)
-    expect(launch).toMatchObject({ brief: "launch", model: "gpt-6-luna" })
+    expect(launch).toMatchObject({ brief: "doorbell", model: "gpt-6-luna" })
     expect(commandWords(launch.command, "linux")).toEqual([
       "codex",
       "--model",
@@ -83,11 +77,10 @@ describe("the tour's launch line", () => {
       "workspace-write",
       "--ask-for-approval",
       "on-request",
-      startLine,
     ])
   })
 
-  it("starts Antigravity plain, taking edits, its start line left to the doorbell", async () => {
+  it("starts Antigravity plain, taking edits, its brief left to the doorbell", async () => {
     const launch = await launchOf("agy")
     expect(launch).toMatchObject({ brief: "doorbell", model: "gemini-3.8-flash-low" })
     expect(commandWords(launch.command, "linux")).toEqual([
@@ -103,6 +96,6 @@ describe("the tour's launch line", () => {
 
   it("reads the same in Windows' shells", async () => {
     const launch = await launchOf("claude")
-    expect(commandWords(launch.command, "win32").at(-1)).toBe(startLine)
+    expect(commandWords(launch.command, "win32").at(-1)).toBe("acceptEdits")
   })
 })

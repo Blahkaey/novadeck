@@ -20,6 +20,9 @@ import type { TranscriptRedactor } from "./redaction.js"
 import type { TerminalRecords } from "./saved-terminals.js"
 import type { TranscriptSealer } from "./sealing.js"
 
+/** What the runner decides of an agent's `open_agent`, before anything starts. */
+export type OpenPolicy = { readonly refusal?: string }
+
 export type TerminalOptions = {
   shell?: string
   shellArgs?: readonly string[]
@@ -134,10 +137,10 @@ export type TerminalOptions = {
    */
   models?: (agent: AgentName) => Promise<readonly Model[]>
   /**
-   * Why a terminal may not open agents, or undefined: asked first of every `open_agent`, with
-   * the terminal that calls it (the tour's teammates may not).
+   * What the caller's `open_agent` is subject to, asked first of every one: a refusal (the
+   * tour's teammates may not open agents).
    */
-  openRefusal?: (terminalId: string) => string | undefined
+  openPolicy?: (terminalId: string) => OpenPolicy
   /**
    * Whether Novadeck's hooks run for the harness in a folder, where it runs them only
    * once the person trusts them (`Harness.hooksTrusted`); asked of the harness itself when

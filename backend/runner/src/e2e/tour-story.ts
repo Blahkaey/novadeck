@@ -4,7 +4,8 @@ import { join } from "node:path"
 import type { AgentName } from "@novadeck/protocol"
 
 import { harnesses } from "../harnesses/registry.js"
-import { card, startLine } from "../tour/brief.js"
+import { tourBriefMark } from "../messaging/messages.js"
+import { card } from "../tour/brief.js"
 import { tourWrites } from "../tour/launch.js"
 import type { AgentSetup } from "./agents/agent.js"
 import { poll, type DeckTerminal } from "./deck.js"
@@ -26,7 +27,7 @@ import {
 // `open_agent`, who describe themselves and send each other and the lead their parts; the
 // copywriter asks the person which tagline in the Inbox; the lead writes welcome.svg and
 // shows it. The fake model plays all three, each by the brief it was given: the lead
-// follows the folder's lead.md, and each teammate its `message`. What a rule keys on is
+// follows the brief Novadeck sends it, and each teammate its `message`. What a rule keys on is
 // told by the conversation (a teammate's holds its brief as a delivered message), so one
 // script serves the three terminals.
 
@@ -170,8 +171,16 @@ const asking = (message: string): Record<string, unknown> => {
   return { subject: found[1], body: found[2], shape: JSON.parse(shape) as unknown }
 }
 
+// The messages an agent was sent by other agents: Novadeck's own notices, as the lead's brief
+// (which quotes each teammate's), are no teammate's task.
+const fromAgents = (call: Call) => received(call).filter((one) => one.from !== "novadeck")
+
 const briefed = (call: Call, who: string): boolean =>
-  received(call).some((one) => one.text.includes(`You are the ${who} in Novadeck's tour`))
+  fromAgents(call).some((one) => one.text.includes(`You are the ${who} in Novadeck's tour`))
+
+/** The lead's brief as Novadeck's notice delivered it, in the call that carries it. */
+const scriptIn = (call: Call): string | undefined =>
+  received(call).find((one) => one.from === "novadeck" && one.text.startsWith(tourBriefMark))?.text
 
 type Role = "copywriter" | "designer" | "lead"
 
@@ -189,7 +198,7 @@ const known = (call: Call): string => call.turns.find((turn) => turn.role === "u
  */
 const briefing = (call: Call, kept: Map<string, Briefing>): Briefing => {
   for (const role of ["copywriter", "designer"] as const) {
-    const brief = received(call).find((one) =>
+    const brief = fromAgents(call).find((one) =>
       one.text.includes(`You are the ${role} in Novadeck's tour`),
     )
     if (brief)
@@ -218,12 +227,21 @@ const handleOpened = (call: Call): string | undefined =>
  * name is found among those any call of the run offered, as the first call of an agent goes
  * out before its MCP tools load.
  */
-export const storyRules = (run: E2E, brief: string): Rule[] => {
+export const storyRules = (run: E2E): { rules: Rule[]; script: () => string } => {
+  // The lead's brief, kept from the first call that carries it: a harness may drop an old
+  // delivery from the calls after.
+  let script: string | undefined
+  const scripted = (from: Call): void => {
+    script ??= scriptIn(from)
+  }
+  const mates = (): readonly [Opening, Opening] => {
+    const [writer, designer] = openings(script ?? "")
+    if (!writer || !designer) throw new Error("The lead's brief has no two open_agent calls")
+    return [writer, designer]
+  }
   const kept = new Map<string, Briefing>()
   const heard = new Map<string, Set<string>>()
   const roleOf = (call: Call): Role => briefing(call, kept).role
-  const [writer, designer] = openings(brief)
-  if (!writer || !designer) throw new Error("The brief has no two open_agent calls")
   const named = (call: Call, name: string): string | undefined =>
     [call, ...run.model.calls].map((one) => tool(one, name)).find(Boolean)
   const call = (from: Call, name: string, input: Record<string, unknown>): Reply | undefined => {
@@ -231,26 +249,32 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
     return found ? { calls: [{ name: found, input }] } : undefined
   }
 
-  return [
+  const rules = [
     // The lead, by the brief's steps.
     own((one) => {
       if (roleOf(one) !== "lead") return undefined
+      scripted(one)
       const started =
-        asked(one, startLine) ||
-        deliveries(one).some((each) => each.from === "novadeck" && each.text.includes(startLine))
+        asked(one, "brief for Novadeck") &&
+        deliveries(one).some(
+          (each) => each.from === "novadeck" && each.text.startsWith(tourBriefMark),
+        )
       if (started)
         return call(one, "describe", { title: "Tour lead", summary: "Leads Novadeck's tour" })
       if (result(one)?.includes("Described this terminal") && opensMade(one) === 0) {
+        const [writer] = mates()
         const opening = call(one, "open_agent", open(writer, writer.message))
         return opening && { ...opening, text: "The tour has begun." }
       }
       const handle = handleOpened(one)
-      if (handle && opensMade(one) === 1)
+      if (handle && opensMade(one) === 1) {
+        const [, designer] = mates()
         return call(
           one,
           "open_agent",
           open(designer, designer.message.replaceAll("COPYWRITER", `@${handle}`)),
         )
+      }
       if (handle && opensMade(one) === 2) return text("The team is working.")
       return undefined
     }),
@@ -281,8 +305,8 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
         return call(one, "describe", { title: "Copywriter", summary: "Writes the card's words" })
       // As a model that follows the lead's script instead would: it tries to open an agent.
       if (result(one)?.includes("Described this terminal"))
-        return call(one, "open_agent", { agent: writer.agent, message: "Help me." })
-      if ((result(one) ?? "").includes(refusal)) return call(one, "ask", asking(writer.message))
+        return call(one, "open_agent", { agent: mates()[0].agent, message: "Help me." })
+      if ((result(one) ?? "").includes(refusal)) return call(one, "ask", asking(mates()[0].message))
       if (/is in the user's Inbox/.test(result(one) ?? "")) return text("Asked you to choose.")
       const { lead } = briefing(one, kept)
       if (lead && sent(one, lead)) return text("Sent it to the lead.")
@@ -308,7 +332,7 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
         return call(one, "describe", { title: "Designer", summary: "Picks the card's look" })
       const { lead, mate } = briefing(one, kept)
       if (result(one)?.includes("Described this terminal"))
-        return call(one, "open_agent", { agent: designer.agent, message: "Help me." })
+        return call(one, "open_agent", { agent: mates()[1].agent, message: "Help me." })
       if ((result(one) ?? "").includes(refusal) && mate)
         return call(one, "send", { to: mate, text: look })
       if (lead && mate && sent(one, mate)) return call(one, "send", { to: lead, text: look })
@@ -316,6 +340,13 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
       return undefined
     }),
   ]
+  return {
+    rules,
+    script: () => {
+      if (script === undefined) throw new Error("The lead was never sent its brief")
+      return script
+    },
+  }
 }
 
 /** The words of the model and effort flags a harness starts with, as `open_agent` gives them. */
@@ -337,16 +368,17 @@ export const tell = async (
 ): Promise<readonly [Opening, Opening]> => {
   await seedTour(run, agents)
   const prepared = await run.deck.tour.prepare(setup.agent)
-  const instructions = await readFile(join(prepared.directory, "lead.md"), "utf8")
-  const [writer, designer] = openings(instructions)
-  expect(writer).toBeDefined()
-  expect(designer).toBeDefined()
-  expect(instructions).toContain("welcome card for Ada,")
+  // The folder's own instruction files hold no script: it reaches the lead as a notice.
+  for (const name of ["AGENTS.md", "CLAUDE.md"])
+    // eslint-disable-next-line no-await-in-loop -- Two small files.
+    expect(await readFile(join(prepared.directory, name), "utf8")).not.toMatch(/open_agent|Steps/)
+  expect(prepared.command).not.toContain("Novadeck tour")
   // The lead's own write, which the fake model has no tool call for in every harness.
   const svg = filled()
   expect(wellFormed(svg)).toBe(true)
   await writeFile(join(prepared.directory, card.file), svg)
-  run.model.use(...storyRules(run, instructions))
+  const story = storyRules(run)
+  run.model.use(...story.rules)
   const requests = run.deck.answerRequests()
   const calls = run.model.mark()
 
@@ -355,6 +387,13 @@ export const tell = async (
   const first = await requests.next()
   const second = await requests.next()
   const mates = { copywriter: first, designer: second }
+  // What the lead was sent: the whole script, as Novadeck's notice, naming the person.
+  const instructions = story.script()
+  expect(instructions).toContain("welcome card for Ada,")
+  expect(instructions).toContain("</svg>")
+  const [writer, designer] = openings(instructions)
+  expect(writer).toBeDefined()
+  expect(designer).toBeDefined()
 
   // Started by the lead, on the brief's model and effort, in the harness the brief names.
   for (const [mate, opening] of [
@@ -493,14 +532,14 @@ export const holdAtTrust = async (
 ): Promise<AgentName> => {
   await seedTour(run, agents)
   const prepared = await run.deck.tour.prepare(setup.agent)
-  const instructions = await readFile(join(prepared.directory, "lead.md"), "utf8")
-  const [, designer] = openings(instructions)
-  run.model.use(...storyRules(run, instructions))
+  const story = storyRules(run)
+  run.model.use(...story.rules)
   const requests = run.deck.answerRequests()
   const lead = await run.deck.openAt(prepared.directory, prepared.command)
   await begin(run, lead, setup, prepared.brief === "doorbell")
   await requests.next()
   const second = await requests.next()
+  const [, designer] = openings(story.script())
   const held = await second.poll(
     () => second.summary().startup ?? undefined,
     "its startup screen",

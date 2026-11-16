@@ -1,24 +1,19 @@
 import type { Effort } from "@novadeck/harness-core/harness"
 import type { AgentName } from "@novadeck/protocol"
 
+import { tourBriefMark } from "../messaging/messages.js"
+
 /**
- * What the tour's agents are told. Every harness loads a folder's `AGENTS.md` (Codex,
- * Antigravity) or `CLAUDE.md` (Claude Code) by itself, as project instructions that a cheap
- * model follows over a message, and the agents the lead opens start in this same folder. So
- * those two files say nothing of a role or of steps: the lead's script is `lead.md`, which
- * nothing loads, and only the lead is pointed at it, by `startLine`. A teammate's task is the
- * message its lead sends. The folder's own files also say the one thing they all share: the
- * sandbox's rules.
- *
- * The start line is short and plain, as it rides on the launch line (or, where a harness takes
- * none there, on the doorbell), so it holds nothing a shell quotes unsafely, as an apostrophe.
+ * What the tour's agents are told. The tour folder's own instruction files, which every harness
+ * loads as it starts there, hold only `sandboxNote`: the agents the lead opens start in the
+ * same folder, and a cheap model follows a script it loads over the message that is its task.
+ * The lead's script (`tourBrief`) is sent to it instead, by the doorbell, as Novadeck's first
+ * notice to it, for every harness (`Tour.brief`); a teammate's task is the message its lead sends.
  */
-export const startLine =
-  "You lead the Novadeck tour: read lead.md in this folder with your file tool, not a shell, and follow it."
 
 /** What the tour rings its agent where it has gone quiet at a step (`tour.nudge`). */
 export const nudgeLine =
-  "Novadeck's tour is waiting on you: look at what you've done so far and carry on from the next step in lead.md. Don't redo a step."
+  "Novadeck's tour is waiting on you: look at what you've done so far and carry on from the next step of the tour brief Novadeck sent you. Don't redo a step."
 
 /**
  * The card the lead makes: its file, and how that file is described to the lead. Changing the
@@ -103,7 +98,7 @@ plan or confirm in prose before a tool call.
 
 /**
  * The folder's own instructions, which every harness loads: the sandbox's rules and no role or
- * step, so an agent opened here does the task it was given and nothing else.
+ * step, so an agent opened there does the task it was given and nothing else.
  */
 export const sandboxNote = `# Novadeck tour sandbox
 
@@ -113,21 +108,19 @@ If you were given a task, do only that task.
 `
 
 /** The lead's script for a run, with the person's name and the teammates' models. */
-export const leadScript = ({
+export const tourBrief = ({
   name,
   copywriter,
   designer,
-}: BriefFacts): string => `# Novadeck tour: the lead's script
-
-You are the lead agent in Novadeck's tour. The person just started the tour to see how Novadeck
-works with agents. This folder is a sandbox Novadeck made for it, and Novadeck empties it each
-time the tour starts.
+}: BriefFacts): string => `${tourBriefMark} The person just started the tour to see how Novadeck
+works with agents, and this is your task now: you are the lead agent. This folder is a sandbox
+Novadeck made for it, and Novadeck empties it each time the tour starts.
 
 ## Rules
 
 - Work only in this folder. Don't read or change anything outside it.
-- Don't install anything, and don't run git. Run no shell command at all: read and write files
-  with your own file tools.
+- Don't install anything, and don't run git. Run no shell command at all: you need none, as
+  these steps only have you call Novadeck's tools and write one file.
 - Keep every reply to one or two short sentences: the person is watching Novadeck, not reading.
 - Be quick: the whole tour should take about 2 minutes. Say nothing between steps beyond the
   one-sentence greeting and the final line, and don't explain, plan or confirm in prose.
@@ -182,14 +175,16 @@ const indent = (text: string): string =>
     .map((line) => `   > ${line}`)
     .join("\n")
 
-/** The files the tour's folder starts with, by name. */
-export const briefFiles = (facts: BriefFacts): Readonly<Record<string, string>> => ({
+/**
+ * The files the tour's folder starts with, by name: the sandbox's rules, which every harness
+ * loads and which hold no role and no step, and a Claude Code project file. The lead's
+ * script is `tourBrief`, rung to it.
+ */
+export const briefFiles: Readonly<Record<string, string>> = {
   "AGENTS.md": sandboxNote,
   "CLAUDE.md": "@AGENTS.md\n",
-  // The lead's script, in a file no harness loads by itself.
-  "lead.md": leadScript(facts),
   // Claude Code's project settings for this folder: its teammates, which are given no launch
   // flags, take edits unasked too, and a plan mode the person's own settings start them in
   // doesn't hold them (project settings outrank the user's). Only the tour folder's own file.
   ".claude/settings.json": '{"permissions":{"defaultMode":"acceptEdits"}}\n',
-})
+}

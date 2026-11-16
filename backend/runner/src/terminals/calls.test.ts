@@ -87,7 +87,7 @@ describe("the open call", () => {
       save: () => undefined,
       install: () => Promise.resolve(undefined),
       models: () => Promise.resolve([{ id: "opus", efforts: ["low", "max"] }]),
-      openRefusal: () => barred,
+      openPolicy: () => ({ ...(barred !== undefined && { refusal: barred }) }),
       claims: () => claims,
       launcher: () => ({
         connected: () => Promise.resolve(true),

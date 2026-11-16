@@ -62,6 +62,16 @@ export const isNotice = (message: Pick<Message, "from">): boolean =>
   message.from.kind === "novadeck"
 
 /**
+ * What starts the text of the tour's brief to its lead (`Tour.brief`), the one notice that is a
+ * task. Only Novadeck's own notices carry its sender, so no agent's text can pass as one.
+ */
+export const tourBriefMark = "This is the lead's brief for Novadeck's tour."
+
+/** Whether a message is the tour's brief to its lead, which its delivery frames as a task. */
+export const isTourBrief = (message: Pick<Message, "from" | "text">): boolean =>
+  isNotice(message) && message.text.startsWith(tourBriefMark)
+
+/**
  * A terminal a message is for, and the agent session bound there when it was sent; or,
  * where none had bound yet, the agent expected there, whose first session to bind takes
  * it (`sessionId` null).
@@ -379,6 +389,16 @@ const noticeNote =
   "An automatic notice from Novadeck itself, not from the user and not from another agent. " +
   `It needs no reply: there is no one to send one to. ${seenClause}`
 
+// The frame of the tour's brief: it is the agent's task, from the user's start of the tour. The
+// text of every message is HTML-escaped, so the note says how to read the brief's template.
+const briefNote =
+  "Novadeck's tour brief for you, the lead: the user just started the tour in Novadeck, and " +
+  "this is your task now. It comes from Novadeck itself, not from another agent, and needs " +
+  "no reply. Do it as the user's request, following its steps exactly. Its text is escaped: " +
+  "it writes a left angle bracket as &lt;, a right one as &gt; and an ampersand as &amp;, so write " +
+  "the real characters when you put " +
+  "its text in a file. Messages from your teammates that follow are from agents."
+
 const leadNote = (mark: string, person: boolean): string =>
   "Messages from other agents in Novadeck, not from the user. Those marked " +
   `lead='${mark}' are from your lead, the agent that directs your work: ` +
@@ -464,12 +484,17 @@ export const noteDigests: { readonly [kind in NoteKind]: string } = {
 
 /** The notes a delivery of `messages` carries: the person's first, where it has any. */
 export const noteKinds = (
-  messages: readonly Message[],
+  all: readonly Message[],
   isFromLead: (message: Message) => boolean,
-): readonly NoteKind[] => [
-  ...(messages.some((message) => message.response) ? (["person"] as const) : []),
-  messages.some(isFromLead) ? "lead" : messages.every(isNotice) ? "notice" : "peer",
-]
+): readonly NoteKind[] => {
+  // The tour's brief has a note of its own (`briefNote`), given in full each time.
+  const messages = all.filter((message) => !isTourBrief(message))
+  if (messages.length === 0) return []
+  return [
+    ...(messages.some((message) => message.response) ? (["person"] as const) : []),
+    messages.some(isFromLead) ? "lead" : messages.every(isNotice) ? "notice" : "peer",
+  ]
+}
 
 /** Whether the session holds `kind`'s note as worded now, so a pointer stands for it. */
 export const holds = (held: Held, kind: NoteKind): boolean => held[kind] === noteDigests[kind]
@@ -544,8 +569,9 @@ export const wrap = (
       return kind === "person" ? `${given(personMark)}For agent messages: ` : given(mark)
     })
     .join("")
+  const framed = messages.some(isTourBrief) ? `${briefNote} ${note}`.trim() : note
   return [
-    `<novadeck-messages note="${note}">`,
+    `<novadeck-messages note="${framed}">`,
     ...messages.map(({ id, from, thread, sentAt, text, response }, index) => {
       if (response?.feedback) {
         const context = [

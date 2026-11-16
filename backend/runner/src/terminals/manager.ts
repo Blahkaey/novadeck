@@ -68,7 +68,7 @@ import { forgetPrompts, markPrompt, murmurHost } from "./murmur-host.js"
 import { Names } from "./names.js"
 import { noNudges } from "./nudges.js"
 import { OpenRequests } from "./opens.js"
-import type { TerminalOptions } from "./options.js"
+import type { OpenPolicy, TerminalOptions } from "./options.js"
 import { TerminalPeers } from "./peers-host.js"
 import { PendingOwners } from "./pending-owners.js"
 import type { Record } from "./record.js"
@@ -223,7 +223,7 @@ export class Terminals {
       | "answers"
       | "install"
       | "models"
-      | "openRefusal"
+      | "openPolicy"
       | "hooksTrusted"
       | "items"
       | "describer"
@@ -243,7 +243,7 @@ export class Terminals {
     connected: (agent: AgentName) => Promise<boolean>
     install: (agent: AgentName) => Promise<Install | undefined>
     models: (agent: AgentName) => Promise<readonly Model[]>
-    openRefusal: ((terminalId: string) => string | undefined) | undefined
+    openPolicy: ((terminalId: string) => OpenPolicy) | undefined
     hooksTrusted: ((agent: AgentName, cwd: string) => Promise<boolean | undefined>) | undefined
     items: CompanionItems | undefined
   }
@@ -310,7 +310,7 @@ export class Terminals {
       openMs: positive(options.openMs, 6_000),
       install: options.install ?? (() => Promise.resolve(undefined)),
       models: options.models ?? (() => Promise.resolve([])),
-      openRefusal: options.openRefusal,
+      openPolicy: options.openPolicy,
       hooksTrusted: options.hooksTrusted,
       items: options.items,
       platform: options.platform ?? process.platform,
@@ -712,7 +712,7 @@ export class Terminals {
       close: (terminalId, closedBy) => this.close({ terminalId }, closedBy),
       install: (agent) => this.options.install(agent),
       models: (agent) => this.options.models(agent),
-      openRefusal: (terminalId) => this.options.openRefusal?.(terminalId),
+      openPolicy: (terminalId) => this.options.openPolicy?.(terminalId) ?? {},
       closingNow: (terminalId) => this.host.closing(terminalId),
       closeForGood: (record, closedBy) => this.closeForGood(record, closedBy),
       terminate: (record) => this.terminate(record),

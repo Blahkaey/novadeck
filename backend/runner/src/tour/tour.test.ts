@@ -7,8 +7,9 @@ import type { AgentName, Project } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { harnesses } from "../harnesses/registry.js"
+import { maxMessageBytes, tourBriefMark } from "../messaging/messages.js"
 import { describe, expect, it } from "../test.js"
-import { nudgeLine, startLine } from "./brief.js"
+import { nudgeLine } from "./brief.js"
 import { tourFolder, tourMarker } from "./folder.js"
 import { Tour, withinFolder, type TourHost } from "./tour.js"
 
@@ -39,6 +40,7 @@ const tourIn = (
   } = {},
 ) => {
   const projects = options.projects ?? []
+  const rung = options.notices ?? []
   const removed: string[] = []
   const host: TourHost = {
     home,
@@ -49,7 +51,6 @@ const tourIn = (
         : options.models
           ? Promise.resolve(options.models)
           : harnesses[agent].launch.models(install),
-    install: () => Promise.resolve(undefined),
     projects: {
       list: () => projects.filter(({ id }) => !removed.includes(id)),
       remove: (id) => {
@@ -59,8 +60,8 @@ const tourIn = (
       },
     },
     notice: (terminalId, text) => {
-      if (!(options.shown ?? []).includes(terminalId)) return false
-      options.notices?.push([terminalId, text])
+      if (!(options.shown ?? ["lead"]).includes(terminalId)) return false
+      rung.push([terminalId, text])
       return true
     },
     cwdOf: (terminalId) => options.cwds?.[terminalId] ?? tourFolder(home),
@@ -68,7 +69,13 @@ const tourIn = (
     gitName: () => Promise.resolve(options.git),
     account: () => options.account,
   }
-  return { tour: new Tour(host), removed }
+  const tour = new Tour(host)
+  // The lead's brief as the tour rings it now, composed of the run last readied.
+  const brief = (): string => {
+    tour.brief("lead")
+    return rung.at(-1)![1]
+  }
+  return { tour, removed, brief }
 }
 
 const project = (id: string, cwd: string): Project => ({ id, name: id, cwd, pinned: false })
@@ -85,10 +92,10 @@ describe("readying the tour", () => {
     const { tour } = tourIn(home)
     const prepared = await tour.prepare("claude")
     const directory = tourFolder(home)
-    expect(prepared).toMatchObject({ directory, brief: "launch", model: "haiku", removed: [] })
+    expect(prepared).toMatchObject({ directory, brief: "doorbell", model: "haiku", removed: [] })
     expect(prepared.command).toMatch(/^claude --model haiku /)
     expect((await readdir(directory)).toSorted()).toEqual(
-      [".claude", "AGENTS.md", "CLAUDE.md", "lead.md", tourMarker].toSorted(),
+      [".claude", "AGENTS.md", "CLAUDE.md", tourMarker].toSorted(),
     )
     expect(await readFile(join(directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
     expect(JSON.parse(await readFile(join(directory, ".claude", "settings.json"), "utf8"))).toEqual(
@@ -171,7 +178,7 @@ describe("readying the tour", () => {
     const first = tour.prepare("claude")
     await expect(tour.prepare("claude")).rejects.toSatisfy(conflict)
     await first
-    await expect(tour.prepare("claude")).resolves.toMatchObject({ brief: "launch" })
+    await expect(tour.prepare("claude")).resolves.toMatchObject({ brief: "doorbell" })
   })
 
   it("leaves Antigravity's start line to the doorbell", async ({ resources }) => {
@@ -180,8 +187,6 @@ describe("readying the tour", () => {
     await expect(tour.prepare("agy")).resolves.toMatchObject({ brief: "doorbell" })
   })
 })
-
-const brief = (home: string) => readFile(join(tourFolder(home), "lead.md"), "utf8")
 
 // The arguments the brief gives `open_agent` for each of its two teammates, in order.
 const opened = (text: string): string[] =>
@@ -196,9 +201,9 @@ describe("the brief's facts", () => {
     resources,
   }) => {
     const home = await scratchHome(resources)
-    const { tour } = tourIn(home, { git: "Ada Lovelace" })
+    const { tour, brief } = tourIn(home, { git: "Ada Lovelace" })
     await tour.prepare("claude")
-    const text = await brief(home)
+    const text = brief()
     expect(text).toContain("welcome card for Ada, with two teammates")
     expect(text).toContain('NAME with "Ada"')
     expect(text).toContain("welcome.svg")
@@ -213,18 +218,18 @@ describe("the brief's facts", () => {
     resources,
   }) => {
     const home = await scratchHome(resources)
-    const { tour } = tourIn(home, {
+    const { tour, brief } = tourIn(home, {
       connected: ["claude", "codex", "agy"],
       lists: { codex: [luna] },
     })
     await tour.prepare("agy")
     // Claude Code comes first of the others.
-    expect(opened(await brief(home))).toEqual([
+    expect(opened(brief())).toEqual([
       'agent "agy", model "gemini-3.8-flash-low", effort "low"',
       'agent "claude", model "haiku", effort "low"',
     ])
     await tour.prepare("claude")
-    expect(opened(await brief(home))).toEqual([
+    expect(opened(brief())).toEqual([
       'agent "claude", model "haiku", effort "low"',
       'agent "codex", model "gpt-e2e-luna", effort "low"',
     ])
@@ -234,16 +239,19 @@ describe("the brief's facts", () => {
     resources,
   }) => {
     const home = await scratchHome(resources)
-    const { tour } = tourIn(home, { connected: ["codex", "claude"], lists: { codex: [luna] } })
+    const { tour, brief } = tourIn(home, {
+      connected: ["codex", "claude"],
+      lists: { codex: [luna] },
+    })
     await tour.prepare("codex")
-    expect(opened(await brief(home))).toEqual([
+    expect(opened(brief())).toEqual([
       'agent "codex", model "gpt-e2e-luna", effort "low"',
       'agent "claude", model "haiku", effort "low"',
     ])
     // A connected harness that lists no models, as Codex before it has signed in.
     const alone = tourIn(home, { connected: ["claude", "codex"], lists: { codex: [] } })
     await alone.tour.prepare("claude")
-    expect(opened(await brief(home))).toEqual([
+    expect(opened(alone.brief())).toEqual([
       'agent "claude", model "haiku", effort "low"',
       'agent "claude", model "haiku", effort "low"',
     ])
@@ -251,12 +259,12 @@ describe("the brief's facts", () => {
 
   it("leaves out an effort a model takes none of", async ({ resources }) => {
     const home = await scratchHome(resources)
-    const { tour } = tourIn(home, {
+    const { tour, brief } = tourIn(home, {
       connected: ["codex"],
       lists: { codex: [{ id: "gpt-e2e-luna", efforts: [] }] },
     })
     await tour.prepare("codex")
-    expect(opened(await brief(home))).toEqual([
+    expect(opened(brief())).toEqual([
       'agent "codex", model "gpt-e2e-luna"',
       'agent "codex", model "gpt-e2e-luna"',
     ])
@@ -264,29 +272,53 @@ describe("the brief's facts", () => {
 
   it("is composed again for each run", async ({ resources }) => {
     const home = await scratchHome(resources)
-    await tourIn(home, { git: "Ada" }).tour.prepare("claude")
-    expect(await brief(home)).toContain("for Ada,")
-    await tourIn(home, { git: "Grace Hopper" }).tour.prepare("claude")
-    expect(await brief(home)).toContain("for Grace,")
+    const first = tourIn(home, { git: "Ada" })
+    await first.tour.prepare("claude")
+    expect(first.brief()).toContain("for Ada,")
+    const second = tourIn(home, { git: "Grace Hopper" })
+    await second.tour.prepare("claude")
+    expect(second.brief()).toContain("for Grace,")
   })
 })
 
 describe("ringing the tour's brief", () => {
-  it("rings the start line to the terminal's agent", () => {
+  it("rings the lead's whole script, naming the person, to the terminal's agent", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
     const notices: [string, string][] = []
-    const { tour } = tourIn("/nowhere", { notices, shown: ["t1"] })
+    const { tour } = tourIn(home, { notices, shown: ["t1"], git: "Ada" })
+    await tour.prepare("claude")
     tour.brief("t1")
-    expect(notices).toEqual([["t1", startLine]])
+    expect(notices).toHaveLength(1)
+    const [id, text] = notices[0]!
+    expect(id).toBe("t1")
+    expect(text.startsWith(tourBriefMark)).toBe(true)
+    expect(text).toContain("## Steps")
+    expect(text).toContain("welcome card for Ada,")
+    // The SVG template keeps its quotes and angle brackets, and the whole of it is there.
+    expect(text).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"')
+    expect(text).toContain("</svg>")
+    expect(Buffer.byteLength(text)).toBeLessThan(maxMessageBytes + 4096)
   })
 
-  it("refuses a terminal whose agent hasn't shown yet", () => {
+  it("is refused before a run is readied", () => {
     const { tour } = tourIn("/nowhere")
+    expect(() => tour.brief("lead")).toThrow(/hasn't been readied/)
+  })
+
+  it("refuses a terminal whose agent hasn't shown yet", async ({ resources }) => {
+    const home = await scratchHome(resources)
+    const { tour } = tourIn(home, { shown: [] })
+    await tour.prepare("claude")
     expect(() => tour.brief("t1")).toThrow(DomainError)
   })
 
-  it("rings only the tour's own terminals", () => {
+  it("rings only the tour's own terminals", async ({ resources }) => {
+    const home = await scratchHome(resources)
     const notices: [string, string][] = []
-    const { tour } = tourIn("/h", { notices, shown: ["mine"], cwds: { mine: "/h/code" } })
+    const { tour } = tourIn(home, { notices, shown: ["mine"], cwds: { mine: "/h/code" } })
+    await tour.prepare("claude")
     expect(() => tour.brief("mine")).toThrow(/isn't one of the tour's/)
     expect(notices).toEqual([])
   })
@@ -332,8 +364,9 @@ describe("the brief's wording", () => {
     resources,
   }) => {
     const home = await scratchHome(resources)
-    await tourIn(home).tour.prepare("claude")
-    const text = await brief(home)
+    const { tour, brief } = tourIn(home)
+    await tour.prepare("claude")
+    const text = brief()
     expect(text).toContain("Never answer your teammates' questions to the person yourself")
     expect(text).toMatch(/body "The lead is making a\s+>\s+welcome card for/)
     expect(text).toContain("dismissed the question")
@@ -344,7 +377,8 @@ describe("the brief's wording", () => {
 describe("what the folder's own instructions say", () => {
   it("holds no role and no step in the files a harness loads by itself", async ({ resources }) => {
     const home = await scratchHome(resources)
-    await tourIn(home).tour.prepare("claude")
+    const { tour } = tourIn(home)
+    await tour.prepare("claude")
     const folder = tourFolder(home)
     for (const name of ["AGENTS.md", "CLAUDE.md"]) {
       // eslint-disable-next-line no-await-in-loop -- Two small files.
@@ -354,42 +388,41 @@ describe("what the folder's own instructions say", () => {
     expect(await readFile(join(folder, "AGENTS.md"), "utf8")).toContain(
       "If you were given a task, do only that task.",
     )
-    // The script is where only the lead is sent, by the start line.
-    expect(startLine).toBe(
-      "You lead the Novadeck tour: read lead.md in this folder with your file tool, not a shell, and follow it.",
-    )
-    expect(nudgeLine).toContain("lead.md")
-    expect(await brief(home)).toContain("## Steps")
+    expect(nudgeLine).toContain("tour brief Novadeck sent you")
   })
 
-  it("tells each teammate never to open agents, and not to explain in prose", async ({
+  it("has the brief tell the lead to run no shell, and each teammate never to open agents", async ({
     resources,
   }) => {
     const home = await scratchHome(resources)
-    await tourIn(home).tour.prepare("claude")
-    const text = await brief(home)
+    const { tour, brief } = tourIn(home)
+    await tour.prepare("claude")
+    const text = brief()
+    expect(text).toContain("Run no shell command at all: you need none")
     expect(text.match(/Never call\s+> \\?`?open_agent|Never call/g)?.length).toBeGreaterThanOrEqual(
       2,
     )
     expect(text).not.toContain("Ignore the lead's steps")
-    expect(text).not.toContain("unless a message from your lead")
     expect(text).toContain("don't explain,")
+    expect(text).toContain("Never answer your teammates' questions to the person yourself")
+    expect(text).toMatch(/body "The lead is making a\s+>\s+welcome card for/)
+    expect(text).toContain("dismissed the question")
   })
 })
 
-describe("who may open agents in the tour's folder", () => {
-  it("refuses a terminal in the folder that has a lead", () => {
+describe("what an agent's open_agent is subject to in the tour", () => {
+  it("refuses a teammate in the folder", () => {
     const { tour } = tourIn("/h", { leads: { mate: "lead" } })
-    expect(tour.openRefusal("mate")).toMatch(/only the tour's lead opens agents/)
+    expect(tour.openPolicy("mate").refusal).toMatch(/only the tour's lead opens agents/)
   })
 
-  it("lets the lead, a led terminal elsewhere, and an unled one in the folder open them", () => {
+  it("leaves the lead, a led terminal elsewhere, and an unled one alone", () => {
     const { tour } = tourIn("/h", {
       leads: { mate: "lead", away: "lead" },
       cwds: { away: "/h/code" },
     })
-    expect(tour.openRefusal("lead")).toBeUndefined()
-    expect(tour.openRefusal("away")).toBeUndefined()
-    expect(tour.openRefusal("unled")).toBeUndefined()
+    expect(tour.openPolicy("lead")).toEqual({})
+    expect(tour.openPolicy("away")).toEqual({})
+    expect(tour.openPolicy("unled")).toEqual({})
   })
 })

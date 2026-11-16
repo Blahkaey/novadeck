@@ -50,6 +50,7 @@ import {
   type OpenAnswer,
   type OpenRequests,
 } from "./opens.js"
+import type { OpenPolicy } from "./options.js"
 import { peerOf } from "./peers-host.js"
 import type { Record } from "./record.js"
 import { launchFor, resumeRefusal, type Claims } from "./resumes.js"
@@ -107,8 +108,8 @@ export type CallsHost = LeadsHost &
     readonly install: (agent: AgentName) => Promise<Install | undefined>
     /** The models a harness can start with here, none where that can't be told. */
     readonly models: (agent: AgentName) => Promise<readonly Model[]>
-    /** Why the caller may not open agents, as the tour's teammates may not; undefined when it may. */
-    readonly openRefusal: (terminalId: string) => string | undefined
+    /** What the caller's `open_agent` is subject to: a refusal. */
+    readonly openPolicy: (terminalId: string) => OpenPolicy
     // A close, in the manager's steps: `closePeer` checks the runner's stop between them.
     /** Starts closing a terminal for good; `closedBy` is the handle of the agent that closed it, null when the person did or the agent closed its own. */
     readonly closeForGood: (record: Record, closedBy?: string | null) => void
@@ -207,9 +208,9 @@ export class Calls {
       ...(request.model !== undefined && { model: request.model }),
       ...(request.effort !== undefined && { effort: request.effort }),
     }
+    const policy = request.agent !== undefined ? this.host.openPolicy(call.terminalId) : {}
     if (request.agent !== undefined) {
-      const barred = this.host.openRefusal(call.terminalId)
-      if (barred) return refused(barred)
+      if (policy.refusal) return refused(policy.refusal)
       const unfit = await this.unfitChoice(request.agent, choice)
       if (unfit) return refused(unfit)
     }

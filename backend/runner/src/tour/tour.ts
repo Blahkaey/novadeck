@@ -1,11 +1,11 @@
 import { posix, win32 } from "node:path"
 
-import type { Install, Model } from "@novadeck/harness-core/harness"
+import type { Model } from "@novadeck/harness-core/harness"
 import type { AgentName, Project, TourPrepared } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { agentLabel } from "../messaging/messages.js"
-import { briefFiles, nudgeLine, startLine, type Teammate } from "./brief.js"
+import { briefFiles, nudgeLine, tourBrief, type BriefFacts, type Teammate } from "./brief.js"
 import { resetTourFolder, tourFolder } from "./folder.js"
 import { tourChoice, tourLaunch } from "./launch.js"
 import { pickName } from "./name.js"
@@ -16,7 +16,6 @@ export type TourHost = {
   readonly platform?: NodeJS.Platform
   readonly connected: (agent: AgentName) => Promise<boolean>
   readonly models: (agent: AgentName) => Promise<readonly Model[]>
-  readonly install: (agent: AgentName) => Promise<Install | undefined>
   readonly projects: {
     readonly list: () => readonly Project[]
     readonly remove: (projectId: string) => Promise<void>
@@ -44,6 +43,8 @@ const agentOrder: readonly AgentName[] = ["claude", "codex", "agy"]
 export class Tour {
   // The run being readied, so a second start meanwhile doesn't empty its folder under it.
   private preparing: Promise<TourPrepared> | undefined
+  // The facts of the run last readied, which its brief is composed of when it is rung.
+  private facts: BriefFacts | undefined
 
   constructor(private readonly host: TourHost) {}
 
@@ -77,10 +78,7 @@ export class Tour {
         `Novadeck isn't connected to ${agentLabel(agent)}, so the tour can't start with it.`,
       )
     // Its cheapest model first, before anything is removed: the person agreed to that one.
-    const [models, install] = await Promise.all([
-      this.host.models(agent).catch((): readonly Model[] => []),
-      this.host.install(agent).catch(() => undefined),
-    ])
+    const models = await this.host.models(agent).catch((): readonly Model[] => [])
     if (tourChoice(agent, models).model === undefined)
       throw new DomainError(
         "MODELS_UNLISTED",
@@ -111,8 +109,9 @@ export class Tour {
         .then((git) => pickName(git, this.host.account())),
     ])
     const copywriter = teammate(agent, models)!
-    await resetTourFolder(directory, briefFiles({ name, copywriter, designer }))
-    const launch = await tourLaunch(agent, { models, install, cwd: directory })
+    await resetTourFolder(directory, briefFiles)
+    this.facts = { name, copywriter, designer }
+    const launch = tourLaunch(agent, { models })
     return { ...launch, directory, removed }
   }
 
@@ -131,13 +130,15 @@ export class Tour {
   }
 
   /**
-   * Rings the tour's start line to the agent in `terminalId`, for a harness whose launch line
-   * takes none (`brief: "doorbell"`): the doorbell delivers it once the agent's prompt shows and
-   * its tools are listed. A terminal whose agent hasn't shown yet is a `CONFLICT`; the client
-   * asks once it has.
+   * Rings the lead's brief (`tourBrief`, composed of the run last readied) to the agent in
+   * `terminalId` as Novadeck's notice, for every harness (`brief: "doorbell"`): the doorbell
+   * delivers it once the agent's prompt shows and its tools are listed. A terminal whose agent
+   * hasn't shown yet is a `CONFLICT`; the client asks once it has. So is a runner that has
+   * readied no run since it started.
    */
   brief(terminalId: string): void {
-    this.ring(terminalId, startLine)
+    if (!this.facts) throw new DomainError("CONFLICT", "The tour hasn't been readied.")
+    this.ring(terminalId, tourBrief(this.facts))
   }
 
   /**
@@ -149,21 +150,25 @@ export class Tour {
   }
 
   /**
-   * Why `terminalId` may not open agents, or undefined: a terminal in the tour's folder that has
-   * a lead is a teammate, and only the tour's lead opens agents there. The lead (no lead of its
-   * own), a led terminal elsewhere, and a terminal the runner doesn't have are not barred.
+   * What an `open_agent` of `terminalId` is subject to: a terminal in the tour's folder that has
+   * a lead is a teammate, and only the tour's lead opens agents there, so it is refused. The
+   * lead (no lead of its own), a led terminal elsewhere, and a terminal the runner doesn't have
+   * are left to the call's own checks.
    */
-  openRefusal(terminalId: string): string | undefined {
+  openPolicy(terminalId: string): { readonly refusal?: string } {
     let cwd: string
     try {
       cwd = this.host.cwdOf(terminalId)
     } catch {
-      return undefined
+      return {}
     }
-    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform)) return undefined
+    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform)) return {}
     return this.host.leadOf(terminalId) === undefined
-      ? undefined
-      : "You're a teammate in Novadeck's tour: only the tour's lead opens agents. Do only the task in your lead's message."
+      ? {}
+      : {
+          refusal:
+            "You're a teammate in Novadeck's tour: only the tour's lead opens agents. Do only the task in your lead's message.",
+        }
   }
 
   // Only the tour's own terminals, those in its folder, are rung; one elsewhere is a
