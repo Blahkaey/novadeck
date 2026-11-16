@@ -77,10 +77,12 @@ plan or confirm in prose before a tool call.
    itself as a message.
 5. When the answer arrives, it names the option the person picked, or holds their own words:
    use that option's tagline, or their words as the tagline. If you are told the person
-   dismissed the question, or the answer is empty, use tagline A. Then call \`send\` with \`to\`
-   your lead's handle and \`text\` "Tagline: <the tagline>. Paragraph: <your paragraph>".
+   dismissed the question, use tagline A. A message with no words in it isn't their answer:
+   wait for the one that is. Then call \`send\` once, with \`to\` your lead's handle and
+   \`text\` "Tagline: <the tagline>. Paragraph: <your paragraph>".
 6. Say in one short sentence at most that you sent it, and stop.
-The designer may send you the look (colours and fonts) meanwhile: read it, no reply needed.`
+The designer may send you the look (colours and fonts) meanwhile: read it, send nothing, and end
+your turn again. Only the person's answer moves you on to step 5.`
 
 const designerBrief = (name: string): string =>
   `You are the designer in Novadeck's tour, a teammate. Your lead is the agent that sent you this
