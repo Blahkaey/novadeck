@@ -34,6 +34,8 @@ const tourIn = (
     removal?: () => Promise<void>
     // Each terminal's folder; the tour's own by default.
     cwds?: Readonly<Record<string, string>>
+    // The terminal leading each led terminal.
+    leads?: Readonly<Record<string, string>>
   } = {},
 ) => {
   const projects = options.projects ?? []
@@ -62,6 +64,7 @@ const tourIn = (
       return true
     },
     cwdOf: (terminalId) => options.cwds?.[terminalId] ?? tourFolder(home),
+    leadOf: (terminalId) => options.leads?.[terminalId],
     gitName: () => Promise.resolve(options.git),
     account: () => options.account,
   }
@@ -85,7 +88,7 @@ describe("readying the tour", () => {
     expect(prepared).toMatchObject({ directory, brief: "launch", model: "haiku", removed: [] })
     expect(prepared.command).toMatch(/^claude --model haiku /)
     expect((await readdir(directory)).toSorted()).toEqual(
-      [".claude", "AGENTS.md", "CLAUDE.md", tourMarker].toSorted(),
+      [".claude", "AGENTS.md", "CLAUDE.md", "lead.md", tourMarker].toSorted(),
     )
     expect(await readFile(join(directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
     expect(JSON.parse(await readFile(join(directory, ".claude", "settings.json"), "utf8"))).toEqual(
@@ -178,7 +181,7 @@ describe("readying the tour", () => {
   })
 })
 
-const brief = (home: string) => readFile(join(tourFolder(home), "AGENTS.md"), "utf8")
+const brief = (home: string) => readFile(join(tourFolder(home), "lead.md"), "utf8")
 
 // The arguments the brief gives `open_agent` for each of its two teammates, in order.
 const opened = (text: string): string[] =>
@@ -335,5 +338,56 @@ describe("the brief's wording", () => {
     expect(text).toMatch(/body "The lead is making a\s+>\s+welcome card for/)
     expect(text).toContain("dismissed the question")
     expect(text).toContain("their words as the tagline")
+  })
+})
+
+describe("what the folder's own instructions say", () => {
+  it("holds no role and no step in the files a harness loads by itself", async ({ resources }) => {
+    const home = await scratchHome(resources)
+    await tourIn(home).tour.prepare("claude")
+    const folder = tourFolder(home)
+    for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+      // eslint-disable-next-line no-await-in-loop -- Two small files.
+      const text = await readFile(join(folder, name), "utf8")
+      expect(text).not.toMatch(/open_agent|lead agent|Steps|describe/)
+    }
+    expect(await readFile(join(folder, "AGENTS.md"), "utf8")).toContain(
+      "If you were given a task, do only that task.",
+    )
+    // The script is where only the lead is sent, by the start line.
+    expect(startLine).toBe("You are the lead of the Novadeck tour: follow lead.md in this folder.")
+    expect(nudgeLine).toContain("lead.md")
+    expect(await brief(home)).toContain("## Steps")
+  })
+
+  it("tells each teammate never to open agents, and not to explain in prose", async ({
+    resources,
+  }) => {
+    const home = await scratchHome(resources)
+    await tourIn(home).tour.prepare("claude")
+    const text = await brief(home)
+    expect(text.match(/Never call\s+> \\?`?open_agent|Never call/g)?.length).toBeGreaterThanOrEqual(
+      2,
+    )
+    expect(text).not.toContain("Ignore the lead's steps")
+    expect(text).not.toContain("unless a message from your lead")
+    expect(text).toContain("don't explain,")
+  })
+})
+
+describe("who may open agents in the tour's folder", () => {
+  it("refuses a terminal in the folder that has a lead", () => {
+    const { tour } = tourIn("/h", { leads: { mate: "lead" } })
+    expect(tour.openRefusal("mate")).toMatch(/only the tour's lead opens agents/)
+  })
+
+  it("lets the lead, a led terminal elsewhere, and an unled one in the folder open them", () => {
+    const { tour } = tourIn("/h", {
+      leads: { mate: "lead", away: "lead" },
+      cwds: { away: "/h/code" },
+    })
+    expect(tour.openRefusal("lead")).toBeUndefined()
+    expect(tour.openRefusal("away")).toBeUndefined()
+    expect(tour.openRefusal("unled")).toBeUndefined()
   })
 })

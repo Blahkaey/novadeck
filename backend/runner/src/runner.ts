@@ -346,6 +346,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     // Where each harness lives, which says how it may start with a task.
     install: (agent) => agents.install(agent),
     models: (agent) => agents.models(agent),
+    // The tour's teammates may not open agents of their own (see Tour.openRefusal).
+    openRefusal: (terminalId) => tour.openRefusal(terminalId),
     transcripts: store.settings.runner().transcripts,
     // Read each time idle agents are looked at, so a change in Preferences counts at once.
     hibernateAfterMinutes: () => store.settings.runner().hibernateAfterMinutes,
@@ -371,6 +373,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
     cwdOf: (terminalId) => terminals.get(terminalId).cwd,
+    leadOf: (terminalId) => terminals.messaging.leadOf(terminalId)?.terminalId,
     gitName: () => readGitName(options.agents?.home),
     account: readAccount,
   })

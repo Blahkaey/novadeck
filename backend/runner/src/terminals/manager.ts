@@ -223,6 +223,7 @@ export class Terminals {
       | "answers"
       | "install"
       | "models"
+      | "openRefusal"
       | "hooksTrusted"
       | "items"
       | "describer"
@@ -242,6 +243,7 @@ export class Terminals {
     connected: (agent: AgentName) => Promise<boolean>
     install: (agent: AgentName) => Promise<Install | undefined>
     models: (agent: AgentName) => Promise<readonly Model[]>
+    openRefusal: ((terminalId: string) => string | undefined) | undefined
     hooksTrusted: ((agent: AgentName, cwd: string) => Promise<boolean | undefined>) | undefined
     items: CompanionItems | undefined
   }
@@ -308,6 +310,7 @@ export class Terminals {
       openMs: positive(options.openMs, 6_000),
       install: options.install ?? (() => Promise.resolve(undefined)),
       models: options.models ?? (() => Promise.resolve([])),
+      openRefusal: options.openRefusal,
       hooksTrusted: options.hooksTrusted,
       items: options.items,
       platform: options.platform ?? process.platform,
@@ -709,6 +712,7 @@ export class Terminals {
       close: (terminalId, closedBy) => this.close({ terminalId }, closedBy),
       install: (agent) => this.options.install(agent),
       models: (agent) => this.options.models(agent),
+      openRefusal: (terminalId) => this.options.openRefusal?.(terminalId),
       closingNow: (terminalId) => this.host.closing(terminalId),
       closeForGood: (record, closedBy) => this.closeForGood(record, closedBy),
       terminate: (record) => this.terminate(record),

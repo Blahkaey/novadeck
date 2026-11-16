@@ -25,6 +25,8 @@ export type TourHost = {
   readonly notice: (terminalId: string, text: string) => boolean
   /** The terminal's folder now; throws for a terminal the runner doesn't have. */
   readonly cwdOf: (terminalId: string) => string
+  /** The terminal that leads this one, if one does. */
+  readonly leadOf: (terminalId: string) => string | undefined
   /** The person's global git name, if git has one; never read over a network. */
   readonly gitName: () => Promise<string | undefined>
   /** The OS account's name, if the system says it. */
@@ -144,6 +146,24 @@ export class Tour {
    */
   nudge(terminalId: string): void {
     this.ring(terminalId, nudgeLine)
+  }
+
+  /**
+   * Why `terminalId` may not open agents, or undefined: a terminal in the tour's folder that has
+   * a lead is a teammate, and only the tour's lead opens agents there. The lead (no lead of its
+   * own), a led terminal elsewhere, and a terminal the runner doesn't have are not barred.
+   */
+  openRefusal(terminalId: string): string | undefined {
+    let cwd: string
+    try {
+      cwd = this.host.cwdOf(terminalId)
+    } catch {
+      return undefined
+    }
+    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform)) return undefined
+    return this.host.leadOf(terminalId) === undefined
+      ? undefined
+      : "You're a teammate in Novadeck's tour: only the tour's lead opens agents. Do only the task in your lead's message."
   }
 
   // Only the tour's own terminals, those in its folder, are rung; one elsewhere is a

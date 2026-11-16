@@ -15,7 +15,7 @@ import { deliveries, own, prompted, result, through } from "./scenarios.js"
 // that starts the agent there; the client opens a project and a terminal with it; a
 // harness that takes no start line on its command line (Antigravity) is given it once its
 // agent has bound, by `tour.brief`. The model is a script: it follows the brief's first
-// step, calling `describe` as AGENTS.md says, and greets.
+// step, calling `describe` as lead.md says, and greets.
 
 // What the brief asks its agent to describe itself as.
 const title = "Tour lead"
@@ -105,10 +105,16 @@ for (const setup of setups) {
       if (prepared.brief === "launch") expect(prepared.command).toContain(startLine)
       else expect(prepared.command).not.toContain(startLine)
 
-      // Its folder: the brief, a Claude Code file that imports it, and the marker.
-      const instructions = await readFile(join(prepared.directory, "AGENTS.md"), "utf8")
-      expect(instructions).toContain("Tour lead")
-      expect(instructions).toContain("open_agent")
+      // Its folder: the lead's script, which nothing loads by itself; the two files a harness
+      // does load, with no role and no step; a Claude Code file that imports them; the marker.
+      const script = await readFile(join(prepared.directory, "lead.md"), "utf8")
+      expect(script).toContain("Tour lead")
+      expect(script).toContain("open_agent")
+      for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+        // eslint-disable-next-line no-await-in-loop -- Two small files.
+        const loaded = await readFile(join(prepared.directory, name), "utf8")
+        expect(loaded).not.toMatch(/open_agent|describe|Steps|lead agent/)
+      }
       expect(await readFile(join(prepared.directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
       await expect(readFile(join(prepared.directory, tourMarker), "utf8")).resolves.toContain(
         "Novadeck's tour",

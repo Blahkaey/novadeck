@@ -26,7 +26,7 @@ import {
 // `open_agent`, who describe themselves and send each other and the lead their parts; the
 // copywriter asks the person which tagline in the Inbox; the lead writes welcome.svg and
 // shows it. The fake model plays all three, each by the brief it was given: the lead
-// follows the folder's AGENTS.md, and each teammate its `message`. What a rule keys on is
+// follows the folder's lead.md, and each teammate its `message`. What a rule keys on is
 // told by the conversation (a teammate's holds its brief as a delivered message), so one
 // script serves the three terminals.
 
@@ -147,6 +147,9 @@ export const openings = (brief: string): Opening[] =>
       .trim(),
   }))
 
+/** What the runner refuses a teammate's `open_agent` with. */
+const refusal = "only the tour's lead opens agents"
+
 const text = (words: string): Reply => ({ text: words })
 
 // An opening's arguments for `open_agent`, with `message` for its message.
@@ -211,7 +214,7 @@ const handleOpened = (call: Call): string | undefined =>
   /Opened a new terminal, @(\w+)/.exec(result(call) ?? "")?.[1]
 
 /**
- * The rules of the whole story. `lead` is the lead's setup, `brief` its AGENTS.md. A tool's
+ * The rules of the whole story. `lead` is the lead's setup, `brief` its lead.md. A tool's
  * name is found among those any call of the run offered, as the first call of an agent goes
  * out before its MCP tools load.
  */
@@ -276,8 +279,10 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
         !one.turns.some((t) => t.role === "assistant")
       )
         return call(one, "describe", { title: "Copywriter", summary: "Writes the card's words" })
+      // As a model that follows the lead's script instead would: it tries to open an agent.
       if (result(one)?.includes("Described this terminal"))
-        return call(one, "ask", asking(writer.message))
+        return call(one, "open_agent", { agent: writer.agent, message: "Help me." })
+      if ((result(one) ?? "").includes(refusal)) return call(one, "ask", asking(writer.message))
       if (/is in the user's Inbox/.test(result(one) ?? "")) return text("Asked you to choose.")
       const { lead } = briefing(one, kept)
       if (lead && sent(one, lead)) return text("Sent it to the lead.")
@@ -302,7 +307,9 @@ export const storyRules = (run: E2E, brief: string): Rule[] => {
       if (fresh(one) && !one.turns.some((t) => t.role === "assistant"))
         return call(one, "describe", { title: "Designer", summary: "Picks the card's look" })
       const { lead, mate } = briefing(one, kept)
-      if (result(one)?.includes("Described this terminal") && mate)
+      if (result(one)?.includes("Described this terminal"))
+        return call(one, "open_agent", { agent: designer.agent, message: "Help me." })
+      if ((result(one) ?? "").includes(refusal) && mate)
         return call(one, "send", { to: mate, text: look })
       if (lead && mate && sent(one, mate)) return call(one, "send", { to: lead, text: look })
       if (lead && sent(one, lead)) return text("Sent the look.")
@@ -330,7 +337,7 @@ export const tell = async (
 ): Promise<readonly [Opening, Opening]> => {
   await seedTour(run, agents)
   const prepared = await run.deck.tour.prepare(setup.agent)
-  const instructions = await readFile(join(prepared.directory, "AGENTS.md"), "utf8")
+  const instructions = await readFile(join(prepared.directory, "lead.md"), "utf8")
   const [writer, designer] = openings(instructions)
   expect(writer).toBeDefined()
   expect(designer).toBeDefined()
@@ -461,6 +468,12 @@ export const tell = async (
     state: "ready",
     content: { kind: "image", src: expect.stringMatching(/^data:image\/svg\+xml;base64,/) },
   })
+  // Each teammate tried to open an agent and was refused, so the team stayed at two.
+  const refused = run.model.calls.filter(
+    (one) => !one.side && (result(one) ?? "").includes(refusal),
+  )
+  expect(refused.length).toBeGreaterThanOrEqual(2)
+  await expect(requests.next(2000)).rejects.toThrow()
   expect(tourWrites[setup.agent].length).toBeGreaterThan(0)
   expect(run.model.calls.length).toBeGreaterThan(calls)
   return [writer!, designer!]
@@ -480,7 +493,7 @@ export const holdAtTrust = async (
 ): Promise<AgentName> => {
   await seedTour(run, agents)
   const prepared = await run.deck.tour.prepare(setup.agent)
-  const instructions = await readFile(join(prepared.directory, "AGENTS.md"), "utf8")
+  const instructions = await readFile(join(prepared.directory, "lead.md"), "utf8")
   const [, designer] = openings(instructions)
   run.model.use(...storyRules(run, instructions))
   const requests = run.deck.answerRequests()

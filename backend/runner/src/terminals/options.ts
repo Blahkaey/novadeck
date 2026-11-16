@@ -134,6 +134,11 @@ export type TerminalOptions = {
    */
   models?: (agent: AgentName) => Promise<readonly Model[]>
   /**
+   * Why a terminal may not open agents, or undefined: asked first of every `open_agent`, with
+   * the terminal that calls it (the tour's teammates may not).
+   */
+  openRefusal?: (terminalId: string) => string | undefined
+  /**
    * Whether Novadeck's hooks run for the harness in a folder, where it runs them only
    * once the person trusts them (`Harness.hooksTrusted`); asked of the harness itself when
    * omitted. Undefined, or a failure, is unknown.

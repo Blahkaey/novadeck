@@ -2,19 +2,22 @@ import type { Effort } from "@novadeck/harness-core/harness"
 import type { AgentName } from "@novadeck/protocol"
 
 /**
- * What the tour's agent is told. The brief lives in the folder's own instruction files, which
- * every harness reads as it starts there: Codex and Antigravity read `AGENTS.md`, and Claude
- * Code reads `CLAUDE.md`, which only imports it. Being the project's own instructions, it also
- * holds the agent to the tour over whatever the person's global instructions ask.
+ * What the tour's agents are told. Every harness loads a folder's `AGENTS.md` (Codex,
+ * Antigravity) or `CLAUDE.md` (Claude Code) by itself, as project instructions that a cheap
+ * model follows over a message, and the agents the lead opens start in this same folder. So
+ * those two files say nothing of a role or of steps: the lead's script is `lead.md`, which
+ * nothing loads, and only the lead is pointed at it, by `startLine`. A teammate's task is the
+ * message its lead sends. The folder's own files also say the one thing they all share: the
+ * sandbox's rules.
  *
- * The line that starts it is short and plain, as it rides on the launch line (or, where a
- * harness takes none there, on the doorbell): it only points the agent at the brief.
+ * The start line is short and plain, as it rides on the launch line (or, where a harness takes
+ * none there, on the doorbell), so it holds nothing a shell quotes unsafely, as an apostrophe.
  */
-export const startLine = "Start the Novadeck tour: follow AGENTS.md in this folder."
+export const startLine = "You are the lead of the Novadeck tour: follow lead.md in this folder."
 
 /** What the tour rings its agent where it has gone quiet at a step (`tour.nudge`). */
 export const nudgeLine =
-  "Novadeck's tour is waiting on you: look at what you've done so far and carry on from the next step in AGENTS.md. Don't redo a step."
+  "Novadeck's tour is waiting on you: look at what you've done so far and carry on from the next step in lead.md. Don't redo a step."
 
 /**
  * The card the lead makes: its file, and how that file is described to the lead. Changing the
@@ -65,11 +68,12 @@ const openArguments = ({ agent, model, effort }: Teammate): string =>
 
 const copywriterBrief = (name: string): string =>
   `You are the copywriter in Novadeck's tour, a teammate. Your lead is the agent that sent you
-this message: its handle is the \`from\` of this message. Ignore the lead's steps in AGENTS.md:
-follow only these. Never write files. Keep every reply to one short sentence.
+this message: its handle is the \`from\` of this message. Never write files. Never call
+\`open_agent\`: only your lead opens agents. Be quick: do each step at once, and don't explain,
+plan or confirm in prose before a tool call.
 1. Call \`describe\` with title "Copywriter" and summary "Writes the card's words".
 2. Write two tagline options for a welcome card for ${name}, A and B, of at most 40 characters
-   each, and one short paragraph of two sentences.
+   each, and one short paragraph of two sentences. Then go straight to step 3.
 3. Call \`ask\` with subject "Which tagline for the welcome card?", body "The lead is making a
    welcome card for ${name}. Which tagline should it carry?" and shape
    {"type":"options","options":[{"label":"A","summary":"<tagline A>"},{"label":"B","summary":"<tagline B>"}],"recommend":0}.
@@ -79,34 +83,52 @@ follow only these. Never write files. Keep every reply to one short sentence.
    use that option's tagline, or their words as the tagline. If you are told the person
    dismissed the question, or the answer is empty, use tagline A. Then call \`send\` with \`to\`
    your lead's handle and \`text\` "Tagline: <the tagline>. Paragraph: <your paragraph>".
-6. Say in one sentence that you sent it, and stop.
+6. Say in one short sentence at most that you sent it, and stop.
 The designer may send you the look (colours and fonts) meanwhile: read it, no reply needed.`
 
 const designerBrief = (name: string): string =>
   `You are the designer in Novadeck's tour, a teammate. Your lead is the agent that sent you this
-message: its handle is the \`from\` of this message. Ignore the lead's steps in AGENTS.md: follow
-only these. Never write files. Keep every reply to one short sentence.
+message: its handle is the \`from\` of this message. Never write files. Never call
+\`open_agent\`: only your lead opens agents. Be quick: do each step at once, and don't explain,
+plan or confirm in prose before a tool call.
 1. Call \`describe\` with title "Designer" and summary "Picks the card's look".
-2. Pick the look of a welcome card for ${name}: three colours as hex codes (background, text and
-   accent, with the text easy to read on the background), and a font stack with no double quotes.
+2. Pick the look of a welcome card for ${name} in one go, with no deliberating: three colours as
+   hex codes (background, text and accent, with the text easy to read on the background), and a
+   font stack with no double quotes. Then go straight to step 3.
 3. Call \`send\` with \`to\` COPYWRITER and \`text\` "Look: background <hex>; text <hex>; accent <hex>;
    fonts <stack>".
 4. Call \`send\` with \`to\` your lead's handle and the same \`text\`.
-5. Say in one sentence that you sent it, and stop.`
+5. Say in one short sentence at most that you sent it, and stop.`
 
-/** The brief for a run: the lead's steps, with the person's name and the teammates' models. */
-export const tourBrief = ({ name, copywriter, designer }: BriefFacts): string => `# Novadeck tour
+/**
+ * The folder's own instructions, which every harness loads: the sandbox's rules and no role or
+ * step, so an agent opened here does the task it was given and nothing else.
+ */
+export const sandboxNote = `# Novadeck tour sandbox
 
-You are the lead agent in Novadeck's tour, unless a message from your lead gave you a role as
-its teammate: then follow only that message and ignore the rest of this file. The person just
-started the tour to see how Novadeck works with agents. This folder is a sandbox Novadeck made
-for it, and Novadeck empties it each time the tour starts.
+Novadeck made this folder for its tour and empties it each time the tour starts. Work only in
+this folder: don't read or change anything outside it, don't install anything, and don't run git.
+If you were given a task, do only that task.
+`
+
+/** The lead's script for a run, with the person's name and the teammates' models. */
+export const leadScript = ({
+  name,
+  copywriter,
+  designer,
+}: BriefFacts): string => `# Novadeck tour: the lead's script
+
+You are the lead agent in Novadeck's tour. The person just started the tour to see how Novadeck
+works with agents. This folder is a sandbox Novadeck made for it, and Novadeck empties it each
+time the tour starts.
 
 ## Rules
 
 - Work only in this folder. Don't read or change anything outside it.
 - Don't install anything, and don't run git.
 - Keep every reply to one or two short sentences: the person is watching Novadeck, not reading.
+- Be quick: the whole tour should take about 2 minutes. Say nothing between steps beyond the
+  one-sentence greeting and the final line, and don't explain, plan or confirm in prose.
 - Novadeck's own tools (\`describe\`, \`open_agent\`, \`send\`, \`ask\`, \`show\`) are how you
   work here. They run without asking.
 - Only you, the lead, write files here. Your teammates never do.
@@ -160,8 +182,10 @@ const indent = (text: string): string =>
 
 /** The files the tour's folder starts with, by name. */
 export const briefFiles = (facts: BriefFacts): Readonly<Record<string, string>> => ({
-  "AGENTS.md": tourBrief(facts),
+  "AGENTS.md": sandboxNote,
   "CLAUDE.md": "@AGENTS.md\n",
+  // The lead's script, in a file no harness loads by itself.
+  "lead.md": leadScript(facts),
   // Claude Code's project settings for this folder: its teammates, which are given no launch
   // flags, take edits unasked too, and a plan mode the person's own settings start them in
   // doesn't hold them (project settings outrank the user's). Only the tour folder's own file.

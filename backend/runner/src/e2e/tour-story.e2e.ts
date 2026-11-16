@@ -10,7 +10,7 @@ import { folder, seedTour, tell } from "./tour-story.js"
 // Novadeck's tour story (docs/tour.md), for each harness as the lead: it opens a copywriter
 // and a designer on the brief's model and effort, they describe themselves and send their
 // parts, the copywriter asks the person in the Inbox, and the lead shows its card. The model
-// is a script (tour-story.ts) that follows the folder's AGENTS.md. Only the lead's own
+// is a script (tour-story.ts) that follows the folder's lead.md. Only the lead's own
 // harness is connected here, so both teammates run on it; tour.mixed.e2e.ts has them differ.
 
 for (const setup of setups) {

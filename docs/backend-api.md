@@ -1805,8 +1805,9 @@ one from an earlier runner.
 - `tour.prepare({ agent })` readies a run of Novadeck's tour with the person's own agent
   (`backend/runner/src/tour/`). It removes every project open at the tour's folder,
   `~/.novadeck/tour`, closing their terminals, so nothing runs there; empties the folder and
-  writes the agent's brief there (`AGENTS.md`, which Codex and Antigravity read, and
-  `CLAUDE.md`, which imports it), beside a `.novadeck-tour` marker; and answers
+  writes the lead's script there (`lead.md`, a file no harness loads by itself) beside a neutral
+  `AGENTS.md` (Codex, Antigravity) and `CLAUDE.md` (which imports it) with no role and no steps,
+  since the agents the lead opens start in the same folder and would follow a script they loaded, beside a `.novadeck-tour` marker; and answers
   `{ directory, command, brief, model?, removed }`. `command` starts the agent there on its
   cheapest model (Claude Code's `haiku`, Codex's newest `*-luna` or else the last it lists,
   Antigravity's `gemini-3.8-flash-low`, each at its lowest effort), taking edits in the folder
@@ -1818,12 +1819,14 @@ one from an earlier runner.
   The brief is composed for each run: it calls the person by the first word of their global
   git name (`git config --global user.name`, read by the runner with a short timeout, never
   over a network), else their OS account's first name capitalized, else "you", and the name
-  is written into that file, and goes on from there: into the teammates' briefs (which Novadeck
+  is written into the script, and goes on from there: into the teammates' briefs (which Novadeck
   keeps and shows in Messages), into the card, and to each agent's model provider through the
   person's own account. It has the lead open two teammates with `open_agent`, a copywriter
   on the lead's own agent and a designer on the first other connected agent whose cheapest model
   is listed (else the lead's), each on that agent's cheapest model at its lowest effort, as
-  above; teammates get no write flags, and only the lead writes the card, `welcome.svg` (an SVG image the side pane shows as an image). The folder also holds a project
+  above; teammates get no write flags, and only the lead writes the card, `welcome.svg` (an SVG image the side pane shows as an image). A terminal in the folder that has a lead is a teammate, and its `open_agent` is refused
+  (`Tour.openRefusal`, through the Terminals option `openRefusal`), so a teammate that follows the
+  lead's script anyway can't nest a team. The folder also holds a project
   `.claude/settings.json` (`defaultMode: acceptEdits`), so Claude Code teammates, given no launch
   flags, take edits unasked and a plan mode in the person's own settings doesn't hold them.
   `removed` names the projects it removed. A folder there that is no folder, or that holds
