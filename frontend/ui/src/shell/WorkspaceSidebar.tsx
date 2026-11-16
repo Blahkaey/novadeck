@@ -1,6 +1,7 @@
 import type { FolderListing, FilesProject } from "@novadeck/core/files"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
+import type { Note, NoteChange } from "@novadeck/core/notes"
 import type { AgentConnection } from "@novadeck/core/port"
 import type { SidebarPanel as PanelId, Tile, WorkspaceSession } from "@novadeck/core/types"
 import type { Work, WorkClosing } from "@novadeck/core/works"
@@ -12,6 +13,7 @@ import { shortcutBindings } from "../interaction/shortcuts"
 import { sessionGlance, type SessionMark } from "../projects/session-marks"
 import { FilesPanel } from "../sidebar/FilesPanel"
 import { HistoryPanel } from "../sidebar/HistoryPanel"
+import { NotesPanel } from "../sidebar/NotesPanel"
 import { panelLabels } from "../sidebar/panel-labels"
 import { SessionsPanel, type SessionsMove } from "../sidebar/SessionsPanel"
 import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
@@ -61,6 +63,19 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
         onRemove: (ids: readonly string[]) => Promise<void>
       }
     | undefined
+  // Where the backend keeps the person's notes: the open project's, whether their last
+  // change didn't take, and what adding, changing, moving and deleting one does. Left out,
+  // there is no Notes panel.
+  notes:
+    | {
+        notes: readonly Note[]
+        failed: boolean
+        onAdd: (note: { text: string; todo: boolean }) => void
+        onChange: (id: string, change: NoteChange) => void
+        onMove: (id: string, index: number) => void
+        onRemove: (ids: readonly string[]) => void
+      }
+    | undefined
   // Where the backend reports each tracked worktree's work against main: the open project's
   // works, the terminals' titles by id, the selected terminal, what a row's click does and what
   // its × does. Left out, there is no Worktrees panel.
@@ -108,6 +123,7 @@ export const WorkspaceSidebar = ({
   sidebarVisible,
   files,
   history,
+  notes,
   worktrees,
   onSessionSelect,
   onSessionRename,
@@ -175,6 +191,15 @@ export const WorkspaceSidebar = ({
         moving={moving}
       />
     </SidebarPanel>
+    {notes && (
+      <NotesPanel
+        key={`notes/${projectId}`}
+        projectId={projectId}
+        {...notes}
+        active={sidebarPanel === "notes"}
+        onClose={onHide}
+      />
+    )}
     {history && (
       <HistoryPanel
         key={`history/${projectId}`}

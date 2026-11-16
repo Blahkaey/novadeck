@@ -66,32 +66,41 @@ export const filesShown = (backend: Pick<Backend, "files">): boolean => backend.
 export const historyShown = (backend: Pick<Backend, "history">): boolean =>
   backend.history !== undefined
 
+// Whether the app shows the Notes panel: where the backend keeps the person's notes.
+export const notesShown = (backend: Pick<Backend, "notes">): boolean => backend.notes !== undefined
+
 // Whether the backend reports each tracked worktree's work, which the Worktrees panel lists.
 export const reportsWorks = (backend: Pick<Backend, "works">): boolean =>
   backend.works !== undefined
 
 // The panels a backend can show: Files only where it reads the projects' files, History only
-// where it keeps closed terminals, Worktrees only where it reports the worktrees' work.
+// where it keeps closed terminals, Worktrees only where it reports the worktrees' work, Notes
+// only where it keeps the person's notes.
 export const availablePanels = (
   hasFiles: boolean,
   hasHistory = false,
   hasWorktrees = false,
+  hasNotes = false,
 ): readonly SidebarPanel[] =>
   sidebarPanels.filter(
     (panel) =>
       (hasFiles || panel !== "files") &&
       (hasHistory || panel !== "history") &&
-      (hasWorktrees || panel !== "worktrees"),
+      (hasWorktrees || panel !== "worktrees") &&
+      (hasNotes || panel !== "notes"),
   )
 
 // Whether the rail shows the panel now: one the backend has, and Worktrees only while the person
 // has agent worktrees on (see `useWorktreesShown`).
 export const panelShownOn =
-  (backend: Pick<Backend, "files" | "history" | "works" | "worktrees">) =>
+  (backend: Pick<Backend, "files" | "history" | "works" | "worktrees" | "notes">) =>
   (panel: SidebarPanel): boolean =>
-    availablePanels(filesShown(backend), historyShown(backend), reportsWorks(backend)).includes(
-      panel,
-    ) &&
+    availablePanels(
+      filesShown(backend),
+      historyShown(backend),
+      reportsWorks(backend),
+      notesShown(backend),
+    ).includes(panel) &&
     (panel !== "worktrees" || (backend.worktrees?.enabled.getSnapshot() ?? false))
 
 // The sidebar panel a URL names, Terminals for anything else, or for one the backend lacks.

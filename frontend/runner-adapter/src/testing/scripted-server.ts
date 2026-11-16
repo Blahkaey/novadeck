@@ -286,6 +286,14 @@ export const scriptedRunner = ({
       watch: api.history.watch.handler(idle),
       remove: api.history.remove.handler(unplayed("history.remove")),
     },
+    notes: {
+      list: api.notes.list.handler(() => []),
+      watch: api.notes.watch.handler(idle),
+      add: api.notes.add.handler(unplayed("notes.add")),
+      update: api.notes.update.handler(unplayed("notes.update")),
+      move: api.notes.move.handler(unplayed("notes.move")),
+      remove: api.notes.remove.handler(unplayed("notes.remove")),
+    },
     works: {
       watch: api.works.watch.handler(idle),
       made: api.works.made.handler(idle),

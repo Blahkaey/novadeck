@@ -13,6 +13,7 @@ export const sidebarPanels = [
   "sessions",
   "worktrees",
   "files",
+  "notes",
   "history",
 ] as const
 export type SidebarPanel = (typeof sidebarPanels)[number]

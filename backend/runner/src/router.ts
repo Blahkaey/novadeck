@@ -29,6 +29,7 @@ import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
+import type { Notes } from "./workspaces/notes.js"
 import type { Projects } from "./workspaces/projects.js"
 import type { WorkspaceStore } from "./workspaces/store.js"
 
@@ -120,6 +121,8 @@ export const createRouter = (options: {
   history?: History
   /** Each terminal's work against main; without it the Worktrees panel is empty. */
   works?: Works
+  /** The person's notes on each project. */
+  notes: Notes
   agents: Harnesses
   /** The forges pull requests come from; without it none is offered. */
   forges?: Forges
@@ -138,6 +141,7 @@ export const createRouter = (options: {
   const { store, terminals, feedback, projects, items, agents, uploads, voice, murmur } = options
   const history = options.history ?? noHistory
   const works = options.works ?? noWorks
+  const { notes } = options
   const forges = options.forges ?? noForges
   const tour: Pick<Tour, "prepare" | "brief" | "nudge"> = options.tour ?? noTour
   // A plan's content says whether Novadeck's plugin is installed into its agent, which the
@@ -160,7 +164,11 @@ export const createRouter = (options: {
       arrange: api.projects.arrange.handler(({ input }) =>
         projects.arrange(input.order, input.pinned),
       ),
-      remove: api.projects.remove.handler(({ input }) => projects.remove(input.projectId)),
+      remove: api.projects.remove.handler(async ({ input }) => {
+        await projects.remove(input.projectId)
+        // Its notes went with it, which their watchers are told.
+        notes.projectRemoved(input.projectId)
+      }),
       folder: api.projects.folder.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         return listFolder(store.project(input.projectId).cwd, input.folder)
@@ -290,6 +298,17 @@ export const createRouter = (options: {
         history.watch(context.session.id, signal),
       ),
       remove: api.history.remove.handler(({ input }) => history.erase(input.ids)),
+    },
+    notes: {
+      list: api.notes.list.handler(({ input }) => notes.list(input.projectId)),
+      watch: api.notes.watch.handler(({ signal }) => notes.watch(signal)),
+      add: api.notes.add.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return notes.add(input)
+      }),
+      update: api.notes.update.handler(({ input }) => notes.update(input)),
+      move: api.notes.move.handler(({ input }) => notes.move(input)),
+      remove: api.notes.remove.handler(({ input }) => notes.remove(input)),
     },
     works: {
       watch: api.works.watch.handler(({ context, signal }) =>

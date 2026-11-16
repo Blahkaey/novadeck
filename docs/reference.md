@@ -474,6 +474,37 @@ terminals. They close and go to History, and you can restore them into another s
 A project's last session can't be deleted. The order, names and deletions are the runner's,
 so they stay after a reload, and the project opens the session you were in last.
 
+## Notes
+
+**Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
+remember about it: one list per project, yours alone. Agents neither read it nor write to
+it. Where a backend keeps no notes, the panel isn't there.
+
+Type in the field at the top and press Enter to add a todo, first in the list; the field
+stays ready for the next. The button before the field switches it to plain notes, which
+have no checkbox, and back. A line is one line of up to 500 characters.
+
+Tick a todo's checkbox to check it off. It moves under **Done** at the foot of the list,
+folded until you open it, and unticking it there opens it again. The count beside the
+panel's title, and in the tooltip of its rail toggle, is how many todos are still to do;
+plain notes are never counted. Done's **Clear** button deletes every done todo for good,
+after asking; a done row's trash deletes that one without asking.
+
+Click a line to change it where it stands: Enter saves, Escape keeps the old line, and
+clicking away saves. The chevron at the end of a row opens what is under the line: its
+details, written as Markdown (up to 8,000 characters) and shown formatted, with **Edit
+details**, **Make it a note** or **Make it a todo**, and **Delete**. Opening a note with no
+details starts writing some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and
+clicking away saves. A chevron that stands out marks a note with details.
+
+Drag a line to move its note among the open ones, or focus it and press Alt with the up or
+down arrow. The order is yours and is kept.
+
+Notes are kept by the runner with the workspace, so they stay after a restart and show in
+every window, and they go with their project when you remove it. A project keeps up to 200.
+If a change can't be saved, the list goes back to what was saved and a line above it says
+so.
+
 ## History
 
 Closing a terminal doesn't end it for good. It moves to **History**, a panel on the
@@ -735,6 +766,7 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Toggle Inbox                                      | `Cmd+Shift+B`      | `Ctrl+Shift+B`                   |
 | Toggle Worktrees (with agent worktrees on)        | `Cmd+Shift+G`      | `Ctrl+Shift+G`                   |
 | Toggle Files                                      | `Cmd+Shift+F`      | `Ctrl+Shift+F`                   |
+| Toggle Notes                                      | `Cmd+Shift+L`      | `Ctrl+Shift+L`                   |
 | Toggle History                                    | `Cmd+Shift+H`      | `Ctrl+Shift+H`                   |
 | Switch to pinned project 1 to 9                   | `Cmd+1` to `Cmd+9` | `Ctrl+Shift+1` to `Ctrl+Shift+9` |
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |

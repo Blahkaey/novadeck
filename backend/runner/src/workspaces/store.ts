@@ -57,6 +57,9 @@ const pinLimit = 9
 
 type ProjectRow = Omit<Project, "pinned"> & { readonly pinned: number }
 
+// The settings row a project's notes are kept in.
+const noteKey = (projectId: string): string => `notes.${projectId}`
+
 const projectOf = ({ pinned, ...project }: ProjectRow): Project => ({
   ...project,
   pinned: pinned === 1,
@@ -1791,7 +1794,47 @@ export class WorkspaceStore
    */
   removeProject(projectId: string): void {
     this.project(projectId)
-    this.forget(() => this.queries.run`DELETE FROM projects WHERE id = ${projectId}`)
+    this.forget(() =>
+      this.transaction(() => {
+        void this.queries.run`DELETE FROM projects WHERE id = ${projectId}`
+        // Its notes are a settings row, which no foreign key takes with it.
+        void this.queries.run`DELETE FROM settings WHERE key = ${noteKey(projectId)}`
+      }),
+    )
+  }
+
+  /** Each project's notes as `saveNotes` kept them, by project id. */
+  savedNotes(): Map<string, string> {
+    const rows = this.queries.all`SELECT key, value FROM settings WHERE key LIKE 'notes.%'` as {
+      key: string
+      value: string
+    }[]
+    return new Map(rows.map(({ key, value }) => [key.slice(noteKey("").length), value]))
+  }
+
+  /** A project's notes as `saveNotes` kept them; undefined where it has none. */
+  savedNotesOf(projectId: string): string | undefined {
+    const row = this.queries.get`SELECT value FROM settings WHERE key = ${noteKey(projectId)}` as
+      | { value: string }
+      | undefined
+    return row?.value
+  }
+
+  /**
+   * Keeps a project's notes, as the text `notes`, or none for null. They are a row of the
+   * settings, one a project (`notes.<project id>`), so they need no table of their own; what
+   * a save replaces is the person's words, forgotten as other deleted content is.
+   */
+  saveNotes(projectId: string, notes: string | null): void {
+    this.project(projectId)
+    this.forget(() => {
+      if (notes === null)
+        void this.queries.run`DELETE FROM settings WHERE key = ${noteKey(projectId)}`
+      else
+        void this.queries.run`
+          INSERT INTO settings (key, value) VALUES (${noteKey(projectId)}, ${notes})
+          ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+    })
   }
 
   project(projectId: string): Project {

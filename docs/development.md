@@ -524,6 +524,18 @@ Agents:
 
 App:
 
+- **Notes:** only where the demo keeps the person's notes (`plain`, `agents`, `messages`,
+  `inbox` and `welcome`; the showcase and the videos' demos have no Notes panel). Storefront
+  starts with four todos, one of them with details, a plain note and two todos under Done; the
+  other projects start with none. Adding, checking off, editing, moving, deleting and Clear
+  done all work there, so they need no action. Each action acts on the open project's notes
+  and leaves the others': "Next notes change fails" makes the next change fail once (the list
+  stays as it was, and a line above it says the change wasn't saved, until a change takes),
+  "Sample notes" puts storefront's samples in the open project, "No notes" empties it (the
+  panel says what it is for), "Every todo done" leaves nothing to do over a Done group of
+  six, "Project full of notes" fills it with the 200 a project keeps (the add field takes no
+  more, and a line says why), and "A long note" adds a todo whose line is as long as one can
+  be, with details that have a heading, lists, code and a link.
 - **Inbox:** each action adds one row of its kind to the Inbox, over what the agents wait on,
   waiting from now and in place of the one of its kind already there: a stuck agent, Codex's
   command permission, an unreadable dialog, a held message, a decision with options, a

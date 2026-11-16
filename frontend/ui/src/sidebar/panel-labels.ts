@@ -8,5 +8,6 @@ export const panelLabels: Readonly<Record<SidebarPanel, string>> = {
   sessions: "Sessions",
   worktrees: "Worktrees",
   files: "Files",
+  notes: "Notes",
   history: "History",
 }

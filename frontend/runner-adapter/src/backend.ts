@@ -61,6 +61,7 @@ import { createRunnerItems } from "./companions/items"
 import { answerLook, type Looks } from "./companions/looks"
 import { createRunnerFiles } from "./files"
 import { createRunnerHistory } from "./history"
+import { createRunnerNotes } from "./notes"
 import { createSessionSaves } from "./sessions/saves"
 import {
   cleanlyExited,
@@ -109,6 +110,7 @@ export type RunnerApi = Pick<
   | "settings"
   | "companions"
   | "history"
+  | "notes"
   | "works"
 > &
   // Not every runner has them (an older one doesn't): none are offered without.
@@ -1483,6 +1485,8 @@ export const runnerBackend = (
   const murmur = createRunnerMurmur(runner.murmur, track)
   // History, followed the same way.
   const history = createRunnerHistory(runner.history, track)
+  // The person's notes, followed the same way.
+  const notes = createRunnerNotes(runner.notes, { track })
   // Works, read once at the start and followed while the Worktrees panel is watched.
   const works = createRunnerWorks(runner.works, track)
   let following = false
@@ -1918,6 +1922,7 @@ export const runnerBackend = (
     voice.follow()
     murmur.follow()
     history.follow()
+    notes.follow()
     works.readOnce()
     inbox.follow()
     window.addEventListener("pagehide", flush)
@@ -1943,6 +1948,7 @@ export const runnerBackend = (
       voice.stop()
       murmur.stop()
       history.stop()
+      notes.stop()
       works.stop()
       // The last changes are saved; nothing retries after this.
       flush()
@@ -2034,6 +2040,7 @@ export const runnerBackend = (
       ),
     files: createRunnerFiles(runner.projects),
     history: history.history,
+    notes: notes.notes,
     // Once the session it goes to exists on the runner, as one the person just made does
     // after a moment; the runner's `changed` then moves it here (`moveEntry`).
     moveTerminal: (key, sessionId, undo) =>

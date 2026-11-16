@@ -26,6 +26,8 @@ import {
   type ItemContent,
   type MurmurSettings,
   type MurmurState,
+  type Note,
+  type NotesChange,
   type PageLook,
   type PageLookAnswer,
   type PageTrouble,
@@ -89,6 +91,12 @@ export type CompanionWatchItem = CompanionChange | Reset
  * yields before each fresh sequence of closed terminals ending in `synced`.
  */
 export type HistoryWatchItem = HistoryChange | Reset
+
+/**
+ * An item of `runner.notes.watch()`: a runner change, or `reset`, which the client yields
+ * before each fresh sequence of projects' notes ending in `synced`.
+ */
+export type NotesWatchItem = NotesChange | Reset
 
 /**
  * An item of `runner.works.watch()`: a runner change, or `reset`, which the client yields
@@ -472,6 +480,47 @@ export type Runner = {
      * under way, are passed over; `watch()` reports each one deleted as `removed`.
      */
     remove(input: { readonly ids: readonly string[] }): Promise<void>
+  }
+  /** The person's own notes on each project: todos and plain notes, in their order. */
+  readonly notes: {
+    /** A project's notes, in the person's order. */
+    list(input: { readonly projectId: string }): Promise<Note[]>
+    /**
+     * Follows every project's notes, as `history.watch()` follows closed terminals: each time
+     * the stream opens it yields `reset`, a `changed` with the whole notes of each project
+     * that has any, then `synced`; at `synced`, a project not reported since has none. Later
+     * events give a project's notes whole each time they change. Iteration ends only when
+     * the runner closes or on `return()`.
+     */
+    watch(): AsyncIterableIterator<NotesWatchItem, undefined>
+    /**
+     * Adds a note first in its project's list, under the id the client gives it. Like every
+     * change below, it resolves with the project's notes as it left them. `CONFLICT` for an
+     * id the project has, and for one note more than a project keeps.
+     */
+    add(input: {
+      readonly id: string
+      readonly projectId: string
+      readonly text: string
+      readonly todo: boolean
+    }): Promise<Note[]>
+    /** Changes what is given of a note; `NOT_FOUND` for one its project doesn't have. */
+    update(input: {
+      readonly projectId: string
+      readonly id: string
+      readonly text?: string
+      readonly body?: string
+      readonly todo?: boolean
+      readonly done?: boolean
+    }): Promise<Note[]>
+    /** Moves an open note to `index` among its project's open notes. */
+    move(input: {
+      readonly projectId: string
+      readonly id: string
+      readonly index: number
+    }): Promise<Note[]>
+    /** Deletes notes for good; an id the project doesn't have is skipped. */
+    remove(input: { readonly projectId: string; readonly ids: readonly string[] }): Promise<Note[]>
   }
   /** Each tracked git worktree against its repository's main branch (Worktrees panel). */
   readonly works: {
@@ -913,6 +962,16 @@ export const connectRunner = async (
       watch: () =>
         followAll(connection, (client, signal) => client.history.watch(undefined, { signal })),
       remove: (input) => call((client) => client.history.remove({ ids: [...input.ids] })),
+    },
+    notes: {
+      list: (input) => call((client) => client.notes.list(input)),
+      watch: () =>
+        followAll(connection, (client, signal) => client.notes.watch(undefined, { signal })),
+      add: (input) => call((client) => client.notes.add(input)),
+      update: (input) => call((client) => client.notes.update(input)),
+      move: (input) => call((client) => client.notes.move(input)),
+      remove: (input) =>
+        call((client) => client.notes.remove({ projectId: input.projectId, ids: [...input.ids] })),
     },
     works: {
       watch: () =>

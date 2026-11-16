@@ -3610,6 +3610,55 @@ describe("companion items", () => {
   })
 })
 
+describe("a project's notes", () => {
+  it("are kept by project across a reopen, replaced whole, and forgotten for null", async ({
+    directory,
+    store,
+  }) => {
+    const cwd = directory()
+    const path = join(cwd, "workspace.sqlite")
+    const workspace = store(path)
+    await workspace.createProject({ id: "p", name: "P", cwd })
+    await workspace.createProject({ id: "q", name: "Q", cwd })
+    expect(workspace.savedNotes()).toEqual(new Map())
+    expect(workspace.savedNotesOf("p")).toBeUndefined()
+    workspace.saveNotes("p", '["first"]')
+    workspace.saveNotes("q", '["other"]')
+    workspace.saveNotes("p", '["second"]')
+    workspace.close()
+
+    const reopened = store(path)
+    expect(reopened.savedNotes()).toEqual(
+      new Map([
+        ["p", '["second"]'],
+        ["q", '["other"]'],
+      ]),
+    )
+    expect(reopened.savedNotesOf("q")).toBe('["other"]')
+    reopened.saveNotes("q", null)
+    expect(reopened.savedNotes()).toEqual(new Map([["p", '["second"]']]))
+    // They are settings rows, which the runner's own settings leave alone.
+    expect(reopened.settings.runner().inboxOrder).toEqual([])
+  })
+
+  it("go with their project, and are refused for one the store doesn't have", async ({
+    directory,
+    store,
+  }) => {
+    const cwd = directory()
+    const workspace = store(join(cwd, "workspace.sqlite"))
+    await workspace.createProject({ id: "p", name: "P", cwd })
+    await workspace.createProject({ id: "q", name: "Q", cwd })
+    workspace.saveNotes("p", "[]")
+    workspace.saveNotes("q", "[]")
+    workspace.removeProject("p")
+    expect([...workspace.savedNotes().keys()]).toEqual(["q"])
+    expect(() => workspace.saveNotes("p", "[]")).toThrow(
+      expect.objectContaining({ code: "NOT_FOUND" }),
+    )
+  })
+})
+
 describe("murmur's settings", () => {
   it("are off until chosen, and the choice is kept or forgotten", ({ directory, store }) => {
     const path = join(directory(), "workspace.sqlite")

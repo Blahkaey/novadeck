@@ -1727,6 +1727,39 @@ one from an earlier runner.
     five seconds, and when the agent leaves or the terminal exits, restarts or rests. The agents
     listing counts it as working. The field may be absent, which reads as null.
 
+- `notes.*` keeps the person's own notes on each project, for the Notes panel: todos, which
+  they check off, and plain notes, in their order. A note has the `id` its client gave it,
+  its `projectId`, `text` (one line, 1 to 500 characters, trimmed, `singleLine`), `body`
+  (Markdown, up to 8,000 characters, empty for none), `todo` (whether it has a checkbox),
+  `doneAt` (when it was checked off, in epoch milliseconds; null while it is open, and always
+  on a plain note) and `createdAt`. A project keeps at most 200 (`noteLimits`). Agents have no
+  tool for them. The runner keeps a project's notes whole, as one row of the `settings`
+  table under `notes.<project id>`, so they need no table and no schema change; each write
+  goes through the store's `forget` (so `secure_delete` and the scrub apply to what it
+  replaces), and removing a project deletes its row in the same transaction. A row that
+  can't be read is logged and reads as no notes. Every change answers with the project's
+  notes as it left them; a project the runner doesn't have is `NOT_FOUND`, and so is a note
+  its project doesn't.
+  - `notes.list({ projectId })` answers the project's notes, in the person's order.
+  - `notes.watch()` streams a `changed` with the whole notes of each project that has any,
+    `synced`, then a project's notes whole each time they change (none once its last note is
+    removed, or the project is). The client's `notes.watch()` yields `reset` before each
+    fresh sequence, as `history.watch()` does.
+  - `notes.add({ id, projectId, text, todo })` adds a note first in the project's list, open
+    and with no body. An id the project already has is a `CONFLICT`, as is one note more
+    than a project keeps.
+  - `notes.update({ projectId, id, text?, body?, todo?, done? })` changes what is given. A
+    todo checked off is done from then, and keeps that time if checked again; a plain note
+    is never done, so `todo: false` opens it. A body keeps no white space at its end.
+  - `notes.move({ projectId, id, index })` moves an open note to `index` among the project's
+    open notes, within their ends; the done ones keep their places. One that is checked off
+    is a `CONFLICT`.
+  - `notes.remove({ projectId, ids })` deletes 1 to 200 notes for good; an id the project
+    doesn't have is skipped.
+  - The UI's adapter shows each change at once, over what the runner last reported, and
+    takes the runner's answer in its place; a change the runner refuses leaves the notes as
+    the runner has them and sets the port's `notes.state.failed` until a change takes.
+
 - `companions.*` keeps what agents show and the person attaches beside terminals: items,
   each a pointer to a file, a page or a plan, never a copy of it, held by exactly one
   terminal's bar, one undocked window, or the session's project window. Items and windows

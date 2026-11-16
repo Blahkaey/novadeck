@@ -25,6 +25,7 @@ import { Uploads } from "./terminals/uploads.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
+import { Notes } from "./workspaces/notes.js"
 import { Projects } from "./workspaces/projects.js"
 import {
   EarlierWorkspaceError,
@@ -547,6 +548,8 @@ const startRunner = (options: RunnerOptions): Runner => {
     rootFolder,
     tour,
   } = wire(options)
+  // The person's notes on each project, kept in the store.
+  const notes = new Notes(store)
   let closing: Promise<void> | undefined
   return {
     sessions: createSessions({
@@ -557,6 +560,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         feedback: terminals.feedback,
         history: terminals.history,
         works,
+        notes,
         forges,
         projects,
         items,
@@ -595,6 +599,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         } finally {
           await forges.close()
           await works.close()
+          notes.close()
           await tidying
           // After both that take snapshots: the items ended with the terminals.
           await snapshots.close()

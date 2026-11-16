@@ -47,6 +47,7 @@ import { forgeIntegration, forgeName } from "./forges.js"
 import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
+import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
 import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
 import { sliceChange } from "./slices.js"
@@ -573,6 +574,51 @@ export const contract = {
     remove: procedure
       .input(z.strictObject({ ids: z.array(id).min(1).max(maxHistoryRemoved) }))
       .output(z.void()),
+  },
+  // The person's own notes on a project: todos, which they check off, and plain notes, in
+  // their order (notes.ts). Every change answers with the project's notes as it left them.
+  // A project the runner doesn't have is NOT_FOUND, and so is a note its project doesn't.
+  notes: {
+    // A project's notes, in the person's order.
+    list: procedure.input(z.strictObject({ projectId: id })).output(z.array(note)),
+    // Every project's notes: a `changed` for each project that has any, `synced`, then a
+    // project's notes whole each time they change.
+    watch: procedure.input(z.void()).output(eventIterator(notesChange)),
+    // Adds a note first in its project's list, open, with no body. The client names it; an id
+    // the project already has is a CONFLICT, as is one more than `noteLimits.perProject`.
+    add: procedure
+      .input(z.strictObject({ id, projectId: id, text: noteText, todo: z.boolean() }))
+      .output(z.array(note)),
+    // Changes what is given of a note: its line, its body, whether it is a todo, and whether
+    // it is checked off (`done`), from now. A plain note is never done: taking the checkbox
+    // away opens it again.
+    update: procedure
+      .input(
+        z.strictObject({
+          projectId: id,
+          id,
+          text: noteText.optional(),
+          body: noteBody.optional(),
+          todo: z.boolean().optional(),
+          done: z.boolean().optional(),
+        }),
+      )
+      .output(z.array(note)),
+    // Moves an open note to `index` among its project's open notes, within their ends; the
+    // done ones keep their places. One that is checked off is a CONFLICT.
+    move: procedure
+      .input(
+        z.strictObject({
+          projectId: id,
+          id,
+          index: z.number().int().min(0).max(noteLimits.perProject),
+        }),
+      )
+      .output(z.array(note)),
+    // Deletes notes for good; an id the project doesn't have is skipped.
+    remove: procedure
+      .input(z.strictObject({ projectId: id, ids: z.array(id).min(1).max(noteLimits.perProject) }))
+      .output(z.array(note)),
   },
   // Each tracked git worktree against its repository's main branch, for the Worktrees panel
   // (works.ts). A work is keyed by its worktree's root.

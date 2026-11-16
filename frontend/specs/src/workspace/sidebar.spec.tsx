@@ -56,13 +56,15 @@ describe("sidebar settings", () => {
   })
 
   context("when a panel's key is pressed", () => {
-    it("shows Files, Worktrees and History by their keys", async () => {
+    it("shows Files, Worktrees, Notes and History by their keys", async () => {
       // The agents demo has the storefront's files and agent worktrees on.
       await openWorkspace("/?demo=agents")
       await pressShortcut("files")
       await expect.element(sidebar()).toHaveAccessibleName("Files")
       await pressShortcut("worktrees")
       await expect.element(sidebar()).toHaveAccessibleName("Worktrees")
+      await pressShortcut("notes")
+      await expect.element(sidebar()).toHaveAccessibleName("Notes")
       await pressShortcut("history")
       await expect.element(sidebar()).toHaveAccessibleName("History")
     })

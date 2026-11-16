@@ -32,6 +32,7 @@ export const shortcut = {
   inbox: (): Chord => commandShift("B"),
   worktrees: (): Chord => commandShift("G"),
   files: (): Chord => commandShift("F"),
+  notes: (): Chord => commandShift("L"),
   history: (): Chord => commandShift("H"),
   preferences: (): Chord =>
     isMac()

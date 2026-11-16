@@ -83,6 +83,9 @@ describe("the rail's tooltips", () => {
       `Worktrees · ${keys("G")}`,
     )
     expect(railTooltip({ panel: "files", open: false, back: null })).toBe(`Files · ${keys("F")}`)
+    expect(railTooltip({ panel: "notes", detail: "3 to do", open: false, back: null })).toBe(
+      `Notes · 3 to do · ${keys("L")}`,
+    )
   })
 })
 
@@ -166,6 +169,30 @@ describe("the rail's Worktrees dot", () => {
     expect(first).not.toBeNull()
     rerender(worktreesRail(2, false, true))
     expect(dot()).not.toBe(first)
+  })
+})
+
+describe("the rail's Notes toggle", () => {
+  const notesRail = (hasNotes: boolean) =>
+    createElement(SidebarRail, {
+      sidebarVisible: false,
+      sidebarPanel: "terminals",
+      zen: false,
+      badge: undefined,
+      bellRings: 0,
+      hasNotes,
+      todosLeft: 3,
+      toggleSidebar: () => {},
+    })
+
+  it("shows only where the backend keeps the person's notes, and draws no dot for them", () => {
+    const { container, rerender, unmount } = render(notesRail(false))
+    unmounts.push(unmount)
+    expect(container.querySelector("#notes-toggle")).toBeNull()
+    rerender(notesRail(true))
+    const toggle = container.querySelector("#notes-toggle")
+    expect(toggle?.getAttribute("aria-label")).toBe("Notes")
+    expect(toggle?.querySelector("[class*='dot']")).toBeNull()
   })
 })
 

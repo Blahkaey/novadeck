@@ -27,6 +27,16 @@ export const noHistory = {
   remove: async () => {},
 }
 
+// A runner whose projects have no notes, and that keeps none.
+export const noNotes = {
+  list: async () => [],
+  watch: () => channel<never>().iterator,
+  add: async () => [],
+  update: async () => [],
+  move: async () => [],
+  remove: async () => [],
+}
+
 // A runner whose terminals have no work against main and never change.
 export const noWorks = {
   watch: () => channel<never>().iterator,
@@ -283,6 +293,7 @@ export const scripted = ({
       },
     },
     history: noHistory,
+    notes: noNotes,
     works: noWorks,
     feedback: {
       watch: () => {

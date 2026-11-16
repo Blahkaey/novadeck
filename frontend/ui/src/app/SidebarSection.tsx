@@ -2,6 +2,7 @@ import { allTeams, sameTeams } from "@novadeck/core/derivations"
 import type { ForgeConnection } from "@novadeck/core/forges"
 import type { ClosedTerminal, HistoryState } from "@novadeck/core/history"
 import { itemIdOf } from "@novadeck/core/items"
+import { noNotes, type Note, type NotesState } from "@novadeck/core/notes"
 import { orderedTiles } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
@@ -27,7 +28,7 @@ import {
   sameWorks,
 } from "./files-feed"
 import { useMoving, useTabsAway } from "./move-to"
-import { historyShown, filesShown } from "./routing"
+import { historyShown, filesShown, notesShown } from "./routing"
 import { currentState, currentTarget, sameItems, sameTarget } from "./selectors"
 import { useReorderTiles } from "./team-fold"
 import { useWorktreesShown } from "./use-worktrees-shown"
@@ -55,11 +56,16 @@ const sameHandles = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, stri
 
 // What a backend without History reads in its place; its panel isn't drawn.
 const noHistory = createStore<HistoryState>({ rows: [] })
+// What a backend without notes reads in their place; its panel isn't drawn.
+const noneNoted = createStore<NotesState>(noNotes)
 const noAgents: readonly never[] = []
 const always = (): (() => void) => () => {}
 
 const sameRows = (a: readonly ClosedTerminal[], b: readonly ClosedTerminal[]): boolean =>
   a.length === b.length && a.every((row, index) => Object.is(row, b[index]))
+
+const sameNotes = (a: readonly Note[], b: readonly Note[]): boolean =>
+  a.length === b.length && a.every((note, index) => Object.is(note, b[index]))
 
 // The sidebar wired to the workspace: terminal tabs and workspace sessions.
 export const SidebarSection = memo((): React.JSX.Element => {
@@ -220,6 +226,28 @@ export const SidebarSection = memo((): React.JSX.Element => {
         : undefined,
     [historyFeed, historyRows, readHistory, backend.agents, connections, commands, projectId],
   )
+  // The Notes panel shows where the backend keeps the person's notes; see `notesShown`.
+  const notesFeed = notesShown(backend) ? backend.notes : undefined
+  const projectNotes = useStoreSelector(
+    notesFeed?.state ?? noneNoted,
+    (state) => state.notes.filter((note) => note.projectId === projectId),
+    sameNotes,
+  )
+  const notesFailed = useStoreSelector(notesFeed?.state ?? noneNoted, (state) => state.failed)
+  const notes = useMemo(
+    () =>
+      notesFeed
+        ? {
+            notes: projectNotes,
+            failed: notesFailed,
+            onAdd: (note: { text: string; todo: boolean }) => notesFeed.add(projectId, note),
+            onChange: notesFeed.change,
+            onMove: notesFeed.move,
+            onRemove: notesFeed.remove,
+          }
+        : undefined,
+    [notesFeed, projectNotes, notesFailed, projectId],
+  )
   const moving = useMoving()
   const away = useTabsAway()
   const worksReported = useStoreSelector(worksFeed?.state ?? noWorks, (state) => state.reported)
@@ -343,6 +371,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
       sidebarVisible={visible}
       files={files}
       history={history}
+      notes={notes}
       worktrees={worktrees}
       onSessionSelect={switchSession}
       onSessionRename={renameSession}

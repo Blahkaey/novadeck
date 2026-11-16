@@ -160,6 +160,7 @@ export const createKeyCommands = (
     "sidebar.inbox": sidebar("inbox"),
     "sidebar.worktrees": sidebar("worktrees"),
     "sidebar.files": sidebar("files"),
+    "sidebar.notes": sidebar("notes"),
     "sidebar.history": sidebar("history"),
     "recent.next": recent(1),
     "recent.previous": recent(-1),

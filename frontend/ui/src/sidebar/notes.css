@@ -1,0 +1,91 @@
+/* The Notes panel (NotesPanel.tsx): the person's own todos and plain notes on the open
+   project. At its top `.notes-add`, a quiet field with `.notes-add-kind` (what it adds: todos
+   or plain notes) before its `.notes-add-input`. Under it the rows scroll (`.notes-scroll`):
+   a `.notes-row` is a sidebar row (the item recipe and sidebar-item.css) whose
+   `.notes-row-line` holds a todo's checkbox or a plain note's `.notes-row-mark`, its
+   `.notes-row-text` (a button that edits it, replaced by `.notes-line-input` meanwhile) and
+   `.notes-row-details`, a chevron that turns as it opens the `.notes-row-body` under the
+   line: the details as Markdown, or `.notes-body-input` while they are written, over the
+   row's other actions as link buttons. The todos checked off wait under `.notes-done`,
+   folded behind `.notes-done-toggle` beside `.notes-clear`; a done row's text is struck
+   through, with `.notes-row-remove` at its end. `.notes-empty` is a line the panel says in
+   words.
+
+   Hooks: on a row, data-kind="todo" | "note" while it is open, data-done="true" once checked
+   off, and `.dragging` while it is dragged; on `.notes-row-details`, aria-expanded and
+   data-filled="true" where the note has details; on `.notes-done-toggle`, aria-expanded.
+
+   Tokens: none of its own; it reads the palette's (muted, ink, line-strong) and the item
+   recipe's (--item-icon-fg). */
+.notes-add {
+  flex: none;
+}
+
+.notes-row-mark {
+  color: var(--item-icon-fg, var(--color-muted));
+}
+.notes-row-text {
+  border-radius: var(--radius-control);
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+/* Its line is text to change, and to drag by. */
+button.notes-row-text {
+  cursor: text;
+}
+.notes-row.dragging button.notes-row-text {
+  cursor: grabbing;
+}
+.notes-row[data-done="true"] .notes-row-text {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+.notes-line-input {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-ink);
+  box-shadow: none;
+  outline: none;
+}
+
+/* The chevron turns down while the row is open, and stands out where there is something
+   under the line to read. */
+.notes-row-details svg,
+.notes-done-toggle svg {
+  transition: transform var(--motion-feedback) var(--ease-interface);
+}
+.notes-row-details[aria-expanded="true"] svg,
+.notes-done-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.icon-button.notes-row-details[data-filled="true"] {
+  color: var(--color-ink);
+}
+
+.notes-row-body .markdown {
+  font-size: var(--text-control);
+  line-height: var(--text-control--line-height);
+  overflow-wrap: anywhere;
+}
+.notes-body-input {
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+.notes-body-input:focus-visible {
+  --_border-color: var(--field-open-border-color, var(--color-line-strong));
+  outline: none;
+}
+
+.notes-done-toggle {
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.notes-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--color-muted);
+  font-size: var(--text-control);
+  line-height: var(--text-control--line-height);
+}

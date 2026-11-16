@@ -267,6 +267,14 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       watch: () => runner.history.watch(),
       remove: (input) => note("remove closed", () => runner.history.remove(input)),
     },
+    notes: {
+      list: (input) => runner.notes.list(input),
+      watch: () => runner.notes.watch(),
+      add: (input) => note(`add note ${input.id}`, () => runner.notes.add(input)),
+      update: (input) => note(`update note ${input.id}`, () => runner.notes.update(input)),
+      move: (input) => note(`move note ${input.id}`, () => runner.notes.move(input)),
+      remove: (input) => note("remove notes", () => runner.notes.remove(input)),
+    },
     works: {
       watch: () => runner.works.watch(),
       made: () => runner.works.made(),

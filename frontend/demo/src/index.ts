@@ -40,6 +40,7 @@ import { demoInboxRows, demoEntries, demoPlanStates } from "./inbox/fixtures"
 import { inboxLeadMessages, inboxTranscripts, withInboxLead } from "./inbox/transcripts"
 import { checkoutMessages, createDemoMessages, isDemoMessages } from "./messages"
 import { withMoves } from "./moves"
+import { createDemoNotes, withNotes } from "./notes"
 import {
   createMockTerminal,
   defaultName,
@@ -739,8 +740,9 @@ const plainBackend = (
     )
   }
   const transcripts = agentTranscripts(now)
+  // Every demo of the storefront keeps the person's notes on it, beside what its agents changed.
   const withChanges = (shown: Backend): Backend =>
-    withWorks(shown, { plans: storefrontPlans, turns })
+    withNotes(withWorks(shown, { plans: storefrontPlans, turns }), createDemoNotes(now))
   if (variant === "messages")
     return withChanges(
       withHistory(

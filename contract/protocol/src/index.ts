@@ -95,6 +95,15 @@ export {
   maxHistoryRemoved,
 } from "./history.js"
 export {
+  type Note,
+  note,
+  noteBody,
+  noteLimits,
+  type NotesChange,
+  notesChange,
+  noteText,
+} from "./notes.js"
+export {
   type PreviewHunk,
   previewHunk,
   type PreviewRename,
