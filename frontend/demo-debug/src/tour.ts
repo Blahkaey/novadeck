@@ -41,6 +41,11 @@ export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
         run: () => tour.goQuiet(),
       },
       {
+        label: "Tour agent: ask permission first",
+        hint: "The next tour agent asks your permission for a command, as its harness's own dialog: a request waits in the Inbox and the tour points at its terminal until you answer",
+        run: () => tour.askPermission(),
+      },
+      {
         label: "Tour story: answer the tagline ask (A)",
         hint: "While the copywriter's ask waits in the Inbox (Which tagline for the welcome card?), answers it with option A as the person would: the row goes, the copywriter tells the lead, and the lead shows the welcome card",
         run: () => tour.answerTagline(0),

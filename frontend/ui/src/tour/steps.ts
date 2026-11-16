@@ -177,9 +177,18 @@ export const screenCoach = (
       ? "It needs you to sign in: do it here, in its terminal. The tour goes on once you're in."
       : screen === "hooks"
         ? agent === "codex"
-          ? "Codex asks you to review Novadeck's hooks: run /hooks here and trust them, and the tour goes on."
+          ? 'Codex asks you to trust Novadeck\'s hooks: pick "Trust all and continue" here, or review them first, and the tour goes on.'
           : "Novadeck's hooks are off for it, so Novadeck can't follow it. Turn hooks back on in its settings, then start it again here."
         : "Answer it here, in its terminal: it's its own question, such as whether to trust the tour's folder. The tour goes on once you have.",
+})
+
+// What the tour says while an agent of the team asks the person's permission: it isn't part of
+// the story, and the tour waits until they answer.
+export const permissionCoach = (terminalId: string): Coach => ({
+  anchor: "terminal",
+  terminalId,
+  title: "Your agent is asking your permission",
+  body: "It wants to do something in the tour's folder. Answer it here, in its terminal, and the tour goes on.",
 })
 
 // What the tour says once the lead's agent has stopped: its terminal is still there to read.

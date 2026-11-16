@@ -247,7 +247,7 @@ describe("The tour's driver", () => {
     })
 
     it("says what each harness's hooks being off asks of the person", () => {
-      expect(screenCoach("hooks", "codex").body).toMatch(/run \/hooks/)
+      expect(screenCoach("hooks", "codex").body).toMatch(/Trust all and continue/)
       expect(screenCoach("hooks", "claude").body).toMatch(/its settings/)
       expect(screenCoach("hooks", "agy").body).not.toMatch(/\/hooks/)
     })
@@ -364,5 +364,45 @@ describe("The tour, with a teammate at a screen of its own", () => {
       patience,
     )
     expect(tourSteps[outcome.run!.step]!.id).toBe("show")
+  })
+})
+
+describe("The tour, with an agent asking the person's permission", () => {
+  const quiet: LeadState = { kind: "agent", working: false, named: true, answered: true }
+  const wanted = signals(quiet, true, { permission: { terminalId: "t3" } })
+  const run = { ...beginRun({ terminalId: "t1", agent: "claude", brief: "launch" }, 0), step: 1 }
+
+  it("points at that agent's terminal, in a person's words", () => {
+    expect(coachNow(run, tourSteps, wanted)).toMatchObject({
+      title: "Your agent is asking your permission",
+      terminalId: "t3",
+      anchor: "terminal",
+    })
+    expect(coachNow(run, tourSteps, wanted)?.body).toContain("in its terminal")
+  })
+
+  it("lets a screen of the agent's own come first, and says nothing while paused", () => {
+    const screen = signals({ kind: "screen", screen: "startup" }, true, {
+      permission: { terminalId: "t3" },
+    })
+    expect(coachNow(run, tourSteps, screen)?.title).toBe("Your agent is asking you something first")
+    expect(coachNow({ ...run, paused: true }, tourSteps, wanted)).toBeNull()
+  })
+
+  it("counts no wait while it asks: no nudge, and none right after", () => {
+    expect(nextTick(run, tourSteps, wanted, patience)).toBeNull()
+    const waited = stepRun(
+      run,
+      tourSteps,
+      { type: "tick", signals: wanted, now: patience * 3 },
+      patience,
+    )
+    expect(waited.nudge).toBe(false)
+    expect(waited.run!.step).toBe(run.step)
+    expect(waited.run!.waitingSince).toBe(patience * 3)
+  })
+
+  it("goes back to the step's own coach once it is answered", () => {
+    expect(coachNow(run, tourSteps, signals(quiet))).toBe(tourSteps[1]!.coach)
   })
 })

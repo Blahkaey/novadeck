@@ -287,11 +287,16 @@ export const useTourDriver = (
     [dropRetry, setClosing],
   )
 
-  // A teammate held at its own agent's screen (a mixed team's folder trust) waits on the person
-  // in its terminal, which isn't on screen: brought there once, for the coach to point at.
-  const held = run && !run.paused && signals.onScreen ? signals.teamScreen?.terminalId : undefined
+  // A teammate held at its own agent's screen (a mixed team's folder trust), or an agent asking
+  // the person's permission, waits on them in its terminal, which isn't on screen: brought there
+  // once per hold, for the coach to point at.
+  const held =
+    run && !run.paused && signals.onScreen
+      ? (signals.teamScreen?.terminalId ?? signals.permission?.terminalId)
+      : undefined
   const revealed = useRef<string | null>(null)
   useEffect(() => {
+    if (!held) revealed.current = null
     if (!held || revealed.current === held) return
     revealed.current = held
     commands.reveal(held)

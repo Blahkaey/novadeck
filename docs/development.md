@@ -629,14 +629,17 @@ App:
   process (the UI's "Your agent stopped"). "Tour agent: hold at folder trust" / "sign-in" /
   "hooks" hold the next one at that startup screen until "Answer the startup screen"; "Tour
   agent: quiet until nudged" has the next one sit idle at its prompt, no turn begun, until
-  `Tour.nudge`, then work and name itself. Addresses: `&tourScreen=startup|sign-in|hooks`
-  (`&tourScreenMs=<n>` answers the screen after n ms), `&tourAgent=quiet`,
+  `Tour.nudge`, then work and name itself; "Tour agent: ask permission first" has the next one
+  raise a permission dialog (an Inbox row, Unblock) and wait for the person's answer before it
+  goes on, and the tour's coach points at its terminal meanwhile. Addresses: `&tourScreen=startup|sign-in|hooks`
+  (`&tourScreenMs=<n>` answers the screen after n ms), `&tourAgent=quiet|permission`,
   `&tourStory=off` (stop after the lead names itself), `&tourTeam=quiet`,
   `&tourPatienceMs=<n>` (the UI's wait before nudging).
   As the agent goes, the tour's driver (`frontend/ui/src/tour/driver.ts`, `app/useTourDriver.ts`)
   draws a ring around what its step points at and a coach card beside it: "Your agent is
   starting", or, while a startup screen holds, "Your agent is asking you something first" in
-  that screen's words. Pause, Skip step and End tour steer it; while paused, or while another
+  that screen's words, or "Your agent is asking your permission" while the lead or a teammate has
+  an Unblock row waiting in the Inbox (any harness's own dialog, or a held message). Pause, Skip step and End tour steer it; while paused, or while another
   project is on screen, a small bar stands in for it.
 - **Boot failures:** each fails the first attempt as the runner would, so a transient one
   retries on its own and the others wait for Retry (an incompatible runner, or a workspace

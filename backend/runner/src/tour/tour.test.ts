@@ -355,7 +355,9 @@ describe("what the folder's own instructions say", () => {
       "If you were given a task, do only that task.",
     )
     // The script is where only the lead is sent, by the start line.
-    expect(startLine).toBe("You are the lead of the Novadeck tour: follow lead.md in this folder.")
+    expect(startLine).toBe(
+      "You lead the Novadeck tour: read lead.md in this folder with your file tool, not a shell, and follow it.",
+    )
     expect(nudgeLine).toContain("lead.md")
     expect(await brief(home)).toContain("## Steps")
   })

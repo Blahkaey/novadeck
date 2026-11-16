@@ -1,7 +1,15 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 
 import type { TourSignals } from "./signals"
-import { endedCoach, screenCoach, waitOf, type Coach, type TourMove, type TourStep } from "./steps"
+import {
+  endedCoach,
+  permissionCoach,
+  screenCoach,
+  waitOf,
+  type Coach,
+  type TourMove,
+  type TourStep,
+} from "./steps"
 
 // A run of the tour as the UI follows it: its lead's terminal and agent, where the lead's first
 // line goes (`launch`, or rung once the agent shows: `doorbell`), the step it is at, when that
@@ -79,9 +87,13 @@ const nextStep = (run: TourRun, steps: readonly TourStep[], now: number): TourOu
 }
 
 // Whether the lead stands where a step's wait counts: its agent there and quiet, not working on
-// a turn, nor holding at a screen of its own, nor stopped. A turn that runs long is no silence.
+// a turn, nor holding at a screen of its own or a teammate's, nor with an agent of the team
+// asking the person's permission, nor stopped. A turn that runs long is no silence.
 const counting = (signals: TourSignals): boolean =>
-  signals.lead.kind === "agent" && !signals.lead.working && signals.teamScreen === null
+  signals.lead.kind === "agent" &&
+  !signals.lead.working &&
+  signals.teamScreen === null &&
+  signals.permission === null
 
 /**
  * Moves the run on by one event. A step makes its moves once, as it begins, and only while the
@@ -202,6 +214,9 @@ export const coachNow = (
       terminalId: held.terminalId,
     }
   }
+  // An agent of the team asking the person's permission (its harness's own dialog): they answer
+  // it in the Inbox or in that agent's terminal, which the tour points at.
+  if (signals.permission) return permissionCoach(signals.permission.terminalId)
   return steps[run.step]?.coach ?? null
 }
 

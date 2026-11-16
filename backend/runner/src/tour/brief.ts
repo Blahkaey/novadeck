@@ -13,7 +13,8 @@ import type { AgentName } from "@novadeck/protocol"
  * The start line is short and plain, as it rides on the launch line (or, where a harness takes
  * none there, on the doorbell), so it holds nothing a shell quotes unsafely, as an apostrophe.
  */
-export const startLine = "You are the lead of the Novadeck tour: follow lead.md in this folder."
+export const startLine =
+  "You lead the Novadeck tour: read lead.md in this folder with your file tool, not a shell, and follow it."
 
 /** What the tour rings its agent where it has gone quiet at a step (`tour.nudge`). */
 export const nudgeLine =
@@ -125,7 +126,8 @@ time the tour starts.
 ## Rules
 
 - Work only in this folder. Don't read or change anything outside it.
-- Don't install anything, and don't run git.
+- Don't install anything, and don't run git. Run no shell command at all: read and write files
+  with your own file tools.
 - Keep every reply to one or two short sentences: the person is watching Novadeck, not reading.
 - Be quick: the whole tour should take about 2 minutes. Say nothing between steps beyond the
   one-sentence greeting and the final line, and don't explain, plan or confirm in prose.

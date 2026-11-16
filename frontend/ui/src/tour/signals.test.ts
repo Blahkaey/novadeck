@@ -183,6 +183,40 @@ describe("The tour's story signals", () => {
     expect(tourSignals(teamWorkspace(), "01", { inbox: unblock }).asking).toBe(false)
   })
 
+  it("see an agent of the team waiting on the person's yes, from a dialog or a held message", () => {
+    const row = (kind: string, extra: object, id = "02") =>
+      ({ ...askRow(id), kind, ...extra }) as unknown as InboxRow
+    const state = (...items: InboxRow[]) => ({ items }) as unknown as InboxState
+    const permission = row("request", { request: { kind: "permission" } })
+    const held = row("held", {})
+    const lead = row("request", { request: { kind: "permission" } }, "01")
+    expect(tourSignals(teamWorkspace(), "01", { inbox: state(permission) }).permission).toEqual({
+      terminalId: "02",
+    })
+    expect(tourSignals(teamWorkspace(), "01", { inbox: state(held) }).permission).toEqual({
+      terminalId: "02",
+    })
+    expect(tourSignals(teamWorkspace(), "01", { inbox: state(lead) }).permission).toEqual({
+      terminalId: "01",
+    })
+  })
+
+  it("see no permission wait for a question, a settled row or a terminal outside the team", () => {
+    const row = (extra: object, id = "02") =>
+      ({
+        ...askRow(id),
+        kind: "request",
+        request: { kind: "permission" },
+        ...extra,
+      }) as unknown as InboxRow
+    const state = (...items: InboxRow[]) => ({ items }) as unknown as InboxState
+    const none = (...items: InboxRow[]) =>
+      tourSignals(teamWorkspace(), "01", { inbox: state(...items) }).permission
+    expect(none(row({ request: { kind: "question" } }))).toBeNull()
+    expect(none(row({ settled: { how: "answered" } }))).toBeNull()
+    expect(none(row({}, "04"))).toBeNull()
+  })
+
   it("see a teammate's question asked with its harness's own tool", () => {
     const question = {
       ...askRow("02"),

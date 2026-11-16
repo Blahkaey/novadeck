@@ -10,7 +10,13 @@ import {
 } from "../support/keyboard"
 import { switchProject, workspaceSwitcher } from "../support/sessions"
 import { closeConfirmation, confirmClose, tabAction } from "../support/terminals"
-import { expectSelected, openWorkspace, press, terminalTabNames } from "../support/workspace"
+import {
+  expectSelected,
+  openWorkspace,
+  press,
+  sidebarPanel,
+  terminalTabNames,
+} from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // Its demo agent stops after the first step: these specs are about the driver, not the story.
@@ -87,6 +93,38 @@ describe("The tour's driver", () => {
     it("says what Novadeck's hooks being off asks", async () => {
       await startTour(`${offered}&tourScreen=hooks&tourScreenMs=1500`)
       await coachSays("Turn hooks back on in its settings")
+    })
+  })
+
+  context("while the agent asks the person's permission", () => {
+    it("points at its terminal, and goes on once the person has answered", async () => {
+      await startTour(`${offered}&tourAgent=permission&tourPatienceMs=500`)
+      await coachSays("Your agent is asking your permission")
+      await coachSays("Answer it here, in its terminal")
+      // The person's wait isn't the agent's silence: no nudge or skip comes meanwhile.
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await coachSays("Your agent is asking your permission")
+      expect(terminalTabNames()).not.toContain("Tour lead")
+
+      // The terminal on screen holds its own agent's rows out of the Inbox, so the person looks
+      // away first, and answers there.
+      await switchProject("storefront")
+      await sidebarPanel("Inbox").click()
+      await page
+        .getByRole("list", { name: "Messages from your agents" })
+        .getByRole("button", { name: /^Unblock: Run pnpm lint/ })
+        .first()
+        .click()
+      // The agent's context comes in late, and a click just after the card moved is held back.
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Yes, proceed", exact: true })
+        .click()
+
+      await bar().getByRole("button", { name: "Back to the tour" }).click()
+      await coachSays("Your agent opens a team")
+      await expect.poll(terminalTabNames, leadNamed).toContain("Tour lead")
     })
   })
 

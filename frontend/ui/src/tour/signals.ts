@@ -48,6 +48,10 @@ export type TourSignals = {
     // Its harness, by the program it runs, where known: the screens' words differ by harness.
     readonly program: string | null
   } | null
+  // An agent of the team (the lead or a teammate) waiting on the person's yes to something, as
+  // its harness's own permission dialog, or a message held for them: an unsettled Inbox row of
+  // type Unblock, whichever harness raised it. Null while none does.
+  readonly permission: { readonly terminalId: string } | null
   // Whether the lead has shown its brief's card: an image (the card is an SVG), or a page or
   // file.
   readonly shown: boolean
@@ -61,13 +65,14 @@ export type TourSources = {
 
 export const noTeam: Pick<
   TourSignals,
-  "team" | "talks" | "asking" | "answered" | "teamScreen" | "shown"
+  "team" | "talks" | "asking" | "answered" | "teamScreen" | "permission" | "shown"
 > = {
   team: { count: 0, named: 0 },
   talks: 0,
   asking: false,
   answered: false,
   teamScreen: null,
+  permission: null,
   shown: false,
 }
 
@@ -143,6 +148,17 @@ const answeredOf = (
 const askingOf = (inbox: InboxState | undefined, team: ReadonlySet<string>): boolean =>
   questionsOf(inbox, team).some((row) => !row.settled)
 
+// The first of the team's agents waiting on the person's yes: an unsettled Unblock row.
+const permissionOf = (
+  inbox: InboxState | undefined,
+  team: ReadonlySet<string>,
+): TourSignals["permission"] => {
+  const row = (inbox?.items ?? []).find(
+    (each) => !each.settled && inboxType(each) === "unblock" && team.has(each.source.terminalId),
+  )
+  return row ? { terminalId: row.source.terminalId } : null
+}
+
 // The tour's signals, for its lead in `terminalId`.
 export const tourSignals = (
   workspace: Workspace,
@@ -182,6 +198,7 @@ export const tourSignals = (
                 program: held.mate.process ?? null,
               }
             : null,
+        permission: permissionOf(sources.inbox, team),
         shown: project.history.some(({ state }) =>
           state.items.some(
             (item) =>
@@ -202,6 +219,7 @@ export const sameSignals = (a: TourSignals, b: TourSignals): boolean =>
   a.answered === b.answered &&
   a.teamScreen?.terminalId === b.teamScreen?.terminalId &&
   a.teamScreen?.screen === b.teamScreen?.screen &&
+  a.permission?.terminalId === b.permission?.terminalId &&
   a.shown === b.shown &&
   a.team.count === b.team.count &&
   a.team.named === b.team.named &&

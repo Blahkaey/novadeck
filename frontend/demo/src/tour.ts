@@ -30,6 +30,9 @@ export type TourAgentPlan = {
   readonly quiet: boolean
   // Its lead, once it described itself, opens no teammates until nudged again.
   readonly quietTeam?: boolean | undefined
+  // Its lead asks the person's permission, as its harness's own dialog, before it goes on:
+  // it waits until the person answers.
+  readonly permission?: boolean | undefined
 }
 
 // What a lead needs of the backend to play the story's rest (see `tour/story.ts`): the
@@ -74,6 +77,8 @@ export type DemoTour = Tour & {
   // Whether the lead plays the rest of the story after describing itself (`&tourStory=off`
   // stops it there).
   readonly story: () => boolean
+  // The next run's lead asks the person's permission before it goes on.
+  readonly askPermission: (ask?: boolean) => void
   // The next run's lead opens its team only once nudged again after it described itself.
   readonly goQuietTeam: (quiet?: boolean) => void
   // The agents Novadeck is connected to, in the order it lists them.
@@ -137,6 +142,9 @@ export const demoTour = (
       workspace = nextWorkspace
     },
     story: () => story,
+    askPermission: (ask = true) => {
+      plan = { ...plan, permission: ask }
+    },
     goQuietTeam: (quiet = true) => {
       plan = { ...plan, quietTeam: quiet }
     },

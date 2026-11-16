@@ -121,6 +121,19 @@ describe("the tour agent in the demo", () => {
     expect(tour.nudged.getSnapshot()).toEqual([id])
   })
 
+  it("asks the person's permission first, and names itself no sooner", async () => {
+    const { at } = open("claude", (each) => {
+      each.askPermission()
+      each.configure({ story: false })
+    })
+    expect(await at(tourPhaseMs.bind + 10)).toMatchObject({
+      agent: { working: true, attention: { kind: "permission", count: 1 } },
+    })
+    const waiting = await at(5000)
+    expect(waiting).toMatchObject({ agent: { attention: { kind: "permission" } } })
+    expect(waiting?.name).not.toBe(tourLeadName)
+  })
+
   it("starts Antigravity's agent only once it's briefed", async () => {
     const { at, tour, id } = open("agy")
     expect(await at(2000)).toMatchObject({ process: "agy", agent: { working: false } })

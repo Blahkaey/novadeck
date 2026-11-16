@@ -132,6 +132,19 @@ export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal, s
     verbs.work(key, terminal())
     later(tourPhaseMs.work, describe)
   }
+  // A permission dialog of the agent's own, as a shell command it wants to run would raise: it
+  // waits, working, until the person answers it in the Inbox or its terminal.
+  const askPermission = () => {
+    if (!alive()) return
+    verbs.ask(key, terminal(), "permission", 1)
+    const check = () => {
+      const found = alive()
+      if (!found) return
+      if (found.state !== "running" || found.agent?.attention === undefined) return work()
+      later(tourPhaseMs.bind, check)
+    }
+    later(tourPhaseMs.bind, check)
+  }
   // The agent shows at its prompt; the doorbell's harness starts only once rung. A quiet one sits
   // idle there, no turn begun, as an agent that never took its first line does, until nudged.
   const bound = () => {
@@ -144,12 +157,12 @@ export const playTourAgent = ({ key, harness, tour, turns, dispatch, terminal, s
         () => later(tourPhaseMs.bind, work),
       )
     }
-    if (demoRun(harness).brief === "launch") return work()
+    if (demoRun(harness).brief === "launch") return plan.permission ? askPermission() : work()
     verbs.rest(key, terminal())
     when(
       (poke) => tour.briefed.subscribe(poke),
       () => tour.briefed.getSnapshot().includes(key.terminalId),
-      () => later(tourPhaseMs.bind, work),
+      () => later(tourPhaseMs.bind, plan.permission ? askPermission : work),
     )
   }
   later(tourPhaseMs.bind, () => {
