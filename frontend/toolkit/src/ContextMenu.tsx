@@ -11,6 +11,8 @@ import {
   type RefObject,
 } from "react"
 
+import { Tooltip } from "./Tooltip"
+
 export type ContextMenuAction = {
   readonly value: string
   readonly label: string
@@ -137,10 +139,27 @@ export type ContextMenuProps = {
   readonly label: string
   readonly trigger: ReactElement
   readonly items: readonly ContextMenuItem[]
+  // What asks for the menu: a right-click on the trigger (`context`, the default), or a plain
+  // click on the trigger (`click`), which opens it above, ending where the trigger does, and
+  // gives focus back to the trigger.
+  readonly opensOn?: "context" | "click"
+  // What the trigger's tooltip says while the menu is closed, for a `click` trigger. The trigger's
+  // Ark data attributes are then the tooltip's: style its open state by aria-expanded.
+  readonly tooltip?: string
 }
 
-export const ContextMenu = ({ label, trigger, items }: ContextMenuProps): React.JSX.Element => {
+export const ContextMenu = ({
+  label,
+  trigger,
+  items,
+  opensOn = "context",
+  tooltip,
+}: ContextMenuProps): React.JSX.Element => {
   const labelId = useId()
+  // One id for the trigger, which a tooltip around it shares.
+  const triggerId = useId()
+  const clicked = opensOn === "click"
+  const button = useRef<HTMLButtonElement | null>(null)
   // Where focus was when the menu was asked for. A context trigger often can't take
   // focus, so closing the menu would otherwise leave focus nowhere.
   const opener = useRef<HTMLElement | null>(null)
@@ -155,22 +174,42 @@ export const ContextMenu = ({ label, trigger, items }: ContextMenuProps): React.
   return (
     <ArkMenu.Root
       open={open}
-      positioning={{ strategy: "fixed", overflowPadding: 12 }}
+      ids={{ trigger: triggerId }}
+      positioning={{
+        strategy: "fixed",
+        overflowPadding: 12,
+        ...(clicked ? { placement: "top-end", gutter: 6 } : {}),
+      }}
       immediate
       onOpenChange={({ open: next }) => {
         setOpen(next)
+        if (next && clicked) opener.current = button.current
         if (!next) closed()
       }}
     >
-      <ArkMenu.ContextTrigger
-        asChild
-        onContextMenu={() => {
-          opener.current =
-            document.activeElement instanceof HTMLElement ? document.activeElement : null
-        }}
-      >
-        {trigger}
-      </ArkMenu.ContextTrigger>
+      {clicked ? (
+        tooltip ? (
+          <Tooltip content={tooltip} disabled={open}>
+            <ArkMenu.Trigger asChild ref={button} id={triggerId}>
+              {trigger}
+            </ArkMenu.Trigger>
+          </Tooltip>
+        ) : (
+          <ArkMenu.Trigger asChild ref={button}>
+            {trigger}
+          </ArkMenu.Trigger>
+        )
+      ) : (
+        <ArkMenu.ContextTrigger
+          asChild
+          onContextMenu={() => {
+            opener.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null
+          }}
+        >
+          {trigger}
+        </ArkMenu.ContextTrigger>
+      )}
       <Portal>
         <ArkMenu.Positioner className="z-50!">
           <ArkMenu.Content aria-labelledby={labelId} className={contentClasses}>

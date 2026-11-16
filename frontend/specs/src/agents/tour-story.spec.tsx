@@ -1,6 +1,7 @@
 import { page, type Locator } from "vitest/browser"
 
-import { openPreferencesOn, preferencesDialog } from "../support/keyboard"
+import { takeTourFromHelp } from "../support/help"
+import { closePreferences, openPreferencesOn, preferencesDialog } from "../support/keyboard"
 import { workspaceSwitcher } from "../support/sessions"
 import { openWorkspace, terminalTabNames, view } from "../support/workspace"
 import { describe, expect, it } from "../test"
@@ -33,9 +34,10 @@ const standsStill = async (locator: Locator): Promise<void> => {
 const coachSays = (words: string, timeout = 15_000): Promise<void> =>
   expect.poll(() => coach().query()?.textContent ?? "", { timeout }).toContain(words)
 
-// Starts the tour from Preferences' About with Claude Code, and Codex for a mixed team.
+// Starts the tour from the footer's Help menu with Claude Code, and Codex for a mixed team,
+// connected first in Preferences' General.
 const startTour = async (): Promise<void> => {
-  await openWorkspace("/")
+  await openWorkspace("/?channel=experimental")
   await openPreferencesOn("General")
   for (const name of ["Claude Code", "Codex"]) {
     const agent = preferencesDialog().getByRole("switch", { name })
@@ -44,8 +46,8 @@ const startTour = async (): Promise<void> => {
     // eslint-disable-next-line no-await-in-loop -- Each connected before the next.
     await expect.element(agent).toHaveAttribute("aria-checked", "true")
   }
-  await preferencesDialog().getByRole("tab", { name: "About" }).click()
-  await preferencesDialog().getByRole("button", { name: "Take the tour" }).click()
+  await closePreferences()
+  await takeTourFromHelp()
   await consent().getByRole("button", { name: "Start the tour" }).click()
   await expect.element(consent()).not.toBeInTheDocument()
 }

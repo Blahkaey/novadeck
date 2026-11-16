@@ -84,12 +84,6 @@ export type DesktopBridge = {
    */
   onNoticeClick?(listener: (id: string) => void): () => void
   /**
-   * Calls `listener` each time the person asks for Novadeck's tour from the app's own menu
-   * (macOS' Help menu), once the app has brought its window to the front. Returns a function
-   * that stops listening. Absent from apps that came before it, and where the app has no menu.
-   */
-  onTourAsked?(listener: () => void): () => void
-  /**
    * Calls `listener` with each update the app learns of: at once when it already knows
    * of one, and again whenever a newer one comes. Returns a function that stops
    * listening. Absent from apps that came before it; a build that never looks for

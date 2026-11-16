@@ -1,6 +1,6 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { AgentConnection, Backend } from "@novadeck/core/port"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 
 import {
   chooseAgent,
@@ -53,13 +53,11 @@ export const useTour = (
     [offered, connections],
   )
   const offer = useCallback(
-    // One already starting stays as it is: the app's menu may ask again meanwhile.
+    // One already starting stays as it is.
     (preferred?: AgentName) =>
       setConsent((current) => (current?.starting ? current : offerTour(connections, preferred))),
     [connections],
   )
-  // The app's menu offers it as Preferences does.
-  useEffect(() => tour?.asked?.(() => offer()), [tour, offer])
   const start = useCallback(() => {
     if (!tour || !consent?.agent || consent.starting) return
     if (connectingAgent(connections, consent.agent)) return

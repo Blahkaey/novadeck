@@ -52,8 +52,6 @@ export type DemoTour = Tour & {
   // Makes the next start fail, as the debug panel or a spec's `&tourStart=fails` asks: as a
   // folder of the person's own does, or (`unlisted`) as Codex not signed in yet does.
   readonly failNext: (how?: "folder" | "unlisted") => void
-  // Asks for the tour as the desktop app's Help menu does.
-  readonly ask: () => void
   // The terminals whose agent was rung the start line, oldest first.
   readonly briefed: Store<readonly string[]>
   // The terminals whose agent was nudged, oldest first.
@@ -110,8 +108,6 @@ export const demoTour = (
   let failing: "folder" | "unlisted" | undefined
   const briefed = createStore<readonly string[]>([])
   const nudged = createStore<readonly string[]>([])
-  const listeners = new Set<() => void>()
-  let asking = false
   let plan: TourAgentPlan = { quiet: false }
   let screenMs: number | undefined
   let story = true
@@ -124,20 +120,6 @@ export const demoTour = (
   const tour: DemoTour = {
     failNext: (how = "folder") => {
       failing = how
-    },
-    // An ask with no one listening yet, as the same click that took the hold off asks before
-    // the page has heard of the tour, waits for the first to listen.
-    ask: () => {
-      if (listeners.size === 0) asking = true
-      for (const listener of listeners) listener()
-    },
-    asked: (listener) => {
-      listeners.add(listener)
-      if (asking) {
-        asking = false
-        queueMicrotask(listener)
-      }
-      return () => void listeners.delete(listener)
     },
     briefed,
     nudged,

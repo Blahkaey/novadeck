@@ -1,6 +1,8 @@
 import { page, type Locator } from "vitest/browser"
 
+import { takeTourFromHelp } from "../support/help"
 import {
+  closePreferences,
   findDialog,
   openPreferencesOn,
   preferencesDialog,
@@ -12,7 +14,7 @@ import { expectSelected, openWorkspace, press, terminalTabNames } from "../suppo
 import { context, describe, expect, it } from "../test"
 
 // Its demo agent stops after the first step: these specs are about the driver, not the story.
-const offered = "/?tourStory=off"
+const offered = "/?tourStory=off&channel=experimental"
 
 const consent = (): Locator => page.getByRole("dialog", { name: "Take the tour" })
 const coach = (): Locator => page.getByRole("region", { name: "Tour step" })
@@ -26,15 +28,15 @@ const barSays = (words: string): Promise<void> =>
 const coachSays = (words: string): Promise<void> =>
   expect.poll(() => coach().query()?.textContent ?? "").toContain(words)
 
-// Starts the tour from Preferences' About with Claude Code, connected first in General.
+// Starts the tour from the footer's Help menu with Claude Code, connected first in Preferences' General.
 const startTour = async (address = offered): Promise<void> => {
   await openWorkspace(address)
   await openPreferencesOn("General")
   const claude = preferencesDialog().getByRole("switch", { name: "Claude Code" })
   await claude.click()
   await expect.element(claude).toHaveAttribute("aria-checked", "true")
-  await preferencesDialog().getByRole("tab", { name: "About" }).click()
-  await preferencesDialog().getByRole("button", { name: "Take the tour" }).click()
+  await closePreferences()
+  await takeTourFromHelp()
   await consent().getByRole("button", { name: "Start the tour" }).click()
   await expect.element(consent()).not.toBeInTheDocument()
 }

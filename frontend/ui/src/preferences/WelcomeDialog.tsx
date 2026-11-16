@@ -5,7 +5,7 @@ import { AntigravityIcon } from "@novadeck/toolkit/icons/AntigravityIcon"
 import { ClaudeIcon } from "@novadeck/toolkit/icons/ClaudeIcon"
 import { CodexIcon } from "@novadeck/toolkit/icons/CodexIcon"
 import { brandName, NovaMark, NovaPattern, Wordmark } from "@novadeck/toolkit/NovaLogo"
-import { ArrowRight, Play, ScrollText, type LucideIcon } from "lucide-react"
+import { ArrowRight, ScrollText, type LucideIcon } from "lucide-react"
 import { useRef, useState, type ComponentType, type CSSProperties, type RefObject } from "react"
 
 import { agentLabels, agentNote, type AgentSwitch } from "./agent-switches"
@@ -147,7 +147,6 @@ const WelcomeForm = ({
   agents,
   onChange,
   onInstall,
-  onTour,
   transcripts,
   onDone,
   heading,
@@ -155,7 +154,6 @@ const WelcomeForm = ({
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
-  readonly onTour?: ((agent: AgentSwitch["agent"]) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   readonly onDone: () => void
   readonly heading: RefObject<HTMLHeadingElement | null>
@@ -179,9 +177,6 @@ const WelcomeForm = ({
     onDone()
     if (install) onInstall?.(install.agent, install.command)
   }
-  // The tour runs the first agent chosen here, once the choices are applied.
-  const touring = agents.find((toggle) => toggle.available && choices[toggle.agent])?.agent
-
   return (
     <form
       className="grid min-h-0 min-[820px]:grid-cols-[1.3fr_1fr]"
@@ -324,19 +319,6 @@ const WelcomeForm = ({
             Let’s build something
             <ArrowRight size={16} className="welcome-arrow" aria-hidden="true" />
           </button>
-          {onTour && touring && (
-            <button
-              type="button"
-              className="button welcome-tour mt-2 min-h-9 w-full gap-2 px-3 py-2 text-control"
-              onClick={() => {
-                submit()
-                onTour(touring)
-              }}
-            >
-              <Play size={14} aria-hidden="true" />
-              Take the tour
-            </button>
-          )}
           <button
             type="button"
             className="button ghost welcome-skip mt-2 min-h-9 w-full px-3 py-2 text-control"
@@ -357,7 +339,6 @@ export const WelcomeDialog = ({
   agents,
   onChange,
   onInstall,
-  onTour,
   transcripts,
   onDone,
 }: {
@@ -365,8 +346,6 @@ export const WelcomeDialog = ({
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
-  // Applies the choices, as starting does, and offers the tour with the agent first chosen.
-  readonly onTour?: ((agent: AgentSwitch["agent"]) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   readonly onDone: () => void
 }): React.JSX.Element => {
@@ -388,7 +367,6 @@ export const WelcomeDialog = ({
         agents={agents}
         onChange={onChange}
         onInstall={onInstall}
-        onTour={onTour}
         transcripts={transcripts}
         onDone={onDone}
         heading={heading}

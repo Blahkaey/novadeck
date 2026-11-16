@@ -119,15 +119,11 @@ describe("Preferences' version", () => {
       .toHaveAccessibleDescription(/Attach them to a bug report/)
   })
 
-  it("keeps About for the tour alone where the backend gives no version and keeps no logs", async () => {
+  it("leaves About out where the backend gives no version and keeps no logs", async () => {
     await openWorkspace("/?version=none")
     await openPreferences()
-    await tab("About").click()
-    await expect
-      .element(preferencesDialog().getByRole("button", { name: "Take the tour" }))
-      .toBeVisible()
-    expect(preferencesDialog().getByText("Version").query()).toBeNull()
-    expect(preferencesDialog().getByRole("button", { name: "Open logs folder" }).query()).toBeNull()
+    await expect.element(tab("Appearance")).toBeVisible()
+    await expect.element(tab("About")).not.toBeInTheDocument()
   })
 })
 

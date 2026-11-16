@@ -19,15 +19,22 @@ import {
 } from "react"
 
 import { FeedbackButton } from "../feedback/FeedbackButton"
+import { FooterHelp } from "../shell/FooterHelp"
 import { nothingToCheck, restartCheck, riskKey } from "../shell/restart-check"
 import { readSubscriptionOrder, writeSubscriptionOrder } from "../shell/shell-storage"
 import { SubscriptionUsage } from "../shell/SubscriptionUsage"
 import { WorkspaceFooter } from "../shell/WorkspaceFooter"
 import { programIcon } from "../terminals/processes/profiles"
 import { useRenderAt } from "../terminals/useRenderAt"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import {
+  useFeatureFlag,
+  useUiState,
+  useWorkspaceServices,
+  useWorkspaceState,
+} from "./controller/context"
 import { useAccounts } from "./controller/footer-accounts"
 import { crashLoopQuestion, currentState, shallowEqual } from "./selectors"
+import { useTourOffer } from "./TourProvider"
 import { dismissWhatsNew } from "./ui-store"
 import { useBusyTerminals } from "./use-busy-terminals"
 import { useOfferNews } from "./use-offer-news"
@@ -60,6 +67,14 @@ export const FooterSection = memo((): React.JSX.Element => {
     [store],
   )
   const crashes = useUiState((state) => state.crashLoop)
+  // The Help menu is an experimental feature: it shows only while IS_EXPERIMENTAL is on, and
+  // where the backend has a tour, which its one item offers.
+  const experimental = useFeatureFlag("IS_EXPERIMENTAL")
+  const tour = useTourOffer()
+  const helpItems = useMemo(
+    () => (tour ? [{ value: "tour", label: "Take the tour", onSelect: () => tour.offer() }] : []),
+    [tour],
+  )
   const offer = useUiState((state) => state.update)
   const portableCardOpen = useUiState((state) => state.portableCardOpen)
   const whatsNew = useUiState((state) => state.whatsNew)
@@ -311,6 +326,7 @@ export const FooterSection = memo((): React.JSX.Element => {
           <FeedbackButton feedback={backend.feedback} titleOf={titleOf} iconOf={programIcon} />
         )
       }
+      help={experimental && tour && <FooterHelp items={helpItems} />}
     />
   )
 })

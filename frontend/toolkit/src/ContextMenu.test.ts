@@ -40,28 +40,35 @@ const settle = async () => {
     await nextFrame()
 }
 
-const mount = (items: readonly ContextMenuItem[]) => {
+const mount = (items: readonly ContextMenuItem[], opensOn?: "context" | "click") => {
   const opener = document.createElement("input")
   document.body.append(opener)
   const view = render(
     createElement(ContextMenu, {
       label: "Actions",
       items,
-      trigger: createElement("div", { "data-testid": "trigger" }, "Row"),
+      ...(opensOn ? { opensOn } : {}),
+      trigger: createElement(
+        opensOn === "click" ? "button" : "div",
+        { "data-testid": "trigger" },
+        "Row",
+      ),
     }),
   )
+  const trigger = () => view.container.querySelector<HTMLElement>('[data-testid="trigger"]')!
   const open = async () => {
     opener.focus()
-    const trigger = view.container.querySelector<HTMLElement>('[data-testid="trigger"]')!
     act(() => {
-      trigger.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 10,
-          clientY: 10,
-        }),
-      )
+      if (opensOn === "click") trigger().click()
+      else
+        trigger().dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: 10,
+            clientY: 10,
+          }),
+        )
     })
     await settle()
   }
@@ -77,7 +84,7 @@ const mount = (items: readonly ContextMenuItem[]) => {
     view.unmount()
     opener.remove()
   })
-  return { opener, open, choose }
+  return { opener, trigger, open, choose }
 }
 
 const menuOpen = (): boolean =>
@@ -97,6 +104,33 @@ describe("a context menu", () => {
     expect(menuOpen()).toBe(true)
     await choose("Rename")
     expect(seen).toEqual([{ focused: opener, open: false }])
+  })
+
+  it("opens on a click where asked, and gives focus back to its trigger", async () => {
+    const seen: (Element | null)[] = []
+    const { opener, trigger, open, choose } = mount(
+      [
+        {
+          value: "tour",
+          label: "Take the tour",
+          onSelect: () => void seen.push(document.activeElement),
+        },
+      ],
+      "click",
+    )
+    await open()
+    expect(menuOpen()).toBe(true)
+    await choose("Take the tour")
+    expect(menuOpen()).toBe(false)
+    expect(seen).toEqual([trigger()])
+    expect(seen[0]).not.toBe(opener)
+  })
+
+  it("opens on a right-click only, by default", async () => {
+    const { trigger } = mount([{ value: "a", label: "A", onSelect: () => {} }])
+    act(() => trigger().click())
+    await settle()
+    expect(menuOpen()).toBe(false)
   })
 
   it("runs nothing for a disabled item", async () => {

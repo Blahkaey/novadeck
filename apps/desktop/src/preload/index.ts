@@ -49,7 +49,6 @@ import {
   updateNewsChannel,
   noticeChannel,
   noticeClickChannel,
-  tourAskChannel,
   noticeCloseChannel,
   notificationsQuietChannel,
   openLogsChannel,
@@ -288,14 +287,6 @@ const bridge = {
     ipcRenderer.on(noticeClickChannel, relay)
     return () => {
       ipcRenderer.removeListener(noticeClickChannel, relay)
-    }
-  },
-  // Nothing comes back but the ask.
-  onTourAsked: (listener) => {
-    const relay = (): void => listener()
-    ipcRenderer.on(tourAskChannel, relay)
-    return () => {
-      ipcRenderer.removeListener(tourAskChannel, relay)
     }
   },
   // Only a valid offer comes back; the request makes the main process answer with the last one,

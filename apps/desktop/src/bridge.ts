@@ -83,8 +83,6 @@ export const windowFocusRequestChannel = "novadeck:window-focus-request"
 
 /** Main-to-renderer report of the terminal id of a notification the person clicked. */
 export const noticeClickChannel = "novadeck:notice-click"
-// The app's Help menu asking the page for the tour (`DesktopApp.onTourAsked`).
-export const tourAskChannel = "novadeck:tour-ask"
 
 /**
  * Main-to-renderer report of an update offer, `{ kind, version, notes }`; see

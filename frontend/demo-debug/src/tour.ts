@@ -8,18 +8,13 @@ const screens = {
   hooks: { label: "hooks", what: "its prompt with Novadeck's hooks off" },
 } as const
 
-// Novadeck's tour: its consent, as the welcome dialog, Preferences' About or the desktop app's
-// Help menu offers it, a start the backend refuses, and its story's controls.
+// Novadeck's tour: a start the backend refuses, and its story's controls. Its consent opens
+// from the footer's Help menu.
 export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
   {
     section: "App",
     title: "Tour",
     actions: [
-      {
-        label: "Offer the tour",
-        hint: "Opens the tour's consent on the first connected agent, as the macOS Help menu does",
-        run: () => tour.ask(),
-      },
       {
         label: "Fail next start",
         hint: "The next Start the tour shows why it can't start (a folder of yours at ~/.novadeck/tour); the consent stays open",

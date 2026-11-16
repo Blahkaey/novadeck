@@ -13,17 +13,6 @@ const connected: readonly AgentConnection[] = [
 const tourOf = () => demoTour(createStore(connected), () => undefined)
 
 describe("the tour group", () => {
-  it("offers the tour as the Help menu does", () => {
-    const tour = tourOf()
-    const asked: string[] = []
-    const stop = tour.asked!(() => asked.push("asked"))
-    const [group] = tourGroups(tour)
-    void group!.actions.find((each) => each.label === "Offer the tour")!.run({} as never)
-    stop()
-    expect(asked).toEqual(["asked"])
-    expect(group!.section).toBe("App")
-  })
-
   it("fails only the next start, as a folder of the person's own does", async () => {
     const tour = tourOf()
     const [group] = tourGroups(tour)

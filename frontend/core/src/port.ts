@@ -259,9 +259,6 @@ export type Tour = {
   readonly prepare: (agent: AgentName) => Promise<TourRun>
   // Rings the tour's start line to the agent in the terminal, once it shows there.
   readonly brief: (terminalId: string) => Promise<void>
-  // Optional. Calls `listener` each time the app's own menu asks for the tour; answers a
-  // function that stops listening. Absent where the app has no such menu.
-  readonly asked?: (listener: () => void) => () => void
   // Optional. Rings the tour's agent in the terminal a nudge to carry on with its brief, as
   // Novadeck's notice, where it has gone quiet; for the tour's own terminals only.
   readonly nudge?: (terminalId: string) => Promise<void>

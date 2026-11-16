@@ -40,6 +40,7 @@ export const WorkspaceFooter = ({
   murmur,
   usage,
   feedback,
+  help,
 }: {
   readonly hidden: boolean
   // The person is navigating the workspace rather than typing in a terminal.
@@ -75,6 +76,8 @@ export const WorkspaceFooter = ({
   readonly usage?: ReactNode
   // The feedback button, after the subscriptions; only a backend that takes feedback has one.
   readonly feedback?: ReactNode
+  // The Help button, after the feedback button.
+  readonly help?: ReactNode
 }): React.JSX.Element => {
   // Murmur's sheet, in the place the download's bar would cover.
   const [murmurSheet, setMurmurSheet] = useState(false)
@@ -117,6 +120,7 @@ export const WorkspaceFooter = ({
       <span className="flex items-center gap-4">
         {usage}
         {feedback}
+        {help}
         <FooterSandbox sandbox={sandbox} hidden={hidden} />
         <FooterMurmur murmur={murmur} hidden={hidden} onSheetChange={setMurmurSheet} />
         <PortableInstall portable={portable} hidden={hidden} />

@@ -606,7 +606,9 @@ App:
   "Finish held install"; "Fail next install" ends the next in a network error in its terminal and
   leaves the agent not installed (nothing starts). The address does the same for a spec:
   `&agentInstall=held` holds the first install, `&agentInstall=fails` fails it.
-- **Tour:** "Offer the tour" opens its consent as the macOS Help menu does, on the first
+- **Tour:** the footer's Help button (the question mark by Feedback, which opens Take the tour)
+  shows only with Experimental on: choose the panel's "Experimental on" (App > Updates) and open
+  Preferences once for the flag to follow, as a spec does with `?channel=experimental`. Take the tour opens its consent on the first
   connected agent (with a choice where several are); Start the tour opens a "Tour" project with
   one terminal starting that agent on its cheapest model. "Fail next start" makes the next Start
   the tour fail as a folder of the person's own at `~/.novadeck/tour` does, the consent staying

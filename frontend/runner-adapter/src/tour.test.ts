@@ -23,7 +23,6 @@ describe("The runner's tour", () => {
     const tour = runnerTour(
       tourAnswering(() => Promise.resolve(run)),
       track,
-      undefined,
     )
     await expect(tour.prepare("codex")).resolves.toEqual(run)
   })
@@ -34,7 +33,6 @@ describe("The runner's tour", () => {
         Promise.reject(new WireError("MODELS_UNLISTED", "Codex hasn't listed its models.")),
       ),
       track,
-      undefined,
     )
     const refused = await tour.prepare("codex").catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(TourNeedsAgent)
@@ -46,7 +44,6 @@ describe("The runner's tour", () => {
     const tour = runnerTour(
       tourAnswering(() => Promise.reject(conflict)),
       track,
-      undefined,
     )
     await expect(tour.prepare("claude")).rejects.toBe(conflict)
   })

@@ -114,12 +114,10 @@ export type RunnerApi = Pick<
   // Not every runner has them (an older one doesn't): none are offered without.
   Partial<Pick<Runner, "forges" | "tour">>
 
-// The tour as the runner readies it, each call held as work the backend waits for, and the
-// app's menu asking for it, where it has one.
+// The tour as the runner readies it, each call held as work the backend waits for.
 export const runnerTour = (
   tour: Runner["tour"],
   track: <T>(work: Promise<T>) => Promise<T>,
-  asked: RunnerBackendOptions["tourAsked"],
 ): NonNullable<Backend["tour"]> => ({
   prepare: (agent) =>
     track(tour.prepare(agent)).catch((error: unknown) => {
@@ -127,7 +125,6 @@ export const runnerTour = (
     }),
   brief: (terminalId) => track(tour.brief(terminalId)),
   nudge: (terminalId) => track(tour.nudge(terminalId)),
-  ...(asked && { asked }),
 })
 
 export type RunnerBackendOptions = {
@@ -153,8 +150,6 @@ export type RunnerBackendOptions = {
   readonly updates?: Backend["updates"]
   readonly version?: Backend["version"]
   readonly openLogs?: Backend["openLogs"]
-  // The app's own menu asking for the tour (`Tour.asked`), where it has one.
-  readonly tourAsked?: NonNullable<Backend["tour"]>["asked"]
   // Where the app sends the person's feedback notes.
   readonly feedback?: Backend["feedback"]
   readonly sandbox?: Backend["sandbox"]
@@ -2077,7 +2072,7 @@ export const runnerBackend = (
     crashLoop: { crashes: crashLooping, retry: retryAfterCrashLoop },
     boot: boot.store,
     ...runnerSwitches(runner, options, track),
-    ...(runner.tour && { tour: runnerTour(runner.tour, track, options.tourAsked) }),
+    ...(runner.tour && { tour: runnerTour(runner.tour, track) }),
     ...(options.pickDirectory ? { pickDirectory: options.pickDirectory } : {}),
     ...(options.showAppearance ? { showAppearance: options.showAppearance } : {}),
     ...(options.notices ? { notices: options.notices } : {}),
