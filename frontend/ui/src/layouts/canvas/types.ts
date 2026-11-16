@@ -29,6 +29,8 @@ export type CanvasProps = {
   // Each increment says the person reordered the sidebar: the windows are arranged afresh.
   reordered: number
   fitOnNavigate: boolean
+  // Navigation frames every window shown, not the selection alone.
+  fitAllOnNavigate?: boolean | undefined
   // Navigation flies the camera in to the selection, as a header's double-click does.
   flyOnNavigate: boolean
   // The session's terminals and windows, in the sidebar's order.

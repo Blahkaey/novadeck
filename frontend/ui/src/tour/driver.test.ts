@@ -1,11 +1,20 @@
 import { context, describe, expect, it } from "../test"
-import { beginRun, coachNow, nextTick, stepRun, type TourRun } from "./driver"
-import type { LeadState, TourSignals } from "./signals"
-import { screenCoach, startStep, type TourStep } from "./steps"
+import { awaitsNext, beginRun, coachNow, nextTick, stepRun, type TourRun } from "./driver"
+import { noTeam, type LeadState, type TourSignals } from "./signals"
+import { screenCoach, startStep, tourSteps, type TourStep } from "./steps"
 
 const patience = 1_000
 
-const signals = (lead: LeadState, onScreen = true): TourSignals => ({ lead, onScreen })
+const signals = (
+  lead: LeadState,
+  onScreen = true,
+  story: Partial<TourSignals> = {},
+): TourSignals => ({
+  lead,
+  onScreen,
+  ...noTeam,
+  ...story,
+})
 // The lead's agent there: quiet by default, `working` on a turn, `named` once it described itself.
 const agent = (named = false, working = false): TourSignals =>
   signals({ kind: "agent", working, named, answered: false })
@@ -82,9 +91,10 @@ describe("The tour's driver", () => {
   })
 
   context("while it waits on the agent", () => {
-    it("moves on once the step's signal comes", () => {
-      const { run } = play(begin(), [{ type: "signals", signals: agent(true), now: 1 }])
-      expect(run).toMatchObject({ step: 1, nudged: false, entered: false })
+    it("moves on once the step's signal comes, beginning the next at once", () => {
+      const { run, seen } = play(begin(), [{ type: "signals", signals: agent(true), now: 1 }])
+      expect(run).toMatchObject({ step: 1, nudged: false, entered: true })
+      expect(seen[0]!.moves).toEqual(steps[1]!.enter)
     })
 
     it("nudges the agent once after its patience, then moves on after as long again", () => {
@@ -237,7 +247,7 @@ describe("The tour's driver", () => {
     })
 
     it("says what each harness's hooks being off asks of the person", () => {
-      expect(screenCoach("hooks", "codex").body).toMatch(/run \/hooks/)
+      expect(screenCoach("hooks", "codex").body).toMatch(/Trust all and continue/)
       expect(screenCoach("hooks", "claude").body).toMatch(/its settings/)
       expect(screenCoach("hooks", "agy").body).not.toMatch(/\/hooks/)
     })
@@ -247,5 +257,152 @@ describe("The tour's driver", () => {
       expect(coachNow({ ...begin(), paused: true }, steps, agent())).toBeNull()
       expect(coachNow(begin(), steps, signals({ kind: "ended" }))?.title).toBe("Your agent stopped")
     })
+  })
+})
+
+describe("The tour's story", () => {
+  const quiet: LeadState = { kind: "agent", working: false, named: true, answered: true }
+  const at = () => beginRun({ terminalId: "t1", agent: "claude", brief: "launch" }, 0)
+  const atStep = (id: string): TourRun => ({
+    ...at(),
+    step: tourSteps.findIndex((step) => step.id === id),
+    entered: true,
+  })
+  const feed = (run: TourRun, story: Partial<TourSignals>) =>
+    stepRun(
+      run,
+      tourSteps,
+      { type: "signals", signals: signals(quiet, true, story), now: 1 },
+      patience,
+    )
+
+  it("waits for both teammates to be there and named", () => {
+    expect(feed(atStep("team"), { team: { count: 2, named: 1 } }).run?.step).toBe(1)
+    expect(feed(atStep("team"), { team: { count: 2, named: 2 } }).run?.step).toBe(2)
+  })
+
+  it("waits for the team to talk", () => {
+    expect(feed(atStep("talk"), { talks: 1 }).run?.step).toBe(2)
+    expect(feed(atStep("talk"), { talks: 2 }).run?.step).toBe(3)
+  })
+
+  it("takes a question gone from the Inbox, once seen, as the person's answer", () => {
+    const asking = feed(atStep("ask"), { asking: true })
+    expect(asking.run).toMatchObject({ step: 3, asked: true })
+    const answered = feed(asking.run!, { asking: false })
+    expect(answered.run?.step).toBe(4)
+  })
+
+  it("counts a question the person answered before its step came", () => {
+    const early = feed(atStep("talk"), { asking: true })
+    const passed = feed({ ...early.run!, step: 3, entered: true }, { asking: false })
+    expect(passed.run?.step).toBe(4)
+  })
+
+  it("nudges no one while the person has a question to answer", () => {
+    const asking = feed(atStep("ask"), { asking: true }).run!
+    expect(nextTick(asking, tourSteps, signals(quiet, true, { asking: true }), patience)).toBeNull()
+  })
+
+  it("nudges the lead while the question hasn't come", () => {
+    const run = { ...atStep("ask"), waitingSince: 0 }
+    expect(nextTick(run, tourSteps, signals(quiet), patience)).toBe(patience)
+  })
+
+  it("moves on once the lead shows its card", () => {
+    expect(feed(atStep("show"), { shown: true }).run?.step).toBe(5)
+  })
+
+  it("frames every window as Canvas comes", () => {
+    const outcome = feed({ ...atStep("canvas"), entered: false }, {})
+    expect(outcome.moves).toEqual([{ kind: "view", view: "canvas" }, { kind: "fit-all" }])
+  })
+
+  it("shows the views until the person's Next, and ends after the last", () => {
+    const grid = atStep("grid")
+    expect(awaitsNext(grid, tourSteps)).toBe(true)
+    expect(nextTick(grid, tourSteps, signals(quiet), patience)).toBeNull()
+    const canvas = stepRun(grid, tourSteps, { type: "next", now: 2 }, patience).run!
+    expect(canvas.step).toBe(6)
+    expect(stepRun(canvas, tourSteps, { type: "next", now: 3 }, patience)).toMatchObject({
+      run: null,
+      end: "done",
+    })
+  })
+
+  it("takes no Next on a step that waits on the agent", () => {
+    const team = atStep("team")
+    expect(stepRun(team, tourSteps, { type: "next", now: 1 }, patience).run).toBe(team)
+  })
+})
+
+describe("The tour, with a teammate at a screen of its own", () => {
+  const quiet: LeadState = { kind: "agent", working: false, named: true, answered: true }
+  const held = signals(quiet, true, {
+    teamScreen: { terminalId: "t3", screen: "startup", program: "codex" },
+  })
+  const run = { ...beginRun({ terminalId: "t1", agent: "claude", brief: "launch" }, 0), step: 1 }
+
+  it("points at that teammate, in its harness's words", () => {
+    expect(coachNow(run, tourSteps, held)).toMatchObject({
+      title: "A teammate is asking you something first",
+      terminalId: "t3",
+      anchor: "terminal",
+    })
+  })
+
+  it("nudges no one while it holds", () => {
+    expect(nextTick(run, tourSteps, held, patience)).toBeNull()
+  })
+
+  it("takes the person's answer from the messages, the question gone or not", () => {
+    const atAsk = { ...run, step: tourSteps.findIndex(({ id }) => id === "ask"), entered: true }
+    const outcome = stepRun(
+      atAsk,
+      tourSteps,
+      { type: "signals", signals: signals(quiet, true, { answered: true }), now: 1 },
+      patience,
+    )
+    expect(tourSteps[outcome.run!.step]!.id).toBe("show")
+  })
+})
+
+describe("The tour, with an agent asking the person's permission", () => {
+  const quiet: LeadState = { kind: "agent", working: false, named: true, answered: true }
+  const wanted = signals(quiet, true, { permission: { terminalId: "t3" } })
+  const run = { ...beginRun({ terminalId: "t1", agent: "claude", brief: "launch" }, 0), step: 1 }
+
+  it("points at that agent's terminal, in a person's words", () => {
+    expect(coachNow(run, tourSteps, wanted)).toMatchObject({
+      title: "Your agent is asking your permission",
+      terminalId: "t3",
+      anchor: "terminal",
+    })
+    expect(coachNow(run, tourSteps, wanted)?.body).toContain("in its terminal")
+  })
+
+  it("lets a screen of the agent's own come first, and says nothing while paused", () => {
+    const screen = signals({ kind: "screen", screen: "startup" }, true, {
+      permission: { terminalId: "t3" },
+    })
+    expect(coachNow(run, tourSteps, screen)?.title).toBe("Your agent is asking you something first")
+    expect(coachNow({ ...run, paused: true }, tourSteps, wanted)).toBeNull()
+  })
+
+  it("counts no wait while it asks: no nudge, and none right after", () => {
+    expect(nextTick(run, tourSteps, wanted, patience)).toBeNull()
+    const waited = stepRun(
+      run,
+      tourSteps,
+      { type: "tick", signals: wanted, now: patience * 3 },
+      patience,
+    )
+    expect(waited.nudge).toBe(false)
+    expect(waited.run!.step).toBe(run.step)
+    expect(waited.run!.waitingSince).toBe(patience * 3)
+  })
+
+  it("goes back to the step's own coach once it is answered", () => {
+    expect(coachNow(run, tourSteps, signals(quiet))).toBe(tourSteps[1]!.coach)
   })
 })

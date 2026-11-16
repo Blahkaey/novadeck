@@ -169,6 +169,7 @@ export const WorkspaceStage = memo(
                   stay={stay}
                   reordered={reordered}
                   fitOnNavigate={shellNavigation.move === "fit"}
+                  fitAllOnNavigate={shellNavigation.move === "fit-all"}
                   flyOnNavigate={flying}
                   terminals={listed}
                   selected={selected}

@@ -1,12 +1,15 @@
-import { page, type Locator } from "vitest/browser"
+import { onTestFinished } from "vitest"
+import { cleanup } from "vitest-browser-react"
+import { page, userEvent, type Locator } from "vitest/browser"
 
-import { openPreferencesOn, preferencesDialog } from "../support/keyboard"
+import { helpButton, takeTourFromHelp } from "../support/help"
+import { closePreferences, openPreferencesOn, preferencesDialog } from "../support/keyboard"
 import { workspaceSwitcher } from "../support/sessions"
 import { expectSelected, openWorkspace, terminalTabNames } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
-// Held back from everyone until its story is whole; the demo offers it on `&tour=on`.
-const offered = "/?tour=on"
+// Offered with Experimental on; its demo agent stops after its first step, as these specs need.
+const offered = "/?tourStory=off&channel=experimental"
 
 const consent = (): Locator => page.getByRole("dialog", { name: "Take the tour" })
 const welcome = (): Locator => page.getByRole("dialog", { name: "Welcome to Novadeck" })
@@ -22,23 +25,26 @@ const expectTourOpen = async (): Promise<void> => {
   await expectSelected(terminalTabNames()[0]!)
 }
 
-// Offers the tour from Preferences' About, which closes for it; with `connect`, Claude Code
-// is connected first, in General (the demo starts with none).
-const offerFromAbout = async ({ connect = true } = {}): Promise<void> => {
-  await openPreferencesOn("General")
+// Offers the tour from the footer's Help menu; with `connect`, Claude Code is connected first,
+// in Preferences' General (the demo starts with none).
+const offerFromHelp = async ({ connect = true } = {}): Promise<void> => {
   if (connect) {
+    await openPreferencesOn("General")
     const claude = preferencesDialog().getByRole("switch", { name: "Claude Code" })
     await claude.click()
     await expect.element(claude).toHaveAttribute("aria-checked", "true")
+    await closePreferences()
   }
-  await preferencesDialog().getByRole("tab", { name: "About" }).click()
-  await preferencesDialog().getByRole("button", { name: "Take the tour" }).click()
-  await expect.element(preferencesDialog()).not.toBeInTheDocument()
-  await expect.element(consent()).toBeVisible()
+  await takeTourFromHelp()
 }
 
 describe("The tour", () => {
-  it("isn't offered yet, even in experimental builds", async () => {
+  it("is offered only with Experimental on, from the footer's Help menu", async () => {
+    await openWorkspace("/?tourStory=off")
+    await expect.element(helpButton()).not.toBeInTheDocument()
+  })
+
+  it("is offered nowhere else: not in the welcome dialog, nor in Preferences' About", async () => {
     await openWorkspace("/?demo=welcome&channel=experimental")
     await expect.element(welcome()).toBeVisible()
     expect(welcome().getByRole("button", { name: "Take the tour" }).query()).toBeNull()
@@ -47,10 +53,10 @@ describe("The tour", () => {
     expect(preferencesDialog().getByRole("button", { name: "Take the tour" }).query()).toBeNull()
   })
 
-  context("offered from Preferences' About", () => {
+  context("offered from the footer's Help menu", () => {
     it("asks first, saying what it runs, where, and how to stop it", async () => {
       await openWorkspace(offered)
-      await offerFromAbout()
+      await offerFromHelp()
       await consentSays("Runs Claude Code on its cheapest model, on your own account")
       await consentSays("~/.novadeck/tour")
       await consentSays("Close the tour's terminal to stop it")
@@ -60,7 +66,7 @@ describe("The tour", () => {
     it("opens the Tour project with its agent starting on its cheapest model", async () => {
       await openWorkspace(offered)
       const before = terminalTabNames()
-      await offerFromAbout()
+      await offerFromHelp()
       await start().click()
       await expect.element(consent()).not.toBeInTheDocument()
       expect(before).not.toContain("Tour")
@@ -70,7 +76,7 @@ describe("The tour", () => {
     it("starts nothing where it was turned down", async () => {
       await openWorkspace(offered)
       const before = terminalTabNames()
-      await offerFromAbout()
+      await offerFromHelp()
       await consent().getByRole("button", { name: "Not now" }).click()
       await expect.element(consent()).not.toBeInTheDocument()
       expect(terminalTabNames()).toEqual(before)
@@ -78,7 +84,7 @@ describe("The tour", () => {
 
     it("says to connect an agent first where none is", async () => {
       await openWorkspace(offered)
-      await offerFromAbout({ connect: false })
+      await offerFromHelp({ connect: false })
       await consentSays("Connect Claude Code, Codex or Antigravity")
       expect(start().query()).toBeNull()
       await consent().getByRole("button", { name: "Close" }).click()
@@ -87,7 +93,7 @@ describe("The tour", () => {
 
     it("says why it couldn't start, staying open to try again", async () => {
       await openWorkspace(`${offered}&tourStart=fails`)
-      await offerFromAbout()
+      await offerFromHelp()
       await start().click()
       await consentSays("holds files Novadeck didn't put there")
       // The next try goes, the folder now fine.
@@ -98,7 +104,7 @@ describe("The tour", () => {
     it("opens nothing where it couldn't start", async () => {
       await openWorkspace(`${offered}&tourStart=fails`)
       const before = terminalTabNames()
-      await offerFromAbout()
+      await offerFromHelp()
       await start().click()
       await consentSays("holds files Novadeck didn't put there")
       await consent().getByRole("button", { name: "Not now" }).click()
@@ -110,36 +116,58 @@ describe("The tour", () => {
 
   it("offers to start an agent that hasn't listed its models yet", async () => {
     await openWorkspace(`${offered}&tourStart=unlisted`)
-    await offerFromAbout()
+    await offerFromHelp()
     await start().click()
     await consentSays("hasn't listed its models here yet")
     await consent().getByRole("button", { name: "Start Claude Code" }).click()
     await expect.element(consent()).not.toBeInTheDocument()
     await expectSelected("claude")
   })
+})
 
-  context("taken from the welcome dialog", () => {
-    it("applies the choices and offers the tour on the first agent chosen", async () => {
-      await openWorkspace(`${offered}&demo=welcome`)
-      await welcome().getByRole("checkbox", { name: "Claude Code" }).click()
-      await welcome().getByRole("button", { name: "Take the tour" }).click()
-      await expect.element(welcome()).not.toBeInTheDocument()
-      await consentSays("Runs Codex on its cheapest model")
-      await start().click()
-      await expectTourOpen()
-    })
+describe("The footer's Help chip", () => {
+  const chip = (): Locator => page.getByRole("button", { name: "Help", exact: true })
+  const url = "/?tourStory=off&channel=experimental"
+  // Opens the menu once and closes it again.
+  const openOnce = async (): Promise<void> => {
+    await chip().click()
+    await expect.element(page.getByRole("menuitem", { name: "Take the tour" })).toBeVisible()
+    await userEvent.keyboard("{Escape}")
+    await expect
+      .element(page.getByRole("menuitem", { name: "Take the tour" }))
+      .not.toBeInTheDocument()
+  }
 
-    it("lets the person pick another connected agent", async () => {
-      await openWorkspace(`${offered}&demo=welcome`)
-      await welcome().getByRole("button", { name: "Take the tour" }).click()
-      await consentSays("Runs Claude Code on its cheapest model")
-      // On its visible label, as a person does.
-      const agents = consent().getByRole("radiogroup", { name: "Agent for the tour" })
-      await agents.getByText("Codex", { exact: true }).click()
-      await expect.element(agents.getByRole("radio", { name: "Codex" })).toBeChecked()
-      await consentSays("Runs Codex on its cheapest model")
-      await start().click()
-      await expectTourOpen()
-    })
+  it("keeps Help and Feedback named at a narrow width, their words hidden", async () => {
+    onTestFinished(() => page.viewport(1440, 900))
+    await page.viewport(600, 800)
+    await openWorkspace(url)
+    await expect.element(chip()).toBeVisible()
+    await expect.element(chip().getByText("Help")).not.toBeVisible()
+    const feedback = page.getByRole("button", { name: "Feedback", exact: true })
+    await expect.element(feedback).toBeVisible()
+  })
+
+  it("shows its word while new", async () => {
+    await openWorkspace(url)
+    await expect.element(chip()).toHaveTextContent("Help")
+    // Named Help either way, as narrow footers hide the word.
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+  })
+
+  it("is the icon alone, still named Help, once opened", async () => {
+    await openWorkspace(url)
+    await openOnce()
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+    await expect.element(chip()).not.toHaveTextContent("Help")
+  })
+
+  it("stays the icon alone across a reload", async () => {
+    await openWorkspace(url)
+    await openOnce()
+    await cleanup()
+    await openWorkspace(url)
+    await expect.element(chip()).toHaveAttribute("aria-label", "Help")
+    await expect.element(chip()).not.toHaveTextContent("Help")
   })
 })

@@ -1,6 +1,8 @@
 import { page, type Locator } from "vitest/browser"
 
+import { takeTourFromHelp } from "../support/help"
 import {
+  closePreferences,
   findDialog,
   openPreferencesOn,
   preferencesDialog,
@@ -8,11 +10,17 @@ import {
 } from "../support/keyboard"
 import { switchProject, workspaceSwitcher } from "../support/sessions"
 import { closeConfirmation, confirmClose, tabAction } from "../support/terminals"
-import { expectSelected, openWorkspace, press, terminalTabNames } from "../support/workspace"
+import {
+  expectSelected,
+  openWorkspace,
+  press,
+  sidebarPanel,
+  terminalTabNames,
+} from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
-// Held back from everyone until its story is whole; the demo offers it on `&tour=on`.
-const offered = "/?tour=on"
+// Its demo agent stops after the first step: these specs are about the driver, not the story.
+const offered = "/?tourStory=off&channel=experimental"
 
 const consent = (): Locator => page.getByRole("dialog", { name: "Take the tour" })
 const coach = (): Locator => page.getByRole("region", { name: "Tour step" })
@@ -26,15 +34,15 @@ const barSays = (words: string): Promise<void> =>
 const coachSays = (words: string): Promise<void> =>
   expect.poll(() => coach().query()?.textContent ?? "").toContain(words)
 
-// Starts the tour from Preferences' About with Claude Code, connected first in General.
+// Starts the tour from the footer's Help menu with Claude Code, connected first in Preferences' General.
 const startTour = async (address = offered): Promise<void> => {
   await openWorkspace(address)
   await openPreferencesOn("General")
   const claude = preferencesDialog().getByRole("switch", { name: "Claude Code" })
   await claude.click()
   await expect.element(claude).toHaveAttribute("aria-checked", "true")
-  await preferencesDialog().getByRole("tab", { name: "About" }).click()
-  await preferencesDialog().getByRole("button", { name: "Take the tour" }).click()
+  await closePreferences()
+  await takeTourFromHelp()
   await consent().getByRole("button", { name: "Start the tour" }).click()
   await expect.element(consent()).not.toBeInTheDocument()
 }
@@ -43,13 +51,13 @@ const startTour = async (address = offered): Promise<void> => {
 const leadNamed = { timeout: 10_000 }
 
 describe("The tour's driver", () => {
-  it("points at the agent as it starts, and goes once it has taken its brief", async () => {
+  it("points at the agent as it starts, and moves on once it has taken its brief", async () => {
     await startTour()
     await coachSays("Your agent is starting")
-    await coachSays("Tour · 1 of 1")
+    await coachSays("Tour · 1 of 7")
     // The agent describes itself as the tour's lead: its step is done.
     await expect.poll(terminalTabNames, leadNamed).toContain("Tour lead")
-    await expect.element(coach()).not.toBeInTheDocument()
+    await coachSays("Your agent opens a team")
   })
 
   it("leaves the keyboard's focus where it was", async () => {
@@ -88,6 +96,38 @@ describe("The tour's driver", () => {
     })
   })
 
+  context("while the agent asks the person's permission", () => {
+    it("points at its terminal, and goes on once the person has answered", async () => {
+      await startTour(`${offered}&tourAgent=permission&tourPatienceMs=500`)
+      await coachSays("Your agent is asking your permission")
+      await coachSays("Answer it here, in its terminal")
+      // The person's wait isn't the agent's silence: no nudge or skip comes meanwhile.
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await coachSays("Your agent is asking your permission")
+      expect(terminalTabNames()).not.toContain("Tour lead")
+
+      // The terminal on screen holds its own agent's rows out of the Inbox, so the person looks
+      // away first, and answers there.
+      await switchProject("storefront")
+      await sidebarPanel("Inbox").click()
+      await page
+        .getByRole("list", { name: "Messages from your agents" })
+        .getByRole("button", { name: /^Unblock: Run pnpm lint/ })
+        .first()
+        .click()
+      // The agent's context comes in late, and a click just after the card moved is held back.
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Yes, proceed", exact: true })
+        .click()
+
+      await bar().getByRole("button", { name: "Back to the tour" }).click()
+      await coachSays("Your agent opens a team")
+      await expect.poll(terminalTabNames, leadNamed).toContain("Tour lead")
+    })
+  })
+
   it("nudges an agent gone quiet, which then goes on", async () => {
     await startTour(`${offered}&tourAgent=quiet&tourPatienceMs=600`)
     await coachSays("Your agent is starting")
@@ -105,11 +145,10 @@ describe("The tour's driver", () => {
       await coachSays("Your agent is starting")
     })
 
-    it("skips its step, ending a story of one", async () => {
+    it("skips a step, on to the next", async () => {
       await startTour(`${offered}&tourAgent=quiet&tourPatienceMs=60000`)
       await coach().getByRole("button", { name: "Skip step" }).click()
-      await expect.element(coach()).not.toBeInTheDocument()
-      expect(bar().query()).toBeNull()
+      await coachSays("Tour · 2 of 7")
     })
 
     it("ends, leaving its terminal as it is", async () => {

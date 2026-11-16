@@ -252,6 +252,9 @@ export type DemoMessages = Messages & {
   ) => boolean
   // Looks again at what waits, as a terminal may have closed since: a message for one is gone.
   readonly refresh: () => void
+  // An agent's terminal that joined its session after the demo began (a teammate a lead opened),
+  // by its handle, so it can send and take messages. Joining again changes nothing.
+  readonly join: (target: WorkspaceTarget, terminal: { terminalId: string; handle: string }) => void
 }
 
 // Whether a backend's messages are the demo's, which keep a record of what the person answered.
@@ -541,6 +544,19 @@ export const createDemoMessages = (
       return true
     },
     refresh: land,
+    join: (target, { terminalId, handle }) => {
+      const index = boxes.findIndex(
+        (box) =>
+          box.target.projectId === target.projectId &&
+          box.target.workspaceSessionId === target.workspaceSessionId,
+      )
+      const box: DemoSessionMessages = boxes[index] ?? { target, terminals: [], threads: [] }
+      if (box.terminals.some((each) => each.terminalId === terminalId)) return
+      const joined = { ...box, terminals: [...box.terminals, { terminalId, handle, agent: true }] }
+      boxes =
+        index < 0 ? [...boxes, joined] : boxes.map((each, at) => (at === index ? joined : each))
+      publish()
+    },
     pause: (next) => {
       state.update((current) => ({ ...current, pending: true }))
       setTimeout(() => {

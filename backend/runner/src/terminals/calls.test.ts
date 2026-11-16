@@ -68,6 +68,7 @@ describe("the open call", () => {
     let state = "queued"
     let briefed = false
     let plain = 0
+    let barred: string | undefined
     const opened = {
       summary: { id: "t2", handle: "fox", title: "claude", ledBy: "t1" },
       terminal: { exiting: false },
@@ -86,6 +87,7 @@ describe("the open call", () => {
       save: () => undefined,
       install: () => Promise.resolve(undefined),
       models: () => Promise.resolve([{ id: "opus", efforts: ["low", "max"] }]),
+      openPolicy: () => ({ ...(barred !== undefined && { refusal: barred }) }),
       claims: () => claims,
       launcher: () => ({
         connected: () => Promise.resolve(true),
@@ -161,6 +163,7 @@ describe("the open call", () => {
       ended,
       claims,
       opened,
+      bar: (reason: string) => (barred = reason),
       open: (request: object) =>
         run.open({
           type: "open",
@@ -378,6 +381,18 @@ describe("the open call", () => {
     })
     expect(await run.open({ agent: "codex", resume: "s-4" })).toMatchObject({ ok: true })
     expect(run.asked).toHaveLength(1)
+  })
+
+  it("refuses an agent to a caller the host bars from opening them, before anything starts", async () => {
+    const run = setup()
+    run.person()
+    run.bar("You're a teammate: only the lead opens agents.")
+    expect(await run.open({ agent: "claude", message: "Do it." })).toEqual({
+      ok: false,
+      reason: "You're a teammate: only the lead opens agents.",
+    })
+    expect(run.asked).toEqual([])
+    expect(run.sent).toEqual([])
   })
 
   it("refuses a command that would start an agent session", async () => {

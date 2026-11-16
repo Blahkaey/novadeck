@@ -1,13 +1,14 @@
 import { posix, win32 } from "node:path"
 
-import type { Install, Model } from "@novadeck/harness-core/harness"
+import type { Model } from "@novadeck/harness-core/harness"
 import type { AgentName, Project, TourPrepared } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { agentLabel } from "../messaging/messages.js"
-import { briefFiles, nudgeLine, startLine } from "./brief.js"
+import { briefFiles, nudgeLine, tourBrief, type BriefFacts, type Teammate } from "./brief.js"
 import { resetTourFolder, tourFolder } from "./folder.js"
 import { tourChoice, tourLaunch } from "./launch.js"
+import { pickName } from "./name.js"
 
 /** What the tour needs of the runner. */
 export type TourHost = {
@@ -15,7 +16,6 @@ export type TourHost = {
   readonly platform?: NodeJS.Platform
   readonly connected: (agent: AgentName) => Promise<boolean>
   readonly models: (agent: AgentName) => Promise<readonly Model[]>
-  readonly install: (agent: AgentName) => Promise<Install | undefined>
   readonly projects: {
     readonly list: () => readonly Project[]
     readonly remove: (projectId: string) => Promise<void>
@@ -24,7 +24,16 @@ export type TourHost = {
   readonly notice: (terminalId: string, text: string) => boolean
   /** The terminal's folder now; throws for a terminal the runner doesn't have. */
   readonly cwdOf: (terminalId: string) => string
+  /** The terminal that leads this one, if one does. */
+  readonly leadOf: (terminalId: string) => string | undefined
+  /** The person's global git name, if git has one; never read over a network. */
+  readonly gitName: () => Promise<string | undefined>
+  /** The OS account's name, if the system says it. */
+  readonly account: () => string | undefined
 }
+
+// The order a second harness is looked for in, for the designer of a mixed team.
+const agentOrder: readonly AgentName[] = ["claude", "codex", "agy"]
 
 /**
  * Novadeck's tour, on the runner's side: its folder, made afresh for each run, and the line
@@ -34,13 +43,18 @@ export type TourHost = {
 export class Tour {
   // The run being readied, so a second start meanwhile doesn't empty its folder under it.
   private preparing: Promise<TourPrepared> | undefined
+  // The facts of the run last readied, which its brief is composed of when it is rung.
+  private facts: BriefFacts | undefined
 
   constructor(private readonly host: TourHost) {}
 
   /**
    * Readies a run of the tour with `agent`: removes any project open at its folder, closing
    * its terminals, so nothing runs there; then empties the folder and writes the brief there;
-   * then builds the agent's launch line, on its cheapest model. An agent Novadeck isn't
+   * then builds the agent's launch line, on its cheapest model. The brief names the person
+   * (`pickName`) and the two teammates the lead opens, each on its harness's cheapest model: the
+   * copywriter on `agent`'s, the designer on another connected harness's where one lists its
+   * cheapest, else on `agent`'s too. An agent Novadeck isn't
    * connected to is a `CONFLICT`, as its tools would be missing; so is a folder that isn't
    * Novadeck's (`resetTourFolder`), and a run asked for while another is being readied. One
    * whose cheapest model can't be told is `MODELS_UNLISTED`: Codex lists its models only once
@@ -64,10 +78,7 @@ export class Tour {
         `Novadeck isn't connected to ${agentLabel(agent)}, so the tour can't start with it.`,
       )
     // Its cheapest model first, before anything is removed: the person agreed to that one.
-    const [models, install] = await Promise.all([
-      this.host.models(agent).catch((): readonly Model[] => []),
-      this.host.install(agent).catch(() => undefined),
-    ])
+    const models = await this.host.models(agent).catch((): readonly Model[] => [])
     if (tourChoice(agent, models).model === undefined)
       throw new DomainError(
         "MODELS_UNLISTED",
@@ -90,19 +101,44 @@ export class Tour {
           }),
       ),
     )
+    const [designer, name] = await Promise.all([
+      this.designerFor(agent, models),
+      this.host
+        .gitName()
+        .catch(() => undefined)
+        .then((git) => pickName(git, this.host.account())),
+    ])
+    const copywriter = teammate(agent, models)!
     await resetTourFolder(directory, briefFiles)
-    const launch = await tourLaunch(agent, { models, install, cwd: directory })
+    this.facts = { name, copywriter, designer }
+    const launch = tourLaunch(agent, { models })
     return { ...launch, directory, removed }
   }
 
+  // The designer's harness: the first other connected one whose cheapest model is listed, else
+  // the lead's own.
+  private async designerFor(agent: AgentName, models: readonly Model[]): Promise<Teammate> {
+    for (const other of agentOrder.filter((each) => each !== agent)) {
+      // eslint-disable-next-line no-await-in-loop -- The first that fits is taken.
+      if (!(await this.host.connected(other).catch(() => false))) continue
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      const listed = await this.host.models(other).catch((): readonly Model[] => [])
+      const found = teammate(other, listed)
+      if (found) return found
+    }
+    return teammate(agent, models)!
+  }
+
   /**
-   * Rings the tour's start line to the agent in `terminalId`, for a harness whose launch line
-   * takes none (`brief: "doorbell"`): the doorbell delivers it once the agent's prompt shows and
-   * its tools are listed. A terminal whose agent hasn't shown yet is a `CONFLICT`; the client
-   * asks once it has.
+   * Rings the lead's brief (`tourBrief`, composed of the run last readied) to the agent in
+   * `terminalId` as Novadeck's notice, for every harness (`brief: "doorbell"`): the doorbell
+   * delivers it once the agent's prompt shows and its tools are listed. A terminal whose agent
+   * hasn't shown yet is a `CONFLICT`; the client asks once it has. So is a runner that has
+   * readied no run since it started.
    */
   brief(terminalId: string): void {
-    this.ring(terminalId, startLine)
+    if (!this.facts) throw new DomainError("CONFLICT", "The tour hasn't been readied.")
+    this.ring(terminalId, tourBrief(this.facts))
   }
 
   /**
@@ -111,6 +147,28 @@ export class Tour {
    */
   nudge(terminalId: string): void {
     this.ring(terminalId, nudgeLine)
+  }
+
+  /**
+   * What an `open_agent` of `terminalId` is subject to: a terminal in the tour's folder that has
+   * a lead is a teammate, and only the tour's lead opens agents there, so it is refused. The
+   * lead (no lead of its own), a led terminal elsewhere, and a terminal the runner doesn't have
+   * are left to the call's own checks.
+   */
+  openPolicy(terminalId: string): { readonly refusal?: string } {
+    let cwd: string
+    try {
+      cwd = this.host.cwdOf(terminalId)
+    } catch {
+      return {}
+    }
+    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform)) return {}
+    return this.host.leadOf(terminalId) === undefined
+      ? {}
+      : {
+          refusal:
+            "You're a teammate in Novadeck's tour: only the tour's lead opens agents. Do only the task in your lead's message.",
+        }
   }
 
   // Only the tour's own terminals, those in its folder, are rung; one elsewhere is a
@@ -122,6 +180,12 @@ export class Tour {
     if (!this.host.notice(terminalId, line))
       throw new DomainError("CONFLICT", "The terminal's agent hasn't started yet.")
   }
+}
+
+// The agent as a teammate on its cheapest model, or none where that can't be told.
+const teammate = (agent: AgentName, models: readonly Model[]): Teammate | undefined => {
+  const { model, effort } = tourChoice(agent, models)
+  return model === undefined ? undefined : { agent, model, ...(effort !== undefined && { effort }) }
 }
 
 /**

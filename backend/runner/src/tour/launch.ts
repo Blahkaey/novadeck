@@ -1,9 +1,8 @@
-import type { Choice, Install, Model } from "@novadeck/harness-core/harness"
+import type { Choice, Model } from "@novadeck/harness-core/harness"
 import type { AgentName } from "@novadeck/protocol"
 
 import { harnesses } from "../harnesses/registry.js"
 import { commandLine } from "../terminals/commands.js"
-import { startLine } from "./brief.js"
 
 /**
  * The model each harness runs the tour on: its cheapest, which the person agreed to spend on
@@ -41,36 +40,29 @@ export const tourWrites: Readonly<Record<AgentName, readonly string[]>> = {
 }
 
 /**
- * How the tour starts its agent: the command line, and where its first line goes. A harness
- * that holds a command-line prompt behind its startup screens takes `startLine` there
- * (`launch`); Antigravity starts plain, and its line is rung by the doorbell once its prompt
- * shows and its tools are listed (`doorbell`).
+ * How the tour starts its agent: the command line, with no prompt on it for any harness: the
+ * lead's brief is rung by the doorbell once its prompt shows and its tools are listed
+ * (`doorbell`, as `tour.brief` does), so the agent's own first prompt is Novadeck's notice, not
+ * a line a harness may hold behind its startup screens.
  */
 export type TourLaunch = {
   readonly command: string
-  readonly brief: "launch" | "doorbell"
+  readonly brief: "doorbell"
   readonly model?: string
 }
 
-export const tourLaunch = async (
+export const tourLaunch = (
   agent: AgentName,
-  place: {
-    readonly models: readonly Model[]
-    readonly install: Install | undefined
-    readonly cwd: string
-  },
-): Promise<TourLaunch> => {
+  place: { readonly models: readonly Model[] },
+): TourLaunch => {
   const { launch } = harnesses[agent]
   const choice = tourChoice(agent, place.models)
-  const prompted = await launch
-    .initialPrompt(startLine, { install: place.install, cwd: place.cwd })
-    .catch(() => undefined)
-  const [program = "", ...rest] = prompted ?? launch.start
-  // Its options right after the program, before the prompt, as `open_agent` puts them.
+  const [program = "", ...rest] = launch.start
+  // Its options right after the program, as `open_agent` puts them.
   const command = commandLine([program, ...launch.choose(choice), ...tourWrites[agent], ...rest])
   return {
     command,
-    brief: prompted === undefined ? "doorbell" : "launch",
+    brief: "doorbell",
     ...(choice.model !== undefined && { model: choice.model }),
   }
 }

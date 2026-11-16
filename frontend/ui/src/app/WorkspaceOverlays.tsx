@@ -36,6 +36,7 @@ import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
 import { schemeCountOfTheme } from "../theme/themes"
+import { TourClosingCard } from "../tour/ClosingCard"
 import { TourSpotlight } from "../tour/Spotlight"
 import { TourConsentDialog } from "../tour/TourConsent"
 import { CloseTeamRows } from "./CloseTeamRows"
@@ -58,11 +59,10 @@ import {
   sameItems,
   shallowEqual,
 } from "./selectors"
+import { useTourOffer, useTourRun } from "./TourProvider"
 import { switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
-import { useTour } from "./useTour"
-import { useTourDriver } from "./useTourDriver"
 
 // Rendered beside a deferred dialog, so it mounts only once the dialog's view has loaded.
 const Loaded = ({
@@ -293,14 +293,24 @@ const useUninstall = (
 
 // Dialogs and the terminal switcher, above the workspace.
 export const WorkspaceOverlays = memo((): React.JSX.Element => {
-  const { backend, commands, navigation, ui } = useWorkspaceServices()
+  const { backend, commands, navigation, ui, workspace: workspaceStore } = useWorkspaceServices()
   const transcripts = useTranscripts(backend.transcripts)
   const hibernation = useHibernation(backend.hibernation)
   const worktrees = useWorktrees(backend.worktrees)
   const agents = useAgents(backend.agents)
   const installs = useInstalls(backend.agents)
-  const driver = useTourDriver(backend.tour)
-  const tour = useTour(backend, agents.list, driver.begin)
+  const driver = useTourRun()
+  // Whether the project the tour ran in is still there, for its closing card to offer removing.
+  const tourProjectId = driver.closing?.projectId ?? null
+  const tourProjectThere = useWorkspaceState(
+    // The workspace keeps one project at least: the last one isn't removed.
+    (state) =>
+      tourProjectId !== null &&
+      state.projects.length > 1 &&
+      state.projects.some(({ id }) => id === tourProjectId),
+    Object.is,
+  )
+  const tour = useTourOffer()
   const forgeList = useForges(backend.forges)
   const forgeRuns = useForgeRuns(backend.forges)
   const approval = useApproval(backend.approvals)
@@ -422,7 +432,6 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
               }
             : {})}
           onDone={backend.agents.finishWelcome}
-          {...(tour ? { onTour: tour.offer } : {})}
         />
       )}
       {driver.shown && (
@@ -431,8 +440,37 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           onPause={driver.pause}
           onResume={driver.resume}
           onSkip={driver.skip}
+          onNext={driver.next}
           onEnd={driver.end}
           onBack={driver.back}
+        />
+      )}
+      {driver.closing && (
+        <TourClosingCard
+          agent={driver.closing.agent}
+          canRemove={tourProjectThere}
+          {...(backend.pickDirectory && {
+            onOpen: () => {
+              const closing = driver.closing
+              const before = workspaceStore.getSnapshot().activeProjectId
+              commands.openFolder().then(
+                () => {
+                  const after = workspaceStore.getSnapshot().activeProjectId
+                  // A folder picked, other than the tour's: its agent starts there, and the card
+                  // goes.
+                  if (!closing || after === before || after === closing.projectId) return
+                  commands.add({ command: closing.agent })
+                  driver.close()
+                },
+                // The card stays, for another try.
+                (error: unknown) => console.error("Novadeck couldn't open that folder:", error),
+              )
+            },
+          })}
+          onRemove={() => {
+            if (driver.closing?.projectId) commands.removeProject(driver.closing.projectId)
+          }}
+          onClose={driver.close}
         />
       )}
       {tour && (
@@ -524,7 +562,6 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           {...(experimental ? { experimental } : {})}
           {...(version ? { version } : {})}
           {...(backend.openLogs ? { logs: backend.openLogs } : {})}
-          {...(tour ? { tour: () => afterClose(() => tour.offer()) } : {})}
           {...(uninstall ? { uninstall } : {})}
           {...(backend.forges
             ? {

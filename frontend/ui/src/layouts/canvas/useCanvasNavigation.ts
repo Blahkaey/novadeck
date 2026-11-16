@@ -22,7 +22,7 @@ import type { createCanvasVisit } from "./visit"
 
 type NavigationProps = Pick<
   CanvasProps,
-  "navigation" | "selected" | "hidden" | "fitOnNavigate" | "flyOnNavigate"
+  "navigation" | "selected" | "hidden" | "fitOnNavigate" | "flyOnNavigate" | "fitAllOnNavigate"
 > & {
   // The canvas opens as it was left (Canvas.tsx): it keeps the camera it was left with.
   restored: boolean
@@ -62,6 +62,7 @@ export const useCanvasNavigation = ({
   selected,
   hidden,
   fitOnNavigate,
+  fitAllOnNavigate = false,
   flyOnNavigate,
   restored,
   initialViewport,
@@ -71,7 +72,7 @@ export const useCanvasNavigation = ({
   visit,
   flyIn,
 }: NavigationProps) => {
-  const { fitView, getNode, getViewport, setCenter } = useReactFlow<TerminalNode>()
+  const { fitView, getNode, getNodes, getViewport, setCenter } = useReactFlow<TerminalNode>()
   const initialized = useNodesInitialized()
   // Canvas sets its camera as it opens (below), and flies from there to a terminal gone to
   // from outside; only new sidebar requests recenter it.
@@ -87,6 +88,17 @@ export const useCanvasNavigation = ({
     const node = getNode(selected)
     if (!node || node.hidden) return
     lastNavigation.current = navigation
+    if (fitAllOnNavigate) {
+      visit.clear()
+      void fitView({
+        ...fitOptions,
+        nodes: getNodes()
+          .filter((each) => !each.hidden)
+          .map(({ id }) => ({ id })),
+        duration: prefersReducedMotion() ? 0 : 180,
+      })
+      return
+    }
     // A visit already at the terminal stays, so its way back is kept.
     if (flyOnNavigate) {
       createdPositions.current.delete(selected)
@@ -124,10 +136,12 @@ export const useCanvasNavigation = ({
     selected,
     hidden,
     fitOnNavigate,
+    fitAllOnNavigate,
     flyOnNavigate,
     flyIn,
     fitView,
     getNode,
+    getNodes,
     getViewport,
     setCenter,
     visit,

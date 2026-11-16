@@ -13,12 +13,6 @@
     text-decoration: underline;
     text-underline-offset: 2px;
   }
-  .feedback-button-text {
-    margin-inline-start: 6px;
-  }
-  .feedback-button-text:first-child {
-    margin-inline-start: 0;
-  }
 
   .feedback-card {
     width: min(400px, calc(100vw - 24px));

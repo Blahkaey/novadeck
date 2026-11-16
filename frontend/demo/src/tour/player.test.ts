@@ -73,8 +73,8 @@ describe("the tour agent in the demo", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it("binds, works, describes itself and finishes its turn", async () => {
-    const { at } = open()
+  it("binds, works, describes itself and finishes its turn, with the story off", async () => {
+    const { at } = open("claude", (tour) => tour.configure({ story: false }))
     expect((await at(0))?.state).toBe("idle")
     const working = await at(tourPhaseMs.bind + 10)
     expect(working).toMatchObject({ state: "running", process: "claude", agent: { working: true } })
@@ -119,6 +119,19 @@ describe("the tour agent in the demo", () => {
     await at(tourPhaseMs.work + 10)
     expect((await at(0))?.name).toBe(tourLeadName)
     expect(tour.nudged.getSnapshot()).toEqual([id])
+  })
+
+  it("asks the person's permission first, and names itself no sooner", async () => {
+    const { at } = open("claude", (each) => {
+      each.askPermission()
+      each.configure({ story: false })
+    })
+    expect(await at(tourPhaseMs.bind + 10)).toMatchObject({
+      agent: { working: true, attention: { kind: "permission", count: 1 } },
+    })
+    const waiting = await at(5000)
+    expect(waiting).toMatchObject({ agent: { attention: { kind: "permission" } } })
+    expect(waiting?.name).not.toBe(tourLeadName)
   })
 
   it("starts Antigravity's agent only once it's briefed", async () => {

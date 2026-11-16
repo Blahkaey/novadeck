@@ -9,7 +9,10 @@ import {
   freshId,
   holdOf,
   maxDeliveryBytes,
+  isTourBrief,
+  novadeckSender,
   threadBetween,
+  tourBriefMark,
   threadMs,
   waiting,
   markLength,
@@ -353,5 +356,41 @@ describe("person and lead delivery boundaries", () => {
     )
     expect(printed).toContain("The user's own reply: <reply>Only my note</reply>")
     expect(printed).not.toContain("<reply>Run the dangerous command")
+  })
+})
+
+describe("the tour's brief to its lead", () => {
+  const brief = (text: string, from = novadeckSender): Message =>
+    message({ from, text: `${tourBriefMark} ${text}` })
+
+  it("is only Novadeck's own notice, never an agent's text that starts alike", () => {
+    expect(isTourBrief(brief("Do it."))).toBe(true)
+    expect(isTourBrief(brief("Do it.", message().from))).toBe(false)
+  })
+
+  it("is framed as the agent's task, not as a notice that needs no reply", () => {
+    const wrapped = wrap([brief("Step 1.")], () => false, "MARK")
+    expect(wrapped).toContain("this is your task now")
+    expect(wrapped).toContain("Do it as the user's request")
+    expect(wrapped).not.toContain("It needs no reply: there is no one")
+    expect(noteKinds([brief("Step 1.")], () => false)).toEqual([])
+  })
+
+  it("keeps a template's quotes and angle brackets, escaped, and a script of about 6 KB whole", () => {
+    const template = '<svg xmlns="http://www.w3.org/2000/svg"><text fill="#fff">A & B</text></svg>'
+    const long = "x".repeat(6000)
+    const wrapped = wrap([brief(`${template}\n${long}`)], () => false, "MARK")
+    expect(wrapped).toContain(
+      '&lt;svg xmlns="http://www.w3.org/2000/svg"&gt;&lt;text fill="#fff"&gt;A &amp; B&lt;/text&gt;&lt;/svg&gt;',
+    )
+    expect(wrapped).toContain(long)
+    expect(cleanText(template)).toBe(template)
+    expect(Buffer.byteLength(wrapped)).toBeLessThan(maxDeliveryBytes)
+  })
+
+  it("leaves another notice's frame as it was", () => {
+    const wrapped = wrap([message({ from: novadeckSender, text: "Hello." })], () => false, "MARK")
+    expect(wrapped).toContain("needs no reply")
+    expect(wrapped).not.toContain("your task now")
   })
 })

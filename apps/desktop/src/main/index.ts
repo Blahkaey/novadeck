@@ -754,8 +754,6 @@ app.whenReady().then(() => {
     )
   // macOS shows its menu bar: Help opens the logs folder. Elsewhere Preferences does.
   if (process.platform === "darwin")
-    // Help offers no tour while the page holds it back (`Tour.offered`): passing `askTour`
-    // here offers it.
     Menu.setApplicationMenu(Menu.buildFromTemplate(macMenu(openLogs)))
   limitPermissions(
     session.defaultSession,

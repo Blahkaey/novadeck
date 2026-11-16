@@ -27,6 +27,14 @@ describe("the tour's folder", () => {
     expect(await readFile(join(folder, "AGENTS.md"), "utf8")).toBe("brief\n")
   })
 
+  it("writes a file in a folder of its own, and empties it again", async ({ resources }) => {
+    const folder = tourFolder(await scratch(resources))
+    await resetTourFolder(folder, { ".claude/settings.json": "{}\n" })
+    expect(await readFile(join(folder, ".claude", "settings.json"), "utf8")).toBe("{}\n")
+    await resetTourFolder(folder, {})
+    expect(await readdir(folder)).toEqual([tourMarker])
+  })
+
   it("is emptied of an earlier run's files, folders and all", async ({ resources }) => {
     const folder = tourFolder(await scratch(resources))
     await resetTourFolder(folder, { "AGENTS.md": "old\n" })

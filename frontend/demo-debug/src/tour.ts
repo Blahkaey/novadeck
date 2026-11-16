@@ -8,26 +8,13 @@ const screens = {
   hooks: { label: "hooks", what: "its prompt with Novadeck's hooks off" },
 } as const
 
-// Novadeck's tour: its consent, as the welcome dialog, Preferences' About or the desktop app's
-// Help menu offers it, and a start the backend refuses.
+// Novadeck's tour: a start the backend refuses, and its story's controls. Its consent opens
+// from the footer's Help menu.
 export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
   {
     section: "App",
     title: "Tour",
     actions: [
-      {
-        label: "Offer the tour",
-        hint: "Takes the hold off the tour (welcome dialog and Preferences' About offer it), then opens its consent on the first connected agent, as the macOS Help menu will",
-        run: () => {
-          tour.offered.update(() => true)
-          tour.ask()
-        },
-      },
-      {
-        label: "Hold the tour back",
-        hint: "The tour is offered nowhere again, as in every real build until its story is whole",
-        run: () => tour.offered.update(() => false),
-      },
       {
         label: "Fail next start",
         hint: "The next Start the tour shows why it can't start (a folder of yours at ~/.novadeck/tour); the consent stays open",
@@ -52,6 +39,26 @@ export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
         label: "Tour agent: quiet until nudged",
         hint: "The next tour agent binds but sits idle at its prompt, no turn begun, until the tour nudges it (the UI does after its wait); then it works and names its terminal",
         run: () => tour.goQuiet(),
+      },
+      {
+        label: "Tour agent: ask permission first",
+        hint: "The next tour agent asks your permission for a command, as its harness's own dialog: a request waits in the Inbox and the tour points at its terminal until you answer",
+        run: () => tour.askPermission(),
+      },
+      {
+        label: "Tour story: answer the tagline ask (A)",
+        hint: "While the copywriter's ask waits in the Inbox (Which tagline for the welcome card?), answers it with option A as the person would: the row goes, the copywriter tells the lead, and the lead shows the welcome card",
+        run: () => tour.answerTagline(0),
+      },
+      {
+        label: "Tour story: teammates stay quiet until nudged",
+        hint: "The next tour lead names itself, then waits for the tour's nudge before opening its Copywriter and Designer teammates",
+        run: () => tour.goQuietTeam(),
+      },
+      {
+        label: "Tour agent: stop",
+        hint: "The running tour lead's process exits: its terminal shows the exit and the tour says Your agent stopped",
+        run: () => tour.stop(),
       },
     ],
   },

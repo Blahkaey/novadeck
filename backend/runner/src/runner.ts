@@ -22,6 +22,7 @@ import { installShellFiles } from "./shell/install.js"
 import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
 import { Uploads } from "./terminals/uploads.js"
+import { readAccount, readGitName } from "./tour/name.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
@@ -351,6 +352,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     // Where each harness lives, which says how it may start with a task.
     install: (agent) => agents.install(agent),
     models: (agent) => agents.models(agent),
+    // The tour's teammates may not open agents, and its lead's open in the teammates' folder.
+    openPolicy: (terminalId) => tour.openPolicy(terminalId),
     transcripts: store.settings.runner().transcripts,
     // Read each time idle agents are looked at, so a change in Preferences counts at once.
     hibernateAfterMinutes: () => store.settings.runner().hibernateAfterMinutes,
@@ -372,11 +375,13 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     ...(options.agents?.home !== undefined && { home: options.agents.home }),
     connected: (agent) => agents.connected(agent),
     models: (agent) => agents.models(agent),
-    install: (agent) => agents.install(agent),
     // Every project, those being removed too, whose removal the tour waits for.
     projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
     cwdOf: (terminalId) => terminals.get(terminalId).cwd,
+    leadOf: (terminalId) => terminals.messaging.leadOf(terminalId)?.terminalId,
+    gitName: () => readGitName(options.agents?.home),
+    account: readAccount,
   })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees

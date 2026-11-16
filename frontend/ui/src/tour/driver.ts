@@ -1,7 +1,15 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 
 import type { TourSignals } from "./signals"
-import { endedCoach, screenCoach, type Coach, type TourMove, type TourStep } from "./steps"
+import {
+  endedCoach,
+  permissionCoach,
+  screenCoach,
+  waitOf,
+  type Coach,
+  type TourMove,
+  type TourStep,
+} from "./steps"
 
 // A run of the tour as the UI follows it: its lead's terminal and agent, where the lead's first
 // line goes (`launch`, or rung once the agent shows: `doorbell`), the step it is at, when that
@@ -16,6 +24,9 @@ export type TourRun = {
   readonly nudged: boolean
   readonly briefed: boolean
   readonly paused: boolean
+  // A teammate's question was seen waiting, at any step so far: its going away is the answer,
+  // even where the person answered it before its step came.
+  readonly asked: boolean
   // The step's moves were made: a step makes them once, as it begins, never again.
   readonly entered: boolean
 }
@@ -29,6 +40,8 @@ export type TourEvent =
   | { readonly type: "pause" }
   | { readonly type: "resume"; readonly now: number }
   | { readonly type: "skip"; readonly now: number }
+  // The person's Next, on a step that only shows something.
+  | { readonly type: "next"; readonly now: number }
   | { readonly type: "end" }
   | { readonly type: "brief-failed" }
 
@@ -59,6 +72,7 @@ export const beginRun = (
   nudged: false,
   briefed: start.brief === "launch",
   paused: false,
+  asked: false,
   entered: false,
 })
 
@@ -73,9 +87,13 @@ const nextStep = (run: TourRun, steps: readonly TourStep[], now: number): TourOu
 }
 
 // Whether the lead stands where a step's wait counts: its agent there and quiet, not working on
-// a turn, nor holding at a screen of its own, nor stopped. A turn that runs long is no silence.
+// a turn, nor holding at a screen of its own or a teammate's, nor with an agent of the team
+// asking the person's permission, nor stopped. A turn that runs long is no silence.
 const counting = (signals: TourSignals): boolean =>
-  signals.lead.kind === "agent" && !signals.lead.working
+  signals.lead.kind === "agent" &&
+  !signals.lead.working &&
+  signals.teamScreen === null &&
+  signals.permission === null
 
 /**
  * Moves the run on by one event. A step makes its moves once, as it begins, and only while the
@@ -101,6 +119,10 @@ export const stepRun = (
       return still(run.paused ? { ...run, paused: false, waitingSince: event.now } : run)
     case "skip":
       return nextStep(run, steps, event.now)
+    case "next": {
+      const step = steps[run.step]
+      return step && waitOf(step, run) === "next" ? nextStep(run, steps, event.now) : still(run)
+    }
     case "brief-failed":
       return still({ ...run, briefed: false })
     case "signals":
@@ -118,25 +140,33 @@ const follow = (
 ): TourOutcome => {
   if (signals.lead.kind === "gone") return { ...still(null), end: "gone" }
   const brief = !run.briefed && signals.lead.kind === "agent"
-  const briefed = brief ? { ...run, briefed: true } : run
+  const seen = signals.asking && !run.asked ? { ...run, asked: true } : run
+  const briefed = brief ? { ...seen, briefed: true } : seen
   const step = steps[run.step]
   // Past its story: it ends once its first line was rung, at the event after, so a ring the
   // backend refused is tried again first.
   if (!step)
     return brief || !run.briefed ? { ...still(briefed), brief } : { ...still(null), end: "done" }
   // Done: on to the next step, but never ended in the event that rings its first line.
-  if (step.done(signals)) {
-    const next = nextStep(brief ? run : briefed, steps, now)
-    return { ...next, run: next.run && { ...next.run, briefed: briefed.briefed }, brief }
+  // Done: on to the next step, which begins with these same signals at once (its moves made
+  // now, not at some later change), but never ended in the event that rings its first line.
+  if (step.done(signals, briefed)) {
+    const next = nextStep(brief ? seen : briefed, steps, now)
+    const following = next.run && { ...next.run, briefed: briefed.briefed }
+    if (!following || following.step >= steps.length) return { ...next, run: following, brief }
+    const begun = follow(following, steps, signals, now, patienceMs)
+    return { ...begun, brief: brief || begun.brief }
   }
   // Its moves once, as it begins on screen, unpaused, whatever the agent is doing.
   const enter = !run.entered && signals.onScreen && !run.paused
   const entered = enter ? { ...briefed, entered: true } : briefed
   const moves = enter ? step.enter : []
   // No agent there yet, a screen of its own, or a pause: the wait starts over once it counts.
-  if (!counting(signals) || run.paused || step.wait === "patient") {
+  // A wait on the person, or their Next, has no end of its own.
+  const wait = waitOf(step, entered)
+  if (!counting(signals) || run.paused || wait !== "nudge") {
     const waiting = entered.waitingSince === now ? entered : { ...entered, waitingSince: now }
-    return { run: step.wait === "patient" ? entered : waiting, moves, brief, nudge: false }
+    return { run: waiting, moves, brief, nudge: false }
   }
   const waited = now - run.waitingSince
   if (!run.nudged && waited >= patienceMs)
@@ -154,9 +184,13 @@ export const nextTick = (
   patienceMs: number,
 ): number | null => {
   const step = steps[run.step]
-  if (!step || run.paused || step.wait === "patient" || !counting(signals)) return null
+  if (!step || run.paused || waitOf(step, run) !== "nudge" || !counting(signals)) return null
   return run.waitingSince + patienceMs
 }
+
+// The harness a program is, by its name.
+const agentOfProgram = (program: string | null): AgentName | undefined =>
+  program === "claude" || program === "codex" || program === "agy" ? program : undefined
 
 // What the tour says now: a screen of the agent's own, or its stopping, comes first, whatever
 // the step; nothing while paused.
@@ -169,5 +203,25 @@ export const coachNow = (
   const { lead } = signals
   if (lead.kind === "screen") return screenCoach(lead.screen, run.agent)
   if (lead.kind === "ended") return endedCoach
+  // A teammate's own screen, as its harness's folder trust in a mixed team: the person answers
+  // it in that teammate's terminal, which the tour points at.
+  const held = signals.teamScreen
+  if (held) {
+    const agent = agentOfProgram(held.program) ?? run.agent
+    return {
+      ...screenCoach(held.screen, agent),
+      title: "A teammate is asking you something first",
+      terminalId: held.terminalId,
+    }
+  }
+  // An agent of the team asking the person's permission (its harness's own dialog): they answer
+  // it in the Inbox or in that agent's terminal, which the tour points at.
+  if (signals.permission) return permissionCoach(signals.permission.terminalId)
   return steps[run.step]?.coach ?? null
+}
+
+// Whether the step on now waits on the person's Next, which the coach then offers.
+export const awaitsNext = (run: TourRun, steps: readonly TourStep[]): boolean => {
+  const step = steps[run.step]
+  return step !== undefined && waitOf(step, run) === "next"
 }

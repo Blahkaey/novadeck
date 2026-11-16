@@ -826,23 +826,26 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
       ),
     ),
   )
-  // `&tour=on` offers the tour, held back from everyone until its story is whole, and
   // `&tourStart=fails` makes its first start fail, as a folder of the person's own does, and
   // `&tourStart=unlisted` as Codex not signed in yet does. Its agent is played as a runner
   // would report one: `&tourScreen=startup|sign-in|hooks` holds it at that screen until it's
   // answered (`&tourScreenMs=<n>` answers after n ms), `&tourAgent=quiet` has it never describe
-  // itself until nudged, and `&tourPatienceMs=<n>` is how long the UI waits before nudging.
+  // itself until nudged, `&tourAgent=permission` has it ask the person's permission first, and `&tourPatienceMs=<n>` is how long the UI waits before nudging. The
+  // lead then opens its team and plays the story on: `&tourStory=off` stops it after it names
+  // itself, and `&tourTeam=quiet` has it open its team only once nudged again.
   if (isDemoTour(backend.tour)) {
     const screen = params.get("tourScreen")
     if (tourScreens.includes(screen as TourScreen)) backend.tour.holdAt(screen as TourScreen)
     if (params.get("tourAgent") === "quiet") backend.tour.goQuiet()
+    if (params.get("tourAgent") === "permission") backend.tour.askPermission()
     const positive = (name: string) =>
       Number(params.get(name)) > 0 ? Number(params.get(name)) : undefined
     backend.tour.configure({
+      ...(params.get("tourStory") === "off" && { story: false }),
       ...(positive("tourPatienceMs") !== undefined && { patienceMs: positive("tourPatienceMs")! }),
       ...(positive("tourScreenMs") !== undefined && { screenMs: positive("tourScreenMs")! }),
     })
-    if (params.get("tour") === "on") backend.tour.offered.update(() => true)
+    if (params.get("tourTeam") === "quiet") backend.tour.goQuietTeam()
     if (params.get("tourStart") === "fails") backend.tour.failNext()
     if (params.get("tourStart") === "unlisted") backend.tour.failNext("unlisted")
   }

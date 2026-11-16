@@ -384,13 +384,21 @@ const messagesIn = (wrapped: string): Delivery[] =>
  * Codex Stop hook's continuation. Text that only looks like a wrapper inside a message
  * stays that message's text.
  */
-export const deliveries = (call: Call): Delivery[] => {
-  const text = latest(call)
+export const deliveries = (call: Call): Delivery[] => deliveriesIn(latest(call))
+
+const deliveriesIn = (text: string): Delivery[] => {
   const plain = [...text.matchAll(block)].map(([wrapped]) => wrapped)
   const rest = text.replace(block, "")
   const escaped = [...rest.matchAll(escapedBlock)].map(([wrapped]) => unescape(wrapped))
   return [...plain, ...escaped].flatMap(messagesIn)
 }
+
+/**
+ * Every message the call's whole conversation was delivered, oldest first, as `deliveries`
+ * reads each turn: what the agent has been told so far, whichever turn brought it.
+ */
+export const received = (call: Call): Delivery[] =>
+  call.turns.flatMap((each) => (each.role === "assistant" ? [] : deliveriesIn(each.text)))
 
 /** One delivery wrapper as the model read it: its rules note, and its messages' ids. */
 export type Wrapper = { readonly note: string; readonly ids: readonly string[] }

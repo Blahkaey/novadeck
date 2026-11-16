@@ -1855,30 +1855,46 @@ one from an earlier runner.
 - `tour.prepare({ agent })` readies a run of Novadeck's tour with the person's own agent
   (`backend/runner/src/tour/`). It removes every project open at the tour's folder,
   `~/.novadeck/tour`, closing their terminals, so nothing runs there; empties the folder and
-  writes the agent's brief there (`AGENTS.md`, which Codex and Antigravity read, and
-  `CLAUDE.md`, which imports it), beside a `.novadeck-tour` marker; and answers
-  `{ directory, command, brief, model?, removed }`. `command` starts the agent there on its
-  cheapest model (Claude Code's `haiku`, Codex's newest `*-luna` or else the last it lists,
-  Antigravity's `gemini-3.8-flash-low`, each at its lowest effort), taking edits in the folder
-  without asking for this launch only (`--permission-mode acceptEdits`, Codex's
-  `--sandbox workspace-write --ask-for-approval on-request`, `--mode accept-edits`), and
-  nothing written to the agent's own settings. `brief` says where its first line goes: on
-  the command itself (`launch`, Claude Code and Codex), or rung by the doorbell (`doorbell`,
-  Antigravity, whose prompt on the command line would start before its tools load).
-  `removed` names the projects it removed. A folder there that is no folder, or that holds
-  files without the marker, is the person's and is never emptied: `CONFLICT`, as are an
-  agent Novadeck isn't connected to and a second run while one is being readied. An agent
-  whose cheapest model can't be told is `MODELS_UNLISTED`: Codex lists its models (its
-  `models_cache.json`) only once it has started signed in. Neither changes anything. The client
-  then opens the folder as a project and starts `command` in a terminal of it
-  (`terminals.create`).
-- `tour.brief({ terminalId })` rings the tour's start line to the agent in the terminal, as
-  Novadeck's notice, for a run whose `brief` is `doorbell`: the doorbell delivers it once the
-  agent's prompt shows and its MCP tools are listed. A terminal whose agent hasn't shown yet,
-  or that isn't in the tour's folder, is a `CONFLICT`; the client asks once it has bound.
+  writes only a neutral sandbox note there (`AGENTS.md`, which Codex and Antigravity read, and
+  `CLAUDE.md`, which imports it: no role, no steps, since the agents the lead opens start in the
+  same folder and would follow a script they loaded) and a project `.claude/settings.json`
+  (`defaultMode: acceptEdits`, so Claude Code teammates, given no launch flags, take edits
+  unasked and a plan mode in the person's own settings doesn't hold them), beside a
+  `.novadeck-tour` marker; and answers `{ directory, command, brief, model?, removed }`.
+  `command` starts the agent there on its cheapest model (Claude Code's `haiku`, Codex's newest
+  `*-luna` or else the last it lists, Antigravity's `gemini-3.8-flash-low`, each at its lowest
+  effort), taking edits in the folder without asking for this launch only
+  (`--permission-mode acceptEdits`, Codex's `--sandbox workspace-write --ask-for-approval
+  on-request`, `--mode accept-edits`), with no prompt on it, and nothing written to the agent's
+  own settings. `brief` is always `doorbell`: the lead's script reaches it by `tour.brief`.
+  The script is composed for each run: it calls the person by the first word of their global
+  git name (`git config --global user.name`, read by the runner with a short timeout, never
+  over a network), else their OS account's first name capitalized, else "you", and the name
+  goes on from there: into the script, the teammates' briefs (which Novadeck keeps and shows in
+  Messages), the card, and each agent's model provider through the person's own account. It has
+  the lead open two teammates with `open_agent`, a copywriter on the lead's own agent and a
+  designer on the first other connected agent whose cheapest model is listed (else the lead's),
+  each on that agent's cheapest model at its lowest effort, as above; teammates get no write
+  flags, and only the lead writes the card, `welcome.svg` (an SVG image the side pane shows as
+  an image). A terminal in the folder that has a lead is a teammate, and its `open_agent` is
+  refused (`Tour.openPolicy`, through the Terminals option `openPolicy`), so a teammate that
+  follows the script anyway can't nest a team. `removed` names the projects it removed. A
+  folder there that is no folder, or that holds files without the marker, is the person's and
+  is never emptied: `CONFLICT`, as are an agent Novadeck isn't connected to and a second run
+  while one is being readied. An agent whose cheapest model can't be told is `MODELS_UNLISTED`:
+  Codex lists its models (its `models_cache.json`) only once it has started signed in. Neither
+  changes anything. The client then opens the folder as a project and starts `command` in a
+  terminal of it (`terminals.create`).
+- `tour.brief({ terminalId })` rings the lead's script (composed of the run last readied) to the
+  agent in the terminal, as Novadeck's notice, for every harness: the doorbell delivers it once
+  the agent's prompt shows and its MCP tools are listed. Its delivery's note frames it as the
+  agent's task (the one notice that is), and its text keeps its quotes and angle brackets
+  (escaped as every message's is), whole: it is under the 8 KB a delivery prints. A terminal
+  whose agent hasn't shown yet, or that isn't in the tour's folder, is a `CONFLICT`, as is a
+  runner that has readied no run; the client asks once it has bound.
 - `tour.nudge({ terminalId })` rings the agent in one of the tour's terminals a fixed line, as
-  Novadeck's notice, to carry on with its brief from the step it is on: the UI's tour driver
-  sends it where a step has waited on the agent past its patience. Refused as `tour.brief` is.
+  Novadeck's notice, to carry on from the step it is on: the UI's tour driver sends it where a
+  step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
 `INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,

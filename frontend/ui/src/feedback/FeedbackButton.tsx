@@ -324,7 +324,8 @@ export const FeedbackButton = ({
               if (event.detail === 0) before.current = null
             }}
             data-send={send === "idle" ? (draftFrom === undefined ? undefined : "draft") : send}
-            aria-label={word === null ? "Send feedback" : undefined}
+            // Named always, as its word where it shows one: narrow footers hide the word.
+            aria-label={word ?? "Send feedback"}
           >
             {send === "sent" ? (
               <Check size={12} strokeWidth={1.75} aria-hidden="true" />
@@ -335,7 +336,7 @@ export const FeedbackButton = ({
             )}
             {word !== null && (
               <span
-                className={`feedback-button-text ${send === "idle" && draftFrom === undefined ? "max-[701px]:hidden" : ""}`}
+                className={`footer-chip-text ${send === "idle" && draftFrom === undefined ? "max-[701px]:hidden" : ""}`}
               >
                 {send === "failed" ? (
                   <>

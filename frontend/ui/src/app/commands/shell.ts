@@ -34,6 +34,8 @@ export type ShellCommands = {
   readonly toggleSidebar: (panel: SidebarPanel) => void
   readonly enterZen: () => void
   readonly exitZen: () => void
+  // Frames every window the view shows, as Canvas's 0 key does; no change elsewhere.
+  readonly frameAll: () => void
   // Asks Canvas to move keyboard focus to the terminal's node once it is selected.
   readonly requestCanvasFocus: (id: string) => void
   // Drops a Canvas focus request once it no longer matches what Canvas shows.
@@ -62,7 +64,7 @@ export const shellEdits = ({ ui }: Pick<CommandContext, "ui">): ShellEdits => {
 
 export const createShellCommands = (ctx: CommandContext): ShellCommands => {
   const { ui, workspace, navigation, effects } = ctx
-  const { change, set } = shellEdits(ctx)
+  const { change, set, pulse } = shellEdits(ctx)
   const panel = (): SidebarPanel => ui.getSnapshot().location.route.panel
   let canvasFocusRequest = 0
   const hide = (): void => {
@@ -108,6 +110,7 @@ export const createShellCommands = (ctx: CommandContext): ShellCommands => {
     }
   }
   return {
+    frameAll: () => pulse("fit-all"),
     showSessions: () => show("sessions"),
     showTerminals: () => show("terminals"),
     showInbox: () => show("inbox"),

@@ -17,14 +17,10 @@ export const linuxMenu = (quit: () => void): MenuItemConstructorOptions[] => [
 
 /**
  * The application menu on macOS: Electron's default, each menu by its role, with Help
- * holding "Take the Tour", which offers Novadeck's tour in the window in front, where
- * `askTour` is given, and "Open Logs Folder", which shows the folder a bug report attaches.
+ * holding "Open Logs Folder", which shows the folder a bug report attaches.
  * Elsewhere the menu bar is hidden, so Preferences offers the same.
  */
-export const macMenu = (
-  openLogs: () => void,
-  askTour?: () => void,
-): MenuItemConstructorOptions[] => [
+export const macMenu = (openLogs: () => void): MenuItemConstructorOptions[] => [
   { role: "appMenu" },
   { role: "fileMenu" },
   { role: "editMenu" },
@@ -32,9 +28,6 @@ export const macMenu = (
   { role: "windowMenu" },
   {
     role: "help",
-    submenu: [
-      ...(askTour ? [{ label: "Take the Tour", click: askTour }] : []),
-      { label: "Open Logs Folder", click: openLogs },
-    ],
+    submenu: [{ label: "Open Logs Folder", click: openLogs }],
   },
 ]

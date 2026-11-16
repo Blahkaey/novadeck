@@ -13,7 +13,6 @@ import {
   MessagesSquare,
   Monitor,
   Moon,
-  Play,
   ScrollText,
   Sun,
   type LucideIcon,
@@ -256,7 +255,6 @@ const WelcomeForm = ({
   agents,
   onChange,
   onInstall,
-  onTour,
   transcripts,
   chatView,
   scheme,
@@ -266,7 +264,6 @@ const WelcomeForm = ({
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
-  readonly onTour?: ((agent: AgentSwitch["agent"]) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   readonly chatView?: ChatViewSetting | undefined
   readonly scheme?: SchemeSetting | undefined
@@ -298,9 +295,6 @@ const WelcomeForm = ({
     onDone()
     if (install) onInstall?.(install.agent, install.command)
   }
-  // The tour runs the first agent chosen here, once the choices are applied.
-  const touring = agents.find((toggle) => toggle.available && choices[toggle.agent])?.agent
-
   return (
     <form
       // The preview takes the room a wide window gives; the choices keep enough for a command.
@@ -490,19 +484,6 @@ const WelcomeForm = ({
             Let’s build something
             <ArrowRight size={16} className="welcome-arrow" aria-hidden="true" />
           </button>
-          {onTour && touring && (
-            <button
-              type="button"
-              className="button welcome-tour mt-2 min-h-9 w-full gap-2 px-3 py-2 text-control"
-              onClick={() => {
-                submit()
-                onTour(touring)
-              }}
-            >
-              <Play size={14} aria-hidden="true" />
-              Take the tour
-            </button>
-          )}
           <button
             type="button"
             className="button ghost welcome-skip mt-2 min-h-9 w-full px-3 py-2 text-control"
@@ -523,7 +504,6 @@ export const WelcomeDialog = ({
   agents,
   onChange,
   onInstall,
-  onTour,
   transcripts,
   chatView,
   scheme,
@@ -533,8 +513,6 @@ export const WelcomeDialog = ({
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
-  // Applies the choices, as starting does, and offers the tour with the agent first chosen.
-  readonly onTour?: ((agent: AgentSwitch["agent"]) => void) | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   // Given, the person chooses here whether agents show as a chat, as starting applies.
   readonly chatView?: ChatViewSetting | undefined
@@ -560,7 +538,6 @@ export const WelcomeDialog = ({
         agents={agents}
         onChange={onChange}
         onInstall={onInstall}
-        onTour={onTour}
         transcripts={transcripts}
         chatView={chatView}
         scheme={scheme}

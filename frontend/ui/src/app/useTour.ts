@@ -1,6 +1,6 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { AgentConnection, Backend } from "@novadeck/core/port"
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useMemo, useState } from "react"
 
 import {
   chooseAgent,
@@ -14,9 +14,6 @@ import {
 } from "../tour/consent"
 import { startTour, type TourEffects, type TourStarted } from "../tour/start"
 import { useWorkspaceServices } from "./controller/context"
-
-// A store that never changes, for a backend without one.
-const never = (): (() => void) => () => {}
 
 export type TourOffer = {
   // The consent while it is offered, null otherwise.
@@ -48,12 +45,7 @@ export const useTour = (
 ): TourOffer | undefined => {
   const { commands } = useWorkspaceServices()
   const [offered, setConsent] = useState<TourConsent | null>(null)
-  // Held back until the tour's story is whole (`Tour.offered`).
-  const held = useSyncExternalStore(
-    backend.tour?.offered?.subscribe ?? never,
-    () => backend.tour?.offered?.getSnapshot() !== true,
-  )
-  const tour = held ? undefined : backend.tour
+  const { tour } = backend
   // As the connections stand now: an agent that disconnects while it is offered is no longer
   // offered, and the one it was offered on is taken once it connects.
   const consent = useMemo(
@@ -61,13 +53,11 @@ export const useTour = (
     [offered, connections],
   )
   const offer = useCallback(
-    // One already starting stays as it is: the app's menu may ask again meanwhile.
+    // One already starting stays as it is.
     (preferred?: AgentName) =>
       setConsent((current) => (current?.starting ? current : offerTour(connections, preferred))),
     [connections],
   )
-  // The app's menu offers it as Preferences does.
-  useEffect(() => tour?.asked?.(() => offer()), [tour, offer])
   const start = useCallback(() => {
     if (!tour || !consent?.agent || consent.starting) return
     if (connectingAgent(connections, consent.agent)) return

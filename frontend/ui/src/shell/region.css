@@ -83,6 +83,13 @@
   padding: 3px 6px;
   border-radius: var(--radius-control);
 }
+/* A chip's word beside its icon (Feedback's, Help's). */
+.footer-chip-text {
+  margin-inline-start: 6px;
+}
+.footer-chip-text:first-child {
+  margin-inline-start: 0;
+}
 /* Specificity kept to a class and one more, so a chip's own tone (Murmur's) may follow it. */
 .app-footer .footer-update:where([aria-expanded="true"]) {
   background-color: var(--color-soft);

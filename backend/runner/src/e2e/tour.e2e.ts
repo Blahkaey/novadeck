@@ -1,7 +1,7 @@
-import { readFile, rm, writeFile } from "node:fs/promises"
+import { readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { briefFiles, startLine } from "../tour/brief.js"
+import { tourBriefMark } from "../messaging/messages.js"
 import { tourMarker } from "../tour/folder.js"
 import { tourWrites } from "../tour/launch.js"
 import { setups } from "./agents/index.js"
@@ -15,7 +15,7 @@ import { deliveries, own, prompted, result, through } from "./scenarios.js"
 // that starts the agent there; the client opens a project and a terminal with it; a
 // harness that takes no start line on its command line (Antigravity) is given it once its
 // agent has bound, by `tour.brief`. The model is a script: it follows the brief's first
-// step, calling `describe` as AGENTS.md says, and greets.
+// step, calling `describe` as lead.md says, and greets.
 
 // What the brief asks its agent to describe itself as.
 const title = "Tour lead"
@@ -24,12 +24,12 @@ const summary = "Leads Novadeck's tour"
 // The tour's folder, as the sandbox's home holds it.
 const folder = join(".novadeck", "tour")
 
-// Whether the call is the model's first look at the tour's start line, as the agent's own
-// first prompt (Claude Code, Codex) or as Novadeck's notice (Antigravity).
+// Whether the call is the model's first look at the lead's brief, which every harness takes as
+// Novadeck's notice.
 const startsTour = (call: Call): boolean =>
   !call.side &&
-  (asked(call, startLine) ||
-    deliveries(call).some((one) => one.from === "novadeck" && one.text.includes(startLine)))
+  asked(call, "brief for Novadeck") &&
+  deliveries(call).some((one) => one.from === "novadeck" && one.text.startsWith(tourBriefMark))
 
 const lead = [
   own((call) => {
@@ -83,7 +83,7 @@ for (const setup of setups) {
 
       expect(prepared.directory).toBe(join(run.sandbox.home, folder))
       expect(prepared.removed).toEqual([])
-      expect(prepared.brief).toBe(setup.agent === "agy" ? "doorbell" : "launch")
+      expect(prepared.brief).toBe("doorbell")
       // The program first, then its options, then (where it takes one) the start line last.
       const [program] = prepared.command.split(" ")
       expect(program).toBe(setup.agent)
@@ -102,13 +102,18 @@ for (const setup of setups) {
         expect(prepared.command).toContain(
           "--sandbox workspace-write --ask-for-approval on-request",
         )
-      if (prepared.brief === "launch") expect(prepared.command).toContain(startLine)
-      else expect(prepared.command).not.toContain(startLine)
+      // No prompt on the line for any harness: its brief is rung to it once it is up.
+      expect(prepared.brief).toBe("doorbell")
+      expect(prepared.command).not.toMatch(/Novadeck|AGENTS\.md/)
 
-      // Its folder: the brief, a Claude Code file that imports it, and the marker.
-      for (const [name, text] of Object.entries(briefFiles))
-        // eslint-disable-next-line no-await-in-loop -- A few small files.
-        expect(await readFile(join(prepared.directory, name), "utf8")).toBe(text)
+      // Its folder: the two files a harness loads by itself hold no role and no step (the lead's
+      // script is sent to it as a notice); a Claude Code file imports them; the marker.
+      expect(await readdir(prepared.directory)).not.toContain("lead.md")
+      for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+        // eslint-disable-next-line no-await-in-loop -- Two small files.
+        const loaded = await readFile(join(prepared.directory, name), "utf8")
+        expect(loaded).not.toMatch(/open_agent|describe|Steps|lead agent/)
+      }
       expect(await readFile(join(prepared.directory, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n")
       await expect(readFile(join(prepared.directory, tourMarker), "utf8")).resolves.toContain(
         "Novadeck's tour",
@@ -125,11 +130,12 @@ for (const setup of setups) {
       const prepared = await prepare(run)
 
       const terminal = await run.deck.openAt(prepared.directory, prepared.command)
-      // What the harness's process was started with, while it runs: not on Windows, where the
-      // runner reads no foreground process's command line (`foregroundProcess.argv` is null).
-      // There the agent binding, its greeting and no usage error on screen show it took them.
+      // What the harness's process was started with, while it runs: only on Linux, as the runner
+      // reads no foreground process's command line on Windows or macOS
+      // (`foregroundProcess.argv` is null there). There the agent binding, its greeting and no
+      // usage error on screen show it took them.
       const argv =
-        process.platform === "win32"
+        process.platform !== "linux"
           ? undefined
           : await poll(
               () => {
@@ -140,8 +146,8 @@ for (const setup of setups) {
               30_000,
             )
 
-      if (prepared.brief === "doorbell") {
-        // Plain, with nothing yet to say: its agent asks for the tour once it has bound.
+      {
+        // Plain, with nothing yet to say: its agent is rung the brief once it has bound.
         await terminal.reached("ready", { timeoutMs: 60_000 })
         await prompted(terminal, setup)
         await poll(
@@ -158,17 +164,12 @@ for (const setup of setups) {
         )
       }
       const first = await run.model.waitFor(startsTour, { after: calls, timeoutMs: 60_000 })
-      if (prepared.brief === "launch") {
-        // The agent's own first prompt, from its command line.
-        const prompt = first.turns.find((turn) => turn.role === "user")
-        expect(prompt?.text).toContain(startLine)
-        expect(deliveries(first).map((one) => one.from)).not.toContain("novadeck")
-      } else {
-        // Novadeck's notice, delivered once its prompt shows and its tools are listed.
-        expect(deliveries(first)).toEqual([
-          { from: "novadeck", text: expect.stringContaining(startLine) },
-        ])
-      }
+      // Novadeck's notice, delivered once its prompt shows and its tools are listed: the whole
+      // script, whose first step the model follows, as an agent's task.
+      const notice = deliveries(first).find((one) => one.from === "novadeck")
+      expect(notice?.text).toContain("## Steps")
+      expect(notice?.text).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
+      expect(notice?.text).toContain("welcome card for ")
       // The brief's own first step: the call to `describe`, and its greeting.
       await terminal.until("The tour has begun.", 60_000)
       await through(terminal, ["settled"])

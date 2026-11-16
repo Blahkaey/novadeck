@@ -83,7 +83,7 @@ import {
   resumeNote,
   sessionHeldElsewhere,
 } from "./resumes.js"
-import { busyReader, markBusy, Sampler, shellProcess } from "./sampling.js"
+import { alive, busyReader, markBusy, Sampler, shellProcess } from "./sampling.js"
 import { hasRun, keptState, type TerminalRecords } from "./saved-terminals.js"
 import { Saves } from "./saving.js"
 import { ShellCommands } from "./shell-commands.js"
@@ -118,17 +118,6 @@ type Create = {
 }
 type Size = { cols: number; rows: number }
 type Attach = { terminalId: string; afterSequence?: number; mode?: "control" | "observe" }
-
-// Whether process `pid` still runs; one the platform refuses to signal belongs to someone
-// else, and runs.
-const alive = (pid: string): boolean => {
-  try {
-    process.kill(Number(pid), 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM"
-  }
-}
 
 const positive = (value: number | undefined, fallback: number): number => {
   const result = value ?? fallback
@@ -308,6 +297,7 @@ export class Terminals {
       openMs: positive(options.openMs, 6_000),
       install: options.install ?? (() => Promise.resolve(undefined)),
       models: options.models ?? (() => Promise.resolve([])),
+      openPolicy: options.openPolicy ?? (() => ({})),
       hooksTrusted: options.hooksTrusted,
       items: options.items,
       platform: options.platform ?? process.platform,
@@ -709,6 +699,7 @@ export class Terminals {
       close: (terminalId, closedBy) => this.close({ terminalId }, closedBy),
       install: (agent) => this.options.install(agent),
       models: (agent) => this.options.models(agent),
+      openPolicy: (terminalId) => this.options.openPolicy(terminalId),
       closingNow: (terminalId) => this.host.closing(terminalId),
       closeForGood: (record, closedBy) => this.closeForGood(record, closedBy),
       terminate: (record) => this.terminate(record),

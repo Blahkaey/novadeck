@@ -1,6 +1,6 @@
 import { lstat, mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { DomainError } from "../errors.js"
 
@@ -49,6 +49,10 @@ export const resetTourFolder = async (
   await mkdir(folder, { recursive: true })
   await writeFile(join(folder, tourMarker), markerText)
   await Promise.all(
-    Object.entries(files).map(([name, text]) => writeFile(join(folder, name), text)),
+    Object.entries(files).map(async ([name, text]) => {
+      // A name may sit in a folder of its own (`.claude/settings.json`).
+      await mkdir(dirname(join(folder, name)), { recursive: true })
+      await writeFile(join(folder, name), text)
+    }),
   )
 }

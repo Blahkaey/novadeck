@@ -1,5 +1,7 @@
 import type { AgentFeedbackDraft, FeedbackAbout, FeedbackKind } from "@novadeck/core/feedback"
 
+import { readFirstUse, writeFirstUse } from "../interaction/first-use"
+
 // What the feedback card holds and says, apart from how it looks: the kinds and their
 // prompts, the text's limit, the send's states and which keys send.
 
@@ -98,19 +100,8 @@ export const privacyText = (about: FeedbackAbout | null): string =>
 
 export const issuesUrl = "https://github.com/novadeck-org/novadeck/issues/new"
 
-// The mark that the card was opened once, which takes the word off the button for good.
+// The mark that the card was opened once, which takes the word off the button for good. Its key
+// is what people's browsers already hold: it stays as it is.
 export const openedStorageKey = "novadeck.feedback-opened"
-export const readFeedbackOpened = (): boolean => {
-  try {
-    return localStorage.getItem(openedStorageKey) === "1"
-  } catch {
-    return false
-  }
-}
-export const writeFeedbackOpened = (): void => {
-  try {
-    localStorage.setItem(openedStorageKey, "1")
-  } catch {
-    /* The word stays for this session when storage is unavailable. */
-  }
-}
+export const readFeedbackOpened = (): boolean => readFirstUse(openedStorageKey)
+export const writeFeedbackOpened = (): void => writeFirstUse(openedStorageKey)
