@@ -175,6 +175,40 @@ describe("Canvas", () => {
         .toBeLessThan(zoomed - 20)
     })
 
+    it("keeps each terminal's screen its size as the header grows and shrinks", async () => {
+      await openCanvas()
+      await clickBackground({ x: 150, y: 100 })
+      const window = () => terminal("Checkout implementation").element()
+      // Layout sizes, which the camera's scale leaves alone: what the screen is given, and
+      // the header's place.
+      const screen = () => {
+        const element = window().querySelector<HTMLElement>(".terminal-xterm")!
+        return { width: element.offsetWidth, height: element.offsetHeight }
+      }
+      const heading = () => window().querySelector<HTMLElement>(".terminal-heading")!.offsetHeight
+      const width = () => boxOf(terminal("Checkout implementation")).width
+      const before = screen()
+      const atRest = heading()
+
+      const start = width()
+      await press("-")
+      await press("-")
+      await expect.poll(width).toBeLessThan(start - 40)
+      await settled(() => boxOf(terminal("Checkout implementation")))
+      expect(heading()).toBeGreaterThan(atRest)
+      expect(screen()).toEqual(before)
+
+      for (let step = 0; step < 10; step++) {
+        // eslint-disable-next-line no-await-in-loop -- One zoom step after another.
+        await press("+")
+      }
+      await expect.poll(width).toBeGreaterThan(start * 1.5)
+      await settled(() => boxOf(terminal("Checkout implementation")))
+      // Past zoom 1, where the header is shorter than its 52 pixels at rest.
+      await expect.poll(heading).toBeLessThan(52)
+      expect(screen()).toEqual(before)
+    })
+
     it("fits all terminals inside the view with 0", async () => {
       await openCanvas()
       await clearMiddle()

@@ -2,6 +2,14 @@
 @reference "../../styles.css";
 
 @layer components {
+  /* How much taller a window's header is at the zoom than at rest (geometry.ts
+     `headerGrowthAt`). Not inherited, so the zoom setting it every frame on a heading and a
+     terminal's screen restyles those alone, never the thousands of rows the screen holds. */
+  @property --_canvas-grown {
+    syntax: "<length>";
+    inherits: false;
+    initial-value: 0px;
+  }
   .canvas-viewport .react-flow {
     --xy-background-color: transparent;
   }
@@ -44,8 +52,27 @@
   .canvas-node .terminal-visibility[data-off-screen] {
     content-visibility: hidden;
   }
+  /* The header grows as the camera zooms out, to stay readable, and takes its room from
+     what the window holds, as it always has. The terminal's screen doesn't give it up: it
+     is as much taller than its room as the header grew, its top rows out of sight beneath
+     the header (too small to read at those zooms) and its last rows where they were. So a
+     zoom never changes a terminal's size: nothing refits, and no agent's screen is resized
+     and redrawn. Past zoom 1 the header is shorter and the screen starts that much lower.
+     Both read one value, set by the zoom as it moves (Canvas.tsx) and from the canvas's
+     chrome scale for those that mount at rest. */
+  .canvas-node .terminal-heading,
+  .canvas-node .terminal-xterm {
+    --_canvas-grown: calc(var(--_canvas-header-height) * (var(--_canvas-chrome-scale, 1) - 1));
+  }
   .canvas-node .terminal-heading {
-    height: calc(var(--_canvas-header-height) * var(--_canvas-chrome-scale));
+    height: calc(var(--_canvas-header-height) + var(--_canvas-grown));
+  }
+  .canvas-node .terminal-content {
+    overflow-y: clip;
+  }
+  /* A flexed screen: the room it fills counts its margin, so it grows by what it reaches up. */
+  .canvas-node .terminal-xterm {
+    margin-top: calc(-1 * var(--_canvas-grown));
   }
   /* The selection bar keeps its place in the header at any zoom, and its 2px width on
      screen: the node is scaled by the zoom, which the chrome scale squared undoes. */

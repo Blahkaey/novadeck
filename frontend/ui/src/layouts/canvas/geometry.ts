@@ -9,6 +9,11 @@ export const canvasStep = 24
 export const terminalHeaderHeight = 52
 // Apply half the canvas zoom strength to node headers.
 export const chromeScaleAt = (zoom: number): number => 1 / Math.sqrt(zoom)
+// How much taller a window's header is at the zoom than at rest, in world units; below zero
+// past zoom 1. The terminal's screen is that much taller than the room left beneath the
+// header, so its size never changes with the zoom (canvas.css).
+export const headerGrowthAt = (zoom: number): number =>
+  terminalHeaderHeight * (chromeScaleAt(zoom) - 1)
 // Every window on Canvas is one size.
 export const windowSize: Size = canvasWindowSize
 export const centerOf = (node: TerminalNode): XYPosition => ({

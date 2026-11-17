@@ -1,5 +1,5 @@
 import { describe, expect, it } from "../../test"
-import { inSight, onScreen } from "./geometry"
+import { headerGrowthAt, inSight, onScreen, terminalHeaderHeight } from "./geometry"
 
 const viewport = { x: 0, y: 0, zoom: 1 }
 const screen = { width: 1000, height: 800 }
@@ -24,5 +24,13 @@ describe("a window in sight", () => {
     expect(inSight({ x: -863, y: -575 }, viewport, screen)).toBe(true)
     expect(inSight({ x: 1000, y: 0 }, viewport, screen)).toBe(false)
     expect(inSight({ x: 0, y: -576 }, viewport, screen)).toBe(false)
+  })
+})
+
+describe("a window's header at a zoom", () => {
+  it("grows as the camera zooms out, and shrinks past zoom 1", () => {
+    expect(headerGrowthAt(1)).toBe(0)
+    expect(headerGrowthAt(0.25)).toBe(terminalHeaderHeight)
+    expect(headerGrowthAt(1.5)).toBeLessThan(0)
   })
 })
