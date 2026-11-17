@@ -141,6 +141,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       remove: (input) =>
         note(`remove project ${input.projectId}`, () => runner.projects.remove(input)),
       folder: (input) => runner.projects.folder(input),
+      browse: (input) => runner.projects.browse(input),
     },
     sessions: {
       list: (input) => runner.sessions.list(input),
@@ -268,6 +269,15 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
     history: {
       list: (input) => runner.history.list(input),
       watch: () => runner.history.watch(),
+      remove: (input) => note("remove closed", () => runner.history.remove(input)),
+    },
+    notes: {
+      list: (input) => runner.notes.list(input),
+      watch: () => runner.notes.watch(),
+      add: (input) => note(`add note ${input.id}`, () => runner.notes.add(input)),
+      update: (input) => note(`update note ${input.id}`, () => runner.notes.update(input)),
+      move: (input) => note(`move note ${input.id}`, () => runner.notes.move(input)),
+      remove: (input) => note("remove notes", () => runner.notes.remove(input)),
     },
     works: {
       watch: () => runner.works.watch(),

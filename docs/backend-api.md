@@ -97,6 +97,70 @@ connect directly over WSS; it does not need a terminal backend on Cloudflare.
 Follow the [runner trust boundary](../SECURITY.md#terminal-runner) before exposing
 the service. There is no TLS, login page, or public multi-user hosting layer here.
 
+### The desktop app on another machine's runner
+
+The desktop app connects to a standalone runner on another machine, in place of starting
+its own, when its data folder holds a `remote-runner.json` (`~/Library/Application
+Support/novadeck` on macOS, `~/.config/novadeck` on Linux, `%APPDATA%\novadeck` on Windows).
+Choose **Runner → Remote Runner…** to set it up, including from local mode. The form asks
+for the address, token and optional pages proxy; a blank token keeps the saved one.
+**Save and Restart** checks the fields and an authenticated connection (up to ten seconds),
+then saves with owner-only permissions and restarts after the workspace saves. A failure
+stays in the form with its reason. **Use this computer's runner** keeps the file as
+`remote-runner.off.json` and restarts locally; opening settings again reads that saved copy.
+The menu names the remote host and its connection state, and the native window title names
+the host too.
+
+The same file can still be written by hand:
+
+```json
+{
+  "url": "ws://127.0.0.1:8787/api/rpc",
+  "token": "the runner's NOVADECK_TOKEN",
+  "pagesProxy": "socks5://127.0.0.1:1080"
+}
+```
+
+The runner stays on loopback, and SSH carries it: `ssh -N -L 8787:127.0.0.1:8787 -D 1080
+user@machine` forwards the runner's port, and opens the SOCKS proxy `pagesProxy` names.
+`url` is a `ws:` address on this machine, as such a tunnel gives, or a `wss:` one; the app
+refuses an unencrypted address anywhere else, as the token crosses in the handshake. The
+main process carries each port its page asks for to that WebSocket (`tunnelPort` in
+`@novadeck/wire/electron`) and adds the token there, so the page never holds it. A file
+that can't be read or understood stops the launch with **Open Settings…** and **Quit**;
+the app never falls back to a runner of its own. Keep the file readable by its owner only.
+
+With a remote runner:
+
+- Shells, agents, projects and files are the runner's machine's. Quitting the app only
+  disconnects: the runner and its shells run on, and the next launch finds them.
+- Each connection pings the runner every 20 seconds and is dropped when no answer comes
+  within 10, or when it takes more than 15 seconds to open; every connection is dropped as
+  the machine wakes from sleep. The page then reconnects, rather than wait on a link that
+  looks open while nothing reaches the runner. The log says so once (`remote.stalled`),
+  naming the runner by its origin alone.
+- Open folder browses the runner's machine in a small window that runs no script: it starts
+  in the runner owner's home folder, its subfolders are links, with the folder above, the
+  home folder and the projects' folders to start from, and its path field takes a typed
+  path. "Open this folder" opens the folder shown, or the path typed, once the runner has
+  looked at it (`projects.browse`, which only looks); one it can't show stays, with the
+  reason.
+- A file pasted or dropped into a terminal is sent as a copy, as from a browser: its path
+  on this machine names nothing there.
+- With `pagesProxy`, the companion pane's pages load through it, loopback addresses
+  included, so `localhost:3000` is the runner's machine's. Without it they load from this
+  machine. A link opened in the system's browser is always this machine's.
+- The standalone runner keeps no transcript key of its own, so it saves and shows no
+  terminal's earlier output, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for one: it
+  makes the key there on its first start, and refuses to start on a file there it can't use
+  (see [SECURITY.md](../SECURITY.md#terminal-runner)). With it, restored terminals show what
+  they last showed, and Preferences offers the switch that turns saving off.
+- The standalone runner caps running and kept terminals together at 32, where the desktop
+  app's own runner has no cap. `NOVADECK_MAX_TERMINALS` sets another cap, a positive whole
+  number, or `none` for no cap; any other value stops the start.
+- The app and the runner must be the same build: the protocol's version doesn't change
+  with every change to its calls.
+
 ## Runner API
 
 The runner owns shells and workspace metadata. The UI talks to it through one
@@ -363,7 +427,13 @@ const entries = await runner.inbox.list()
 await runner.inbox.answer(askId, { type: "reply", option: null, text: "Use green" })
 await runner.inbox.answer(actionAskId, { type: "done" })
 await runner.inbox.read(updateIds)
+await runner.inbox.clear()
 ```
+
+`clear` is the person clearing the Inbox of what asks nothing of them: it reads every open tell
+and done report, and takes every resolved entry out of the listing for good, the ones past the
+ten too. Open asks and finished turns are not touched, and the entries stay in their terminals'
+messages.
 
 Listed entries are the open ones, and the ten that resolved last (an ask answered, dismissed or
 replied to, a tell or done read, either ended with its session or terminal, whether or not the
@@ -1652,8 +1722,18 @@ one from an earlier runner.
   - `history.list({ projectId })` answers the project's rows, newest first; a project with
     none, or one the runner doesn't have, answers none.
   - `history.watch()` streams every row across projects, `synced`, then `changed` (a close, or a
-    change of availability) and `removed` (a restored or pruned row). The client's
+    change of availability) and `removed` (a restored, pruned or removed row). The client's
     `history.watch()` yields `reset` before each fresh sequence, as `terminals.watch()` does.
+  - `history.remove({ ids })` deletes those rows for good on the person's say, 1 to 1000 ids
+    of any project (`maxHistoryRemoved`), as the prune deletes old ones: in one write through
+    the store's `forget`, with each row's `removed` to watchers, and with the same word to
+    worktree cleanup (see agent-workspace.md, "Worktrees"), except for a row a
+    running terminal was restored from, whose worktrees that restore hands over once
+    confirmed. It resolves with nothing. Passed over, and left as they are: an id the runner
+    doesn't have, a row that reads `restoring`, and a plain row restored whose new terminal has
+    yet to save the output it took over (it reads `open`, and goes by itself once that is
+    saved). A write that fails rejects, with no row gone. The UI's adapter sends more than
+    1000 ids as several calls, one after another, and stops at the first that fails.
   - `terminals.create({ id, sessionId, cols, rows, closed })` restores row `closed` as the
     new terminal `id`, with nothing else to say. An unknown row is `NOT_FOUND`; one that can't
     be restored now is `CONFLICT`.
@@ -1666,6 +1746,56 @@ one from an earlier runner.
     unchanged by it. It clears when the process ends, when the system can't tell for about
     five seconds, and when the agent leaves or the terminal exits, restarts or rests. The agents
     listing counts it as working. The field may be absent, which reads as null.
+
+- `notes.*` keeps the person's own notes on each project, for the Notes panel: todos, which
+  they check off, and plain notes, in their order. A note has the `id` its client gave it,
+  its `projectId`, `text` (one line, 1 to 500 characters, trimmed, `singleLine`), `body`
+  (Markdown, up to 8,000 characters, empty for none), `todo` (whether it has a checkbox),
+  `doneAt` (when it was checked off, in epoch milliseconds; null while it is open, and always
+  on a plain note), `createdAt` and, on a note an agent added, `by`: `{ agent, handle }`, the
+  harness and its terminal's handle then, as a feedback draft names its author. A note the
+  person wrote has no `by`, and no change of theirs adds, alters or removes one. A project
+  keeps at most 200 (`noteLimits`). Agents only add, through the MCP `note` tool (below). The
+  runner keeps a project's notes whole, as one row of the `settings` table under
+  `notes.<project id>`, so they need no table and no schema change; each write goes through
+  the store's `forget` (so `secure_delete` and the scrub apply to what it replaces), and
+  removing a project deletes its row in the same transaction. A note is kept with `by` only
+  where it has one, so a row of the person's notes is the same text it was. A row that can't
+  be read is logged and reads as no notes; a field the build doesn't know, as a later build
+  writes, is dropped from what it reads rather than empty the row. Every change answers with
+  the project's notes as it left them; a project the runner doesn't have is `NOT_FOUND`, and
+  so is a note its project doesn't.
+  - `notes.list({ projectId })` answers the project's notes, in the person's order.
+  - `notes.watch()` streams a `changed` with the whole notes of each project that has any,
+    `synced`, then a project's notes whole each time they change (none once its last note is
+    removed, or the project is). The client's `notes.watch()` yields `reset` before each
+    fresh sequence, as `history.watch()` does.
+  - `notes.add({ id, projectId, text, todo })` adds the person's note first in the project's
+    list, open, with no body and no `by`. An id the project already has is a `CONFLICT`, as
+    is one note more than a project keeps.
+  - `notes.update({ projectId, id, text?, body?, todo?, done? })` changes what is given. A
+    todo checked off is done from then, and keeps that time if checked again; a plain note
+    is never done, so `todo: false` opens it. A body keeps no white space at its end.
+  - `notes.move({ projectId, id, index })` moves an open note to `index` among the project's
+    open notes, within their ends; the done ones keep their places. One that is checked off
+    is a `CONFLICT`.
+  - `notes.remove({ projectId, ids })` deletes 1 to 200 notes for good; an id the project
+    doesn't have is skipped.
+  - The UI's adapter shows each change at once, over what the runner last reported, and
+    takes the runner's answer in its place; a change the runner refuses leaves the notes as
+    the runner has them and sets the port's `notes.state.failed` until a change takes.
+  - The MCP `note` tool, the agents' only way in, adds 1 to 20 notes (`noteLimits.perCall`),
+    each `{ text, todo?, body? }` (a todo unless `todo` is false), first in the caller's
+    project's list in the order given, each with a runner-made id and `by` naming the
+    caller; watchers see them as any change. It can't read, change or remove a note. The
+    runner refuses it unless a root turn runs in the caller's terminal that the person's own
+    submission started (`Messaging.personTurn`: never one the doorbell, the harness or an
+    opening agent's command-line prompt started) and no other agent's message has been
+    leased into it since, at its prompt, a tool call or a Stop Novadeck continued; the
+    person's Inbox replies and Novadeck's notices don't count. A terminal's agents add 20
+    notes a minute at most, and a list that would take the project past 200 is refused
+    whole. Its answer is how many todos and plain notes went in. The server's instructions
+    and Novadeck's per-turn notices never mention it.
 
 - `companions.*` keeps what agents show and the person attaches beside terminals: items,
   each a pointer to a file, a page or a plan, never a copy of it, held by exactly one

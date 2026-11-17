@@ -36,9 +36,9 @@ export type Ack = { readonly terminalId: string; readonly token: string; readonl
  * `release` ends such a lead (see `terminals/leads.ts`), `worktrees` (whether the person turned them on, which the tools' listing asks), `openWorktree`, `takeWorktree`,
  * `closeWorktree` and `giveWorktree` make, claim, remove and hand on the git worktrees agents
  * work in (see `worktrees/calls.ts`), and `send`, `agents` and `team` message other terminals' agents and
- * describe them (see `messaging/sending.ts`), and `describe` names and says what the caller's own
- * terminal works on (see `terminals/describe-request.ts`); the runner reads `request`, and nothing
- * here does.
+ * describe them (see `messaging/sending.ts`), `describe` names and says what the caller's own
+ * terminal works on (see `terminals/describe-request.ts`), and `note` adds to the person's Notes as
+ * they asked (see `terminals/note-request.ts`); the runner reads `request`, and nothing here does.
  */
 export type Call = {
   readonly type: CallType
@@ -70,6 +70,7 @@ const callTypes = [
   "tell",
   "done",
   "feedback",
+  "note",
 ] as const
 export type CallType = (typeof callTypes)[number]
 
@@ -98,6 +99,7 @@ export const unansweredCalls = {
   tell: { ok: false, reason: "Novadeck couldn't save the update." },
   done: { ok: false, reason: "Novadeck couldn't save the report." },
   feedback: { ok: false, reason: "Novadeck couldn't save the feedback draft." },
+  note: { ok: false, reason: "Novadeck couldn't add to the user's Notes." },
   describe: { ok: false, reason: "Novadeck couldn't describe the terminal." },
   models: { ok: false, reason: "Novadeck couldn't list the models." },
 } as const satisfies { readonly [type in CallType]: { ok: false; reason: string } }

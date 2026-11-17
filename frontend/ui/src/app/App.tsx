@@ -1,4 +1,5 @@
 import { allTeams, leadChain, litTeams, sameLitTeams, sameTeams } from "@novadeck/core/derivations"
+import { noNotes, todosLeft, type NotesState } from "@novadeck/core/notes"
 import type { Backend, BackendSelection, CreateBackend, TerminalKey } from "@novadeck/core/port"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
@@ -43,7 +44,7 @@ import { HeaderSection } from "./HeaderSection"
 import { dropWords } from "./history-drops"
 import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
-import { historyShown, filesShown } from "./routing"
+import { historyShown, filesShown, notesShown } from "./routing"
 import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
@@ -209,13 +210,15 @@ const TeamWireSection = ({
 
 // What a backend without worktrees made: none.
 const noneMade = createStore<WorksMade>(new Map())
+// What a backend without notes keeps: none.
+const noneNoted = createStore<NotesState>(noNotes)
 
 // The rail and the Zen dock read the bell's badge and rings themselves, so an unread change that
 // leaves them as they were re-renders neither them nor the app around them.
 const RailWithBadge = (
   props: Omit<
     ComponentProps<typeof SidebarRail>,
-    "badge" | "bellRings" | "historyDrops" | "lastDrop" | "sessionsAsk" | "worksMade"
+    "badge" | "bellRings" | "historyDrops" | "lastDrop" | "sessionsAsk" | "worksMade" | "todosLeft"
   >,
 ): React.JSX.Element => {
   const { backend } = useWorkspaceServices()
@@ -226,6 +229,8 @@ const RailWithBadge = (
   const madeIn = useCallback((counts: WorksMade) => counts.get(projectId) ?? 0, [projectId])
   const made = useStoreSelector(backend.works?.made ?? noneMade, madeIn)
   const worksMade = useMemo(() => ({ count: made, projectId }), [made, projectId])
+  const left = useCallback((state: NotesState) => todosLeft(state.notes, projectId), [projectId])
+  const toDo = useStoreSelector(backend.notes?.state ?? noneNoted, left)
   return (
     <SidebarRail
       {...props}
@@ -235,6 +240,7 @@ const RailWithBadge = (
       lastDrop={lastDrop ? dropWords(lastDrop) : undefined}
       sessionsAsk={elsewhereSessionsText(marks, openId)}
       worksMade={worksMade}
+      todosLeft={toDo}
     />
   )
 }
@@ -297,6 +303,7 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
       hasFiles={filesShown(services.backend)}
       hasHistory={historyShown(services.backend)}
       hasWorktrees={worktreesShown}
+      hasNotes={notesShown(services.backend)}
       order={railOrder}
       onOrder={(order) => {
         setRailOrder(order)

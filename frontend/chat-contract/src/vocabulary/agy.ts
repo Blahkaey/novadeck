@@ -338,6 +338,21 @@ export const agyVocabulary: readonly Written[] = [
           "Asked.",
         ],
         [`${novadeck}ask`, { withdraw: "00000000-0000-4000-8000-000000000001" }, "Withdrew."],
+        [
+          `${novadeck}note`,
+          { notes: [{ text: "Revisit the retry logic", body: "Backoff caps at 30 s." }] },
+          "Added a todo.",
+        ],
+        [
+          `${novadeck}note`,
+          {
+            notes: [
+              { text: "Rename the queue" },
+              { text: "Staging runs with the flag off", todo: false },
+            ],
+          },
+          "Added a todo and a note.",
+        ],
       ],
       0,
     ),

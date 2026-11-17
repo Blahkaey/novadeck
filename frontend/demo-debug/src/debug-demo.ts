@@ -43,6 +43,7 @@ import { installGroups } from "./installs"
 import { launchGroups } from "./launch"
 import { messageGroups } from "./messages"
 import { murmurGroups } from "./murmur"
+import { notesGroups } from "./notes"
 import { planGroups } from "./plans"
 import { createDemoStates } from "./states"
 import { sessionTarget } from "./terminals"
@@ -299,6 +300,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...murmurGroups(isDemoMurmur(inner.murmur) ? inner.murmur : undefined),
           ...voiceGroups(isDemoVoice(inner.voice) ? inner.voice : undefined),
           ...historyGroups(inner.history),
+          ...notesGroups(inner.notes),
           ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined),
           ...worksGroups(inner.works),
           ...forgesGroups(launch, inner),

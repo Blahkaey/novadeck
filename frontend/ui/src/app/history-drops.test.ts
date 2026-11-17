@@ -96,7 +96,11 @@ context("the words for a landing", () => {
 
 context("the close button's tooltip", () => {
   const keeps = {
-    history: { state: createStore<HistoryState>({ rows: [] }), list: async () => [] },
+    history: {
+      state: createStore<HistoryState>({ rows: [] }),
+      list: async () => [],
+      remove: async () => {},
+    },
   }
   const window: Tile = {
     id: "w1",

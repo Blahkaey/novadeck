@@ -67,6 +67,19 @@ export type Live = Scope & {
   /** The prompt that started the current root turn, by its delivery epoch; null before any. */
   prompt: { readonly epoch: number; readonly text: string } | null
   /**
+   * The delivery epoch of the latest root turn another agent's message was leased into, at
+   * its prompt, a tool call or a Stop Novadeck continued, so its words may be in that turn;
+   * null before any.
+   */
+  othersIn: number | null
+  /**
+   * The word of a root turn a prompt hook came during (Codex's steer, Claude Code's queue),
+   * carried to the epoch that hook started for as long as that turn runs, so a prompt of the
+   * person's makes no turn theirs that wasn't: `others` where another agent's message had
+   * reached it, `notTheirs` where their own submission hadn't started it; null for none.
+   */
+  inherited: { readonly epoch: number; readonly whose: "others" | "notTheirs" } | null
+  /**
    * The person's prompt whose asks are yet to be withdrawn with their notice: when they
    * submitted it, and the delivery epoch of the turn it started, which alone may pay it.
    */
@@ -140,6 +153,8 @@ export const started = (
   escapeTold: null,
   lapsed: false,
   prompt: null,
+  othersIn: null,
+  inherited: null,
   automatic: [],
   withdrawing: null,
   keyedAt: 0,

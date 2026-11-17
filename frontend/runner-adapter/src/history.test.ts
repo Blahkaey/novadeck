@@ -1,5 +1,6 @@
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { BackendAction } from "@novadeck/core/port"
+import { maxHistoryRemoved } from "@novadeck/protocol"
 import type { HistoryWatchItem } from "@novadeck/runner-client"
 import { WireError } from "@novadeck/wire"
 import { vi } from "vitest"
@@ -26,16 +27,21 @@ const closed = (n: number, change: Partial<ClosedTerminal> = {}): ClosedTerminal
   ...change,
 })
 
-const followed = (listing: (projectId: string) => ClosedTerminal[] = () => []) => {
+const followed = (
+  listing: (projectId: string) => ClosedTerminal[] = () => [],
+  removing: (ids: readonly string[]) => Promise<void> = async () => {},
+) => {
   const stream = channel<HistoryWatchItem>()
   const listed: string[] = []
+  const removed: (readonly string[])[] = []
   const { history, follow, stop } = createRunnerHistory({
     list: async ({ projectId }) => (listed.push(projectId), listing(projectId)),
     watch: () => stream.iterator,
+    remove: ({ ids }) => (removed.push(ids), removing(ids)),
   })
   follow()
   const ids = () => history.state.getSnapshot().rows.map((row) => row.id)
-  return { history, stream, stop, ids, listed }
+  return { history, stream, stop, ids, listed, removed }
 }
 
 describe("History, as the runner reports it", () => {
@@ -94,6 +100,7 @@ describe("a project's rows read while the stream speaks", () => {
     const { history, follow } = createRunnerHistory({
       list: () => new Promise((resolve) => (answer = resolve)),
       watch: () => stream.iterator,
+      remove: async () => {},
     })
     follow()
     const ids = () => history.state.getSnapshot().rows.map((row) => row.id)
@@ -113,6 +120,56 @@ describe("a project's rows read while the stream speaks", () => {
     expect((await listed).map((row) => row.id)).toEqual([id(3), id(1)])
     expect(ids()).toEqual([id(3), id(1)])
     expect(history.state.getSnapshot().rows[1]?.availability).toEqual({ state: "restoring" })
+  })
+})
+
+describe("removing closed terminals", () => {
+  it("asks the runner to delete them, and drops each as the stream reports it gone", async () => {
+    const { history, stream, ids, removed } = followed()
+    stream.push({ type: "reset" })
+    stream.push({ type: "changed", closed: closed(1) })
+    stream.push({ type: "changed", closed: closed(2) })
+    stream.push({ type: "synced" })
+    await vi.waitFor(() => expect(ids()).toEqual([id(2), id(1)]))
+    await history.remove([id(2)])
+    expect(removed).toEqual([[id(2)]])
+    // The runner's word takes the row away, not the call's answer.
+    expect(ids()).toEqual([id(2), id(1)])
+    stream.push({ type: "removed", id: id(2), projectId: "p" })
+    await vi.waitFor(() => expect(ids()).toEqual([id(1)]))
+  })
+
+  it("rejects when the runner couldn't, and keeps the rows", async () => {
+    const { history, stream, ids } = followed(undefined, async () => {
+      throw new WireError("INTERNAL")
+    })
+    stream.push({ type: "reset" })
+    stream.push({ type: "changed", closed: closed(1) })
+    stream.push({ type: "synced" })
+    await vi.waitFor(() => expect(ids()).toEqual([id(1)]))
+    await expect(history.remove([id(1)])).rejects.toMatchObject({ code: "INTERNAL" })
+    expect(ids()).toEqual([id(1)])
+  })
+
+  it("asks for no more than one call takes at a time, and for nothing with no ids", async () => {
+    const { history, removed } = followed()
+    await history.remove([])
+    expect(removed).toEqual([])
+    const many = Array.from({ length: maxHistoryRemoved + 2 }, (_, index) => id(index + 1))
+    await history.remove(many)
+    expect(removed.map((ids) => ids.length)).toEqual([maxHistoryRemoved, 2])
+    expect(removed.flat()).toEqual(many)
+  })
+
+  it("stops at the first call that fails", async () => {
+    let calls = 0
+    const { history, removed } = followed(undefined, async () => {
+      calls += 1
+      if (calls === 2) throw new WireError("INTERNAL")
+    })
+    const many = Array.from({ length: 2 * maxHistoryRemoved + 1 }, (_, index) => id(index + 1))
+    await expect(history.remove(many)).rejects.toMatchObject({ code: "INTERNAL" })
+    expect(removed).toHaveLength(2)
   })
 })
 

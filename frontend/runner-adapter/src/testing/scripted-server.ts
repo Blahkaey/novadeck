@@ -161,6 +161,7 @@ export const scriptedRunner = ({
       arrange: api.projects.arrange.handler(() => {}),
       remove: api.projects.remove.handler(unplayed("projects.remove")),
       folder: api.projects.folder.handler(unplayed("projects.folder")),
+      browse: api.projects.browse.handler(unplayed("projects.browse")),
     },
     sessions: {
       list: api.sessions.list.handler(() => [session]),
@@ -284,6 +285,15 @@ export const scriptedRunner = ({
     history: {
       list: api.history.list.handler(() => []),
       watch: api.history.watch.handler(idle),
+      remove: api.history.remove.handler(unplayed("history.remove")),
+    },
+    notes: {
+      list: api.notes.list.handler(() => []),
+      watch: api.notes.watch.handler(idle),
+      add: api.notes.add.handler(unplayed("notes.add")),
+      update: api.notes.update.handler(unplayed("notes.update")),
+      move: api.notes.move.handler(unplayed("notes.move")),
+      remove: api.notes.remove.handler(unplayed("notes.remove")),
     },
     works: {
       watch: api.works.watch.handler(idle),
@@ -320,6 +330,7 @@ export const scriptedRunner = ({
       answer: api.inbox.answer.handler(unplayed("inbox.answer")),
       read: api.inbox.read.handler(unplayed("inbox.read")),
       dismiss: api.inbox.dismiss.handler(unplayed("inbox.dismiss")),
+      clear: api.inbox.clear.handler(unplayed("inbox.clear")),
     },
     feedback: {
       watch: api.feedback.watch.handler(idle),

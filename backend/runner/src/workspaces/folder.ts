@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process"
 import type { Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
-import { isAbsolute, join, relative, sep } from "node:path"
+import { homedir } from "node:os"
+import { dirname, isAbsolute, join, relative, sep } from "node:path"
 
-import type { FolderListing } from "@novadeck/protocol"
+import type { FolderBrowse, FolderListing } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { gitEnv, gitPath } from "../git.js"
@@ -122,6 +123,23 @@ const kindOf = async (directory: string, dirent: Dirent): Promise<Found | undefi
 }
 
 /**
+ * The entries of `directory`, a real path, as a listing shows them: sorted, and without git's
+ * own `.git`. `INVALID_DIRECTORY` for one that is no folder or can't be read.
+ */
+const entriesOf = async (directory: string): Promise<Found[]> => {
+  const dirents = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code
+    throw invalid(code === "ENOTDIR" ? "That isn't a folder." : "That folder can't be read.")
+  })
+  const found = await Promise.all(
+    dirents.map((dirent) => (dirent.name === ".git" ? undefined : kindOf(directory, dirent))),
+  )
+  const listed = found.filter((entry) => entry !== undefined)
+  listed.sort(byOrder)
+  return listed
+}
+
+/**
  * One folder of a project's directory, `folder` being its path from the project's root
  * (`src/cart`, or "" for the root). Folders come first, then files, each by name without case or a leading dot; git's own
  * `.git` is left out. `INVALID_DIRECTORY` for a path that is badly formed, a folder that is
@@ -139,15 +157,7 @@ export const listFolder = async (
   const directory = await realpath(join(real, ...names)).catch(() => undefined)
   if (directory === undefined) throw invalid("That folder is gone.")
   if (!within(real, directory)) throw invalid("That folder is outside the project.")
-  const dirents = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-    const code = (error as NodeJS.ErrnoException).code
-    throw invalid(code === "ENOTDIR" ? "That isn't a folder." : "That folder can't be read.")
-  })
-  const found = await Promise.all(
-    dirents.map((dirent) => (dirent.name === ".git" ? undefined : kindOf(directory, dirent))),
-  )
-  const listed = found.filter((entry) => entry !== undefined)
-  listed.sort(byOrder)
+  const listed = await entriesOf(directory)
   const entries = listed.slice(0, limit)
   const ignored = await ignoredNames(directory, entries)
   return {
@@ -157,5 +167,31 @@ export const listFolder = async (
       ignored: ignored.has(name),
     })),
     truncated: listed.length > entries.length,
+  }
+}
+
+/**
+ * A folder of the runner's machine and the folders in it, for a client that picks a project's
+ * folder there: `path` absolute, or the runner owner's home folder without one. Answers its
+ * real path, its parent's (null at the root) and its folders by name, sorted as a listing is,
+ * at most `limit` of them. Unlike `listFolder`, it never asks git what is ignored: picking a
+ * folder has no use for it. `INVALID_DIRECTORY` for a path that isn't absolute, is missing,
+ * is no folder or can't be read.
+ */
+export const browseFolder = async (
+  path: string | undefined,
+  limit: number = maxFolderEntries,
+): Promise<FolderBrowse> => {
+  const given = path ?? homedir()
+  if (given.includes("\0") || !isAbsolute(given)) throw invalid("That isn't a full path.")
+  const directory = await realpath(given).catch(() => undefined)
+  if (directory === undefined) throw invalid("No folder has that path.")
+  const folders = (await entriesOf(directory)).filter((entry) => entry.folder)
+  const parent = dirname(directory)
+  return {
+    path: directory,
+    parent: parent === directory ? null : parent,
+    folders: folders.slice(0, limit).map(({ name }) => name),
+    truncated: folders.length > limit,
   }
 }

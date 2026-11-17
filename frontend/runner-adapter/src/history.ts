@@ -1,11 +1,13 @@
 import type { ClosedTerminal, History, HistoryState } from "@novadeck/core/history"
 import { createStore } from "@novadeck/core/store"
+import { maxHistoryRemoved } from "@novadeck/protocol"
 import type { Runner } from "@novadeck/runner-client"
 
 import { consume } from "./streams"
 
-// The runner's History: every closed terminal as `history.watch` reports them, and a
-// project's rows read afresh when the pane opens, which also checks their availability.
+// The runner's History: every closed terminal as `history.watch` reports them, a project's
+// rows read afresh when the pane opens, which also checks their availability, and the rows
+// the person removes, which leave as the stream reports them gone.
 
 export type RunnerHistory = {
   readonly history: History
@@ -104,6 +106,13 @@ export const createRunnerHistory = (
       } finally {
         listing.delete(touched)
       }
+    },
+    remove: async (ids) => {
+      // In calls of no more ids than the runner takes at once, one after another: the first
+      // that fails rejects, with the rows of the calls before it gone.
+      for (let from = 0; from < ids.length; from += maxHistoryRemoved)
+        // eslint-disable-next-line no-await-in-loop -- One call at a time, stopping at a failure.
+        await track(calls.remove({ ids: ids.slice(from, from + maxHistoryRemoved) }))
     },
   }
   return { history, follow, stop }

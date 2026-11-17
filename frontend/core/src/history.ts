@@ -3,7 +3,8 @@ import type { Store } from "./store"
 
 // History: the terminals closed in the last 7 days, per project, to restore. A backend that
 // keeps them reports every row (`state`) and reads a project's rows afresh when the pane
-// opens (`list`); it restores one when `newTerminal` is given its id as `closed`.
+// opens (`list`); it restores one when `newTerminal` is given its id as `closed`, and deletes
+// those the person removes (`remove`).
 
 // Whether a closed terminal can be restored now. `gone` says what is missing, the
 // conversation or the folder it ran in; `disconnected` names the agent whose harness is not
@@ -43,4 +44,9 @@ export type History = {
   // A project's rows as they are now, with their availability checked, newest first; the
   // state takes them too. Rejects when the backend cannot say.
   readonly list: (projectId: string) => Promise<readonly ClosedTerminal[]>
+  // Deletes the rows of these ids for good, with what the backend saved for them: they can't
+  // be restored after. An id it doesn't have, and a row being restored, are passed over. The
+  // rows leave the state as the backend reports them gone, which may be after this resolves.
+  // Rejects when the backend couldn't delete them.
+  readonly remove: (ids: readonly string[]) => Promise<void>
 }

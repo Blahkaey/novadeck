@@ -26,6 +26,17 @@ export const folderListing = z.strictObject({
   ),
   truncated: z.boolean(),
 })
+// A folder of the runner's machine, as `projects.browse` shows it to a client picking a
+// project's folder there: its real path, its parent's (null at the root), and the folders in
+// it by name, sorted as `projects.folder` sorts them. `truncated` says it holds more folders
+// than are listed.
+export const folderBrowse = z.strictObject({
+  path: directory,
+  parent: directory.nullable(),
+  folders: z.array(z.string().min(1).max(4096)),
+  truncated: z.boolean(),
+})
+
 export const workspaceSession = z.strictObject({
   id,
   projectId: id,
@@ -39,4 +50,5 @@ export const workspaceSession = z.strictObject({
 
 export type Project = z.infer<typeof project>
 export type FolderListing = z.infer<typeof folderListing>
+export type FolderBrowse = z.infer<typeof folderBrowse>
 export type WorkspaceSession = z.infer<typeof workspaceSession>

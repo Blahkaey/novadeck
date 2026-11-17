@@ -127,7 +127,9 @@ export class Settings {
   }
 
   runner(): RunnerSettings {
-    const rows = this.queries.all`SELECT key, value FROM settings` as {
+    // Not the projects' notes, which the table keeps beside the settings (`saveNotes`) and
+    // which can be long.
+    const rows = this.queries.all`SELECT key, value FROM settings WHERE key NOT LIKE 'notes.%'` as {
       key: string
       value: string
     }[]

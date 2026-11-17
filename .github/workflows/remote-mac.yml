@@ -1,0 +1,72 @@
+name: Remote Mac App
+
+# This fork's own build of the desktop app for an Intel Mac, which connects to a runner on
+# another machine (see "The desktop app on another machine's runner" in docs/backend-api.md).
+# It is packaged as Package packages a pull request's: unsigned, as version 0.0.0, which looks
+# for no updates, and without the voice and murmur engines, which a remote runner's machine
+# holds; but for Intel alone, on an Intel runner. The disk image is kept as an artifact of the
+# run. Runs when the branch moves, and by hand.
+on:
+  push:
+    branches: [remote-runner]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push replaces a build still under way.
+concurrency:
+  group: remote-mac-intel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: macOS (Intel)
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - name: Check Out Source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Not pnpm/setup, as the other workflows have it: that installs pnpm's own binary, and
+      # pnpm 11 has none that works on an Intel Mac (pnpm/pnpm#11423). Node is set up by
+      # itself, the one .nvmrc names, and pnpm installed through npm, which runs on that Node.
+      - name: Set Up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      # The version package.json pins.
+      - name: Set Up pnpm
+        shell: bash
+        run: |
+          version="$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')"
+          npm install --global "pnpm@$version"
+          pnpm --version
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # What package:mac does, less the universal build: the relay is built for this runner's
+      # chip, with the Rust its rust-toolchain.toml names, and the builder is asked for a disk
+      # image for x64 alone (a target named here overrides the configured universal ones).
+      # The app's update feed names this repository, as Package's does.
+      - name: Package Application
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          pnpm --workspace-root exec turbo run build --filter=@novadeck/desktop
+          pnpm --dir apps/desktop exec electron-builder --mac dmg --x64 --publish never \
+            "-c.publish.owner=${REPOSITORY%%/*}" "-c.publish.repo=${REPOSITORY#*/}"
+          ls -l apps/desktop/release
+
+      - name: Upload App
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: novadeck-mac-intel
+          path: apps/desktop/release/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

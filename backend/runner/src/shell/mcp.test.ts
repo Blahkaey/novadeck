@@ -10,6 +10,7 @@ import {
   inboxEntry,
   maxAskOptions,
   maxFeedbackText,
+  noteLimits,
   startupCommand,
 } from "@novadeck/protocol"
 import { relayPath } from "@novadeck/relay"
@@ -175,6 +176,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       "team",
       "describe",
       "feedback",
+      "note",
     ])
     // Each as MCP lists a tool, without what the server keeps for itself.
     for (const tool of tools?.result?.tools ?? [])
@@ -1433,6 +1435,47 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     })
   })
 
+  it("forwards the notes the user asked for, and says how many went in, in its words", async () => {
+    const call = async (args: unknown, reply: unknown) => {
+      calls.length = 0
+      answer = reply
+      const [, result] = await session(terminal(), [
+        initialize,
+        { id: 3, method: "tools/call", params: { name: "note", arguments: args } },
+      ])
+      return result?.result
+    }
+    const notes = [{ text: "Revisit the retry logic", body: "Backoff caps at 30 s." }]
+    expect(await call({ notes, extra: "dropped" }, { ok: true, todos: 1, notes: 0 })).toEqual({
+      isError: false,
+      content: [
+        {
+          type: "text",
+          text: "Added a todo to the user's Notes. Add no more unless they ask.",
+        },
+      ],
+    })
+    expect(calls).toEqual([expect.objectContaining({ type: "note", request: { notes } })])
+    const text = async (todos: number, plain: number) =>
+      JSON.stringify(await call({ notes }, { ok: true, todos, notes: plain }))
+    expect(await text(3, 0)).toContain("Added 3 todos to the user's Notes.")
+    expect(await text(0, 1)).toContain("Added a note to the user's Notes.")
+    expect(await text(1, 2)).toContain("Added a todo and 2 notes to the user's Notes.")
+    // The runner's refusal is the agent's to act on: no nudge toward feedback.
+    const refused = await call({ notes }, { ok: false, reason: "Say it in your reply." })
+    expect(refused).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "Say it in your reply." }],
+    })
+  })
+
+  it("leaves the note tool out of what it says of itself, so nothing reminds an agent of it", async () => {
+    const [started] = await session(terminal(), [initialize])
+    const { instructions } = started!.result as { instructions: string }
+    // Its feedback "drafts a note about Novadeck"; nothing names the user's Notes or todos.
+    expect(instructions).not.toMatch(/\bNotes\b|\btodos?\b|\bnote\b(?! about Novadeck)/)
+  })
+
   it("nudges toward feedback after a failure of Novadeck's own, never after a refusal or its own", async () => {
     const call = async (name: string, reply: unknown) => {
       answer = reply
@@ -1708,6 +1751,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       "team",
       "describe",
       "feedback",
+      "note",
     ])
     expect(shown?.result).toMatchObject({ isError: false })
     // Listing the tools asks the runner for the models, then the show goes through.
@@ -1910,7 +1954,7 @@ describe("the bounds Novadeck's MCP tools advertise", () => {
     return Object.fromEntries(reply.result.tools.map((tool) => [tool.name, tool.inputSchema]))
   }
 
-  it("are the protocol's for an ask, a tell, a done, a startup command and feedback", async () => {
+  it("are the protocol's for an ask, a tell, a done, a startup command, feedback and notes", async () => {
     const tools = await listed()
     const ask = agentAsk.shape
     const shapes = ask.shape.options
@@ -1939,5 +1983,9 @@ describe("the bounds Novadeck's MCP tools advertise", () => {
     expect(act.properties.done_label.maxLength).toBe(action.doneLabel.maxLength)
     expect(tools["open_terminal"]!.properties.command.maxLength).toBe(startupCommand.maxLength)
     expect(tools["feedback"]!.properties.text.maxLength).toBe(maxFeedbackText)
+    const added = tools["note"]!.properties.notes
+    expect(added.maxItems).toBe(noteLimits.perCall)
+    expect(added.items.properties.text.maxLength).toBe(noteLimits.text)
+    expect(added.items.properties.body.maxLength).toBe(noteLimits.body)
   })
 })

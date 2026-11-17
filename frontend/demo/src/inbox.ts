@@ -2,6 +2,7 @@ import { followFinishes, type FollowedFinish } from "@novadeck/core/agents/finis
 import type { Conversation, Conversations } from "@novadeck/core/conversation"
 import type { AgentName } from "@novadeck/core/harnesses"
 import {
+  clearable,
   emptyInbox,
   rowKey,
   ordered,
@@ -544,6 +545,19 @@ export const createDemoInbox = (
         return
       }
       settle(id, "dismissed")
+    },
+    // As the runner clears: the updates are read, and they and every resolved row go, the
+    // demo's own and its agents'. What the Messages pane keeps of them stays.
+    clear: () => {
+      for (const row of state.getSnapshot().items)
+        if (row.kind === "update" && !row.settled) record(row, { kind: "update", action: "read" })
+      change((current) => ({
+        ...current,
+        items: current.items.filter((row) => !clearable(row)),
+      }))
+      doneEntries = []
+      history.clear()
+      recompute()
     },
     order,
     // Only the rows still listed: the order forgets the gone.

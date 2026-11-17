@@ -212,6 +212,13 @@ const setup = (
       watch: vi.fn<InboxStreams["inbox"]["watch"]>(() => feed.iterator),
       answer: vi.fn<InboxStreams["inbox"]["answer"]>(async () => {}),
       dismiss: vi.fn<InboxStreams["inbox"]["dismiss"]>(async () => {}),
+      // As the runner clears: its tells, done reports and resolved entries leave the listing.
+      clear: vi.fn<InboxStreams["inbox"]["clear"]>(async () => {
+        others = others.filter(
+          ({ content, settled }) => !settled && content.kind !== "tell" && content.kind !== "done",
+        )
+        publish()
+      }),
       read: vi.fn<InboxStreams["inbox"]["read"]>(async (ids) => {
         const gone = ({ id, content }: InboxEntry) => content.kind === "turn" && ids.includes(id)
         if (!rows.some(gone) && !others.some(gone)) return
@@ -1409,6 +1416,55 @@ describe("Dismissing an ask", () => {
   })
 })
 
+describe("Clearing the Inbox", () => {
+  const settledEntry = (): InboxEntry =>
+    entry({ id: "entry-2", settled: { how: "dismissed", at: 9000 } })
+  const waiting = () => workspaceOf(agentTerminal(1, attention))
+  // An open ask, a resolved one, a tell, and a dialog answered in the terminal, which the app
+  // keeps resolved itself.
+  const filled = async (options: Parameters<typeof setup>[3] = {}) => {
+    const set = setup(waiting(), {}, noMessages, options)
+    set.entries.push([entry(), settledEntry(), told()])
+    set.details[0]!.push(detailOf(asked("r1", 9000)))
+    await settle()
+    set.workspaceStore.update(() => workspaceOf(agentTerminal(1, { working: true })))
+    await settle()
+    return set
+  }
+  const listed = (inbox: ReturnType<typeof setup>["inbox"]) =>
+    inbox.state
+      .getSnapshot()
+      .items.map(({ id }) => id)
+      .toSorted()
+
+  it("has the runner clear, then forgets the rows resolved here, leaving what asks", async () => {
+    const saveHistory = vi.fn<(rows: readonly string[]) => void>()
+    const { inbox, streams } = await filled({ saveHistory })
+    expect(listed(inbox)).toEqual(["entry-1", "entry-2", "request:r1", "told-1"])
+    inbox.clear()
+    await settle()
+    expect(streams.inbox.clear).toHaveBeenCalledOnce()
+    expect(listed(inbox)).toEqual(["entry-1"])
+    expect(saveHistory.mock.calls.at(-1)![0]).toEqual([])
+  })
+
+  it("leaves the Inbox as it was, with no error, when the runner refuses", async () => {
+    const { inbox, streams } = await filled()
+    streams.inbox.clear.mockRejectedValueOnce(new Error("closing"))
+    inbox.clear()
+    await settle()
+    expect(listed(inbox)).toEqual(["entry-1", "entry-2", "request:r1", "told-1"])
+    expect(inbox.state.getSnapshot().failed).toEqual({})
+  })
+
+  it("clears nothing once unbound", async () => {
+    const { inbox, streams, stop } = await filled()
+    stop()
+    inbox.clear()
+    expect(streams.inbox.clear).not.toHaveBeenCalled()
+  })
+})
+
 describe("Turn rows", () => {
   const ws = () =>
     workspaceOf(
@@ -1448,6 +1504,7 @@ describe("Turn rows", () => {
         answer: async () => {},
         read: async () => {},
         dismiss: async () => {},
+        clear: async () => {},
       },
       detail: () => channel<AgentDetail>().iterator,
       answer: async () => {},

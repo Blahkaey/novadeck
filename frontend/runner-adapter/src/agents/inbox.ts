@@ -58,6 +58,7 @@ export type InboxStreams = {
     readonly answer: (id: string, answer: AskAnswer) => Promise<void>
     readonly read: (ids: readonly string[]) => Promise<void>
     readonly dismiss: (id: string) => Promise<void>
+    readonly clear: () => Promise<void>
   }
   readonly detail: (terminalId: string) => AsyncIterableIterator<AgentDetail, undefined>
   readonly answer: (key: TerminalKey, request: string, answer: ChatAnswer) => Promise<void>
@@ -74,6 +75,7 @@ export type InboxStreams = {
 
 export type RunnerInbox = Inbox & {
   readonly bind: NonNullable<Inbox["bind"]>
+  readonly clear: NonNullable<Inbox["clear"]>
   readonly turns: NonNullable<Inbox["turns"]>
   readonly readFinishes: NonNullable<Inbox["readFinishes"]>
   // Says what the person answered a dialog with, which a chat answers too, for the row it
@@ -572,6 +574,20 @@ export const createRunnerInbox = (
       )
         return
       tracker.call(id, () => streams.inbox.dismiss(id), { silent: true })
+    },
+    // The runner reads the updates and unlists its resolved entries; once it has, the rows
+    // resolved here go too. A clear that fails leaves the Inbox as it was, with no error shown.
+    clear: () => {
+      const next = binding
+      if (!next || ended) return
+      track(Promise.resolve().then(() => streams.inbox.clear())).then(
+        () => {
+          if (binding !== next) return
+          endings.clear()
+          recompute()
+        },
+        () => {},
+      )
     },
     bind: (next) => {
       binding = next

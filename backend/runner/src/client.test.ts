@@ -11,6 +11,7 @@ import {
   connectRunner,
   type AttachedTerminal,
   type CompanionWatchItem,
+  type NotesWatchItem,
   type Runner,
   type TerminalWatchItem,
 } from "@novadeck/runner-client"
@@ -463,6 +464,98 @@ const rows = (path: string) => {
   }
 }
 
+describe("runner client notes", () => {
+  it("keeps a project's notes across a restart, and tells every client of each change", async ({
+    resources,
+  }) => {
+    const directory = await temporary(resources)
+    const database = join(directory, "workspace.sqlite")
+    const first = await startServer({ port: 0, token, database, terminals: ptyOptions })
+    const url = `${first.origin.replace(/^http/, "ws")}/api/rpc`
+    const client = await connectRunner(websocket(url, { token }), fast)
+    const { projectId } = await session(client, directory)
+    const other = await connectRunner(websocket(url, { token }), fast)
+    const watch = other.notes.watch()
+    const until = async (predicate: (change: NotesWatchItem) => boolean) => {
+      while (true) {
+        // eslint-disable-next-line no-await-in-loop -- Changes are read in order.
+        const result = await watch.next()
+        if (result.done) throw new Error("The notes' stream ended")
+        if (predicate(result.value)) return result.value
+      }
+    }
+    await until((change) => change.type === "synced")
+
+    const [ship, flag] = [crypto.randomUUID(), crypto.randomUUID()]
+    await client.notes.add({ id: ship, projectId, text: "Ship it", todo: true })
+    await client.notes.add({ id: flag, projectId, text: " Remember the flag ", todo: false })
+    await client.notes.update({ projectId, id: ship, body: "Today.", done: true })
+    const listed = await client.notes.list({ projectId })
+    expect(listed).toMatchObject([
+      { id: flag, projectId, text: "Remember the flag", todo: false, doneAt: null },
+      { id: ship, projectId, text: "Ship it", body: "Today.", todo: true },
+    ])
+    expect(listed[1]!.doneAt).toEqual(expect.any(Number))
+    // The other client hears the project's notes whole, as the last change left them.
+    await expect(
+      until((change) => change.type === "changed" && change.notes[1]?.doneAt != null),
+    ).resolves.toEqual({ type: "changed", projectId, notes: listed })
+
+    for (const refused of [
+      () => client.notes.add({ id: ship, projectId, text: "Again", todo: true }),
+      () => client.notes.move({ projectId, id: ship, index: 0 }),
+    ])
+      // eslint-disable-next-line no-await-in-loop -- One call at a time.
+      await expect(refused()).rejects.toMatchObject({ code: "CONFLICT" })
+    for (const missing of [
+      () => client.notes.update({ projectId, id: crypto.randomUUID(), text: "x" }),
+      () => client.notes.list({ projectId: crypto.randomUUID() }),
+    ])
+      // eslint-disable-next-line no-await-in-loop -- One call at a time.
+      await expect(missing()).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      client.notes.add({ id: crypto.randomUUID(), projectId, text: "two\nlines", todo: true }),
+    ).rejects.toBeDefined()
+
+    await watch.return?.()
+    await other.close()
+    await client.close()
+    await first.close()
+
+    const again = await deployed(resources, { database })
+    const reopened = await again.connect()
+    await expect(reopened.notes.list({ projectId })).resolves.toEqual(listed)
+    const following = reopened.notes.watch()
+    resources.defer(async () => {
+      await following.return?.()
+    })
+    await expect(following.next()).resolves.toMatchObject({ value: { type: "reset" } })
+    await expect(following.next()).resolves.toMatchObject({
+      value: { type: "changed", projectId, notes: listed },
+    })
+    await expect(following.next()).resolves.toMatchObject({ value: { type: "synced" } })
+    await expect(reopened.notes.remove({ projectId, ids: [flag] })).resolves.toMatchObject([
+      { id: ship },
+    ])
+    await expect(following.next()).resolves.toMatchObject({
+      value: { type: "changed", notes: [{ id: ship }] },
+    })
+
+    // The project's notes go with it, which the watcher is told.
+    await reopened.projects.remove({ projectId })
+    await expect(following.next()).resolves.toEqual({
+      done: false,
+      value: { type: "changed", projectId, notes: [] },
+    })
+    const kept = new DatabaseSync(database, { readOnly: true })
+    try {
+      expect(kept.prepare("SELECT key FROM settings WHERE key LIKE 'notes.%'").all()).toEqual([])
+    } finally {
+      kept.close()
+    }
+  })
+})
+
 describe("runner client project removal", () => {
   it("takes its companion items and undocked windows along, telling watchers", async ({
     resources,
@@ -821,6 +914,76 @@ describe("runner client session management", () => {
       await expect(Promise.all([removing, again])).resolves.toEqual([undefined, undefined])
     },
   )
+})
+
+describe("runner client History", () => {
+  it("deletes the closed terminals named for good, and tells whoever follows them", async ({
+    resources,
+  }) => {
+    const directory = await temporary(resources)
+    const database = join(directory, "workspace.sqlite")
+    const earlier = new WorkspaceStore(database)
+    const projectId = crypto.randomUUID()
+    const sessionId = crypto.randomUUID()
+    await earlier.createProject({ id: projectId, name: "P", cwd: directory })
+    earlier.createSession({ id: sessionId, projectId, name: "S" })
+    const closed = (closedAt: number, transcript: string | null) => {
+      const id = crypto.randomUUID()
+      earlier.insertClosed({
+        id,
+        projectId,
+        sessionId,
+        handle: earlier.giveHandle(sessionId),
+        naming: { person: null, opener: null, murmur: null, own: null, summary: null },
+        agent: null,
+        lastProgram: null,
+        command: null,
+        cwd: directory,
+        agents: {},
+        interruptions: [],
+        transcript,
+        closedAt,
+        closedBy: null,
+      })
+      return id
+    }
+    const now = Date.now()
+    const going = closed(now - 3, "screen")
+    const staying = closed(now - 2, null)
+    const alsoGoing = closed(now - 1, null)
+    earlier.close()
+
+    const app = await deployed(resources, { database })
+    const client = await app.connect()
+    const watch = client.history.watch()
+    resources.defer(async () => {
+      await watch.return?.()
+    })
+    const next = async () => (await watch.next()).value
+    let synced = false
+    while (!synced) {
+      // eslint-disable-next-line no-await-in-loop -- Changes are read in order.
+      synced = (await next())?.type === "synced"
+    }
+
+    await client.history.remove({ ids: [going, crypto.randomUUID(), alsoGoing] })
+    const removed = [await next(), await next()]
+    expect(removed).toEqual(
+      expect.arrayContaining([
+        { type: "removed", id: going, projectId },
+        { type: "removed", id: alsoGoing, projectId },
+      ]),
+    )
+    const listed = await client.history.list({ projectId })
+    expect(listed.map(({ id }) => id)).toEqual([staying])
+    // Not restorable after: the row is gone from the store.
+    await expect(
+      client.terminals.create({ ...shell(sessionId), closed: going }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    const kept = new DatabaseSync(database, { readOnly: true })
+    resources.defer(() => kept.close())
+    expect(kept.prepare("SELECT id FROM closed_terminals").all()).toEqual([{ id: staying }])
+  })
 })
 
 describe("runner client agent detail", () => {

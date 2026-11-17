@@ -36,6 +36,7 @@ import { readDescribeRequest, type DescribeAnswer } from "./describe-request.js"
 import { mention } from "./handles.js"
 import type { Launcher } from "./launching.js"
 import { Leads, leadNotice, type LeadsHost } from "./leads.js"
+import { NoteCalls, type NoteCallsHost } from "./note-request.js"
 import { afterSummary } from "./nudges.js"
 import {
   allowOpen,
@@ -87,7 +88,8 @@ const unopened = {
 // `LeadsHost` holds the runner's records and stop, its messaging, peers, approvals,
 // bindings, and whether a terminal is closing.
 export type CallsHost = LeadsHost &
-  WorktreeCallsHost & {
+  WorktreeCallsHost &
+  Pick<NoteCallsHost, "notes"> & {
     readonly inbox: () => Inbox
     readonly feedback: () => Feedback
     /** Agents' requests for a new terminal, on their way to the client. */
@@ -130,8 +132,8 @@ export type CallsHost = LeadsHost &
 /**
  * The tool calls agents make through Novadeck's MCP server in their terminals' shells,
  * each answered only with the shell's own token: what they show beside the terminal, the
- * Inbox's asks and tells, messages, summaries, and the terminals they open and close, a
- * few at most each minute per chain of terminals and across the runner.
+ * Inbox's asks and tells, messages, summaries, notes the person asked for, and the terminals
+ * they open and close, a few at most each minute per chain of terminals and across the runner.
  */
 export class Calls {
   /**
@@ -160,6 +162,8 @@ export class Calls {
   readonly leads: Leads
   /** The git worktrees agents open, take, give and close. */
   private readonly worktrees: WorktreeCalls
+  /** What agents add to the person's Notes, as they asked. */
+  private readonly notes: NoteCalls
 
   constructor(
     /** How long an agent's request for a new terminal waits for the client's answer. */
@@ -168,6 +172,7 @@ export class Calls {
   ) {
     this.leads = new Leads(host)
     this.worktrees = new WorktreeCalls(host)
+    this.notes = new NoteCalls(host)
   }
 
   /**
@@ -727,6 +732,8 @@ export class Calls {
       case "feedback":
         if (!callerOf(this.host.records(), call)) return Promise.resolve(unansweredCalls.feedback)
         return Promise.resolve(this.host.feedback().call(call.terminalId, call.request))
+      case "note":
+        return Promise.resolve(this.notes.call(call) ?? unansweredCalls.note)
       case "send":
         return this.host.send(call)
       case "agents":

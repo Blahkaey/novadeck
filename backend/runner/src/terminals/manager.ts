@@ -191,6 +191,7 @@ export class Terminals {
       | "closed"
       | "projects"
       | "worktrees"
+      | "notes"
       | "historyTimes"
       | "handleOrder"
       | "handleCooldown"
@@ -711,6 +712,7 @@ export class Terminals {
       send: (call) => this.send(call),
       agents: (call) => this.agents(call),
       team: (call) => this.peers.team(call),
+      notes: () => options.notes,
       ...worktreeHost(this.options.worktrees, (sessionId) => this.projectOf(sessionId)),
     })
     this.moves = new Moves({
@@ -1553,6 +1555,9 @@ export class Terminals {
   }
   dismissAsk(id: string): void {
     this.inbox.dismiss(id)
+  }
+  clearInbox(): void {
+    this.inbox.clear()
   }
 
   /** A terminal's threads and messages with their states. */

@@ -9,6 +9,7 @@ describe("the rail's order", () => {
       "sessions",
       "worktrees",
       "files",
+      "notes",
       "history",
     ])
   })
@@ -20,6 +21,7 @@ describe("the rail's order", () => {
       "sessions",
       "worktrees",
       "files",
+      "notes",
       "history",
     ])
   })
@@ -31,24 +33,26 @@ describe("the rail's order", () => {
       "terminals",
       "worktrees",
       "files",
+      "notes",
       "history",
     ])
   })
 
-  it("puts Worktrees and History after the panels a person saved before they existed", () => {
+  it("puts the panels newer than a person's saved order after the ones they placed", () => {
     expect(railOrder(["inbox", "sessions", "files", "terminals"])).toEqual([
       "inbox",
       "sessions",
       "files",
       "terminals",
       "worktrees",
+      "notes",
       "history",
     ])
   })
 
-  it("keeps an order saved under the rail's former default as it was", () => {
+  it("keeps an order saved under the rail's former default as it was, Notes after it", () => {
     const former = ["terminals", "files", "sessions", "history", "inbox", "worktrees"]
-    expect(railOrder(former)).toEqual(former)
+    expect(railOrder(former)).toEqual([...former, "notes"])
   })
 
   it("reads a panel stored under its former id in its place", () => {
@@ -58,6 +62,7 @@ describe("the rail's order", () => {
       "terminals",
       "files",
       "sessions",
+      "notes",
       "history",
     ])
   })
@@ -69,6 +74,7 @@ describe("the rail's order", () => {
       "terminals",
       "sessions",
       "worktrees",
+      "notes",
       "history",
     ])
   })
@@ -81,6 +87,7 @@ describe("the rail's order", () => {
       "inbox",
       "sessions",
       "worktrees",
+      "notes",
       "history",
     ])
     expect(movedPanel(order, order, 0, 2)).toEqual([
@@ -89,6 +96,7 @@ describe("the rail's order", () => {
       "terminals",
       "worktrees",
       "files",
+      "notes",
       "history",
     ])
   })
@@ -104,6 +112,7 @@ describe("the rail's order", () => {
       "inbox",
       "worktrees",
       "files",
+      "notes",
       "history",
     ])
   })

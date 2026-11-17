@@ -35,6 +35,11 @@ export const focusSheetSoon = (frames = 12): void => {
   })
 }
 
+// Moves focus to the Inbox panel's Hide button, where a header button that goes leaves it.
+export const focusPanelClose = (): void => {
+  document.querySelector<HTMLElement>("#inbox-panel .sidebar-close")?.focus()
+}
+
 // The select button of the row after a row's; none where it is the last.
 export const nextRowButton = (id: string): HTMLElement | null => {
   const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-row]"))

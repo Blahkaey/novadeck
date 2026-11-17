@@ -1,7 +1,42 @@
 import type { MenuItemConstructorOptions } from "electron"
 
 import { describe, expect, it } from "../../test"
-import { linuxMenu, macMenu } from "./menu"
+import { linuxMenu, macMenu, runnerMenu } from "./menu"
+
+describe("the runner menu", () => {
+  it("names the remote host and connection state, and opens settings", () => {
+    let opened = 0
+    for (const state of ["connecting", "connected", "disconnected"] as const) {
+      const items = runnerMenu({
+        host: "runner.example",
+        state,
+        open: () => {
+          opened += 1
+        },
+      }).submenu as MenuItemConstructorOptions[]
+      expect(items[0]).toMatchObject({
+        enabled: false,
+        label: expect.stringContaining("runner.example") as string,
+      })
+      expect(items[0]!.label).toContain(
+        state === "connected"
+          ? "Connected"
+          : state === "connecting"
+            ? "Connecting…"
+            : "Disconnected",
+      )
+      expect(items[1]!.label).toBe("Remote Runner…")
+      ;(items[1]!.click as () => void)()
+    }
+    expect(opened).toBe(3)
+  })
+
+  it("offers remote settings while running on this computer too", () => {
+    const items = runnerMenu({ state: "connected", open: () => {} })
+      .submenu as MenuItemConstructorOptions[]
+    expect(items.map((item) => item.label)).toEqual(["This computer", "Remote Runner…"])
+  })
+})
 
 describe("the Linux application menu", () => {
   it("keeps the default menus, Edit, View and Window, by their roles", () => {

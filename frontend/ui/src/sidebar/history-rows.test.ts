@@ -3,14 +3,17 @@ import type { AgentConnection } from "@novadeck/core/port"
 
 import { context, describe, expect, it } from "../test"
 import {
+  clearWords,
   closedShort,
   folderOf,
   litPieces,
+  removable,
   rowFolder,
   rowMatches,
   rowTooltip,
   summaryExcerpt,
   rowView,
+  unremovedWords,
 } from "./history-rows"
 
 const now = new Date(2026, 10, 6, 18, 0).getTime()
@@ -222,6 +225,42 @@ describe("History's rows", () => {
       expect(lines[1]).toBe("Coupon codes, closed by @fox")
       expect(lines[2]).toMatch(/^Closed .*40/)
       expect(lines[3]).toBe("Coupon codes in the cart and at checkout")
+    })
+  })
+
+  context("when removed", () => {
+    it("can be, in any state but while it is being restored", () => {
+      const states: ClosedTerminal["availability"][] = [
+        { state: "ready" },
+        { state: "gone", reason: "folder" },
+        { state: "disconnected", agent: "codex" },
+        { state: "open", handle: "fox", terminalId: "t" },
+      ]
+      for (const availability of states) expect(removable(row({ availability }))).toBe(true)
+      expect(removable(row({ availability: { state: "restoring" } }))).toBe(false)
+    })
+
+    it("is counted in Clear's question, which says the rows don't come back", () => {
+      expect(clearWords(14, 0)).toBe(
+        "14 closed terminals are removed from History for good. You can’t restore them after.",
+      )
+      expect(clearWords(1, 0)).toBe(
+        "1 closed terminal is removed from History for good. You can’t restore it after.",
+      )
+    })
+
+    it("leaves the rows being restored, which Clear's question says", () => {
+      expect(clearWords(3, 1)).toMatch(/^3 closed terminals are .* The one being restored stays\.$/)
+      expect(clearWords(1, 2)).toMatch(/^1 closed terminal is .* The 2 being restored stay\.$/)
+    })
+
+    it("says which removal failed: a row's by its title, or Clear's", () => {
+      expect(unremovedWords({ kind: "row", id: "closed-1", title: "Coupon codes" })).toBe(
+        "Couldn’t remove Coupon codes. It’s still in History.",
+      )
+      expect(unremovedWords({ kind: "clear" })).toBe(
+        "Couldn’t clear History. What’s listed is still here.",
+      )
     })
   })
 })

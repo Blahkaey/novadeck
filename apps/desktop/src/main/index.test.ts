@@ -55,6 +55,49 @@ describe("the compiled desktop app", () => {
       )
     })
 
+    it("connects to another machine's runner, where the data folder names one, in place of starting its own", async () => {
+      const main = await read("main/index.js")
+      const preload = await read("preload/index.cjs")
+
+      expect(main).toContain('"remote-runner.json"')
+      // Read before either runner is made, and only one of the two is.
+      const settings = main.indexOf("const settings = await remoteSettings()")
+      expect(settings).toBeGreaterThan(-1)
+      expect(settings).toBeLessThan(main.indexOf("runner = linkRemote(remote)"))
+      expect(main).toMatch(
+        /if \(remote\) runner = linkRemote\(remote\);?\n\s*else\s*runner = startRunner\(/u,
+      )
+      // Its connections are dropped as the system wakes, and each pings the runner.
+      expect(main).toMatch(/powerMonitor\.on\("resume", \(\) => linked\.reconnect\(\)\)/u)
+      expect(main).toContain("handshakeTimeout")
+      // `ws` loads from the packaged app's own node_modules, as a dependency: bundled, its
+      // optional native helpers would be empty stand-ins that break masking a large frame,
+      // on an Electron whose Node has no masking of its own.
+      expect(main).toMatch(/import \{[^}]*WebSocket[^}]*\} from "ws"/u)
+      expect(main).not.toContain("viteOptionalPeerDep_bufferutil")
+      // The runner's token is added to each handshake in the main process; the preload
+      // hears only that the runner is remote.
+      expect(main).toContain("tunnelPort(")
+      expect(preload).toContain("--novadeck-remote=")
+      expect(preload).not.toContain("remote-runner.json")
+      // Its folders are asked for by path, and its pages may load through its proxy.
+      expect(main).toContain("askRemoteFolder(")
+      expect(main).toContain('proxyBypassRules: "<-loopback>"')
+    })
+
+    it("offers connection settings from the menu and a failed launch, and saves before restarting", async () => {
+      const main = await read("main/index.js")
+      expect(main).toContain("askRemoteSettings(")
+      expect(main).toContain('"Open Settings…"')
+      expect(main).toContain('"Remote Runner…"')
+      expect(main).toContain('"remote-runner.off.json"')
+      expect(main).toContain("check: checkRemoteSettings")
+      expect(main).toContain("writeRemoteSettings(folder, settings)")
+      expect(main).toContain("disableRemoteSettings(folder)")
+      expect(main).toContain("runnerHost: new URL(remote.url).hostname")
+      expect(main).toContain("app.relaunch()")
+    })
+
     it("offers a folder picker parented to the requesting window", async () => {
       const main = await read("main/index.js")
       const preload = await read("preload/index.cjs")
@@ -103,10 +146,12 @@ describe("the compiled desktop app", () => {
       expect(main).toContain("persist: () => runner?.persist()")
       expect(main).toContain("closeRunner: () => runner?.close(),")
       expect(main).toContain("closeServer: () => server?.close()")
-      expect(main).toContain("installMacUpdate: updates.installMacUpdateOnQuit")
-      expect(main).toMatch(
-        /reopenAppImage: updates\.openAppImageAfterQuit,\s*reopenCurrent: updates\.openCurrentAfterQuit,\s*keepUpdate: updates\.keepUpdateOnQuit,\s*quit: \(\) => app\.quit\(\)/u,
-      )
+      expect(main).toContain("updates.installMacUpdateOnQuit()")
+      expect(main).toContain("connectionRestart ? Promise.resolve()")
+      expect(main).toContain("app.relaunch()")
+      expect(main).toContain("updates.openAppImageAfterQuit()")
+      expect(main).toContain("updates.openCurrentAfterQuit()")
+      expect(main).toContain("keepUpdate: updates.keepUpdateOnQuit")
       // The runner's end reaches the quit, and an abandoned runner's quit turns off both of
       // the installs; what that does is covered in ./updates/updater.test.ts.
       expect(main).toMatch(
@@ -115,7 +160,9 @@ describe("the compiled desktop app", () => {
       expect(main).toMatch(
         /keepUpdateOnQuit: \(\) => \{\s*runnerKept = true;\s*keepUpdateOnQuit\(\[updater, macQuitInstall\], \{\s*swapped: appImageSwapped,\s*log: \(\w+\) => log\w*\.warn\(\w+\)/u,
       )
-      expect(main).toMatch(/hosting: \(\) => Boolean\(server \|\| runner\),\s*shutDown,/u)
+      expect(main).toMatch(
+        /hosting: \(\) => Boolean\(server \|\| runner \|\| connectionRestart\),\s*shutDown,/u,
+      )
       expect(main).toContain("saveBeforeQuitChannel")
       expect(preload).toContain("novadeck:save-before-quit")
       expect(preload).toContain("beforeQuit")
@@ -164,8 +211,10 @@ describe("the compiled desktop app", () => {
       // Electron's relaunch hands the child no-new-privileges, which stops an AppImage from
       // mounting; only macOS and Windows use it, with the executable alone.
       expect(main).not.toContain("args: []")
-      // A restart on Windows opens itself that way when its installer never began.
-      expect(main.match(/app\.relaunch\(/gu)).toHaveLength(2)
+      // A connection-settings restart uses the same AppImage helper on Linux. An unpacked
+      // build, macOS and Windows can relaunch directly after the normal shutdown.
+      expect(main).toContain("copies.startInstalledImage(process.env.APPIMAGE, process.pid)")
+      expect(main.match(/app\.relaunch\(/gu)).toHaveLength(3)
     })
 
     it("opens a window for a second launch when the app has none, as on macOS", async () => {

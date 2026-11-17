@@ -1,5 +1,59 @@
 import type { DemoPortable } from "./portable"
+import type { RemoteScenario } from "./remote"
 import type { DemoUpdates } from "./updates"
+
+export const remoteScenarios = {
+  local: {
+    label: "Set up a remote runner",
+    hint: "Empty connection form from this computer's runner",
+    state: "local",
+  },
+  connected: {
+    label: "Remote connected",
+    hint: "Runner host and Connected, with saved settings and a blank password",
+    state: "connected",
+  },
+  connecting: {
+    label: "Remote connecting",
+    hint: "Runner host and Connecting…",
+    state: "connecting",
+  },
+  disconnected: {
+    label: "Remote disconnected",
+    hint: "Runner host and Disconnected; settings remain editable",
+    state: "disconnected",
+  },
+  checking: {
+    label: "Checking connection",
+    hint: "Connection form disabled while the runner is checked",
+    state: "checking",
+  },
+  invalid: {
+    label: "Invalid address",
+    hint: "Address validation error in the connection form",
+    state: "invalid",
+  },
+  refused: {
+    label: "Token refused",
+    hint: "Connection form explains that the runner refused its token",
+    state: "refused",
+  },
+  unreachable: {
+    label: "Runner unreachable",
+    hint: "Connection form explains that its ten-second check could not reach the runner",
+    state: "unreachable",
+  },
+  "write-failed": {
+    label: "Settings cannot save",
+    hint: "Connection form explains that the app's data folder cannot be written",
+    state: "write-failed",
+  },
+  "launch-failed": {
+    label: "Bad settings at launch",
+    hint: "Launch failure offers Open Settings… and Quit",
+    state: "launch-failed",
+  },
+} as const satisfies Record<string, RemoteScenario>
 
 // The named update and portable scenarios the demo can play, each defined once: the
 // debug panel lists every one (App › Updates, App › Portable) and a spec asks for one by

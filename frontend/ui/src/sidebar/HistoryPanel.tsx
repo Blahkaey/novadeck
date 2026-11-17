@@ -1,6 +1,7 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { AgentConnection } from "@novadeck/core/port"
+import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import {
   sidebarListClasses,
   sidebarRowClasses,
@@ -8,20 +9,26 @@ import {
   sidebarRowNameClasses,
   sidebarRowSelectClasses,
 } from "@novadeck/toolkit/SidebarItem"
+import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { Plug, RotateCcw, Search } from "lucide-react"
+import { History as HistoryIcon, ListX, Plug, RotateCcw, Search, Trash2 } from "lucide-react"
 import { Fragment, useEffect, useId, useState, type ReactNode } from "react"
 
 import {
   agentName,
+  clearWords,
+  closedCount,
   closedFull,
   litPieces,
+  removable,
   rowMatches,
   rowFolder,
   rowTooltip,
   rowView,
   summaryExcerpt,
+  unremovedWords,
   type RowView,
+  type Unremoved,
 } from "./history-rows"
 import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
@@ -54,11 +61,37 @@ const Lit = ({ text, typed }: { text: string; typed: string }): React.JSX.Elemen
   </>
 )
 
+// What Clear asks about: the rows it takes, as they were when it was pressed, and how many
+// stay because they are being restored.
+type Clearing = { readonly rows: readonly ClosedTerminal[]; readonly staying: number }
+
+const clearBar = ({ rows }: Clearing): React.JSX.Element => (
+  <SubjectBar>
+    <SubjectSide>
+      <HistoryIcon size={14} strokeWidth={1.5} aria-hidden="true" />
+      <SubjectName>{panelLabels.history}</SubjectName>
+    </SubjectSide>
+    <SubjectDetail end>{closedCount(rows.length)}</SubjectDetail>
+  </SubjectBar>
+)
+
+const panel = "#history-panel"
+
+// Where the keyboard goes from a row's Remove button, as its row leaves: the row after it,
+// else the one before, else the panel's Hide button.
+const focusBeside = (id: string): void => {
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(`${panel} [data-history-row]`))
+  const at = rows.findIndex((row) => row.dataset.historyRow === id)
+  const beside = (rows[at + 1] ?? rows[at - 1])?.querySelector<HTMLElement>(".history-row-select")
+  ;(beside ?? document.querySelector<HTMLElement>(`${panel} .sidebar-close`))?.focus()
+}
+
 // A row drawn as a terminal's tab: its icon and title, with when it closed at the end of the
 // title's line, and under them the start of its summary, cut to where a search found it (a
 // plain terminal's folder before it). Its handle isn't shown: a restore keeps it only where
 // it is still free in the session. Under the pointer or focus, a row that can be
-// restored shows the restore icon in its date's place.
+// restored shows the restore icon in its date's place, and every row but one being restored
+// shows Remove after it, which deletes the row without asking.
 const HistoryRow = ({
   row,
   view,
@@ -68,6 +101,7 @@ const HistoryRow = ({
   onRestore,
   onReveal,
   onConnect,
+  onRemove,
 }: {
   row: ClosedTerminal
   view: RowView
@@ -77,6 +111,8 @@ const HistoryRow = ({
   onRestore: (row: ClosedTerminal) => void
   onReveal: (terminalId: string) => void
   onConnect: (agent: AgentName) => void
+  // `keyboard` when the button was pressed with a key, so the focus it held moves on.
+  onRemove: (row: ClosedTerminal, keyboard: boolean) => void
 }): React.JSX.Element => {
   const descriptionId = useId()
   const folder = rowFolder(row)
@@ -137,16 +173,28 @@ const HistoryRow = ({
       <span id={descriptionId} hidden>
         {description}
       </span>
-      {view.connect && (
+      {removable(row) && (
         <div className="history-row-actions">
-          <Tooltip content={`Connect ${agentName(view.connect)} in Preferences`}>
+          {view.connect && (
+            <Tooltip content={`Connect ${agentName(view.connect)} in Preferences`}>
+              <button
+                type="button"
+                className="history-row-connect icon-button small dim quiet"
+                aria-label={`Connect ${agentName(view.connect)} in Preferences`}
+                onClick={() => onConnect(view.connect!)}
+              >
+                <Plug size={14} strokeWidth={1.6} />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip content="Remove · can’t be restored after">
             <button
               type="button"
-              className="icon-button small dim quiet"
-              aria-label={`Connect ${agentName(view.connect)} in Preferences`}
-              onClick={() => onConnect(view.connect!)}
+              className="history-row-remove icon-button small dim quiet"
+              aria-label={`Remove ${row.title} from History`}
+              onClick={(event) => onRemove(row, event.detail === 0)}
             >
-              <Plug size={14} strokeWidth={1.6} />
+              <Trash2 size={14} strokeWidth={1.6} />
             </button>
           </Tooltip>
         </div>
@@ -157,7 +205,8 @@ const HistoryRow = ({
 
 // The sidebar's History panel: the terminals closed in this project, newest first, with a
 // search while there are any. The count beside the title is the matches over the total
-// while searching.
+// while searching. Clear, beside Hide while any row can be removed, deletes them all once
+// its question is confirmed, whatever the search shows; a row's own Remove deletes just it.
 export const HistoryPanel = ({
   rows,
   list,
@@ -168,6 +217,7 @@ export const HistoryPanel = ({
   onRestore,
   onReveal,
   onConnect,
+  onRemove,
 }: {
   rows: readonly ClosedTerminal[]
   // Reads the project's rows afresh, with their availability checked; the rows follow.
@@ -181,9 +231,37 @@ export const HistoryPanel = ({
   // Goes to the terminal that holds a conversation, by its handle.
   onReveal: (terminalId: string) => void
   onConnect: (agent: AgentName) => void
+  // Deletes the rows of these ids for good; they leave `rows` as the backend reports them
+  // gone. Rejects when it couldn't.
+  onRemove: (ids: readonly string[]) => Promise<void>
 }): React.JSX.Element => {
   const [typed, setTyped] = useState("")
   const [failed, setFailed] = useState(false)
+  // What Clear's dialog asks about, and the removal that failed last.
+  const [clearing, setClearing] = useState<Clearing | null>(null)
+  const [unremoved, setUnremoved] = useState<Unremoved | null>(null)
+  // Each goes with the rows it names, and a search with the last row: settled as the rows
+  // change, during render.
+  const [seen, setSeen] = useState(rows)
+  if (seen !== rows) {
+    setSeen(rows)
+    const listed = (id: string): boolean => rows.some((row) => row.id === id)
+    if (clearing && !clearing.rows.some((row) => listed(row.id))) setClearing(null)
+    if (unremoved && (unremoved.kind === "row" ? !listed(unremoved.id) : rows.length === 0))
+      setUnremoved(null)
+    if (rows.length === 0) setTyped("")
+  }
+  // A panel shown again says nothing of a removal that failed before it was hidden.
+  const [wasActive, setWasActive] = useState(active)
+  if (wasActive !== active) {
+    setWasActive(active)
+    if (!active) setUnremoved(null)
+  }
+  // Asks the backend to delete rows. When it couldn't, they stay, and a line says so.
+  const remove = (taken: readonly ClosedTerminal[], failure: Unremoved): void => {
+    setUnremoved(null)
+    onRemove(taken.map((row) => row.id)).catch(() => setUnremoved(failure))
+  }
   // Rows say when they closed against the day it is, which is read when the panel opens.
   const [now, setNow] = useState(() => Date.now())
   // The rows are read when the panel opens, so what the runner checked is what shows.
@@ -210,6 +288,7 @@ export const HistoryPanel = ({
   }, [active, list])
   const matches = rows.filter((row) => rowMatches(row, typed))
   const searching = typed.trim() !== ""
+  const clearable = rows.filter(removable)
   return (
     <SidebarPanel
       id="history-panel"
@@ -217,6 +296,22 @@ export const HistoryPanel = ({
       count={rows.length === 0 ? "" : searching ? `${matches.length}/${rows.length}` : rows.length}
       active={active}
       onClose={onClose}
+      actions={
+        clearable.length > 0 ? (
+          <Tooltip content="Clear History">
+            <button
+              type="button"
+              className="history-clear icon-button dim quiet size-7"
+              aria-label="Clear History"
+              onClick={() =>
+                setClearing({ rows: clearable, staying: rows.length - clearable.length })
+              }
+            >
+              <ListX size={14} strokeWidth={1.6} />
+            </button>
+          </Tooltip>
+        ) : undefined
+      }
     >
       {rows.length > 0 && (
         <label className="field quiet history-search flex h-9 shrink-0 items-center gap-2 px-2">
@@ -238,6 +333,11 @@ export const HistoryPanel = ({
           Couldn’t read the closed terminals. This is what was last heard.
         </p>
       )}
+      {unremoved && (
+        <p className="history-empty" role="status">
+          {unremovedWords(unremoved)}
+        </p>
+      )}
       <div
         className={`history-list ${sidebarListClasses}`}
         role="list"
@@ -254,6 +354,10 @@ export const HistoryPanel = ({
             onRestore={onRestore}
             onReveal={onReveal}
             onConnect={onConnect}
+            onRemove={(taken, keyboard) => {
+              if (keyboard) focusBeside(taken.id)
+              remove([taken], { kind: "row", id: taken.id, title: taken.title })
+            }}
           />
         ))}
         {matches.length === 0 && (
@@ -264,6 +368,21 @@ export const HistoryPanel = ({
           </p>
         )}
       </div>
+      <ConfirmDialog
+        subject={clearing}
+        bar={clearBar}
+        title={() => "Clear History?"}
+        description={(asked) => clearWords(asked.rows.length, asked.staying)}
+        confirmLabel="Clear History"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (clearing) remove(clearing.rows, { kind: "clear" })
+          setClearing(null)
+        }}
+        onCancel={() => setClearing(null)}
+        returnFocus={() => document.querySelector<HTMLElement>(`${panel} .history-clear`)}
+        widthClassName="w-[min(360px,calc(100vw-32px))]"
+      />
     </SidebarPanel>
   )
 }

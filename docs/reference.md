@@ -409,8 +409,8 @@ long; and an Update, an agent's `done` report or a `tell`. Click a
 row to read it and answer in place, or reveal its terminal. An `ask` returns immediately so
 the agent can keep working; your answer reaches that exact agent session later as a message.
 
-Every row is open, resolved or withdrawn, and only a withdrawn one disappears: an ask its own
-agent withdrew. Everything else that ends stays, as history, in gray, saying how it ended: an
+Every row is open, resolved or withdrawn. A withdrawn one disappears: an ask its own
+agent withdrew. Everything else that ends stays, as history, in gray, until you clear it (below), saying how it ended: an
 ask answered here (with your answer), dismissed, or replied to by you writing in its terminal; a
 tell or `done` report once you opened it, saw its row in the list or looked at its terminal; a dialog answered here, in
 the chat (with your answer) or in the terminal, or closed in the terminal with no word of
@@ -422,7 +422,11 @@ row outlives its terminal. A resolved
 row opens as a read-only card, with no controls that change anything. The list is one list, the
 row added last first, open and resolved rows together, with no lines between them; of the resolved
 rows only the ten that resolved last are listed, whatever their kind. Messages keeps its own,
-longer history. A turn that ends without a `done` call or an ask makes no row; its tab
+longer history. **Clear**, the button in the Inbox's header while any row asks nothing of you,
+takes those rows out of the Inbox for good: every update (a `tell` or a `done` report) is read,
+and the updates and every resolved row leave the list, the resolved ones past the ten too, so
+none comes back in their place. Rows that ask something of you stay, and so does what Messages
+keeps. A card open on a row Clear takes closes; a card open on a row that asks stays open. A turn that ends without a `done` call or an ask makes no row; its tab
 marks it (see above). A failed turn is a stored row that stays, across a reload and a runner
 restart, until the agent works again or you read it (viewing its terminal reads it); it is
 trouble that counts only while it is the agent's latest end and the agent isn't working. Asks,
@@ -500,13 +504,59 @@ terminals. They close and go to History, and you can restore them into another s
 A project's last session can't be deleted. The order, names and deletions are the runner's,
 so they stay after a reload, and the project opens the session you were in last.
 
+## Notes
+
+**Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
+remember about it: one list per project, yours. Where a backend keeps no notes, the panel
+isn't there.
+
+Ask an agent to note something ("add a todo to revisit the retry logic") and it adds it with
+Novadeck's `note` tool, first in the open project's list, in the order it gave, at once. That
+is all an agent can do with the list: it can't read your notes, change, check off, move or
+delete one, and it adds one only in a turn your own message started. Once Novadeck has
+delivered another agent's message into that turn (with your prompt, at a tool call, or as it
+carried the turn on), or the turn is one Novadeck or the agent started, even if you then
+added a message to it while it ran, it is refused and the agent says what it would have
+noted in its reply; ask again once it's done, or add it yourself. A note
+an agent added carries a small mark, and hovering it names the agent and its handle ("Added
+by Claude Code · @wren"), so one you didn't ask for is plain to see and one click to delete.
+Novadeck can tell that you started the turn, not that you asked for a note in it: an agent
+told to fix a bug could still add one then, and what it reads of other agents on its own (their
+latest prompts in a listing, files they wrote) doesn't count as a message delivered.
+
+Type in the field at the top and press Enter to add a todo, first in the list; the field
+stays ready for the next. The button before the field switches it to plain notes, which
+have no checkbox, and back. A line is one line of up to 500 characters.
+
+Tick a todo's checkbox to check it off. It moves under **Done** at the foot of the list,
+folded until you open it, and unticking it there opens it again. The count beside the
+panel's title, and in the tooltip of its rail toggle, is how many todos are still to do;
+plain notes are never counted. Done's **Clear** button deletes every done todo for good,
+after asking; a done row's trash deletes that one without asking.
+
+Click a line to change it where it stands: Enter saves, Escape keeps the old line, and
+clicking away saves. The chevron at the end of a row opens what is under the line: its
+details, written as Markdown (up to 8,000 characters) and shown formatted, with **Edit
+details**, **Make it a note** or **Make it a todo**, and **Delete**. Opening a note with no
+details starts writing some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and
+clicking away saves. A chevron that stands out marks a note with details.
+
+Drag a line to move its note among the open ones, or focus it and press Alt with the up or
+down arrow. The order is yours and is kept.
+
+Notes are kept by the runner with the workspace, so they stay after a restart and show in
+every window, and they go with their project when you remove it. A project keeps up to 200.
+If a change can't be saved, the list goes back to what was saved and a line above it says
+so.
+
 ## History
 
 Closing a terminal doesn't end it for good. It moves to **History**, a panel on the
 sidebar's rail, last by default, with one list per project, newest first. A terminal comes
-back for 7 days; after that its row goes by itself. Closing a terminal no longer always
+back for 7 days; after that its row goes by itself, unless you remove it sooner (see
+"Removing rows" below). Closing a terminal no longer always
 asks (see "Closing asks first" below), because what it loses can be got back from here. A rail order you saved before History
-existed puts its toggle at the end. There is no button to delete one.
+existed puts its toggle at the end.
 Where a backend keeps no History, as in a browser demo without it, the panel isn't there
 and closing is final.
 
@@ -541,6 +591,20 @@ technology. Four other states stand where the date was:
 - **An @handle** (not hatched). The conversation is open in another terminal; clicking
   goes there.
 - **A spinner** (not hatched). The restore is under way.
+
+### Removing rows
+
+A row can go before its 7 days are up. Under the pointer, or with the keyboard on it, a
+row shows a trash button at the end of its line, after the restore icon: it removes that
+one row at once, without asking. **Clear**, beside the panel's Hide button while there is
+a row to remove, removes every row of the project, those a search leaves out too, once
+you confirm a question that says how many go.
+
+Either way the row is gone for good and can't be restored after. A plain terminal's saved
+output goes with it. An agent's conversation stays with the agent, as Novadeck never held
+it, but History no longer offers it. A row that is being restored has no trash button, and
+Clear leaves it. If a row couldn't be removed, a line above the list says so and the row
+stays.
 
 ### Closing asks first
 
@@ -639,7 +703,8 @@ agent.
 - **Transcripts.** Each terminal's recent output is kept, and a restored terminal shows
   it read-only above a separator and its fresh prompt (on Windows, scrolled up just above
   a fresh screen); a resumed agent shows its own history instead. A closed plain terminal's
-  output is kept for the 7 days its row stays in History; an agent's row keeps none.
+  output is kept for as long as its row stays in History, 7 days unless you remove it
+  sooner; an agent's row keeps none.
   Transcripts are on by default and can be turned off in Preferences,
   which also forgets the saved ones. A changed terminal's transcript is saved about every
   30 seconds, and when its shell exits or restarts. What looks like a secret (a known
@@ -745,6 +810,7 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Toggle Inbox                                      | `Cmd+Shift+B`      | `Ctrl+Shift+B`                   |
 | Toggle Worktrees (with agent worktrees on)        | `Cmd+Shift+G`      | `Ctrl+Shift+G`                   |
 | Toggle Files                                      | `Cmd+Shift+F`      | `Ctrl+Shift+F`                   |
+| Toggle Notes                                      | `Cmd+Shift+L`      | `Ctrl+Shift+L`                   |
 | Toggle History                                    | `Cmd+Shift+H`      | `Ctrl+Shift+H`                   |
 | Switch to pinned project 1 to 9                   | `Cmd+1` to `Cmd+9` | `Ctrl+Shift+1` to `Ctrl+Shift+9` |
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |

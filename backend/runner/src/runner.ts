@@ -26,6 +26,7 @@ import { readAccount, readGitName } from "./tour/name.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
+import { Notes } from "./workspaces/notes.js"
 import { Projects } from "./workspaces/projects.js"
 import {
   EarlierWorkspaceError,
@@ -304,7 +305,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   const scopes = userScopes()
   // On macOS and Windows each shell and what it starts run below the window's priority.
   const priority = terminalPriorities()
-  // Without a key from the app no transcript is saved or shown.
+  // Without a key, from the app or a standalone runner's key file, no transcript is saved or shown.
   const sealer = createTranscriptSealer(options.transcriptKey)
   // Whether an agent works in the worktree now, read afresh each time it is asked: a turn may
   // have started since. A shell command or agent whose current checkout is the worktree counts,
@@ -336,10 +337,13 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     enabled: () => store.settings.runner().worktrees,
   })
   rootFolder.ensure()
+  // The person's notes on each project, kept in the store, which agents add to as they ask.
+  const notes = new Notes(store)
   const terminals = new Terminals({
     records: store,
     closed: store,
     projects: () => store.projects().map(({ id }) => id),
+    notes,
     worktrees: {
       service: worktrees,
       enabled: () => store.settings.runner().worktrees,
@@ -474,6 +478,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     rewriteShellFiles,
     agents,
     terminals,
+    notes,
     items,
     projects,
     works,
@@ -562,6 +567,7 @@ const startRunner = (options: RunnerOptions): Runner => {
     sealer,
     rootFolder,
     tour,
+    notes,
   } = wire(options)
   let closing: Promise<void> | undefined
   return {
@@ -573,6 +579,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         feedback: terminals.feedback,
         history: terminals.history,
         works,
+        notes,
         forges,
         projects,
         items,
@@ -611,6 +618,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         } finally {
           await forges.close()
           await works.close()
+          notes.close()
           await tidying
           // After both that take snapshots: the items ended with the terminals.
           await snapshots.close()

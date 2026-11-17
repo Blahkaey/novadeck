@@ -24,6 +24,17 @@ import { channel } from "./channel"
 export const noHistory = {
   list: async () => [],
   watch: () => channel<never>().iterator,
+  remove: async () => {},
+}
+
+// A runner whose projects have no notes, and that keeps none.
+export const noNotes = {
+  list: async () => [],
+  watch: () => channel<never>().iterator,
+  add: async () => [],
+  update: async () => [],
+  move: async () => [],
+  remove: async () => [],
 }
 
 // A runner whose terminals have no work against main and never change.
@@ -239,6 +250,7 @@ export const scripted = ({
       answer: unused,
       read: async () => {},
       dismiss: unused,
+      clear: unused,
     },
     agents: {
       list: listAgents as never,
@@ -281,6 +293,7 @@ export const scripted = ({
       },
     },
     history: noHistory,
+    notes: noNotes,
     works: noWorks,
     feedback: {
       watch: () => {

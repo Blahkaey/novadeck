@@ -3,6 +3,7 @@ import { ordered, type InboxRow } from "@novadeck/core/inbox"
 import { context, describe, expect, it } from "../test"
 import {
   clearArrived,
+  cleared,
   closeSheet,
   held,
   initialView,
@@ -165,6 +166,27 @@ describe("The list while a sheet is open", () => {
     const open = openRow(settle(initialView, before), "a", before)
 
     expect(ids(visible(open, [before[1]!], { a: before[0]! }))).toEqual(["a", "b"])
+  })
+})
+
+describe("The list once the person cleared what asked nothing", () => {
+  const rows = [approve("a", 3), update("u", 2), approve("b", 1)]
+
+  it("lets the cleared rows go at once while a sheet holds it still", () => {
+    const open = openRow(settle(initialView, rows), "a", rows)
+    const after = cleared(open, ["u"])
+
+    // The backend still lists the update until its clear lands: the list doesn't wait for it.
+    expect(ids(visible(after, rows))).toEqual(["a", "b"])
+    expect(after.open).toBe("a")
+    expect(ids(visible(after, [rows[0]!, rows[2]!]))).toEqual(["a", "b"])
+  })
+
+  it("is the same view with no sheet open, or where it held none of them", () => {
+    const closed = settle(initialView, rows)
+    expect(cleared(closed, ["u"])).toBe(closed)
+    const open = openRow(closed, "a", rows)
+    expect(cleared(open, ["gone"])).toBe(open)
   })
 })
 

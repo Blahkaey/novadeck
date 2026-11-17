@@ -1,5 +1,25 @@
 import type { MenuItemConstructorOptions } from "electron"
 
+import type { RemoteState } from "../remote/runner.js"
+
+/** The status and settings entry remain available when the app runs its own runner. */
+export const runnerMenu = (options: {
+  readonly host?: string
+  readonly state: RemoteState
+  readonly open: () => void
+}): MenuItemConstructorOptions => ({
+  label: "Runner",
+  submenu: [
+    {
+      label: options.host
+        ? `${options.host} · ${options.state === "connected" ? "Connected" : options.state === "connecting" ? "Connecting…" : "Disconnected"}`
+        : "This computer",
+      enabled: false,
+    },
+    { label: "Remote Runner…", click: options.open },
+  ],
+})
+
 /**
  * The application menu on Linux: Electron's default (File, Edit, View and Window, each by
  * its role) with a Quit of its own. The default Quit, Ctrl+Q, quits without telling the

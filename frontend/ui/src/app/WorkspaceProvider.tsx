@@ -31,7 +31,14 @@ import { noticeBoard, watchBellRings, watchInboxPings } from "./inbox-pings"
 import { nameFinished, watchFinishes } from "./murmur-offer"
 import { watchPageFocus } from "./page-focus"
 import { pullRequestsOf } from "./pull-requests"
-import { availablePanels, historyShown, resolveRoute, filesShown, reportsWorks } from "./routing"
+import {
+  availablePanels,
+  historyShown,
+  resolveRoute,
+  filesShown,
+  notesShown,
+  reportsWorks,
+} from "./routing"
 import { currentContext } from "./selectors"
 import {
   createUiStore,
@@ -70,7 +77,12 @@ const createServices = (
     windowedView: readWindowedView(),
     now: now(),
   })
-  const panels = availablePanels(filesShown(backend), historyShown(backend), reportsWorks(backend))
+  const panels = availablePanels(
+    filesShown(backend),
+    historyShown(backend),
+    reportsWorks(backend),
+    notesShown(backend),
+  )
   const { workspace: initial, route } = resolveRoute(seeded, location, preferences, now(), panels)
   const workspace = createWorkspaceStore(initial, backend.commit)
   // The store only reports later commits; give the backend the starting terminals now.

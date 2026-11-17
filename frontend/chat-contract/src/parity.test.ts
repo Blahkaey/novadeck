@@ -288,6 +288,28 @@ const novadeckTool = (tool: string, fields: Fields | null): ToolSummary | undefi
     }
     case "describe":
       return { kind: "agent", title: "Described this terminal", detail: text("title") }
+    case "note": {
+      const listed = (value: unknown): readonly unknown[] => {
+        if (typeof value !== "string") return Array.isArray(value) ? value : []
+        try {
+          return listed(JSON.parse(value))
+        } catch {
+          return []
+        }
+      }
+      const notes = listed(fields?.notes).map(nested)
+      const todos = notes.filter((each) => each?.todo !== false && each?.todo !== "false").length
+      const plain = notes.length - todos
+      const added = [
+        todos === 0 ? "" : todos === 1 ? "a todo" : `${todos} todos`,
+        plain === 0 ? "" : plain === 1 ? "a note" : `${plain} notes`,
+      ].filter(Boolean)
+      return {
+        kind: "agent",
+        title: `Added ${added.join(" and ") || "notes"}`,
+        detail: oneLine(textField(notes[0] ?? null, "text")),
+      }
+    }
     default:
       return undefined
   }
@@ -723,6 +745,7 @@ const novadeck = [
   "showing",
   "look",
   "describe",
+  "note",
   "new",
 ]
 const novadeckInputs = [
@@ -746,6 +769,8 @@ const novadeckInputs = [
   { changes: {} },
   { changes: "{}" },
   { summary: "Fixing the cart rounding" },
+  { notes: [{ text: "Revisit the retry logic" }, { text: "Flag off", todo: false }] },
+  { notes: '[{"text":"Wrapped","todo":false}]' },
 ]
 for (const tool of novadeck)
   for (const given of novadeckInputs) {

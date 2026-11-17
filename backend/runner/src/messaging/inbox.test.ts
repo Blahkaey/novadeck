@@ -274,6 +274,61 @@ describe("Inbox asks and updates", () => {
     expect(openOf(inbox).map((each) => each.id)).toEqual([id])
   })
 
+  it("clears what asks nothing: reads the updates and unlists every resolved entry, for good", () => {
+    const { inbox, create, messaging } = setup()
+    const open = create()
+    const dismissed = create()
+    inbox.dismiss(dismissed)
+    const read = inbox.call(identity.terminalId, "tell", { subject: "Ready", body: "Tests pass." })
+    const unread = inbox.call(identity.terminalId, "done", { subject: "Fixed", body: "Green." })
+    if (!read.ok || !unread.ok) throw new Error("the updates were refused")
+    inbox.read([read.id])
+    expect(inbox.list().map((each) => each.id)).toHaveLength(4)
+
+    inbox.clear()
+
+    // Only the ask that still waits is listed, and the unread done was read on its way out.
+    expect(inbox.list().map((each) => each.id)).toEqual([open])
+    const history = inbox.history(
+      identity.terminalId,
+      messaging.list(identity.terminalId, identity.handle),
+    )
+    const kept = history.threads.flatMap((thread) => thread.messages)
+    expect(kept.find((message) => message.inbox === "done")?.inboxState).toBe("read")
+    expect(kept.map((message) => message.inbox)).toEqual(
+      expect.arrayContaining(["ask", "tell", "done"]),
+    )
+    // One resolved after the clear is listed again, and a second clear takes it too.
+    inbox.dismiss(open)
+    expect(inbox.list().map(({ id, settled }) => [id, settled?.how])).toEqual([[open, "dismissed"]])
+    inbox.clear()
+    expect(inbox.list()).toEqual([])
+    messaging.close()
+  })
+
+  it("keeps what it cleared out of the listing across a restart", ({ resources }) => {
+    const folder = mkdtempSync(join(tmpdir(), "novadeck-clear-"))
+    resources.defer(() => rmSync(folder, { recursive: true, force: true }))
+    const path = join(folder, "workspace.sqlite")
+    const store = storeWith(path, parents)
+    const first = setup(store, store)
+    const told = first.inbox.call(identity.terminalId, "tell", { subject: "Ready", body: "Body" })
+    if (!told.ok) throw new Error(told.reason)
+    first.inbox.clear()
+    first.stop()
+    store.close()
+
+    const reopened = storeWith(path, parents)
+    resources.defer(() => reopened.close())
+    const next = setup(reopened, reopened)
+    resources.defer(() => next.stop())
+    expect(next.inbox.list()).toEqual([])
+    expect(reopened.entries().find((each) => each.id === told.id)).toMatchObject({
+      state: "read",
+      cleared: true,
+    })
+  })
+
   it("shows action instructions without running them and accepts done or words, but no option index", () => {
     const { inbox, create, messaging } = setup()
     const id = create({

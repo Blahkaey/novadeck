@@ -210,6 +210,21 @@ export const rearranged = (view: InboxView, ids: readonly string[]): InboxView =
   return same(order, view.order) ? view : { ...view, order }
 }
 
+// The view once the person cleared the Inbox of the rows `ids`, which asked nothing: a list an
+// open sheet holds still lets them go at once, where it would keep each, as it was, until the
+// sheet closes. The open row is not one of them: a sheet on a row that is cleared closes first.
+export const cleared = (view: InboxView, ids: readonly string[]): InboxView => {
+  if (view.open === null) return view
+  const gone = new Set(ids)
+  const order = view.order.filter((id) => !gone.has(id))
+  if (order.length === view.order.length) return view
+  return {
+    ...view,
+    order,
+    kept: Object.fromEntries(Object.entries(view.kept).filter(([id]) => !gone.has(id))),
+  }
+}
+
 export const clearArrived = (view: InboxView): InboxView =>
   view.arrived.length === 0 ? view : { ...view, arrived: [] }
 

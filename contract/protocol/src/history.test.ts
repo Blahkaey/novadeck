@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { contract } from "./contract.js"
-import { closedTerminal, closedTerminalState, historyChange } from "./history.js"
+import { closedTerminal, closedTerminalState, historyChange, maxHistoryRemoved } from "./history.js"
 import { terminalSummary } from "./terminals.js"
 
 const row = {
@@ -70,6 +70,23 @@ describe("a restore", () => {
     expect(create.safeParse({ ...base, closed: row.projectId }).success).toBe(true)
     for (const more of [{ command: "ls" }, { restore: true }, { resume: "claude" }, { cwd: "/x" }])
       expect(create.safeParse({ ...base, closed: row.projectId, ...more }).success).toBe(false)
+  })
+})
+
+describe("a removal", () => {
+  const remove = contract.history.remove["~orpc"].inputSchema!
+
+  it("names its rows by id and nothing else: at least one, and no more than one call takes", () => {
+    expect(remove.safeParse({ ids: [row.id] }).success).toBe(true)
+    expect(
+      remove.safeParse({ ids: Array.from({ length: maxHistoryRemoved }, () => row.id) }).success,
+    ).toBe(true)
+    expect(remove.safeParse({ ids: [] }).success).toBe(false)
+    expect(
+      remove.safeParse({ ids: Array.from({ length: maxHistoryRemoved + 1 }, () => row.id) })
+        .success,
+    ).toBe(false)
+    expect(remove.safeParse({ ids: [row.id], projectId: row.projectId }).success).toBe(false)
   })
 })
 

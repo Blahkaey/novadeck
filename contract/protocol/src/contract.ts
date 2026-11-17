@@ -44,10 +44,11 @@ import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
 import { directory, id, name } from "./fields.js"
 import { forgeIntegration, forgeName } from "./forges.js"
-import { closedTerminal, historyChange } from "./history.js"
+import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
-import { clientState, folderListing, project, workspaceSession } from "./projects.js"
+import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
+import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
 import { sliceChange } from "./slices.js"
 import {
@@ -151,6 +152,12 @@ export const contract = {
     folder: procedure
       .input(z.strictObject({ projectId: id, folder: z.string().max(4096) }))
       .output(folderListing),
+    // A folder of the runner's machine and the folders in it, for a client that picks a
+    // project's folder there, as the desktop app of a runner on another machine does: `path`
+    // absolute, or the runner owner's home folder when omitted. Only looks: it makes nothing.
+    // A path that isn't absolute, is missing, is no folder or can't be read is
+    // INVALID_DIRECTORY. Whoever holds the token can read any folder through a shell anyway.
+    browse: procedure.input(z.strictObject({ path: directory.optional() })).output(folderBrowse),
   },
   sessions: {
     // In the order the person arranged them; a session created since comes first.
@@ -566,9 +573,63 @@ export const contract = {
     // A project with none, or that the runner doesn't have, lists none.
     list: procedure.input(z.strictObject({ projectId: id })).output(z.array(closedTerminal)),
     // Every project's closed terminals: each `changed`, `synced`, then later changes
-    // (a close, a restore's progress and outcome, a prune), as `terminals.watch` reports
-    // terminals. An availability found by checking files is only as of when the list was read.
+    // (a close, a restore's progress and outcome, a prune, a removal), as `terminals.watch`
+    // reports terminals. An availability found by checking files is only as of when the list
+    // was read.
     watch: procedure.input(z.void()).output(eventIterator(historyChange)),
+    // Deletes those closed terminals for good on the person's say, as the prune does when
+    // they are 7 days old: each row goes with the output saved for it, and watchers receive
+    // its `removed`. Passed over, and left as they are: an id the runner doesn't have, and a
+    // row whose restore is under way (it reads `restoring`, or its new terminal has yet to
+    // save the output it took over). At most `maxHistoryRemoved` ids.
+    remove: procedure
+      .input(z.strictObject({ ids: z.array(id).min(1).max(maxHistoryRemoved) }))
+      .output(z.void()),
+  },
+  // The person's own notes on a project: todos, which they check off, and plain notes, in
+  // their order (notes.ts). Every change answers with the project's notes as it left them.
+  // A project the runner doesn't have is NOT_FOUND, and so is a note its project doesn't.
+  notes: {
+    // A project's notes, in the person's order.
+    list: procedure.input(z.strictObject({ projectId: id })).output(z.array(note)),
+    // Every project's notes: a `changed` for each project that has any, `synced`, then a
+    // project's notes whole each time they change.
+    watch: procedure.input(z.void()).output(eventIterator(notesChange)),
+    // Adds a note first in its project's list, open, with no body. The client names it; an id
+    // the project already has is a CONFLICT, as is one more than `noteLimits.perProject`.
+    add: procedure
+      .input(z.strictObject({ id, projectId: id, text: noteText, todo: z.boolean() }))
+      .output(z.array(note)),
+    // Changes what is given of a note: its line, its body, whether it is a todo, and whether
+    // it is checked off (`done`), from now. A plain note is never done: taking the checkbox
+    // away opens it again.
+    update: procedure
+      .input(
+        z.strictObject({
+          projectId: id,
+          id,
+          text: noteText.optional(),
+          body: noteBody.optional(),
+          todo: z.boolean().optional(),
+          done: z.boolean().optional(),
+        }),
+      )
+      .output(z.array(note)),
+    // Moves an open note to `index` among its project's open notes, within their ends; the
+    // done ones keep their places. One that is checked off is a CONFLICT.
+    move: procedure
+      .input(
+        z.strictObject({
+          projectId: id,
+          id,
+          index: z.number().int().min(0).max(noteLimits.perProject),
+        }),
+      )
+      .output(z.array(note)),
+    // Deletes notes for good; an id the project doesn't have is skipped.
+    remove: procedure
+      .input(z.strictObject({ projectId: id, ids: z.array(id).min(1).max(noteLimits.perProject) }))
+      .output(z.array(note)),
   },
   // Each tracked git worktree against its repository's main branch, for the Worktrees panel
   // (works.ts). A work is keyed by its worktree's root.
@@ -747,6 +808,10 @@ export const contract = {
     // The person dismisses an open ask without answering it: it stays listed, resolved, and its
     // agent is told at its next hook. One that isn't an open ask is NOT_FOUND.
     dismiss: procedure.input(z.strictObject({ id })).output(z.void()),
+    // The person clears the Inbox of what asks nothing of them: every open tell and done report
+    // is read, and every resolved entry leaves the listing for good. An open ask and a finished
+    // turn are not touched. The entries stay in their terminals' messages.
+    clear: procedure.input(z.void()).output(z.void()),
   },
   // Agents' feedback drafts for the people building Novadeck (see `feedbackDraft`): the app
   // shows each in its feedback card for the person to send or discard.

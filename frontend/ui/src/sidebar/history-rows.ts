@@ -4,7 +4,7 @@ import type { AgentConnection } from "@novadeck/core/port"
 import { findQuery, matchesQuery } from "@novadeck/core/terminals/find"
 
 // What History's rows say, apart from how they draw it: when a terminal closed, why it
-// can't come back, and which rows a search finds.
+// can't come back, which rows a search finds, and what removing them says.
 
 export const agentName = (agent: AgentName | null): string =>
   harnesses.find(({ id }) => id === agent)?.name ?? "The agent"
@@ -144,6 +144,34 @@ export const rowView = (
     }
   }
 }
+
+// Whether the person can remove the row: not one being restored, which its restore settles
+// and the backend leaves.
+export const removable = (row: ClosedTerminal): boolean => row.availability.state !== "restoring"
+
+// "1 closed terminal", "14 closed terminals".
+export const closedCount = (count: number): string =>
+  `${count} closed ${count === 1 ? "terminal" : "terminals"}`
+
+// What Clear's question says before it is answered: how many rows go, that they don't come
+// back, and how many stay because they are being restored.
+export const clearWords = (count: number, staying: number): string => {
+  const one = count === 1
+  const goes = `${closedCount(count)} ${one ? "is" : "are"} removed from History for good. You can’t restore ${one ? "it" : "them"} after.`
+  if (staying === 0) return goes
+  return `${goes} ${staying === 1 ? "The one being restored stays." : `The ${staying} being restored stay.`}`
+}
+
+// A removal that failed, as the panel says it above the list: one row's by its title, or
+// Clear's. The rows are still there.
+export type Unremoved =
+  | { readonly kind: "row"; readonly id: string; readonly title: string }
+  | { readonly kind: "clear" }
+
+export const unremovedWords = (failed: Unremoved): string =>
+  failed.kind === "row"
+    ? `Couldn’t remove ${failed.title}. It’s still in History.`
+    : "Couldn’t clear History. What’s listed is still here."
 
 // What a plain terminal's row adds after its title.
 export const rowFolder = (row: ClosedTerminal): string | undefined =>

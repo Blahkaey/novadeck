@@ -92,7 +92,19 @@ export {
   historyChange,
   type HistoryChange,
   historyLimits,
+  maxHistoryRemoved,
 } from "./history.js"
+export {
+  type Note,
+  note,
+  type NoteAuthor,
+  noteAuthor,
+  noteBody,
+  noteLimits,
+  type NotesChange,
+  notesChange,
+  noteText,
+} from "./notes.js"
 export {
   type PreviewHunk,
   previewHunk,
@@ -158,6 +170,7 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type FolderBrowse,
   type FolderListing,
   maxClientStateLength,
   type Project,

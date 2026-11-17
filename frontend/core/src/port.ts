@@ -14,6 +14,7 @@ import type { History } from "./history"
 import type { Inbox } from "./inbox"
 import type { Companions } from "./items"
 import type { Messages } from "./messages"
+import type { Notes } from "./notes"
 import type { WorkspaceSeed } from "./seed"
 import type { NoticeSound } from "./sounds"
 import type { WorkspaceAction } from "./state"
@@ -430,6 +431,10 @@ export type BackendFields = {
   // Optional. The terminals closed in the last 7 days, per project, to list and restore
   // (see core's `history`). Absent where the backend keeps none: closing is then final.
   readonly history?: History
+  // Optional. The person's own notes on each project, todos and plain notes, for the
+  // sidebar's Notes panel (see core's `notes`). Absent where the backend keeps none: the
+  // panel isn't drawn.
+  readonly notes?: Notes
   // Optional. Each terminal's work that differs from its repository's main branch, for the
   // sidebar's Worktrees panel (see core's `works`). Absent where the backend can't read the
   // terminals' checkouts: the panel isn't drawn.

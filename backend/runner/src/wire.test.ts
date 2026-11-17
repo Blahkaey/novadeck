@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
 import { createScreen } from "@novadeck/emulator/headless"
@@ -281,6 +281,45 @@ describe("WebSocket authentication and protocol", () => {
       kept.close()
     }
   })
+
+  it("keeps transcripts with a key file, made on the first start, and none without one", async ({
+    resources,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-key-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const keyFile = join(directory, "transcript-key")
+
+    const keyed = await fixture(resources, { transcriptKeyFile: keyFile })
+    const { client } = await keyed.connect()
+    await expect(client.settings.get()).resolves.toMatchObject({ transcriptsAvailable: true })
+    expect(await readFile(keyFile)).toHaveLength(32)
+
+    const plain = await fixture(resources)
+    const other = await plain.connect()
+    await expect(other.client.settings.get()).resolves.toMatchObject({
+      transcriptsAvailable: false,
+    })
+  })
+
+  it("refuses to start on a key file that holds no key, and leaves it be", async ({
+    resources,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-key-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const keyFile = join(directory, "transcript-key")
+    await writeFile(keyFile, "not a key", { mode: 0o600 })
+
+    await expect(
+      startServer({
+        port: 0,
+        token,
+        database: join(directory, "workspace.sqlite"),
+        transcriptKeyFile: keyFile,
+        terminals: ptyOptions,
+      }),
+    ).rejects.toThrow(`The transcript key file ${keyFile} doesn't hold a key`)
+    expect(await readFile(keyFile, "utf8")).toBe("not a key")
+  })
 })
 
 describe("workspace metadata API", () => {
@@ -341,6 +380,35 @@ describe("workspace metadata API", () => {
     await expect(
       client.projects.folder({ projectId: project.id, folder: "x".repeat(5000) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("browses the runner's folders, from its owner's home, without making anything", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "browse")
+    await mkdir(join(cwd, "src"), { recursive: true })
+    await writeFile(join(cwd, "notes.md"), "")
+    const real = await realpath(cwd)
+
+    await expect(client.projects.browse({ path: cwd })).resolves.toEqual({
+      path: real,
+      parent: dirname(real),
+      folders: ["src"],
+      truncated: false,
+    })
+    await expect(client.projects.browse({})).resolves.toMatchObject({
+      path: await realpath(homedir()),
+    })
+    await Promise.all(
+      ["relative", join(cwd, "missing"), join(cwd, "notes.md")].map((path) =>
+        expect(client.projects.browse({ path })).rejects.toMatchObject({
+          code: "INVALID_DIRECTORY",
+        }),
+      ),
+    )
+    await expect(client.projects.list()).resolves.toEqual([])
   })
 
   it("payload, directory and workspace relationship validation", async ({ resources }) => {

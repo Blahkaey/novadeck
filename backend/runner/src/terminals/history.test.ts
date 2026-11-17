@@ -36,6 +36,11 @@ const memory = () => {
       for (const id of old) rows.delete(id)
       return old
     },
+    eraseClosed: (ids) => {
+      const had = [...new Set(ids)].flatMap((id) => rows.get(id) ?? [])
+      for (const { id } of had) rows.delete(id)
+      return had.map(({ id, projectId }) => ({ id, projectId }))
+    },
   }
   return { rows, records }
 }
@@ -537,6 +542,113 @@ describe("pruning and watching", () => {
     history.closing(live(), null)
     await vi.waitFor(() => expect(watching.later).toHaveLength(1))
     expect(watching.later[0]).toMatchObject({ type: "changed", closed: { id: "t-1" } })
+    watching.stop()
+  })
+})
+
+describe("removing rows on the person's say", () => {
+  it("deletes the rows named, of any project, and tells watchers of each", async () => {
+    const { history, store } = setup()
+    store.rows.set("a", row({ id: "a" }))
+    store.rows.set("b", row({ id: "b" }))
+    store.rows.set("c", row({ id: "c", projectId: "p2" }))
+    const watching = await follow(history)
+    history.erase(["a", "c"])
+    expect([...store.rows.keys()]).toEqual(["b"])
+    await vi.waitFor(() => expect(watching.later).toHaveLength(2))
+    expect(watching.later).toEqual([
+      { type: "removed", id: "a", projectId: "p1" },
+      { type: "removed", id: "c", projectId: "p2" },
+    ])
+    watching.stop()
+  })
+
+  it("passes over an id it doesn't keep", async () => {
+    const { history, store, host } = setup()
+    store.rows.set("a", row({ id: "a" }))
+    const watching = await follow(history)
+    history.erase(["nope"])
+    history.erase([])
+    expect([...store.rows.keys()]).toEqual(["a"])
+    expect(host.pruned).not.toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(watching.later).toEqual([])
+    watching.stop()
+  })
+
+  it("tells the host which terminals left for good, so their worktrees can go, as a prune does", () => {
+    const { history, store, host } = setup()
+    store.rows.set("a", row({ id: "a" }))
+    store.rows.set("b", row({ id: "b" }))
+    history.erase(["a", "nope", "b"])
+    expect(host.pruned).toHaveBeenCalledExactlyOnceWith(["a", "b"])
+  })
+
+  it("leaves the worktrees of a row a running terminal was restored from to that restore", () => {
+    const { history, store, host } = setup({
+      restoredBeside: (id: string) =>
+        id === "a" ? { handle: "moth", terminalId: "t-moth" } : undefined,
+    })
+    store.rows.set("a", row({ id: "a" }))
+    store.rows.set("b", row({ id: "b" }))
+    history.erase(["a", "b"])
+    expect(store.rows.size).toBe(0)
+    expect(host.pruned).toHaveBeenCalledExactlyOnceWith(["b"])
+  })
+
+  it("passes over a row being restored, which a removal takes once the restore let it go", async () => {
+    const { history, store } = setup()
+    store.rows.set("old-1", row())
+    let fail!: () => void
+    const attempt = history.restore(
+      { id: "new-1", sessionId: "s1", closed: "old-1" },
+      () => new Promise<TerminalSummary>((_, reject) => (fail = () => reject(new Error("no")))),
+    )
+    await vi.waitFor(() => expect(fail).toBeDefined())
+    history.erase(["old-1"])
+    expect(store.rows.has("old-1")).toBe(true)
+    fail()
+    await expect(attempt).rejects.toThrow("no")
+    history.erase(["old-1"])
+    expect(store.rows.has("old-1")).toBe(false)
+  })
+
+  it("passes over a plain row whose screen is not written yet", () => {
+    const { history, store, archived } = setup()
+    history.closing(live(), null)
+    history.erase(["t-1"])
+    expect(store.rows.has("t-1")).toBe(true)
+    archived[0]!.settled()
+    history.erase(["t-1"])
+    expect(store.rows.has("t-1")).toBe(false)
+  })
+
+  it("passes over a plain row restored, which goes once its new terminal saved its screen", async () => {
+    const saves: (() => void)[] = []
+    const s = setup({ saved: (_record: Record, done: () => void) => void saves.push(done) })
+    s.store.rows.set("old-1", row({ transcript: "v1.text" }))
+    await restoring(s, live())
+    await vi.waitFor(() => expect(saves).toHaveLength(1))
+    s.history.erase(["old-1"])
+    expect(s.store.rows.has("old-1")).toBe(true)
+    expect(s.host.pruned).not.toHaveBeenCalled()
+    saves[0]!()
+    expect(s.store.rows.size).toBe(0)
+    expect(s.host.restored).toHaveBeenCalledExactlyOnceWith("old-1", "t-1")
+  })
+
+  it("throws when the store can't delete, with no row gone and nobody told", async () => {
+    const { history, store, host } = setup()
+    store.rows.set("a", row({ id: "a" }))
+    vi.spyOn(store.records, "eraseClosed").mockImplementation(() => {
+      throw new Error("disk full")
+    })
+    const watching = await follow(history)
+    expect(() => history.erase(["a"])).toThrow("disk full")
+    expect(store.rows.has("a")).toBe(true)
+    expect(host.pruned).not.toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(watching.later).toEqual([])
     watching.stop()
   })
 })

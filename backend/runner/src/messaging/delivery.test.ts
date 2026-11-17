@@ -1239,6 +1239,29 @@ describe("an agent's prompt shown before any session binds", () => {
   it("is Unbound again once the agent leaves before any session bound", () => {
     expect(transition(ready, { type: "unbound" }).state).toBe("unbound")
   })
+
+  it("tells the person's first prompt theirs where the session binds on it, as Codex's does", () => {
+    // Typed and submitted at the shown prompt; the session binds, then its prompt's hook.
+    const first = run(ready, typing, enter, { ...binds, at: at + 200 })
+    expect(first).toMatchObject({ state: "fresh", box: { enteredAt: at } })
+    expect(transition(first, prompted(at + 300))).toMatchObject({
+      state: "working",
+      byPerson: true,
+      box: { empty: true, enteredAt: null },
+    })
+    // Not where they typed after the Enter, or it is long past by the session's prompt.
+    expect(run(ready, typing, enter, typing, binds, prompted()).byPerson).toBe(false)
+    expect(
+      run(ready, typing, enter, { ...binds, at: at + 200 }, prompted(at + submitWindowMs + 1))
+        .byPerson,
+    ).toBe(false)
+    // Nor an Enter in the shell, before the agent's box showed: it started the program.
+    expect(run(unbound, typing, enter, binds, prompted()).byPerson).toBe(false)
+    // A turn the harness starts is never theirs.
+    expect(run(ready, typing, enter, binds, harness).byPerson).toBe(false)
+    // Nor one a session bound mid-turn starts, though they queued a prompt just before.
+    expect(run(working, typing, enter, binds, prompted()).byPerson).toBe(false)
+  })
 })
 
 describe("the person's Enter window", () => {

@@ -1,3 +1,4 @@
+import { noNotes } from "@novadeck/core/notes"
 import { createTerminalState } from "@novadeck/core/state"
 import { createStore, createWorkspaceStore } from "@novadeck/core/store"
 import { appearance, terminalFixture, workspaceWithWindow } from "@novadeck/core/testing"
@@ -7,6 +8,7 @@ import { describe, expect, it } from "vitest"
 import {
   availablePanels,
   historyShown,
+  notesShown,
   resolveRoute,
   routeUrl,
   filesShown,
@@ -171,6 +173,35 @@ describe("route reconciliation", () => {
     expect(at("changes")).toBe("worktrees")
   })
 
+  it("shows the Notes panel only where the backend keeps the person's notes", () => {
+    const pathname = "/projects/project/sessions/initial/grid"
+    const location = { pathname, search: "?terminal=01&panel=notes" }
+
+    const without = resolveRoute(fixture(), location, preferences, 1, availablePanels(true, true))
+    const withNotes = resolveRoute(
+      fixture(),
+      location,
+      preferences,
+      1,
+      availablePanels(true, true, false, true),
+    )
+
+    expect(without.route.panel).toBe("terminals")
+    expect(withNotes.route.panel).toBe("notes")
+    expect(notesShown({})).toBe(false)
+    expect(
+      notesShown({
+        notes: {
+          state: createStore(noNotes),
+          add: () => {},
+          change: () => {},
+          move: () => {},
+          remove: () => {},
+        },
+      }),
+    ).toBe(true)
+  })
+
   it("shows the History panel only where the backend keeps closed terminals", () => {
     const pathname = "/projects/project/sessions/initial/grid"
     const location = { pathname, search: "?terminal=01&panel=history" }
@@ -189,7 +220,11 @@ describe("route reconciliation", () => {
     expect(historyShown({})).toBe(false)
     expect(
       historyShown({
-        history: { state: createStore({ rows: [] }), list: () => Promise.resolve([]) },
+        history: {
+          state: createStore({ rows: [] }),
+          list: () => Promise.resolve([]),
+          remove: () => Promise.resolve(),
+        },
       }),
     ).toBe(true)
   })

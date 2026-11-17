@@ -299,7 +299,7 @@ export const claudeVocabulary: readonly Written[] = [
   {
     // Novadeck's reporting tools, their inputs' keys as Claude Code's transcripts give them
     // (seen 2026-11: done {subject, body}, feedback {kind, text}, look {} and {page}), each
-    // result a list of text parts; ask and tell as Novadeck's server defines them.
+    // result a list of text parts; ask, tell and note as Novadeck's server defines them.
     name: "novadeck-reports",
     records: [
       said("Wrap up."),
@@ -337,6 +337,21 @@ export const claudeVocabulary: readonly Written[] = [
           "Asked.",
         ],
         [`${novadeck}ask`, { withdraw: "00000000-0000-4000-8000-000000000001" }, "Withdrew."],
+        [
+          `${novadeck}note`,
+          { notes: [{ text: "Revisit the retry logic", body: "Backoff caps at 30 s." }] },
+          [{ type: "text", text: "Added a todo." }],
+        ],
+        [
+          `${novadeck}note`,
+          {
+            notes: [
+              { text: "Rename the queue" },
+              { text: "Staging runs with the flag off", todo: false },
+            ],
+          },
+          [{ type: "text", text: "Added a todo and a note." }],
+        ],
       ]),
     ],
   },

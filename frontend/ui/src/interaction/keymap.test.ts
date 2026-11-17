@@ -469,6 +469,9 @@ describe("keymap", () => {
           expect(keydown(platform, { ...modifier, shiftKey: true, key: "F" })).toEqual([
             "sidebar.files",
           ])
+          expect(keydown(platform, { ...modifier, shiftKey: true, key: "L" })).toEqual([
+            "sidebar.notes",
+          ])
           expect(keydown(platform, { ...modifier, shiftKey: true, key: "H" })).toEqual([
             "sidebar.history",
           ])
@@ -632,6 +635,7 @@ describe("keymap", () => {
             "sidebar.inbox",
             "sidebar.worktrees",
             "sidebar.files",
+            "sidebar.notes",
             "sidebar.history",
             "view.toggleFocus",
             "terminal.new",
@@ -670,6 +674,7 @@ describe("keymap", () => {
           "Toggle Inbox: Ctrl Shift B",
           "Toggle Worktrees: Ctrl Shift G",
           "Toggle Files: Ctrl Shift F",
+          "Toggle Notes: Ctrl Shift L",
           "Toggle History: Ctrl Shift H",
           "Open preferences: Ctrl ,",
           "Navigate the workspace: Shift Esc",
@@ -694,6 +699,7 @@ describe("keymap", () => {
           "Toggle Inbox: ⌘ Shift B",
           "Toggle Worktrees: ⌘ Shift G",
           "Toggle Files: ⌘ Shift F",
+          "Toggle Notes: ⌘ Shift L",
           "Toggle History: ⌘ Shift H",
           "Open preferences: ⌘ ,",
           "Navigate the workspace: Shift Esc",

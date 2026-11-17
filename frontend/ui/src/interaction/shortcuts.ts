@@ -29,6 +29,7 @@ export type ShortcutName =
   | "inbox"
   | "worktrees"
   | "files"
+  | "notes"
   | "history"
   | "preferences"
   | "navigate"
@@ -137,6 +138,15 @@ export const shortcutBindings = (
       meta: mac,
       shift: true,
       display: [mac ? "⌘" : "Ctrl", "Shift", "F"],
+    },
+    // L for the list it keeps: N starts a session.
+    notes: {
+      label: "Toggle Notes",
+      key: "l",
+      ctrl: !mac,
+      meta: mac,
+      shift: true,
+      display: [mac ? "⌘" : "Ctrl", "Shift", "L"],
     },
     history: {
       label: "Toggle History",

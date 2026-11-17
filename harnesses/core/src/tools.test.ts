@@ -122,6 +122,32 @@ describe("Novadeck's own tools", () => {
     })
   })
 
+  it("labels a note call by the todos and notes it adds, with the first one's line", () => {
+    const todo = (text: string) => ({ text })
+    const plain = (text: string) => ({ text, todo: false })
+    expect(novadeckTool("note", { notes: [todo("Revisit the retry logic")] })).toEqual({
+      kind: "agent",
+      title: "Added a todo",
+      detail: "Revisit the retry logic",
+    })
+    expect(novadeckTool("note", { notes: [todo("a"), todo("b"), todo("c")] })?.title).toBe(
+      "Added 3 todos",
+    )
+    expect(novadeckTool("note", { notes: [plain("Staging has the flag off")] })?.title).toBe(
+      "Added a note",
+    )
+    expect(novadeckTool("note", { notes: [todo("a"), plain("b"), plain("c")] })?.title).toBe(
+      "Added a todo and 2 notes",
+    )
+    // As Antigravity may wrap a list, in JSON text; and an input with no list at all.
+    expect(novadeckTool("note", { notes: JSON.stringify([plain("Wrapped")]) })).toEqual({
+      kind: "agent",
+      title: "Added a note",
+      detail: "Wrapped",
+    })
+    expect(novadeckTool("note", {})).toEqual({ kind: "agent", title: "Added notes", detail: "" })
+  })
+
   it("keeps the first line of a done report's subject", () => {
     expect(novadeckTool("done", { subject: "Shipped\nand tested", body: "" })?.detail).toBe(
       "Shipped",

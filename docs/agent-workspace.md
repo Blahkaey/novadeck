@@ -797,8 +797,11 @@ with every safety check again at that time:
     (`terminals.checkouts()`, read again just before the removal). An unmerged worktree is never
     removed by this: while its owner is in History it waits (a terminal restored from History
     finds it still there), and an orphaned one is listed as "No owner" for the person to close.
-    When the owner's History row is pruned (`ClosedTerminals.prune`, the only place that tells
-    cleanup; a restore also deletes a row but does not), its worktrees are removed with `force`
+    When the owner's History row leaves for good, pruned at 7 days (`ClosedTerminals.prune`) or
+    removed by the person in the History panel (`ClosedTerminals.erase`, `history.remove`), the
+    two places that tell cleanup (a restore also deletes a row but does not, and a removed row a
+    running terminal was restored from doesn't either: its worktrees wait for that restore, which
+    hands them over once confirmed), its worktrees are removed with `force`
     semantics: uncommitted work and a detached HEAD are kept on `refs/novadeck/kept/` refs and an
     unmerged branch is kept. If git couldn't read the worktree, it has submodules or an agent
     works in it, the row is orphaned instead, the folder stays, and a warning is logged. Each
@@ -839,6 +842,12 @@ with every safety check again at that time:
   the summaries the terminals' agents gave through `describe`, and `team` follows the
   caller's own team's work since it last looked. See
   [Agent messaging](agent-messaging.md).
+- **Notes** the person asks for come from the same server's `note` tool, listed in every
+  Novadeck terminal: it adds notes or todos first in the caller's project's Notes, each
+  marked with the agent that added it, and can't read or change a note. The runner takes it
+  only in a turn the person's own message started that no other agent's message reached
+  (`terminals/note-request.ts`). See [Agent messaging](agent-messaging.md), "Notes the
+  person asks for".
 - **Pages** are any http(s) address; an address with a user name or password is
   refused. The desktop app loads them live in the pane, in Electron's `<webview>`,
   which lays out with the pane, keeps Novadeck's menus and cards above it, and lets a

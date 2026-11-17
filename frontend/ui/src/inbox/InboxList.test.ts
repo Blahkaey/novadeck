@@ -1,4 +1,5 @@
 import {
+  clearable,
   emptyInbox,
   withSnoozes,
   type Inbox,
@@ -11,7 +12,7 @@ import { act, createElement, useLayoutEffect } from "react"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
-import { HeldPill, InboxCount, InboxList } from "./InboxList"
+import { HeldPill, InboxClear, InboxCount, InboxList } from "./InboxList"
 import { InboxProvider, useInboxContext, type InboxContextValue } from "./InboxProvider"
 import { InboxSheet } from "./InboxSheet"
 import { sightDwellMs } from "./read-on-sight"
@@ -95,6 +96,7 @@ const mount = (
   snoozing = false,
   active = true,
   looking = true,
+  clearing = false,
 ) => {
   const state = createStore<InboxState>({ ...emptyInbox, items: rows })
   const answered: string[] = []
@@ -119,6 +121,15 @@ const mount = (
         }
       : {}),
     ...(arranging ? { order, arrange: (ids: readonly string[]) => order.update(() => ids) } : {}),
+    ...(clearing
+      ? {
+          clear: () =>
+            state.update((current) => ({
+              ...current,
+              items: current.items.filter((row) => !clearable(row)),
+            })),
+        }
+      : {}),
   }
   // The Inbox's own handlers, as the views that open its sheets hold them.
   const handlers: { current: InboxContextValue | null } = { current: null }
@@ -144,6 +155,9 @@ const mount = (
         { id: "inbox-panel" },
         snoozing ? createElement("span", { className: "count" }, createElement(InboxCount)) : null,
         createElement(HeldPill),
+        createElement(InboxClear),
+        // The panel's Hide button, where the keyboard goes once Clear has gone.
+        createElement("button", { className: "sidebar-close" }),
         createElement(InboxList),
       ),
       createElement(InboxSheet, { active: true }),
@@ -407,12 +421,88 @@ describe("The Inbox's list", () => {
       inbox.view.unmount()
     })
 
-    it("offers no Mark all read or Clear settled", async () => {
+    it("offers no Mark all read", async () => {
       const inbox = mount([told("u1", 1), agentAsk("b", 2, { how: "replied", at: 5 })], false, true)
 
       expect(inbox.view.container.querySelector('[aria-label="Mark all read"]')).toBeNull()
-      expect(inbox.view.container.querySelector('[aria-label="Clear settled"]')).toBeNull()
       await nextFrame()
+      inbox.view.unmount()
+    })
+  })
+
+  context("where the backend can clear", () => {
+    const clearing = (rows: readonly InboxRow[]) =>
+      mount(rows, false, true, false, false, true, true, true)
+    const clearButton = (inbox: ReturnType<typeof mount>): HTMLElement | null =>
+      inbox.view.container.querySelector<HTMLElement>(
+        '[aria-label="Clear updates and resolved rows"]',
+      )
+
+    it("offers Clear only while a row asks nothing, and only where the backend can", async () => {
+      const asking = clearing([agentAsk("a", 2), permission("p", 1)])
+      expect(clearButton(asking)).toBeNull()
+      asking.arrive(told("u", 3))
+      expect(clearButton(asking)).not.toBeNull()
+      await nextFrame()
+      asking.view.unmount()
+
+      const without = mount([told("u", 1), agentAsk("b", 2, { how: "replied", at: 5 })])
+      expect(clearButton(without)).toBeNull()
+      await nextFrame()
+      without.view.unmount()
+    })
+
+    it("takes the updates and the resolved rows, and leaves what asks", async () => {
+      const inbox = clearing([
+        told("u", 4),
+        agentAsk("a", 3),
+        agentAsk("b", 2, { how: "replied", at: 5 }),
+        permission("p", 1),
+      ])
+      act(() => clearButton(inbox)!.click())
+
+      expect(inbox.subjects()).toEqual(["a", "Run p?"])
+      expect(clearButton(inbox)).toBeNull()
+      await nextFrame()
+      inbox.view.unmount()
+    })
+
+    it("leaves the keyboard on the panel's Hide button, as its own button goes", async () => {
+      const inbox = clearing([told("u", 2), agentAsk("a", 1)])
+      clearButton(inbox)!.focus()
+      // A click the keyboard made carries no detail.
+      act(() => clearButton(inbox)!.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+
+      expect(document.activeElement?.className).toBe("sidebar-close")
+      await nextFrame()
+      inbox.view.unmount()
+    })
+
+    it("closes a sheet open on a row it clears", async () => {
+      const inbox = clearing([agentAsk("a", 2), agentAsk("b", 1, { how: "replied", at: 5 })])
+      inbox.open("b")
+      expect(document.querySelector(".inbox-sheet")).not.toBeNull()
+      act(() => clearButton(inbox)!.click())
+      await nextFrame()
+
+      expect(document.querySelector(".inbox-sheet")).toBeNull()
+      expect(inbox.subjects()).toEqual(["a"])
+      inbox.view.unmount()
+    })
+
+    it("lets the cleared rows go at once from a list a sheet holds still, and keeps the sheet", async () => {
+      const inbox = clearing([
+        agentAsk("a", 3),
+        agentAsk("b", 2, { how: "replied", at: 5 }),
+        told("u", 1),
+      ])
+      inbox.open("a")
+      act(() => clearButton(inbox)!.click())
+      await nextFrame()
+
+      expect(inbox.subjects()).toEqual(["a"])
+      expect(inbox.row("a").dataset.selected).toBe("true")
+      expect(document.querySelector(".inbox-sheet")).not.toBeNull()
       inbox.view.unmount()
     })
   })

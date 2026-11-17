@@ -199,6 +199,15 @@ PowerShell running a `.cmd` program drops those quotes, so cmd can still split i
 
 ## Terminal Runner
 
+The desktop app's **Runner → Remote Runner…** form runs no script, has no preload or
+Node access, and uses an in-memory session. The saved token never appears in its page;
+the password field stays blank to keep it. A submitted token crosses an intercepted
+navigation inside the host, which is never sent to the network or logged. URL-bearing
+page diagnostics are restricted to the app's default session, excluding these private
+forms. Settings are checked and the connection authenticated before an owner-only
+temporary file replaces `remote-runner.json`. Switching to local keeps the settings as
+`remote-runner.off.json`, so that file also holds the token and must remain private.
+
 The standalone terminal API is a personal/self-hosted shell capability, not a
 multi-user sandbox. Anyone holding `NOVADECK_TOKEN` can execute programs and read
 or modify files as the runner's OS account. Projects and sessions organize work;
@@ -246,8 +255,16 @@ key-like runs) is masked in a worker thread; a transcript that cannot be masked 
 saved, and the copy saved before stays. The masked text is then encrypted (AES-256-GCM,
 bound to its terminal) with a key the desktop app keeps in the system keychain: the
 Keychain on macOS, DPAPI on Windows, the Secret Service on Linux (GNOME Keyring, or KWallet
-where it offers the Secret Service). Where nothing protects that key (no keyring on Linux,
-an unlock that is refused or fails, the standalone runner, which has no key) no transcript is saved or shown, and the setting stays as it is.
+where it offers the Secret Service). A standalone runner has no app to keep its key: it keeps
+none, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for it, which it makes on its first
+start (32 random bytes, owner-only) and reads on every later one. It refuses to start on a
+file there that it can't read, that isn't a 32-byte key, or that other accounts can read or
+change, and never overwrites one: losing or replacing that file leaves every transcript saved
+under it unreadable. That file sits on the same disk as the database, so it keeps transcripts
+only from a copy of the database that leaves without it, such as a backup of the database
+alone; anyone who can read both reads the transcripts. Where nothing protects the key (no
+keyring on Linux, an unlock that is refused or fails, a standalone runner without a key file)
+no transcript is saved or shown, and the setting stays as it is.
 A restored terminal waits a few seconds, once for the run, for the key; if it comes later,
 that terminal's saved transcript is not shown and is left as it is until the next start.
 A transcript found unencrypted is forgotten at every start, key or not, but a database set

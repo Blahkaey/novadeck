@@ -137,6 +137,8 @@ export class Leasing {
     // The first always goes, as it fits alone; beside what the turn holds it may not.
     if (messages.length === 0 || prints(messages) > maxDeliveryBytes) return undefined
     for (const message of messages) store.put({ ...message, state: "leased" })
+    // Another agent's words may reach the turn from here, printed or not (`personTurn`).
+    if (messages.some(({ from }) => from.kind === "agent")) live.othersIn = live.delivery.epoch
     const text = wrapped(messages)
     const gave: Held = lasting ? givenIn(held, noteKinds(messages, isFromLead)) : {}
     return this.leases.grant({

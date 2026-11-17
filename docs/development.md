@@ -521,9 +521,33 @@ Agents:
 - **Agent connections:** make the next connect in Preferences fail, refresh the agents, or
   connect Antigravity with the note Preferences shows where its own status line keeps
   Novadeck's out, as on Windows.
+- **History:** only where the demo keeps closed terminals (`plain`, `agents`, `messages`,
+  `inbox` and `welcome`; the showcase and the videos' demos have no History panel). Storefront
+  starts with 14 rows, one in each state a row can be in but restoring, which a click on a row
+  shows for a moment; the other projects start with none, and closing a terminal something ran
+  in adds one. So the panel's Clear, its question and a row's trash button need no action.
+  "Selected agent can't be restored" and "Selected agent can be restored" set what closing the
+  selected agent's terminal asks. "Next History removal fails" makes the next removal, a row's
+  or Clear's, fail once: the rows stay, and a line above the list says they couldn't be removed.
 
 App:
 
+- **Notes:** only where the demo keeps the person's notes (`plain`, `agents`, `messages`,
+  `inbox` and `welcome`; the showcase and the videos' demos have no Notes panel). Storefront
+  starts with four todos, one of them with details and one added by an agent, marked so (Codex's
+  icon at the end of its line, whose tooltip reads "Added by Codex · @pike", History's Tax
+  rounding agent), a plain note and two todos under Done; the other projects start with none.
+  Adding, checking off, editing, moving, deleting and Clear done all work there, so they need
+  no action. Each action acts on the open project's notes and leaves the others': "Next
+  notes change fails" makes the next change fail once (the list stays as it was, and a line
+  above it says the change wasn't saved, until a change takes), "Sample notes" puts
+  storefront's samples in the open project, "No notes" empties it (the panel says what it is
+  for), "Every todo done" leaves nothing to do over a Done group of six, "Project full of
+  notes" fills it with the 200 a project keeps (the add field takes no more, and a line says
+  why), "A long note" adds a todo whose line is as long as one can be, with details that have
+  a heading, lists, code and a link, and "An agent adds a todo" puts a todo first in the list,
+  marked as added by the first agent running in the session on screen (Claude Code's @wren,
+  from History, where none runs), as an agent's `note` tool adds one.
 - **Inbox:** each action adds one row of its kind to the Inbox, over what the agents wait on,
   waiting from now and in place of the one of its kind already there: a stuck agent, Codex's
   command permission, an unreadable dialog, a held message, a decision with options, a
@@ -551,7 +575,10 @@ App:
   stopped, and trouble the agent worked past or messages delivered), each opening as a
   read-only card in gray; "Seventeen resolved rows" adds all of them at once, to see that the
   list holds only the ten that resolved last. Answering any open row resolves it in place the
-  same way. "Next reply not delivered" queues the next reply, then
+  same way. The Inbox's header has Clear while any row is an update or resolved (the `inbox`
+  variant starts with a few): it reads the updates and takes them and the resolved rows away,
+  all seventeen of those too, leaving the rows that ask; with one of them open, its card
+  closes. "Next reply not delivered" queues the next reply, then
   shows the delivery failure in its Inbox receipt (on the sheet the Inbox moved on to, with
   Back to it) and Messages history. A box for your own words says when it is over 4,096
   characters, and won't send until it isn't. Pausing messages between agents leaves
@@ -688,6 +715,11 @@ App:
   you toggle it back; or count four crashes, which opens the dialog, puts Restart terminals
   in the footer and fails the selected terminal's session's terminals (Try again or Restart
   terminals clears the count and restarts them, in every session a trip failed).
+- **Remote Runner:** browser stand-ins for the native settings window: local setup, a
+  saved connection with its host connected, connecting or disconnected, a connection check
+  in progress, invalid fields, a refused token, a failed save, and bad settings at launch.
+  These use sample addresses only and save no credentials or desktop settings. Save and
+  Restart and Use this computer's runner show what the desktop app would do.
 - **Sandbox:** boot as a desktop app running without Electron's sandbox, for the footer's No
   sandbox chip and its fix command; "No sandbox, no fix" as one with no command to offer;
   and "Sandboxed" back to normal.
@@ -1386,8 +1418,11 @@ cp backend/runner/example.env backend/runner/.env
 
 - Runner: `HOST`, `PORT`, and `CORS_ORIGINS` control the listener and allowed frontend origins; a `HOST` that isn't loopback is refused unless `NOVADECK_ALLOW_REMOTE_HOST=1`.
 - Terminal API: `NOVADECK_TOKEN` enables authenticated WebSocket RPC;
-  `NOVADECK_DATABASE` optionally selects the SQLite metadata file. Without a token,
-  only the existing HTTP status API is available.
+  `NOVADECK_DATABASE` optionally selects the SQLite metadata file,
+  `NOVADECK_TRANSCRIPT_KEY_FILE` a file for the key saved terminal output is encrypted with
+  (none unless set, so nothing is saved), and `NOVADECK_MAX_TERMINALS` the cap on terminals (32
+  unless set; `none` for no cap). Without a token, only the existing HTTP status API is
+  available.
 - Electron: the host runs the runner in a utility process and hands each window a
   MessagePort through a sandboxed preload bridge. It also serves the status endpoint
   on a local, OS-selected port. Package `.env` files are not used.

@@ -13,11 +13,14 @@ import {
 import { context, describe, expect, it } from "../test"
 
 // The agents demo keeps closed terminals: the storefront's rows, one for each state, and what
-// the person closes here. Restoring takes the row away a moment after, as the runner confirms.
+// the person closes here. Restoring takes the row away a moment after, as the runner confirms,
+// and so does removing one.
 const agents = "/?demo=agents"
 
 const closed = () => page.getByRole("list", { name: "Closed terminals" })
 const find = () => page.getByRole("searchbox", { name: "Find a closed terminal" })
+const clear = () => page.getByRole("button", { name: "Clear History", exact: true })
+const clearQuestion = () => page.getByRole("alertdialog", { name: "Clear History?" })
 const openHistory = async () => {
   await openWorkspace(agents)
   await sidebarPanel("History").click()
@@ -172,6 +175,118 @@ describe("The History panel", () => {
       await expect.element(terminal("Coupon codes")).toBeVisible()
       await sidebarPanel("Terminals").click()
       await expect.poll(() => terminalTabNames()[0]).toBe("Coupon codes")
+    })
+  })
+
+  context("when clearing", () => {
+    it("asks first, saying how many go for good, and keeps every row when cancelled", async () => {
+      await openHistory()
+      await clear().click()
+      await expect.element(clearQuestion()).toBeVisible()
+      await expect
+        .poll(() => clearQuestion().element().textContent)
+        .toMatch(
+          /14 closed terminals are removed from History for good\. You can’t restore them after\./,
+        )
+      // Nothing went while it asked.
+      await clearQuestion().getByRole("button", { name: "Cancel" }).click()
+      await expect.element(clearQuestion()).not.toBeInTheDocument()
+      await expect.element(page.getByRole("heading", { name: /^History 14$/ })).toBeVisible()
+      await expect.element(page.getByRole("button", { name: "Restore Coupon codes" })).toBeVisible()
+    })
+
+    it("is asked and called off by the keyboard, which goes back to Clear", async () => {
+      await openHistory()
+      clear().element().focus()
+      await userEvent.keyboard("{Enter}")
+      // The safe answer has the focus, so a second Enter clears nothing.
+      await expect.element(clearQuestion().getByRole("button", { name: "Cancel" })).toHaveFocus()
+      await userEvent.keyboard("{Escape}")
+      await expect.element(clearQuestion()).not.toBeInTheDocument()
+      await expect.element(clear()).toHaveFocus()
+      await expect.element(page.getByRole("heading", { name: /^History 14$/ })).toBeVisible()
+    })
+
+    it("empties the list once confirmed, and is gone with the rows", async () => {
+      await openHistory()
+      await clear().click()
+      await clearQuestion().getByRole("button", { name: "Clear History" }).click()
+      await expect
+        .element(page.getByText("Terminals you close show up here, so you can bring them back."))
+        .toBeVisible()
+      await expect.element(page.getByRole("heading", { name: /^History$/ })).toBeVisible()
+      await expect.element(closed().getByRole("button")).not.toBeInTheDocument()
+      await expect.element(clear()).not.toBeInTheDocument()
+      await expect.element(find()).not.toBeInTheDocument()
+    })
+
+    it("clears the rows a search leaves out too", async () => {
+      await openHistory()
+      await find().fill("tax")
+      await expect.element(page.getByRole("heading", { name: /^History 1\/14$/ })).toBeVisible()
+      await clear().click()
+      await expect
+        .poll(() => clearQuestion().element().textContent)
+        .toMatch(/14 closed terminals are removed/)
+      await clearQuestion().getByRole("button", { name: "Clear History" }).click()
+      await expect
+        .element(page.getByText("Terminals you close show up here, so you can bring them back."))
+        .toBeVisible()
+    })
+
+    it("has no Clear in a project with nothing closed", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("History").click()
+      await page.getByRole("button", { name: "Switch workspace", exact: true }).click()
+      await page
+        .getByRole("dialog", { name: "Switch workspace" })
+        .getByRole("button", { name: /^docs-site / })
+        .click()
+      await expect
+        .element(page.getByText("Terminals you close show up here, so you can bring them back."))
+        .toBeVisible()
+      await expect.element(clear()).not.toBeInTheDocument()
+    })
+  })
+
+  context("when removing a row", () => {
+    it("takes just that row away, without asking, and restores nothing", async () => {
+      await openHistory()
+      await closed().getByRole("button", { name: "Restore Coupon codes" }).hover()
+      await page.getByRole("button", { name: "Remove Coupon codes from History" }).click()
+      await expect
+        .element(closed().getByRole("button", { name: "Restore Coupon codes" }))
+        .not.toBeInTheDocument()
+      await expect.element(page.getByRole("heading", { name: /^History 13$/ })).toBeVisible()
+      await expect.element(page.getByRole("button", { name: "Restore Tax rounding" })).toBeVisible()
+      await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument()
+      await expect.element(terminal("Coupon codes")).not.toBeInTheDocument()
+    })
+
+    it("removes a row that can't be restored, by the keyboard, and moves on to the next row", async () => {
+      await openHistory()
+      const remove = page.getByRole("button", { name: "Remove Product filters from History" })
+      remove.element().focus()
+      await expect.element(remove).toHaveFocus()
+      await userEvent.keyboard("{Enter}")
+      await expect
+        .element(closed().getByRole("button", { name: "Product filters, unavailable" }))
+        .not.toBeInTheDocument()
+      await expect
+        .element(closed().getByRole("button", { name: "Image CDN, unavailable" }))
+        .toHaveFocus()
+    })
+
+    it("keeps a press where Remove will show the row's own, until the pointer is on the row", async () => {
+      await openHistory()
+      const row = closed().getByRole("button", { name: "Restore Tax rounding" })
+      const remove = page.getByRole("button", { name: "Remove Tax rounding from History" })
+      const place = remove.element().getBoundingClientRect()
+      const pressed = () =>
+        document.elementFromPoint(place.left + place.width / 2, place.top + place.height / 2)
+      expect(row.element().contains(pressed())).toBe(true)
+      await row.hover()
+      await expect.poll(() => remove.element().contains(pressed())).toBe(true)
     })
   })
 

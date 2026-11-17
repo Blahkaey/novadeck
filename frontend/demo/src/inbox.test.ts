@@ -211,6 +211,31 @@ describe("the demo Inbox", () => {
     })
   })
 
+  context("when the person clears it", () => {
+    it("reads its updates and takes them and the resolved rows, leaving what waits", () => {
+      const record = vi.fn<(row: InboxRow, answer?: InboxAnswer) => void>()
+      const inbox = createDemoInbox(now, demoInboxRows(now), record)
+      const waiting = demoInboxRows(now).filter((each) => each.kind !== "update")
+      inbox.answer(demoInboxIds.held, { kind: "held", action: "stop" })
+      vi.advanceTimersByTime(answerMs)
+      record.mockClear()
+
+      inbox.clear!()
+
+      expect(inbox.state.getSnapshot().items.map((each) => each.id)).toEqual(
+        ordered(waiting)
+          .map((each) => each.id)
+          .filter((id) => id !== demoInboxIds.held),
+      )
+      // Each update was read on its way out, as the Messages pane then says.
+      expect(record.mock.calls.map(([row, answer]) => [row.id, answer]).toSorted()).toEqual(
+        [demoInboxIds.done, demoInboxIds.told]
+          .map((id) => [id, { kind: "update", action: "read" }])
+          .toSorted(),
+      )
+    })
+  })
+
   context("when a row arrives", () => {
     it("joins the Inbox, replacing one with its ID, until it is cleared", () => {
       const inbox = createDemoInbox(now, [])
@@ -881,6 +906,19 @@ describe("an agent that calls done", () => {
     expect(found.inbox.turns?.getSnapshot()?.some((row) => row.projectId === "mobile-app")).toBe(
       true,
     )
+  })
+
+  it("goes for good with its report once the person clears the Inbox, read or not", async () => {
+    const found = boot()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await call(found)
+    const row = updateOn(found)!
+
+    found.inbox.clear!()
+
+    expect(found.inbox.state.getSnapshot().items.some(({ id }) => id === row.id)).toBe(false)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(found.inbox.state.getSnapshot().items.some(({ id }) => id === row.id)).toBe(false)
   })
 
   it("is read by the person, and goes", async () => {

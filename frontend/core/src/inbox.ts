@@ -177,6 +177,11 @@ export type InboxRow = InboxContent & {
   readonly snoozed?: true
 }
 
+// Whether clearing the Inbox takes a row: one that asks nothing of the person, as a resolved
+// row, or an update, which the clear reads.
+export const clearable = (row: InboxRow): boolean =>
+  row.settled !== undefined || row.kind === "update"
+
 // The four ways the Inbox presents a row: Unblock (the agent can't go on without the
 // person's yes or action), Ask (a question), Trouble and Update.
 export type InboxType = "unblock" | "ask" | "trouble" | "update"
@@ -263,6 +268,10 @@ export type Inbox = {
   // Optional. Dismisses an agent's open ask without answering it: it stays, resolved, and its
   // agent is told. Absent where asks can't be dismissed.
   readonly dismiss?: (id: string) => void
+  // Optional. Clears the Inbox of what asks nothing of the person (`clearable`): its updates
+  // are read, and they and every resolved row leave it for good. Absent where the backend
+  // can't clear.
+  readonly clear?: () => void
   // Optional. The rows that ask, by `rowKey`, in the order the person dragged them into, and
   // how that order is kept, which forgets rows no longer listed; empty until they drag one.
   // Absent where the backend keeps none, and the rows keep the Inbox's own order.

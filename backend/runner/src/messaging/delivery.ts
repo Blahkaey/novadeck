@@ -449,6 +449,26 @@ const atPrompt = (
 }
 
 /**
+ * A new session announced past its own prompt: Fresh, no turn yet. One that binds as the
+ * person's bare Enter at the agent's own box submitted its first prompt (Codex's thread and
+ * Antigravity's conversation begin with it) keeps that Enter, so the prompt it starts is
+ * judged theirs as in a session bound before it. Only from Drafting, the box they typed in
+ * and submitted: an Enter in the shell, before the agent's box showed, started the program,
+ * not a prompt, and a session bound while a turn runs started with no Enter of theirs.
+ */
+const bornOfEnter = (
+  delivery: Delivery,
+  event: { readonly at: number; readonly firedAt?: number },
+  slackMs: number,
+): Delivery => {
+  const next: Delivery = { ...arrived(delivery), state: "fresh" }
+  if (delivery.state !== "drafting" || next.box.typedSinceEnter) return next
+  const fired = firing(event, slackMs)
+  const entered = pendingEnter(delivery, fired.at, fired.windowMs)
+  return entered === undefined ? next : { ...next, box: { ...next.box, enteredAt: entered } }
+}
+
+/**
  * The delivery after an event; the same delivery when it changes nothing. `slackMs` is
  * how much later a hook may come for the shell it starts in (see `firing`).
  */
@@ -515,7 +535,7 @@ export const transition = (delivery: Delivery, event: DeliveryEvent, slackMs = 0
         opening: false,
       }
     // Only a session announced at its own prompt may be rung before its first turn.
-    if (!event.ready) return { ...arrived(delivery), state: "fresh" }
+    if (!event.ready) return bornOfEnter(delivery, event, slackMs)
     return atPrompt(delivery, event, slackMs)
   }
   // What the person typed after their last Enter outlasts the binding's end, which may be

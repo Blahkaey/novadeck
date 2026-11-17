@@ -26,7 +26,11 @@ describe("the debug panel's History group", () => {
   it("offers nothing where the backend's History isn't the demo's", () => {
     expect(historyGroups(undefined)).toEqual([])
     expect(
-      historyGroups({ state: createDemoHistory(0).history.state, list: async () => [] }),
+      historyGroups({
+        state: createDemoHistory(0).history.state,
+        list: async () => [],
+        remove: async () => {},
+      }),
     ).toEqual([])
   })
 
@@ -41,5 +45,17 @@ describe("the debug panel's History group", () => {
     expect(history.isRestorable("02")).toBe(true)
     run("Selected agent can be restored")
     expect(history.isRestorable("01")).toBe(true)
+  })
+
+  it("makes the next removal fail, once, with the rows kept", async () => {
+    const { history } = createDemoHistory(0)
+    const [group] = historyGroups(history)
+    const rows = history.state.getSnapshot().rows
+    void group!.actions
+      .find((action) => action.label === "Next History removal fails")!
+      .run(context(() => undefined))
+    await expect(history.remove([rows[0]!.id])).rejects.toThrow()
+    expect(history.state.getSnapshot().rows).toEqual(rows)
+    await expect(history.remove([rows[0]!.id])).resolves.toBeUndefined()
   })
 })

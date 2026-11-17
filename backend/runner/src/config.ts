@@ -21,6 +21,21 @@ const readPort = (value: string | undefined): number => {
   return port
 }
 
+/**
+ * The cap on terminals: a positive whole number, `none` for no cap (`null`), or
+ * `undefined` to leave the server's default.
+ */
+const readMaxTerminals = (value: string | undefined): number | null | undefined => {
+  const text = value?.trim()
+  if (!text) return undefined
+  if (text.toLowerCase() === "none") return null
+  const cap = Number(text)
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(cap) || cap < 1) {
+    throw new Error("NOVADECK_MAX_TERMINALS must be a positive whole number or none")
+  }
+  return cap
+}
+
 const readOrigins = (value: string | undefined): readonly string[] => {
   if (value === undefined) return defaultCorsOrigins
 
@@ -68,6 +83,8 @@ export const readConfig = (environment: NodeJS.ProcessEnv = process.env): Server
   const source = environment.NOVADECK_VOICE_SOURCE?.trim()
   const murmurEngine = environment.NOVADECK_MURMUR_ENGINE?.trim()
   const murmurSource = environment.NOVADECK_MURMUR_SOURCE?.trim()
+  const maxTerminals = readMaxTerminals(environment.NOVADECK_MAX_TERMINALS)
+  const keyFile = environment.NOVADECK_TRANSCRIPT_KEY_FILE?.trim()
   return {
     hostname: readHost(environment),
     port: readPort(environment.PORT),
@@ -98,7 +115,10 @@ export const readConfig = (environment: NodeJS.ProcessEnv = process.env): Server
           : murmurDirectory,
         directory: join(dirname(database), "murmur"),
       },
+      // Without one no transcript is saved, as upstream's standalone runner keeps none.
+      ...(keyFile && { transcriptKeyFile: resolve(keyFile) }),
     }),
+    ...(maxTerminals !== undefined && { maxTerminals }),
     // Another build of the relay than `@novadeck/relay`'s, as a packaged one.
     ...(relay ? { relay: resolve(relay) } : {}),
   }

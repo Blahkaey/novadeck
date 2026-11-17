@@ -59,6 +59,7 @@ import {
   panePictureChannel,
   portableChannel,
   rendererPoolChannel,
+  remoteArgumentPrefix,
   quitAppChannel,
   runnerPortChannel,
   sandboxChannel,
@@ -84,6 +85,9 @@ const apiUrl = new URL(argument.slice(apiUrlArgumentPrefix.length))
 
 // Whether the main process sends feedback notes: it says so by an argument, `1`.
 const feedback = process.argv.includes(`${feedbackArgumentPrefix}1`)
+
+// Whether the runner is on another machine: the main process says so by an argument, `1`.
+const remote = process.argv.includes(`${remoteArgumentPrefix}1`)
 
 // What the main process raised Chromium's WebGL context limit to, when it says so in a form the
 // contract allows; the page keeps its browser default otherwise.
@@ -428,7 +432,10 @@ const bridge = {
   // Only whether it did comes back; the main process checks the page is one of this page's.
   pagePhone: async (page, phone) =>
     (await ipcRenderer.invoke(pagePhoneChannel, page, phone)) === true,
+  // A file's path names it for a runner on this machine alone: a remote one is sent a copy,
+  // as a browser's is.
   pathForFile: (file) => {
+    if (remote) return ""
     try {
       return webUtils.getPathForFile(file)
     } catch {

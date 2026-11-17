@@ -15,6 +15,7 @@ import {
   type ClosedTerminal,
   type CompanionWindow,
   type FeedbackDraft,
+  type FolderBrowse,
   type FolderListing,
   type ForgeIntegration,
   type ForgeName,
@@ -25,6 +26,8 @@ import {
   type ItemContent,
   type MurmurSettings,
   type MurmurState,
+  type Note,
+  type NotesChange,
   type PageLook,
   type PageLookAnswer,
   type PageTrouble,
@@ -90,6 +93,12 @@ export type CompanionWatchItem = CompanionChange | Reset
 export type HistoryWatchItem = HistoryChange | Reset
 
 /**
+ * An item of `runner.notes.watch()`: a runner change, or `reset`, which the client yields
+ * before each fresh sequence of projects' notes ending in `synced`.
+ */
+export type NotesWatchItem = NotesChange | Reset
+
+/**
  * An item of `runner.works.watch()`: a runner change, or `reset`, which the client yields
  * before each fresh sequence of works ending in `synced`.
  */
@@ -139,6 +148,13 @@ export type Runner = {
      * outside the project's directory.
      */
     folder(input: { readonly projectId: string; readonly folder: string }): Promise<FolderListing>
+    /**
+     * A folder of the runner's machine by its absolute `path`, or the runner owner's home
+     * folder without one: its real path, its parent's (null at the root), and the folders in
+     * it. Makes nothing. Rejects with `INVALID_DIRECTORY` for a path that isn't absolute, is
+     * missing, is no folder or can't be read.
+     */
+    browse(input: { readonly path?: string }): Promise<FolderBrowse>
   }
   readonly sessions: {
     list(input: { readonly projectId: string }): Promise<WorkspaceSession[]>
@@ -460,10 +476,57 @@ export type Runner = {
      * Follows every closed terminal on the runner, across projects, as `terminals.watch()`
      * follows terminals: each time the stream opens it yields `reset`, every closed
      * terminal as `changed`, then `synced`; at `synced`, forget any not reported since.
-     * Later events report a close, a change of availability and `removed` for a restored
-     * or pruned row. Iteration ends only when the runner closes or on `return()`.
+     * Later events report a close, a change of availability and `removed` for a restored,
+     * pruned or removed row. Iteration ends only when the runner closes or on `return()`.
      */
     watch(): AsyncIterableIterator<HistoryWatchItem, undefined>
+    /**
+     * Deletes those closed terminals for good, at most `maxHistoryRemoved` a call: each row
+     * and the output saved for it. An id the runner doesn't have, and a row whose restore is
+     * under way, are passed over; `watch()` reports each one deleted as `removed`.
+     */
+    remove(input: { readonly ids: readonly string[] }): Promise<void>
+  }
+  /** The person's own notes on each project: todos and plain notes, in their order. */
+  readonly notes: {
+    /** A project's notes, in the person's order. */
+    list(input: { readonly projectId: string }): Promise<Note[]>
+    /**
+     * Follows every project's notes, as `history.watch()` follows closed terminals: each time
+     * the stream opens it yields `reset`, a `changed` with the whole notes of each project
+     * that has any, then `synced`; at `synced`, a project not reported since has none. Later
+     * events give a project's notes whole each time they change. Iteration ends only when
+     * the runner closes or on `return()`.
+     */
+    watch(): AsyncIterableIterator<NotesWatchItem, undefined>
+    /**
+     * Adds a note first in its project's list, under the id the client gives it. Like every
+     * change below, it resolves with the project's notes as it left them. `CONFLICT` for an
+     * id the project has, and for one note more than a project keeps.
+     */
+    add(input: {
+      readonly id: string
+      readonly projectId: string
+      readonly text: string
+      readonly todo: boolean
+    }): Promise<Note[]>
+    /** Changes what is given of a note; `NOT_FOUND` for one its project doesn't have. */
+    update(input: {
+      readonly projectId: string
+      readonly id: string
+      readonly text?: string
+      readonly body?: string
+      readonly todo?: boolean
+      readonly done?: boolean
+    }): Promise<Note[]>
+    /** Moves an open note to `index` among its project's open notes. */
+    move(input: {
+      readonly projectId: string
+      readonly id: string
+      readonly index: number
+    }): Promise<Note[]>
+    /** Deletes notes for good; an id the project doesn't have is skipped. */
+    remove(input: { readonly projectId: string; readonly ids: readonly string[] }): Promise<Note[]>
   }
   /** Each tracked git worktree against its repository's main branch (Worktrees panel). */
   readonly works: {
@@ -645,6 +708,11 @@ export type Runner = {
      * told. Rejects with `NOT_FOUND` for one that isn't an open ask.
      */
     dismiss(id: string): Promise<void>
+    /**
+     * Clears the Inbox of what asks nothing of the person: reads every open tell and done
+     * report, and takes every resolved entry out of the listing for good.
+     */
+    clear(): Promise<void>
   }
   readonly feedback: {
     /** The agents' feedback drafts waiting for the app, oldest first, then again on each change. */
@@ -787,6 +855,7 @@ export const connectRunner = async (
           client.projects.arrange({ order: [...input.order], pinned: [...input.pinned] }),
         ),
       folder: (input) => call((client) => client.projects.folder(input)),
+      browse: (input) => call((client) => client.projects.browse(input)),
     },
     sessions: {
       list: (input) => call((client) => client.sessions.list(input)),
@@ -900,6 +969,17 @@ export const connectRunner = async (
       list: (input) => call((client) => client.history.list(input)),
       watch: () =>
         followAll(connection, (client, signal) => client.history.watch(undefined, { signal })),
+      remove: (input) => call((client) => client.history.remove({ ids: [...input.ids] })),
+    },
+    notes: {
+      list: (input) => call((client) => client.notes.list(input)),
+      watch: () =>
+        followAll(connection, (client, signal) => client.notes.watch(undefined, { signal })),
+      add: (input) => call((client) => client.notes.add(input)),
+      update: (input) => call((client) => client.notes.update(input)),
+      move: (input) => call((client) => client.notes.move(input)),
+      remove: (input) =>
+        call((client) => client.notes.remove({ projectId: input.projectId, ids: [...input.ids] })),
     },
     works: {
       watch: () =>
@@ -956,6 +1036,7 @@ export const connectRunner = async (
       answer: (id, answer) => call((client) => client.inbox.answer({ id, answer })),
       read: (ids) => call((client) => client.inbox.read({ ids: [...ids] })),
       dismiss: (id) => call((client) => client.inbox.dismiss({ id })),
+      clear: () => call((client) => client.inbox.clear()),
     },
     feedback: {
       watch: () =>

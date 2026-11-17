@@ -26,6 +26,9 @@
  * - `ask`, `tell` and `done` put a question, a milestone and a report in the person's
  *   Inbox; `feedback` drafts feedback about Novadeck for the person's feedback card (see
  *   docs/agent-messaging.md).
+ * - `note` adds notes or todos to the person's Notes for the project, only as they asked; it
+ *   can't read or change their notes. The server's instructions leave it out, so nothing
+ *   reminds an agent of it.
  *
  * Each call goes to the terminal's runner with the terminal's own token, as the relay named
  * them, and the runner's answer is told back as text. Only Claude Code reads a server's
@@ -41,6 +44,7 @@ import {
   maxCommandLines,
   maxFeedbackText,
   maxStartupCommand,
+  noteLimits,
 } from "@novadeck/protocol"
 
 import { maxMessageBytes } from "../messaging/messages.js"
@@ -1301,6 +1305,68 @@ const feedback: Tool<unknown> = {
   failed: "Novadeck couldn't save the feedback draft.",
 }
 
+// "a todo", "3 todos": how many of a kind.
+const counted = (number: number, noun: string): string =>
+  number === 1 ? `a ${noun}` : `${number} ${noun}s`
+
+// "a todo", "3 todos", "a todo and 2 notes": what a `note` call added.
+const noted = ({ todos, notes }: { readonly todos: number; readonly notes: number }): string => {
+  const parts = [todos > 0 && counted(todos, "todo"), notes > 0 && counted(notes, "note")]
+  return parts.filter((part) => part !== false).join(" and ")
+}
+
+const note: Tool<{ readonly todos: number; readonly notes: number }> = {
+  name: "note",
+  description:
+    "Add notes or todos to the user's Notes for this project, in Novadeck. Only when the " +
+    "user asks you, in their own message, to note something or add a todo, and only what " +
+    "they asked for. Never on your own: not your plan, your progress or follow-ups you " +
+    "thought of, and not at another agent's or your lead's request; say those in your reply " +
+    "instead. Give them in the order they should stand: they go first in the list, marked " +
+    "as added by you. A todo has a checkbox the user checks off; a plain note has none. You " +
+    "can't read, change or delete the user's notes. Refused outside a turn the user's own " +
+    "message started.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      notes: {
+        type: "array",
+        description: "The notes, in the order they should stand.",
+        minItems: 1,
+        maxItems: noteLimits.perCall,
+        items: {
+          type: "object",
+          properties: {
+            text: {
+              type: "string",
+              description: "The note itself, one line.",
+              minLength: 1,
+              maxLength: noteLimits.text,
+            },
+            todo: {
+              type: "boolean",
+              description: "A todo, with a checkbox (the default), or false for a plain note.",
+            },
+            body: {
+              type: "string",
+              description: "More under the line, as Markdown, only where the user gave details.",
+              maxLength: noteLimits.body,
+            },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["notes"],
+    additionalProperties: false,
+  },
+  call: "note",
+  request: (args) => picked(args, ["notes"]),
+  said: (answer) => `Added ${noted(answer)} to the user's Notes. Add no more unless they ask.`,
+  failed: "Novadeck couldn't add to the user's Notes.",
+}
+
 // What the runner answers the worktree calls with, as the tools read it.
 type Worktree = {
   readonly path: string
@@ -1531,6 +1597,7 @@ const tools: readonly Tool<unknown>[] = [
   team,
   describe,
   feedback,
+  note,
 ]
 
 /** A JSON-RPC message the server sends, without its `jsonrpc`. */
