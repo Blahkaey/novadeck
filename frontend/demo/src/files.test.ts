@@ -1,5 +1,7 @@
+import type { ItemContent } from "@novadeck/core/items"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { workspaceReducer } from "@novadeck/core/state"
+import { itemFixture } from "@novadeck/core/testing"
 import type { TerminalStatus } from "@novadeck/core/types"
 import { afterEach, vi } from "vitest"
 
@@ -184,9 +186,172 @@ describe("the storefront's folders", () => {
   })
 })
 
+describe("the person's changes to a project's files", () => {
+  const names = async (
+    files: ReturnType<typeof createDemoFiles>,
+    folder: string,
+    id = "storefront",
+  ) =>
+    (await files.list(id, folder)).entries
+      .map((entry) => (entry.folder ? `${entry.name}/` : entry.name))
+      .toSorted()
+
+  it("makes a file or folder, and the folders on the way, which the folders then list", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.create("storefront", "src/api/v2/orders.ts", false)).resolves.toBe(
+      "src/api/v2/orders.ts",
+    )
+    await files.create("storefront", "assets", true)
+    await files.create("storefront", "node_modules/.keep", false)
+
+    expect(await names(files, "src/api")).toEqual(["client.ts", "orders.ts", "v2/"])
+    expect(await names(files, "src/api/v2")).toEqual(["orders.ts"])
+    expect(await files.list("storefront", "assets")).toEqual({ entries: [], truncated: false })
+    expect(await names(files, "node_modules")).toEqual([".keep"])
+  })
+
+  it("refuses a name taken, a way through a file, the project's folder and Git's .git, in the runner's words", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.create("storefront", "src/App.tsx", false)).rejects.toThrow(
+      "There's already something named App.tsx in src.",
+    )
+    await expect(files.create("storefront", "src", true)).rejects.toThrow(
+      "There's already something named src in the project's folder.",
+    )
+    await expect(files.create("storefront", "README.md/notes.md", false)).rejects.toThrow(
+      "README.md isn't a folder.",
+    )
+    await expect(files.create("storefront", ".GIT/hooks", true)).rejects.toThrow(
+      "Novadeck doesn't change Git's own .git.",
+    )
+    await expect(files.remove("storefront", "")).rejects.toThrow(
+      "Novadeck doesn't change the project's folder itself.",
+    )
+  })
+
+  it("renames a file, and a folder with everything in it, as it is spelled", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.move("storefront", "src/cart", "src/basket")).resolves.toBe("src/basket")
+    await files.move("storefront", "README.md", "readme.md")
+
+    expect(await names(files, "src")).toContain("basket/")
+    expect(await names(files, "src")).not.toContain("cart/")
+    expect(await names(files, "src/basket")).toEqual([
+      "CartItem.tsx",
+      "CartSummary.tsx",
+      "useCart.ts",
+    ])
+    expect(await names(files, "")).toContain("readme.md")
+    await expect(files.list("storefront", "src/cart")).rejects.toThrow()
+  })
+
+  it("keeps what a project ignores ignored where it moves", async () => {
+    const files = createDemoFiles(now)
+    await files.move("storefront", "node_modules", "deps")
+    const root = await files.list("storefront", "")
+    expect(root.entries.find((entry) => entry.name === "deps")).toEqual({
+      name: "deps",
+      folder: true,
+      ignored: true,
+    })
+  })
+
+  it("refuses a move onto a name taken, into itself, or of what isn't there", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.move("storefront", "src/main.tsx", "src/App.tsx")).rejects.toThrow(
+      "There's already something named App.tsx in src.",
+    )
+    await expect(files.move("storefront", "src", "src/inner")).rejects.toThrow(
+      "A folder can't move into itself.",
+    )
+    await expect(files.move("storefront", "src/gone.ts", "src/here.ts")).rejects.toThrow(
+      "src/gone.ts isn't there any more.",
+    )
+  })
+
+  it("deletes a file, and a folder with everything in it, keeping the folder it was in, empty", async () => {
+    const files = createDemoFiles(now)
+    await files.remove("storefront", "src/components")
+    await files.remove("storefront", "public/favicon.svg")
+
+    expect(await names(files, "src")).not.toContain("components/")
+    expect(await files.list("storefront", "public")).toEqual({ entries: [], truncated: false })
+    await expect(files.remove("storefront", "src/components")).rejects.toThrow(
+      "src/components isn't there any more.",
+    )
+  })
+
+  it("keeps each project's changes to itself, and each demo's from the next", async () => {
+    const files = createDemoFiles(now)
+    await files.remove("api-service", "Dockerfile")
+    expect(await names(files, "", "api-service")).not.toContain("Dockerfile")
+    expect(await names(createDemoFiles(now), "", "api-service")).toContain("Dockerfile")
+    expect(await names(files, "", "storefront")).toContain("package.json")
+  })
+
+  it("has the agents' work follow a rename, and go with a delete", async () => {
+    const files = createDemoFiles(now)
+    await files.move("storefront", "src/checkout", "src/pay")
+    expect(project(files).changes["src/pay/Checkout.tsx"]).toBeDefined()
+    expect(project(files).changes[demoPaths.checkout]).toBeUndefined()
+    expect(project(files).writing.crow).toBe("src/pay/Checkout.test.tsx")
+
+    await files.remove("storefront", "src/pay")
+    expect(Object.keys(project(files).changes).some((path) => path.startsWith("src/pay"))).toBe(
+      false,
+    )
+    expect(project(files).writing.crow).toBeUndefined()
+  })
+
+  it("counts an agent's write to a file the person made as a change, and to one they deleted as new", async () => {
+    const files = createDemoFiles(now)
+    await files.create("storefront", "src/notes.ts", false)
+    await files.remove("storefront", "src/main.tsx")
+    files.write("crow", "src/notes.ts")
+    files.write("crow", "src/main.tsx")
+    expect(project(files).changes["src/notes.ts"]?.kind).toBe("modified")
+    expect(project(files).changes["src/main.tsx"]?.kind).toBe("added")
+  })
+
+  it("fails the next change once when the debug panel says so, and not once it lifts that", async () => {
+    const files = createDemoFiles(now)
+    files.failNextChange()
+    await expect(files.create("storefront", "a.ts", false)).rejects.toThrow(
+      "The demo was told to fail this change.",
+    )
+    await expect(files.create("storefront", "a.ts", false)).resolves.toBe("a.ts")
+    files.failNextChange()
+    files.failNextChange(false)
+    await expect(files.remove("storefront", "a.ts")).resolves.toBeUndefined()
+  })
+
+  it("says a file the person deleted or moved away is gone, until it is there again, telling each time", async () => {
+    const files = createDemoFiles(now)
+    let told = 0
+    const unwatch = files.watchGone(() => void (told += 1))
+    await files.remove("storefront", "src/cart")
+    await files.move("storefront", "README.md", "README.txt")
+
+    expect(files.gone("storefront", "src/cart/useCart.ts")).toBe(true)
+    expect(files.gone("storefront", "README.md")).toBe(true)
+    expect(files.gone("storefront", "README.txt")).toBe(false)
+    expect(files.gone("api-service", "README.md")).toBe(false)
+
+    await files.create("storefront", "src/cart/useCart.ts", false)
+    expect(files.gone("storefront", "src/cart/useCart.ts")).toBe(false)
+    expect(files.gone("storefront", "src/cart/CartItem.tsx")).toBe(true)
+    unwatch()
+    await files.remove("storefront", "index.html")
+    expect(told).toBe(3)
+  })
+})
+
 describe("a write to the project", () => {
+  // The storefront's files these writes are to, as its tree holds them.
+  const tree = [demoPaths.checkout, demoPaths.checkoutTest]
+
   it("moves the agent's time on and makes the file the one it writes", () => {
-    const after = writeTo(storefrontFiles(now), "crow", demoPaths.checkoutTest, now + 5)
+    const after = writeTo(storefrontFiles(now), "crow", demoPaths.checkoutTest, now + 5, tree)
     expect(after.changes[demoPaths.checkoutTest]).toEqual({
       kind: "modified",
       touched: { crow: now + 5 },
@@ -195,7 +360,7 @@ describe("a write to the project", () => {
   })
 
   it("keeps what other agents did to the file", () => {
-    const after = writeTo(storefrontFiles(now), filesThird, demoPaths.checkout, now + 5)
+    const after = writeTo(storefrontFiles(now), filesThird, demoPaths.checkout, now + 5, tree)
     expect(Object.keys(after.changes[demoPaths.checkout]!.touched).toSorted()).toEqual([
       "crow",
       "moth",
@@ -204,13 +369,13 @@ describe("a write to the project", () => {
   })
 
   it("adds a file the tree doesn't have", () => {
-    const after = writeTo(storefrontFiles(now), "crow", demoPaths.payments, now)
+    const after = writeTo(storefrontFiles(now), "crow", demoPaths.payments, now, tree)
     expect(after.changes[demoPaths.payments]?.kind).toBe("added")
   })
 
   it("leaves the project it was given as it was", () => {
     const before = storefrontFiles(now)
-    writeTo(before, "crow", demoPaths.payments, now)
+    writeTo(before, "crow", demoPaths.payments, now, tree)
     expect(before.changes[demoPaths.payments]).toBeUndefined()
   })
 })
@@ -237,7 +402,7 @@ describe("the file an agent writes next", () => {
   it("is a new file the first time it rolls low, and not after", () => {
     const created = nextFile(before, "crow", 0.05, 0)
     expect(created).toBe("src/checkout/PaymentForm.tsx")
-    const later = writeTo(before, "crow", created, now)
+    const later = writeTo(before, "crow", created, now, [])
     expect(nextFile(later, "crow", 0.05, 0)).toBe(demoPaths.payments)
   })
 
@@ -524,6 +689,72 @@ describe("the demo files", () => {
 describe("a backend with the demo's files", () => {
   const target = { projectId: "storefront", workspaceSessionId: "initial" }
   const workspace = workspaceFromSeed(demoSeed(now), { view: "focus", windowedView: "grid", now })
+
+  context("where a window shows a file of the project", () => {
+    const ready: ItemContent = {
+      state: "ready",
+      stamp: "1",
+      content: {
+        kind: "file",
+        path: "~/shown.ts",
+        firstLine: 1,
+        lines: ["export {}"],
+        from: 1,
+        to: 1,
+        total: 1,
+        truncated: false,
+        clamped: false,
+      },
+    }
+    // The demo's backend whose companions show `ready` for every item, with a window in the
+    // storefront's first session showing the file at `path`, and what it heard.
+    const showing = (files: ReturnType<typeof createDemoFiles>, path: string) => {
+      const inner = plainDemo("plain")
+      const backend = withFiles(
+        {
+          ...inner,
+          companions: { ...inner.companions!, follow: (_t, _id, _o, on) => (on(ready), () => {}) },
+        },
+        undefined,
+        files,
+      )
+      const directory = workspace.projects.find((each) => each.id === "storefront")!.directory
+      const item = itemFixture("shown", "01", { path: `${directory}/${path}` })
+      backend.commit(workspaceReducer(workspace, { type: "item/upsert", target, item }), [])
+      const heard: ItemContent[] = []
+      const stop = backend.companions!.follow(target, item.id, { reveal: undefined }, (content) =>
+        heard.push(content),
+      )
+      return { heard, stop }
+    }
+    const missing = { state: "unavailable", reason: "missing", size: null }
+
+    it("shows the file as it is until the person deletes it, then says it is gone", async () => {
+      const files = createDemoFiles(now)
+      const { heard } = showing(files, "src/cart/useCart.ts")
+      await files.remove("storefront", "src/main.tsx")
+      expect(heard).toEqual([ready])
+
+      await files.remove("storefront", "src/cart")
+      expect(heard).toEqual([ready, missing])
+    })
+
+    it("says a file the person moved away is gone, and shows it again once it is back", async () => {
+      const files = createDemoFiles(now)
+      const { heard } = showing(files, "README.md")
+      await files.move("storefront", "README.md", "README.txt")
+      await files.move("storefront", "README.txt", "README.md")
+      expect(heard).toEqual([ready, missing, ready])
+    })
+
+    it("hears nothing more once it stops following", async () => {
+      const files = createDemoFiles(now)
+      const { heard, stop } = showing(files, "README.md")
+      stop()
+      await files.remove("storefront", "README.md")
+      expect(heard).toEqual([ready])
+    })
+  })
 
   it("stops the agent of a terminal that closes", () => {
     const { clock, pending } = manual()

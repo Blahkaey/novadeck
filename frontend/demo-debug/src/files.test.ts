@@ -24,13 +24,23 @@ const context = (selected?: DemoActionContext["selected"]): DemoActionContext =>
   crash: () => undefined,
 })
 
+// The launch's file operations, which an action that boots again turns on or off.
+const offering = () => {
+  const offered: boolean[] = []
+  return {
+    offered,
+    launch: { setFileOperations: (next: boolean) => void offered.push(next) },
+  }
+}
+
 const run = (
   files: ReturnType<typeof createDemoFiles>,
   label: string,
   selected?: DemoActionContext["selected"],
   workspace?: Workspace,
+  launch = offering().launch,
 ) => {
-  const [group] = filesGroups(files)
+  const [group] = filesGroups(files, launch)
   void group!.actions
     .find((action) => action.label === label)!
     .run({ ...context(selected), workspace: () => workspace })
@@ -58,11 +68,11 @@ const project = (files: ReturnType<typeof createDemoFiles>) =>
 
 describe("the debug panel's Files group", () => {
   it("is absent where the demo has no files", () => {
-    expect(filesGroups(undefined)).toEqual([])
+    expect(filesGroups(undefined, offering().launch)).toEqual([])
   })
 
   it("hints what each action shows", () => {
-    const [group] = filesGroups(createDemoFiles(1))
+    const [group] = filesGroups(createDemoFiles(1), offering().launch)
     expect(group!.actions.every((action) => action.hint.length > 0)).toBe(true)
   })
 
@@ -74,7 +84,7 @@ describe("the debug panel's Files group", () => {
 
   it("stops Crow's cursor and keeps its changes, as a Files-only fixture", () => {
     const files = createDemoFiles(1)
-    const [group] = filesGroups(files)
+    const [group] = filesGroups(files, offering().launch)
     expect(group!.actions.some((action) => action.label === "Agent ends its turn")).toBe(false)
     run(files, "Agent stops writing (Files only)")
     expect(project(files).writing.crow).toBeUndefined()
@@ -178,8 +188,38 @@ describe("the debug panel's Files group", () => {
     await expect(files.exclude.read("storefront")).resolves.toEqual({})
   })
 
+  it("has the next file made, renamed or deleted fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next file operation fails")
+    await expect(files.create("storefront", "notes.md", false)).rejects.toThrow()
+    await expect(files.create("storefront", "notes.md", false)).resolves.toBe("notes.md")
+
+    run(files, "Next file operation fails")
+    run(files, "Files read normally again")
+
+    await expect(files.remove("storefront", "notes.md")).resolves.toBeUndefined()
+  })
+
+  it("boots again with the backend making, renaming and deleting files, or not", () => {
+    const { offered, launch } = offering()
+    const files = createDemoFiles(1)
+    const [group] = filesGroups(files, launch)
+    const action = (label: string) => group!.actions.find((each) => each.label === label)!
+    expect([action("File operations not offered"), action("File operations offered")]).toEqual([
+      expect.objectContaining({ reboots: true }),
+      expect.objectContaining({ reboots: true }),
+    ])
+
+    run(files, "File operations not offered", undefined, undefined, launch)
+    run(files, "File operations offered", undefined, undefined, launch)
+
+    expect(offered).toEqual([false, true])
+  })
+
   it("puts the copy failure before the way back to normal", () => {
-    const labels = filesGroups(createDemoFiles(1))[0]!.actions.map((action) => action.label)
+    const labels = filesGroups(createDemoFiles(1), offering().launch)[0]!.actions.map(
+      (action) => action.label,
+    )
     expect(labels.indexOf("Copying a path fails")).toBe(
       labels.indexOf("Files read normally again") - 1,
     )

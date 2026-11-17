@@ -482,19 +482,46 @@ there.
 
 Right-click a file or folder for its menu:
 
+- **New File…** and **New Folder…** make an empty one inside a folder, or beside a file
+  (see below).
 - **Copy Path** copies its full path on the computer the project is on, which is the
   runner's. `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or folder
   with the keyboard on it.
 - **Copy Relative Path** copies its path from the project's folder, as `src/cart/useCart.ts`.
+- **Rename…** (`F2`) names it anew in its place.
+- **Delete** (`Delete`; `Cmd+Backspace` on macOS) deletes it, a folder with everything in it,
+  once you confirm. It doesn't go to the trash, and can't be undone.
 - **Hide in This Project** hides it from the tree in this project (see below).
 
 Both paths are written as that computer writes them, with backslashes for a project on
 Windows. A file that only an agent's work has, which the project's folder doesn't hold yet,
-copies the path it will have there. Right-click the tree's empty space, or the line in its
-place when the folder is empty or can't be read, for the project's folder itself: **Copy
-Path** copies the folder's own path, and **Refresh** reads the files again. A copy that works
-says nothing. One that can't, as where a browser doesn't let the page use the clipboard, puts a
-line above the tree saying so until you dismiss it or hide the panel.
+copies the path it will have there. Its menu, and that of a file an agent deleted, offers no
+new file or folder, rename or delete: they are the agent's to change. Right-click the tree's empty
+space, or the line in its place when the folder is empty, everything in it is hidden, or it
+can't be read, for the project's folder itself: **New File…** and **New Folder…** make one at
+its top, **Copy Path** copies the folder's own path, and **Refresh** reads the files again. A
+copy that works says nothing. One that can't, as where a browser doesn't let the page use the
+clipboard, puts a line above the tree saying so until you dismiss it or hide the panel.
+
+### Making, renaming and deleting
+
+A new file or folder is named in a field first in the folder it goes in, which opens; a rename
+in a field in the row's place, with the name selected up to its extension. `Enter` makes the
+change and `Escape` leaves it; clicking away makes it when the name will do, and leaves it
+otherwise. A line under the field says what is wrong with a name: empty, holding `\`, `.` or
+`..`, or the name of something already beside it. A new name may hold `/` to make the folders
+on the way too, as `api/v2/orders.ts`; a rename can't. The new or renamed file is selected,
+and with the keys, focused; a renamed folder stays open with what it shows. A file the project
+window shows that you rename, or that is in a folder you rename, opens there at its new name; a
+deleted one says it is not there any more. Nothing already there is overwritten, though a file
+made at a rename's new name in the moment between Novadeck's check and the rename is replaced.
+A change the computer refuses, as for want of permission, a name it won't keep or a disk that
+is full, puts a line above the tree saying why, and a file or folder that one of your hiding
+patterns hides is still made or renamed, with a line naming the pattern. A field whose row, or
+folder, leaves the tree, as when an agent removes it, closes; switching to another app leaves
+it open with what you typed. Novadeck never changes the project's folder itself or Git's own
+`.git`, however a link or name leads to it. Where a backend doesn't make, rename or delete
+files, the menus don't offer it.
 
 The tree reads its open folders again when the panel is shown and when an agent's turn ends
 in the project; it doesn't watch the folder for changes. **Refresh**, beside **Collapse
@@ -852,7 +879,10 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and
 previous of its tabs, and on a tab with focus the arrow keys, `Home` and `End` move along
 them and `Delete` closes it. In the Files panel, `Shift+Alt+C` (`Shift+Option+C` on macOS)
-copies the path of the file or folder with the keyboard on it.
+copies the path of the file or folder with the keyboard on it, `F2` renames it and `Delete`
+(`Cmd+Backspace` on macOS) asks to delete it. On a Files row those keys are the panel's, and
+on macOS a forward `Delete` too, which does nothing there: they never rename or close the
+selected terminal, as they do while navigating.
 
 The keyboard's home is the selected terminal. A mouse click on the sidebar, a header or
 the view switch leaves typing there, and the shortcuts above work from terminal input.

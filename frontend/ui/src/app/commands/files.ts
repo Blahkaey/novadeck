@@ -18,6 +18,13 @@ export type FileCommands = {
     path: string,
     options?: { readonly preview?: boolean; readonly copy?: string | undefined },
   ) => Promise<void>
+  // The person renamed or moved a file or folder of the project, by its paths from the project's
+  // root: each of its sessions' project window that shows that file, or a file inside that
+  // folder, is pointed at it where it is now, without being selected, and shows main's copy of
+  // it, not a preview of the agents' work at the old path. Where it can't be, as when the file
+  // has moved on again, the window says the file is gone, as for a file deleted. Nothing happens
+  // where the backend can't open files there, nor for a project removed meanwhile.
+  readonly followMovedFile: (projectId: string, from: string, to: string) => Promise<void>
 }
 
 type SourceDependencies = {
@@ -29,6 +36,21 @@ const sessionState = (workspace: Workspace, target: WorkspaceTarget): WorkspaceS
   workspace.projects
     .find((project) => project.id === target.projectId)
     ?.history.find((session) => session.id === target.workspaceSessionId)?.state
+
+// Where a path at or below `from` is once `from` moved to `to`, each absolute on the backend's
+// machine in the separator `directory` is written in; undefined for a path elsewhere.
+const movedPath = (
+  directory: string,
+  path: string,
+  from: string,
+  to: string,
+): string | undefined => {
+  if (path === absolutePath(directory, from)) return absolutePath(directory, to)
+  const inside = absolutePath(directory, `${from}/`)
+  return path.startsWith(inside)
+    ? `${absolutePath(directory, `${to}/`)}${path.slice(inside.length)}`
+    : undefined
+}
 
 export const createFileCommands = (
   { workspace, navigation, effects, companions, ui }: CommandContext,
@@ -114,5 +136,32 @@ export const createFileCommands = (
       },
     ])
     pulse()
+  },
+  followMovedFile: async (projectId, from, to) => {
+    const open = companions?.openInProject
+    const project = workspace.getSnapshot().projects.find((each) => each.id === projectId)
+    if (!open || !project) return
+    await Promise.all(
+      project.history.map(async (session) => {
+        const target = { projectId: project.id, workspaceSessionId: session.id }
+        const { roster, items } = session.state
+        const window = roster.windows.find((each) => each.home === "project")
+        const shown = items.find((each) => each.id === window?.itemId)?.path
+        const path = shown && movedPath(project.directory, shown, from, to)
+        if (!window || !path) return
+        // A file that can't be opened there stays as it was, gone. One the person closed meanwhile
+        // is made anew under the id asked for, which the backend's watch places, unselected.
+        const answer = await open(target, path, effects.newId()).catch(() => undefined)
+        if (answer?.window.id !== window.id) return
+        workspace.dispatch({ type: "item/upsert", target, item: answer.item })
+        workspace.dispatch({ type: "window/upsert", target, window: answer.window })
+        const context = `${target.projectId}/${target.workspaceSessionId}`
+        ui.update((now) => {
+          if (now.filePreviews[context]?.itemId !== answer.item.id) return now
+          const { [context]: _was, ...rest } = now.filePreviews
+          return { ...now, filePreviews: rest }
+        })
+      }),
+    )
   },
 })

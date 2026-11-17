@@ -108,6 +108,23 @@ export const SidebarSection = memo((): React.JSX.Element => {
       },
     [excludeFeed, projectId],
   )
+  // How the backend makes, moves and deletes the project's files, each where it can.
+  const entries = useMemo(() => {
+    if (!filesFeed) return undefined
+    const { create, move, remove } = filesFeed
+    return {
+      ...(create && {
+        create: (path: string, folder: boolean) => create(projectId, path, folder),
+      }),
+      ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),
+      ...(remove && { remove: (path: string) => remove(projectId, path) }),
+    }
+  }, [filesFeed, projectId])
+  // What the project's windows do once the person moved one of its files.
+  const onMoved = useCallback(
+    (from: string, to: string) => void commands.followMovedFile(projectId, from, to),
+    [commands, projectId],
+  )
   // Where the panel's paths are copied from.
   const directory = useWorkspaceState((workspace) => activeProject(workspace)!.directory)
   // Its folders are read again when an agent's turn ends in the project.
@@ -189,6 +206,8 @@ export const SidebarSection = memo((): React.JSX.Element => {
             exclude,
             projectExclude,
             onExcludeSettings: commands.openFilesExcludeSettings,
+            entries,
+            onMoved,
             turn,
             watch: watchWorks,
             onOpenFile,
@@ -207,6 +226,8 @@ export const SidebarSection = memo((): React.JSX.Element => {
       exclude,
       projectExclude,
       commands,
+      entries,
+      onMoved,
       turn,
       watchWorks,
       onOpenFile,

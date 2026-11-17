@@ -5,6 +5,7 @@ import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, eventually, expect, it } from "../test"
 import { folderListings } from "../test/files"
+import { atOrBelow, moved, parentOf, type EntryChanges } from "./files-edit"
 import { FilesPanel } from "./FilesPanel"
 import { readTimeoutMs } from "./useFolderReader"
 import { pulseMs } from "./usePulses"
@@ -167,6 +168,12 @@ type Hiding = {
   readonly onSettings?: () => void
 }
 
+// How the backend changes the project's files, where it does, and what hears that one moved.
+type Changing = {
+  readonly entries?: EntryChanges | undefined
+  readonly onMoved?: ((from: string, to: string) => void) | undefined
+}
+
 // A project's own patterns as a backend keeps them, from `initial`: how many reads were asked of
 // it, what was saved, and each save refused with `refusal` where it is given. A read answers with
 // them as they were when it was asked.
@@ -236,6 +243,7 @@ const mount = async (
   onOpenFile: (path: string) => Promise<void> = () => Promise.resolve(),
   watch?: () => () => void,
   hiding: Hiding = { exclude: {} },
+  changing: Changing = {},
 ) => {
   let visible = true
   let turn = 0
@@ -246,6 +254,8 @@ const mount = async (
     exclude: hiding.exclude,
     projectExclude: hiding.project,
     onExcludeSettings: hiding.onSettings ?? (() => {}),
+    entries: changing.entries,
+    onMoved: changing.onMoved,
     turn,
     watch,
     onOpenFile,
@@ -2096,6 +2106,735 @@ describe("The Files panel", () => {
       expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
       expect(panel.rows()).not.toContain("docs")
       panel.view.unmount()
+    })
+  })
+
+  context("when the person makes, renames and deletes files", () => {
+    blurWhatHides()
+
+    // A backend whose files the panel changes: `initial` as `backend` takes them, made, moved and
+    // deleted as asked, with each change asked for noted, and each refused while `refuse` says why.
+    // After `hold`, the next change waits for `release`; `lose` takes a path away as another
+    // program would.
+    const changing = (initial: readonly string[] = files) => {
+      let paths = [...initial]
+      let refusal: string | undefined
+      let holding = false
+      let release = (): void => {}
+      const folders: string[] = []
+      const changes: string[] = []
+      const refuse = async (): Promise<void> => {
+        if (holding) {
+          holding = false
+          await new Promise<void>((resolve) => (release = resolve))
+        }
+        if (refusal !== undefined) throw new Error(refusal)
+      }
+      // A folder left with nothing in it stays, empty.
+      const keepFolder = (folder: string): void => {
+        if (folder !== "" && !paths.some((each) => atOrBelow(each, folder)))
+          paths = [...paths, `${folder}/`]
+      }
+      return {
+        folders,
+        changes,
+        refuse: (why: string | undefined): void => {
+          refusal = why
+        },
+        hold: (): void => {
+          holding = true
+        },
+        release: (): void => release(),
+        lose: (path: string): void => {
+          paths = paths.filter((each) => !atOrBelow(each.replace(/\/$/, ""), path))
+        },
+        list: async (folder: string): Promise<FolderListing> => {
+          folders.push(folder)
+          const listing = folderListings(paths).get(folder)
+          if (!listing && folder !== "") throw new Error("There is no such folder")
+          return listing ?? { entries: [], truncated: false }
+        },
+        entries: {
+          create: async (path: string, folder: boolean) => {
+            changes.push(`create ${path}`)
+            await refuse()
+            paths = [
+              ...paths.filter((each) => each !== `${parentOf(path)}/`),
+              folder ? `${path}/` : path,
+            ]
+            return path
+          },
+          move: async (from: string, to: string) => {
+            changes.push(`move ${from} ${to}`)
+            await refuse()
+            paths = paths.map(
+              (each) => moved(each.replace(/\/$/, ""), from, to) + (each.endsWith("/") ? "/" : ""),
+            )
+            keepFolder(parentOf(from))
+            return to
+          },
+          remove: async (path: string) => {
+            changes.push(`remove ${path}`)
+            await refuse()
+            paths = paths.filter((each) => !atOrBelow(each.replace(/\/$/, ""), path))
+            keepFolder(parentOf(path))
+          },
+        } satisfies EntryChanges,
+      }
+    }
+    type Fake = ReturnType<typeof changing>
+    const mountChanging = (
+      fake: Fake,
+      options: {
+        readonly work?: FilesProject
+        readonly hiding?: Hiding
+        readonly entries?: EntryChanges
+        readonly onMoved?: (from: string, to: string) => void
+      } = {},
+    ) =>
+      mount(options.work, undefined, undefined, fake, undefined, undefined, options.hiding, {
+        entries: options.entries ?? fake.entries,
+        onMoved: options.onMoved,
+      })
+    type Panel = Awaited<ReturnType<typeof mount>>
+    const item = (panel: Panel, name: string): HTMLElement =>
+      panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
+    const field = (): HTMLInputElement | null =>
+      document.querySelector<HTMLInputElement>(".files-naming-input")
+    const problem = (): string | null =>
+      document.querySelector(".files-naming-problem")?.textContent ?? null
+    const type = (text: string): void =>
+      act(() => {
+        const input = field()!
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text)
+        input.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    const press = async (
+      on: Element,
+      key: string,
+      init: KeyboardEventInit = {},
+    ): Promise<KeyboardEvent> => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })
+      act(() => {
+        on.dispatchEvent(event)
+      })
+      await settle()
+      return event
+    }
+    const alert = (panel: Panel): string | null =>
+      panel.view.container.querySelector("[role=alert]")?.textContent ?? null
+    const dialog = (): HTMLElement | null => document.querySelector("[role=alertdialog]")
+    const dialogButton = (label: string): HTMLButtonElement =>
+      [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find(
+        (each) => each.textContent === label,
+      )!
+    // Asks for a row's menu, or the empty space's, and chooses `label`.
+    const fromMenu = async (on: Element, label: string): Promise<void> => {
+      await rightClick(on)
+      await choose(label)
+      await settle()
+    }
+
+    context("in the menu", () => {
+      it("offers New File…, New Folder…, Rename… and Delete on a row, where the backend makes them", async () => {
+        const panel = await mountChanging(changing())
+
+        await rightClick(item(panel, "package.json"))
+
+        expect(menuItems()).toEqual([
+          "New File…",
+          "New Folder…",
+          "Copy Path",
+          "Copy Relative Path",
+          "Rename…",
+          "Delete",
+        ])
+        panel.view.unmount()
+      })
+
+      it("offers only what the backend makes", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake, { entries: { remove: fake.entries.remove } })
+
+        await rightClick(item(panel, "package.json"))
+
+        expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path", "Delete"])
+        panel.view.unmount()
+      })
+
+      it("offers only the copies on a row only an agent's work has", async () => {
+        const panel = await mountChanging(changing(), { work: work() })
+
+        await rightClick(item(panel, "new.ts"))
+
+        expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
+        panel.view.unmount()
+      })
+
+      it("offers a new file or folder in the root on the line that says the folder is empty", async () => {
+        const fake = changing([])
+        const panel = await mountChanging(fake)
+
+        await rightClick(panel.view.container.querySelector(".files-empty")!)
+        expect(menuItems()).toEqual(["New File…", "New Folder…", "Copy Path", "Refresh"])
+        await choose("New Folder…")
+        await settle()
+        expect(panel.view.container.querySelector(".files-empty")).toBeNull()
+        type("assets")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["create assets"])
+        expect(panel.rows()).toEqual(["assets"])
+        panel.view.unmount()
+      })
+    })
+
+    context("when naming a new file or folder", () => {
+      it("names it in a field first in a folder, which opens, then makes it, selected and focused", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+
+        await fromMenu(item(panel, "docs"), "New File…")
+        expect(document.activeElement).toBe(field())
+        expect(field()!.getAttribute("aria-label")).toBe("Name of the new file")
+        // The field comes first in docs, which opened.
+        const lines = [...panel.view.container.querySelectorAll(".files-row, .files-naming-row")]
+        expect(
+          lines.map((line) => line.querySelector(".files-name")?.textContent ?? "field"),
+        ).toEqual(["docs", "field", "readme.md", "src", "package.json"])
+        type("guide.md")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["create docs/guide.md"])
+        expect(field()).toBeNull()
+        expect(item(panel, "guide.md").getAttribute("aria-selected")).toBe("true")
+        expect(document.activeElement).toBe(item(panel, "guide.md"))
+        panel.view.unmount()
+      })
+
+      it("makes it beside a file, and the folders a slash names on the way, open", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("src")
+        await panel.click("cart")
+
+        await fromMenu(item(panel, "useCart.ts"), "New File…")
+        type("api/orders.ts")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["create src/cart/api/orders.ts"])
+        expect(panel.rows()).toEqual([
+          "docs",
+          "src",
+          "cart",
+          "api",
+          "orders.ts",
+          "Cart.tsx",
+          "useCart.ts",
+          "package.json",
+        ])
+        expect(document.activeElement).toBe(item(panel, "orders.ts"))
+        panel.view.unmount()
+      })
+
+      it("says under the field what is wrong with a name, and keeps it open on Enter", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("src")
+
+        await fromMenu(item(panel, "src"), "New File…")
+        expect(problem()).toBeNull()
+        type("cart")
+        expect(problem()).toBe("There's already a folder named cart here.")
+        expect(field()!.getAttribute("aria-invalid")).toBe("true")
+        await press(field()!, "Enter")
+        expect(field()).not.toBeNull()
+        type("a\\b.ts")
+        expect(problem()).toBe("A name can't hold a backslash.")
+
+        expect(fake.changes).toEqual([])
+        panel.view.unmount()
+      })
+
+      it("ends on Escape with nothing made, giving the row it was asked on its focus back", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+
+        await fromMenu(item(panel, "package.json"), "New Folder…")
+        type("dist")
+        await press(field()!, "Escape")
+
+        expect(field()).toBeNull()
+        expect(fake.changes).toEqual([])
+        expect(document.activeElement).toBe(item(panel, "package.json"))
+        panel.view.unmount()
+      })
+
+      it("makes what a name that will do asks for when the field is left, and nothing for one that won't or none", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+
+        await fromMenu(item(panel, "docs"), "New File…")
+        type("notes.md")
+        act(() => field()!.blur())
+        await settle()
+        expect(fake.changes).toEqual(["create docs/notes.md"])
+        // Leaving it gives no focus to the new row, though it is selected.
+        expect(item(panel, "notes.md").getAttribute("aria-selected")).toBe("true")
+        expect(document.activeElement).not.toBe(item(panel, "notes.md"))
+
+        for (const typed of ["readme.md", ""]) {
+          // eslint-disable-next-line no-await-in-loop -- One field after another.
+          await fromMenu(item(panel, "docs"), "New File…")
+          type(typed)
+          act(() => field()!.blur())
+          // eslint-disable-next-line no-await-in-loop -- Each field ends before the next.
+          await settle()
+          expect(field()).toBeNull()
+        }
+        expect(fake.changes).toEqual(["create docs/notes.md"])
+        panel.view.unmount()
+      })
+
+      it("leaves Enter to an input method composing", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+
+        await fromMenu(item(panel, "docs"), "New File…")
+        type("ノート.md")
+        await press(field()!, "Enter", { isComposing: true })
+
+        expect(field()).not.toBeNull()
+        expect(fake.changes).toEqual([])
+        panel.view.unmount()
+      })
+
+      it("makes one the patterns hide, and says which pattern hides it", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake, { hiding: { exclude: { "**/*.log": true } } })
+
+        await fromMenu(panel.view.container.querySelector("[role=tree]")!, "New File…")
+        type("debug.log")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["create debug.log"])
+        expect(alert(panel)).toBe("Made debug.log, which the pattern **/*.log hides.")
+        expect(panel.rows()).not.toContain("debug.log")
+        panel.view.unmount()
+      })
+
+      it("says above the tree why the backend refused it", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        fake.refuse("The system doesn't allow it: permission denied.")
+
+        await fromMenu(item(panel, "docs"), "New Folder…")
+        type("guides")
+        await press(field()!, "Enter")
+
+        expect(alert(panel)).toBe(
+          "Couldn't make docs/guides: The system doesn't allow it: permission denied.",
+        )
+        expect(panel.rows()).not.toContain("guides")
+        panel.view.unmount()
+      })
+    })
+
+    context("when renaming", () => {
+      it("names a row anew in its place, its name's stem selected, then selects and focuses it", async () => {
+        const fake = changing()
+        const followed: string[] = []
+        const panel = await mountChanging(fake, {
+          onMoved: (from, to) => void followed.push(`${from} -> ${to}`),
+        })
+        await panel.click("src")
+        await panel.click("cart")
+
+        await fromMenu(item(panel, "useCart.ts"), "Rename…")
+        expect(field()!.value).toBe("useCart.ts")
+        expect([field()!.selectionStart, field()!.selectionEnd]).toEqual([0, 7])
+        expect(panel.rows()).not.toContain("useCart.ts")
+        type("useBasket.ts")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["move src/cart/useCart.ts src/cart/useBasket.ts"])
+        expect(followed).toEqual(["src/cart/useCart.ts -> src/cart/useBasket.ts"])
+        expect(panel.rows()).toEqual([
+          "docs",
+          "src",
+          "cart",
+          "Cart.tsx",
+          "useBasket.ts",
+          "package.json",
+        ])
+        expect(item(panel, "useBasket.ts").getAttribute("aria-selected")).toBe("true")
+        expect(document.activeElement).toBe(item(panel, "useBasket.ts"))
+        panel.view.unmount()
+      })
+
+      it("keeps a renamed open folder open, with what it lists and the file selected in it", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("src")
+        await panel.click("cart")
+        await panel.click("Cart.tsx")
+        fake.folders.length = 0
+
+        await fromMenu(item(panel, "cart"), "Rename…")
+        type("basket")
+        await press(field()!, "Enter")
+
+        expect(panel.rows()).toEqual([
+          "docs",
+          "src",
+          "basket",
+          "Cart.tsx",
+          "useCart.ts",
+          "package.json",
+        ])
+        expect(item(panel, "basket").getAttribute("aria-expanded")).toBe("true")
+        expect(item(panel, "Cart.tsx").getAttribute("aria-selected")).toBe("true")
+        // Its folder is read again; what it lists itself is kept, not read anew.
+        expect(fake.folders).toEqual(["src"])
+        panel.view.unmount()
+      })
+
+      it("renames to a name the patterns hide, and says which pattern hides it", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake, { hiding: { exclude: { "**/*.log": true } } })
+
+        await fromMenu(item(panel, "package.json"), "Rename…")
+        type("package.log")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["move package.json package.log"])
+        expect(alert(panel)).toBe("Renamed to package.log, which the pattern **/*.log hides.")
+        expect(panel.rows()).toEqual(["docs", "src"])
+        panel.view.unmount()
+      })
+
+      it("does nothing for the name it has, and says why the backend refused another", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+
+        await fromMenu(item(panel, "package.json"), "Rename…")
+        await press(field()!, "Enter")
+        expect(fake.changes).toEqual([])
+        expect(document.activeElement).toBe(item(panel, "package.json"))
+
+        fake.refuse("There's already something named package.JSON in the project's folder.")
+        await fromMenu(item(panel, "package.json"), "Rename…")
+        type("package.JSON")
+        await press(field()!, "Enter")
+
+        expect(alert(panel)).toBe(
+          "Couldn't rename package.json to package.JSON: There's already something named package.JSON in the project's folder.",
+        )
+        expect(panel.rows()).toContain("package.json")
+        panel.view.unmount()
+      })
+    })
+
+    context("when deleting", () => {
+      it("asks first, naming the entry, a folder's insides and that it can't be undone", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("src")
+
+        await fromMenu(item(panel, "cart"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+
+        expect(dialog()!.querySelector(".modal-title")?.textContent).toBe("Delete cart?")
+        expect(dialog()!.querySelector(".modal-description")?.textContent).toBe(
+          "src/cart and everything in it will be deleted. This can't be undone.",
+        )
+        act(() => dialogButton("Cancel").click())
+        await settle()
+
+        expect(fake.changes).toEqual([])
+        await eventually(() => expect(document.activeElement).toBe(item(panel, "cart")))
+        panel.view.unmount()
+      })
+
+      it("says a file goes alone", async () => {
+        const panel = await mountChanging(changing())
+
+        await fromMenu(item(panel, "package.json"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+
+        expect(dialog()!.querySelector(".modal-description")?.textContent).toBe(
+          "package.json will be deleted. This can't be undone.",
+        )
+        act(() => dialogButton("Cancel").click())
+        await settle()
+        panel.view.unmount()
+      })
+
+      it("deletes once confirmed, and the row after it takes the focus", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("docs")
+
+        await fromMenu(item(panel, "docs"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        act(() => dialogButton("Delete").click())
+        await settle()
+
+        expect(fake.changes).toEqual(["remove docs"])
+        expect(panel.rows()).toEqual(["src", "package.json"])
+        await eventually(() => expect(document.activeElement).toBe(item(panel, "src")))
+        panel.view.unmount()
+      })
+
+      it("says above the tree why the backend refused it, and keeps the row", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        fake.refuse("It's in use by another program.")
+
+        await fromMenu(item(panel, "package.json"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        act(() => dialogButton("Delete").click())
+        await settle()
+
+        expect(alert(panel)).toBe("Couldn't delete package.json: It's in use by another program.")
+        expect(panel.rows()).toContain("package.json")
+        panel.view.unmount()
+      })
+    })
+
+    context("with the keyboard", () => {
+      it("renames the focused row on F2 and asks to delete it on Delete, keeping both from the workspace", async () => {
+        const panel = await mountChanging(changing())
+        const reached: KeyboardEvent[] = []
+        const listen = (event: KeyboardEvent): void => void reached.push(event)
+        window.addEventListener("keydown", listen)
+        act(() => item(panel, "package.json").focus())
+
+        const rename = await press(item(panel, "package.json"), "F2")
+        expect(field()!.value).toBe("package.json")
+        await press(field()!, "Escape")
+        const remove = await press(item(panel, "package.json"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        window.removeEventListener("keydown", listen)
+
+        expect([rename.defaultPrevented, remove.defaultPrevented]).toEqual([true, true])
+        expect(reached).toEqual([])
+        act(() => dialogButton("Cancel").click())
+        await settle()
+        panel.view.unmount()
+      })
+
+      it("keeps F2 and Delete from the workspace on a row it may not change, doing nothing", async () => {
+        const panel = await mountChanging(changing(), { work: work() })
+        const reached: KeyboardEvent[] = []
+        const listen = (event: KeyboardEvent): void => void reached.push(event)
+        window.addEventListener("keydown", listen)
+
+        await press(item(panel, "new.ts"), "F2")
+        await press(item(panel, "new.ts"), "Delete")
+        window.removeEventListener("keydown", listen)
+
+        expect(reached).toEqual([])
+        expect(field()).toBeNull()
+        expect(dialog()).toBeNull()
+        panel.view.unmount()
+      })
+
+      it("keeps F2 and Delete from the workspace where the backend changes nothing, doing nothing", async () => {
+        const panel = await mount(undefined)
+        const reached: string[] = []
+        const listen = (event: KeyboardEvent): void => void reached.push(event.key)
+        window.addEventListener("keydown", listen)
+
+        await press(item(panel, "package.json"), "F2")
+        await press(item(panel, "package.json"), "Delete")
+        window.removeEventListener("keydown", listen)
+
+        expect(reached).toEqual([])
+        expect(field()).toBeNull()
+        expect(dialog()).toBeNull()
+        panel.view.unmount()
+      })
+
+      it("on macOS deletes on ⌘⌫ only, keeping a forward Delete from the workspace too", async () => {
+        const platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel")
+        const panel = await mountChanging(changing())
+        const reached: string[] = []
+        const listen = (event: KeyboardEvent): void => void reached.push(event.key)
+        window.addEventListener("keydown", listen)
+
+        const forward = await press(item(panel, "package.json"), "Delete")
+        expect(dialog()).toBeNull()
+        await press(item(panel, "package.json"), "Backspace", { metaKey: true })
+        await eventually(() => expect(dialog()).not.toBeNull())
+        window.removeEventListener("keydown", listen)
+
+        expect(forward.defaultPrevented).toBe(true)
+        expect(reached).toEqual([])
+        act(() => dialogButton("Cancel").click())
+        await settle()
+        platform.mockRestore()
+        panel.view.unmount()
+      })
+
+      it("keeps the focus on the row a refused rename was asked on", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        act(() => item(panel, "package.json").focus())
+        fake.refuse("It's in use by another program.")
+
+        await press(item(panel, "package.json"), "F2")
+        type("manifest.json")
+        await press(field()!, "Enter")
+
+        expect(alert(panel)).toBe(
+          "Couldn't rename package.json to manifest.json: It's in use by another program.",
+        )
+        expect(document.activeElement).toBe(item(panel, "package.json"))
+        panel.view.unmount()
+      })
+
+      it("gives the focus to the row after one renamed to a name the patterns hide", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake, { hiding: { exclude: { "**/*.log": true } } })
+        act(() => item(panel, "docs").focus())
+
+        await press(item(panel, "docs"), "F2")
+        type("logs.log")
+        await press(field()!, "Enter")
+
+        expect(fake.changes).toEqual(["move docs logs.log"])
+        expect(document.activeElement).toBe(item(panel, "src"))
+        panel.view.unmount()
+      })
+    })
+
+    context("while another change is under way", () => {
+      it("keeps the field a name is typed in, its text and its focus, when a delete asked before ends", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        fake.hold()
+        await fromMenu(item(panel, "package.json"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        act(() => dialogButton("Delete").click())
+        await settle()
+
+        await fromMenu(item(panel, "docs"), "New File…")
+        type("draft.md")
+        fake.release()
+        await settle()
+
+        expect(panel.rows()).not.toContain("package.json")
+        expect(document.activeElement).toBe(field())
+        expect(field()!.value).toBe("draft.md")
+        expect(fake.changes).toEqual(["remove package.json"])
+        panel.view.unmount()
+      })
+
+      it("clears the line above the tree as a delete is asked", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        fake.refuse("It's in use by another program.")
+        await fromMenu(item(panel, "package.json"), "Rename…")
+        type("manifest.json")
+        await press(field()!, "Enter")
+        expect(alert(panel)).not.toBeNull()
+        fake.refuse(undefined)
+
+        await fromMenu(item(panel, "package.json"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        act(() => dialogButton("Delete").click())
+        await settle()
+
+        expect(alert(panel)).toBeNull()
+        panel.view.unmount()
+      })
+    })
+
+    context("when it is refused part way", () => {
+      it("reads again the folder a refused make was asked in", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        fake.refuse("The disk is full.")
+        await fromMenu(item(panel, "docs"), "New File…")
+        fake.folders.length = 0
+
+        type("guides/install.md")
+        await press(field()!, "Enter")
+
+        expect(fake.folders).toEqual(["docs"])
+        panel.view.unmount()
+      })
+
+      it("reads again the folder of a refused delete, and the open folder it was asked on", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await panel.click("src")
+        await panel.click("cart")
+        fake.refuse("It's in use by another program.")
+        fake.folders.length = 0
+
+        await fromMenu(item(panel, "cart"), "Delete")
+        await eventually(() => expect(dialog()).not.toBeNull())
+        act(() => dialogButton("Delete").click())
+        await settle()
+
+        expect(fake.folders.toSorted()).toEqual(["src", "src/cart"])
+        panel.view.unmount()
+      })
+    })
+
+    context("when what a field names leaves the tree", () => {
+      it("keeps the field, its text and its focus through a reading of the folders", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await fromMenu(item(panel, "docs"), "New File…")
+        type("draft.md")
+        const typing = field()
+
+        await panel.endTurn()
+
+        expect(field()).toBe(typing)
+        expect(document.activeElement).toBe(typing)
+        expect(field()!.value).toBe("draft.md")
+        panel.view.unmount()
+      })
+
+      it("ends a rename whose row is gone, giving the tree's tab stop the focus, and makes nothing later", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        act(() => item(panel, "package.json").focus())
+        await press(item(panel, "package.json"), "F2")
+        type("manifest.json")
+        fake.lose("package.json")
+
+        await panel.endTurn()
+
+        expect(field()).toBeNull()
+        expect(document.activeElement).toBe(item(panel, "docs"))
+        await panel.endTurn()
+        expect(field()).toBeNull()
+        expect(fake.changes).toEqual([])
+        panel.view.unmount()
+      })
+    })
+
+    context("when the window loses focus", () => {
+      it("keeps the field open with its text, making nothing", async () => {
+        const fake = changing()
+        const panel = await mountChanging(fake)
+        await fromMenu(item(panel, "docs"), "New File…")
+        type("dra")
+        const away = vi.spyOn(document, "hasFocus").mockReturnValue(false)
+
+        act(() => field()!.blur())
+        await settle()
+        away.mockRestore()
+
+        expect(field()!.value).toBe("dra")
+        expect(fake.changes).toEqual([])
+        panel.view.unmount()
+      })
     })
   })
 

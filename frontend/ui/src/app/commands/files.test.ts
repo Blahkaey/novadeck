@@ -245,4 +245,117 @@ describe("files commands", () => {
       expect(app.state().roster.windows).toEqual([])
     })
   })
+
+  context("when a file or folder of the project moves", () => {
+    // A backend whose project window shows each file it is asked to open, as a runner does, with
+    // what it was asked for since `asked` was last emptied; `gone` names the paths it can't open.
+    const follows = (gone: readonly string[] = []) => {
+      let version = 0
+      return open((_target, path) => {
+        if (gone.includes(path)) return Promise.reject(new Error("That file doesn't exist."))
+        version += 1
+        const name = path.slice(path.lastIndexOf("/") + 1)
+        return Promise.resolve({
+          item: { ...readme, path, name, version },
+          window: windowOf("session-1", name),
+        })
+      })
+    }
+    const shown = (app: ReturnType<typeof follows>) => ({
+      path: app.state().items[0]?.path,
+      window: app.state().roster.windows.map((each) => each.name),
+    })
+
+    it("opens the file the window shows where it was renamed to, leaving the selection be", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cart.ts")
+      app.workspace.dispatch({ type: "terminal/select", target, terminalId: "01" })
+      app.asked.length = 0
+
+      await app.commands.followMovedFile("project", "src/cart.ts", "src/basket.ts")
+
+      expect(app.asked.map((each) => each.path)).toEqual(["~/project/src/basket.ts"])
+      expect(shown(app)).toEqual({ path: "~/project/src/basket.ts", window: ["basket.ts"] })
+      expect(app.state().selected).toBe("01")
+    })
+
+    it("opens it in the project window of every session of the project that shows it", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cart.ts")
+      app.workspace.dispatch({
+        type: "session/add",
+        projectId: "project",
+        session: createWorkspaceSession(
+          { name: "Other", state: createTerminalState([], "grid", "grid") },
+          { id: "other", now: 2 },
+        ),
+      })
+      await app.commands.openProjectFile("src/cart.ts")
+
+      await app.commands.followMovedFile("project", "src/cart.ts", "src/basket.ts")
+
+      const project = app.workspace.getSnapshot().projects.find((each) => each.id === "project")!
+      expect(project.history.map((session) => [session.id, session.state.items[0]?.path])).toEqual([
+        ["other", "~/project/src/basket.ts"],
+        ["initial", "~/project/src/basket.ts"],
+      ])
+    })
+
+    it("opens a file inside a renamed folder at its new path", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cart/total.ts")
+
+      await app.commands.followMovedFile("project", "src/cart", "src/basket")
+
+      expect(shown(app).path).toBe("~/project/src/basket/total.ts")
+    })
+
+    it("leaves a window that shows another file alone, one beside the folder's name too", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cartography.ts")
+      app.asked.length = 0
+
+      await app.commands.followMovedFile("project", "src/cart", "src/basket")
+
+      expect(app.asked).toEqual([])
+      expect(shown(app).path).toBe("~/project/src/cartography.ts")
+    })
+
+    it("stops previewing the agents' work at the old path, showing main's copy", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cart.ts", { preview: true })
+      expect(Object.keys(app.ui.getSnapshot().filePreviews)).toHaveLength(1)
+
+      await app.commands.followMovedFile("project", "src/cart.ts", "src/basket.ts")
+
+      expect(app.ui.getSnapshot().filePreviews).toEqual({})
+    })
+
+    it("leaves the window on the old path, gone, where the file can't be opened at the new", async () => {
+      const app = follows(["~/project/src/basket.ts"])
+      await app.commands.openProjectFile("src/cart.ts")
+
+      await expect(
+        app.commands.followMovedFile("project", "src/cart.ts", "src/basket.ts"),
+      ).resolves.toBeUndefined()
+
+      expect(shown(app).path).toBe("~/project/src/cart.ts")
+    })
+
+    it("does nothing for a project removed meanwhile", async () => {
+      const app = follows()
+      await app.commands.openProjectFile("src/cart.ts")
+      app.asked.length = 0
+
+      await app.commands.followMovedFile("removed", "src/cart.ts", "src/basket.ts")
+
+      expect(app.asked).toEqual([])
+      expect(shown(app).path).toBe("~/project/src/cart.ts")
+    })
+
+    it("does nothing where the backend can't open files", async () => {
+      const app = open()
+      await expect(app.commands.followMovedFile("project", "a.ts", "b.ts")).resolves.toBeUndefined()
+    })
+  })
 })

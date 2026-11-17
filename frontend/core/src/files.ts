@@ -78,6 +78,17 @@ export type ProjectFiles = {
     readonly read: (projectId: string) => Promise<FilesExclude>
     readonly save: (projectId: string, patterns: FilesExclude) => Promise<void>
   }
+  // The person's changes to the project's files, each by a path from the project's root with
+  // `/` between names, where the backend can make them; each absent where it can't. `create`
+  // makes an empty file, or with `folder` an empty folder, and the folders on the way that are
+  // missing; `move` renames an entry, or moves it into another folder; `remove` deletes one for
+  // good, a folder with everything in it. `create` and `move` answer the path of the entry they
+  // made or moved. Each rejects with the backend's reason: a name taken, which is never
+  // overwritten, the root or the VCS's own folder, a path gone or leading out of the project, or
+  // the system refusing, as for want of permission.
+  readonly create?: (projectId: string, path: string, folder: boolean) => Promise<string>
+  readonly move?: (projectId: string, from: string, to: string) => Promise<string>
+  readonly remove?: (projectId: string, path: string) => Promise<void>
 }
 
 // A project's directory is written as the backend's machine writes it: a Windows one with

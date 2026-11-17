@@ -197,6 +197,48 @@ An upload's path goes in double-quoted when the person's own folders above it ho
 space or any character outside those letters, as `C:\R&D\...` does (`shellPath`);
 PowerShell running a `.cmd` program drops those quotes, so cmd can still split it there.
 
+## Project Files
+
+The Files panel makes empty files and folders, renames and moves them, and deletes them in a
+project's folder, through the runner's `projects.createEntry`, `projects.moveEntry` and
+`projects.removeEntry` (`backend/runner/src/workspaces/entries.ts`). They are the runner's
+first writes into a project's folder. Only a client holding the runner's token, or the desktop
+app's own window through its port (see Terminal Runner), calls them, as the UI does when the
+person asks; a terminal's report token can't, so an agent's tool calls change no file through
+them. Whoever can call them can change any file through a shell anyway: these procedures keep a
+slip of the person's inside the project, and are no sandbox.
+
+Each takes a path from the project's root, `/` between names: a leading `/`, `..`, `.`, an
+empty name, a backslash and NUL are refused (`segments` in
+`backend/runner/src/workspaces/project-paths.ts`).
+The folder an entry is in, resolved through any links, must lie inside the project's
+directory resolved the same way, and so must each folder made on the way to a new entry. The
+entry itself is never followed: a link is renamed or deleted as a link, never what it leads to,
+and a folder deleted with everything in it loses the links in it, not what they lead to.
+Never changed: the project's folder itself, and Git's own `.git` and what is in it, at either
+end of a move: a path with a name `.git` in it, in any letters' case, and a folder on the way
+that resolves into `.git` however it is named, through a link to it or by a Windows short name
+such as `GIT~1`, as is an entry that resolves to it (a link to `.git` is deleted as a link).
+Nothing that is there is overwritten: a file is made with `wx`; the last folder of a new path
+is made alone, after any missing on the way, so one already there is never taken for it; and a
+move stops at anything at its destination, unless that is the entry itself in other letters'
+case in its own folder on a filesystem that doesn't tell them apart (the same device and inode,
+and a name the folder doesn't list as spelled). A move makes no folder; a folder can't move
+into itself. A move to another disk is refused, as are names
+Windows keeps for devices or won't hold, on Windows. Folders a failed make created are
+removed again. Deleting is for good: nothing goes to the system's trash. A folder something
+writes into as it is deleted is tried twice more, then what is left stays, with the system's
+refusal.
+
+The checks come before the change, so what they saw can change before it is made: a folder
+on the way replaced by a link in between can put the change where the link leads, as any
+process of the person's account could, and a file, or an empty folder, made at a move's
+destination in between is replaced by the move, as the system's rename does. The runner refuses what the system refuses (permission,
+a read-only or full disk, a file in use), saying why, and has no other rights over the
+project's files than the account it runs as. Hard links are the same file under other names:
+deleting one leaves the others. The demo (`frontend/demo/src/files.ts`) changes only an
+in-memory copy of its fixture trees.
+
 ## Terminal Runner
 
 The desktop app's **Runner → Remote Runner…** form runs no script, has no preload or

@@ -68,6 +68,8 @@ const launch = (): DemoLaunch => ({
   setWorktrees: () => {},
   forges: true,
   setForges: () => {},
+  fileOperations: true,
+  setFileOperations: () => {},
 })
 
 describe("the debug layer's demo", () => {
@@ -103,6 +105,20 @@ describe("the debug layer's demo", () => {
   it("offers agent worktrees unless the launch says the backend has none", () => {
     expect(createDebugDemo(launch()).worktrees).toBeDefined()
     expect(createDebugDemo({ ...launch(), worktrees: false }).worktrees).toBeUndefined()
+  })
+
+  it("makes, renames and deletes a project's files unless the launch says the backend doesn't", () => {
+    // The agents demo, whose storefront has files.
+    const agents = { ...launch(), variant: "agents" as const }
+    const offered = createDebugDemo(agents).files
+    const reading = createDebugDemo({ ...agents, fileOperations: false }).files
+    expect([offered?.create, offered?.move, offered?.remove].every(Boolean)).toBe(true)
+    expect([reading?.create, reading?.move, reading?.remove]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ])
+    expect(reading?.list).toBeDefined()
   })
 
   it("offers forge integrations unless the launch says the backend has none", () => {

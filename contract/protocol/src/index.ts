@@ -170,6 +170,7 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type EntryChanged,
   type FilesExclude,
   filesExcludeLimits,
   type FolderBrowse,

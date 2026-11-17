@@ -5,6 +5,7 @@ import { demoPaths, filesThird, type DemoFiles } from "@novadeck/demo/files"
 import { terminalOf } from "@novadeck/demo/workspace"
 
 import { refuseClipboard, restoreClipboard } from "./clipboard"
+import type { DemoLaunch } from "./debug-demo"
 import type { DemoActionGroup } from "./types"
 
 // Files exist for the storefront project only.
@@ -21,8 +22,12 @@ const handleOf = (key: TerminalKey | undefined, workspace: Workspace | undefined
 }
 
 // The panel's group for the Files panel's states, which need the demo's files: the
-// storefront project's tree, where the agents change files by themselves too.
-export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGroup[] =>
+// storefront project's tree, where the agents change files by themselves too, and the person
+// makes, renames and deletes them where the launch offers it.
+export const filesGroups = (
+  files: DemoFiles | undefined,
+  launch: Pick<DemoLaunch, "setFileOperations">,
+): readonly DemoActionGroup[] =>
   files
     ? [
         {
@@ -91,15 +96,33 @@ export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGr
               run: () => files.failExcludeReads(),
             },
             {
+              label: "Next file operation fails",
+              hint: "In Files, the next New File…, New Folder…, Rename… or Delete fails, once: a red-edged line above the tree says it couldn't make, rename or delete that path, and why, with Dismiss, and the tree is as it was; Files read normally again lifts it before then",
+              run: () => files.failNextChange(),
+            },
+            {
+              label: "File operations not offered",
+              hint: "Files' right-click menus have no New File…, New Folder…, Rename… or Delete, and F2 and Delete on a row do nothing, as on a runner without them; the copies, Refresh and Hide in This Project stay",
+              reboots: true,
+              run: () => launch.setFileOperations(false),
+            },
+            {
+              label: "File operations offered",
+              hint: "Files' right-click menus offer New File… and New Folder…, and Rename… and Delete on a row of the project's folder, with F2 and Delete on a focused row, as the demo starts",
+              reboots: true,
+              run: () => launch.setFileOperations(true),
+            },
+            {
               label: "Copying a path fails",
               hint: "Every copy in the page fails until Files read normally again or a reboot: in Files, Copy Path or Copy Relative Path on a row's right-click, Copy Path on the empty space's, or Shift+Alt+C on a focused row shows a red-edged line above the tree saying it couldn't copy that path, with a Dismiss button; hiding the panel clears it",
               run: refuseClipboard,
             },
             {
               label: "Files read normally again",
-              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and hidden files read again; paths copy and hidden files save again at once",
+              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and hidden files read again; paths copy, hidden files save, and files are made, renamed and deleted again at once",
               run: () => {
                 restoreClipboard()
+                files.failNextChange(false)
                 files.failNextExcludeSave(false)
                 files.failExcludeReads(false)
                 for (const folder of ["", "src/cart", "src/components"])

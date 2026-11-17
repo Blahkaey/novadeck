@@ -11,6 +11,7 @@ import type { ComponentProps } from "react"
 import { HeldPill, InboxClear, InboxCount, InboxList } from "../inbox/InboxList"
 import { shortcutBindings } from "../interaction/shortcuts"
 import { sessionGlance, type SessionMark } from "../projects/session-marks"
+import type { EntryChanges } from "../sidebar/files-edit"
 import { FilesPanel } from "../sidebar/FilesPanel"
 import { HistoryPanel } from "../sidebar/HistoryPanel"
 import { NotesPanel } from "../sidebar/NotesPanel"
@@ -34,11 +35,12 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
   // Where the backend reads the projects' files: what its agents changed in the project, if it
   // says, the project's directory as the backend's machine writes it, how to read a folder, the
   // person's patterns for hiding files in every project, how to read and replace the project's
-  // own where the backend keeps them, how to open Preferences at the person's, when an agent's
-  // turn last ended, how to follow the works the changes come from while the panel shows, if
-  // they do, how to open a file, the handle of the selected terminal, and the session's agents
-  // for the strip: every terminal's handle in roster order, and the teams as handles, each lead
-  // first. Left out, there is no Files panel.
+  // own where the backend keeps them, how to open Preferences at the person's, how the backend
+  // makes, moves and deletes the project's files where it can, what to tell when one moved, when
+  // an agent's turn last ended, how to follow the works the changes come from while the panel
+  // shows, if they do, how to open a file, the handle of the selected terminal, and the session's
+  // agents for the strip: every terminal's handle in roster order, and the teams as handles, each
+  // lead first. Left out, there is no Files panel.
   files:
     | {
         project: FilesProject | undefined
@@ -52,6 +54,8 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
             }
           | undefined
         onExcludeSettings: () => void
+        entries: EntryChanges | undefined
+        onMoved: (from: string, to: string) => void
         turn: number
         watch: (() => () => void) | undefined
         onOpenFile: (path: string) => Promise<void>
@@ -165,6 +169,8 @@ export const WorkspaceSidebar = ({
         exclude={files.exclude}
         projectExclude={files.projectExclude}
         onExcludeSettings={files.onExcludeSettings}
+        entries={files.entries}
+        onMoved={files.onMoved}
         turn={files.turn}
         watch={files.watch}
         onOpenFile={files.onOpenFile}

@@ -32,6 +32,7 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
   let uninstall: DemoUninstall | undefined
   let worktrees = true
   let forges = true
+  let fileOperations = true
   let play: DemoLaunch["play"]
   return async (signal, progress): Promise<BackendConnection> => {
     await rehearsals.beforeConnect(signal, unavailable)
@@ -88,6 +89,11 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
       forges,
       setForges: (next) => {
         forges = next
+        rehearsals.rehearse({ reboot: true })
+      },
+      fileOperations,
+      setFileOperations: (next) => {
+        fileOperations = next
         rehearsals.rehearse({ reboot: true })
       },
     }

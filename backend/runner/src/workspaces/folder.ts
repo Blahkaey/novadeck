@@ -2,13 +2,13 @@ import { spawn } from "node:child_process"
 import type { Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { dirname, isAbsolute, join, relative, sep } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
 
 import type { FolderBrowse, FolderListing } from "@novadeck/protocol"
 
-import { DomainError } from "../errors.js"
 import { gitEnv, gitPath } from "../git.js"
 import { killTree } from "../programs.js"
+import { invalid, segments, within } from "./project-paths.js"
 
 /** The most entries one folder lists; a folder holding more says so (`truncated`). */
 export const maxFolderEntries = 2000
@@ -19,27 +19,6 @@ const ignoreTimeout = 2000
 type Entry = FolderListing["entries"][number]
 /** An entry before git is asked, saying whether it is a link, which git names without a slash. */
 type Found = Entry & { readonly link: boolean }
-
-const invalid = (message: string): DomainError => new DomainError("INVALID_DIRECTORY", message)
-
-/**
- * The names of a folder's path, which is relative to a project's root, `/` between names
- * and "" for the root itself. Refuses anything else, so a path can't lead out of the root.
- */
-const segments = (folder: string): string[] => {
-  if (folder === "") return []
-  if (folder.includes("\\") || folder.includes("\0")) throw invalid("That isn't a folder path.")
-  const names = folder.split("/")
-  if (names.some((name) => name === "" || name === "." || name === ".."))
-    throw invalid("That isn't a folder path.")
-  return names
-}
-
-/** Whether `path` is `root` or lies inside it; both resolved alike. */
-const within = (root: string, path: string): boolean => {
-  const route = relative(root, path)
-  return route === "" || (!isAbsolute(route) && route.split(sep)[0] !== "..")
-}
 
 /**
  * Which of the entries of `directory` git ignores, by name. Only reads: a folder that is

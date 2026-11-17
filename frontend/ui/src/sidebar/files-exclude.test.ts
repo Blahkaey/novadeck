@@ -1,7 +1,7 @@
 import type { FilesExclude } from "@novadeck/core/files"
 
 import { context, describe, expect, it } from "../test"
-import { exactPattern, hiddenUnder, hidesOf } from "./files-exclude"
+import { exactPattern, hiddenUnder, hidesOf, hidingPattern } from "./files-exclude"
 
 // Which of `paths` the patterns hide, the person's for every project and the project's over them.
 const hidden = (
@@ -130,6 +130,20 @@ describe("Hiding files by pattern", () => {
       expect(exactPattern('a"b.txt')).toBe('a\\"b.txt')
       expect(exactPattern("notes\\draft.md")).toBe("notes[\\\\]draft.md")
       expect(exactPattern("src/cart/useCart.ts")).toBe("src/cart/useCart.ts")
+    })
+  })
+
+  context("when naming the pattern that hides a path", () => {
+    it("names the first pattern on that matches it, or a folder above it", () => {
+      const everywhere = { "**/*.log": true, "**/dist": true }
+      expect(hidingPattern(everywhere, {}, "logs/app.log")).toBe("**/*.log")
+      expect(hidingPattern(everywhere, {}, "web/dist/main.js")).toBe("**/dist")
+      expect(hidingPattern(everywhere, { "web/**": true }, "web/dist/main.js")).toBe("**/dist")
+    })
+
+    it("names none where every pattern that matches is switched off, or none matches", () => {
+      expect(hidingPattern({ "**/*.log": true }, { "**/*.log": false }, "app.log")).toBeUndefined()
+      expect(hidingPattern({ "**/*.log": true }, {}, "src/app.ts")).toBeUndefined()
     })
   })
 })

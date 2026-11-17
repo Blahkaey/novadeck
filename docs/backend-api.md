@@ -295,6 +295,27 @@ says so, and keeps what was there. Each project's are a row of the runner's sett
 read answers `{}`, and a pattern another build kept that isn't a switch is left out. A missing
 project, or one being removed, is `NOT_FOUND`. Nothing tells other clients of a change: the Files
 panel reads them again when it is shown.
+`projects.createEntry({ projectId, path, folder })` makes an empty file, or with `folder` an
+empty folder, at `path` from the project's root, and the folders on the way that are missing;
+`projects.moveEntry({ projectId, from, to })` renames an entry, or moves it into another folder
+that is there already; `projects.removeEntry({ projectId, path })` deletes one for good, a
+folder with everything in it. The first two answer `{ path }`, the path made. Paths are as
+`projects.folder` takes them, at most 4096 characters (else `BAD_REQUEST`). Nothing found
+there is overwritten: a name that is taken is a `CONFLICT` whose message names it, except a
+rename of an entry to its own name in other letters' case, in its folder, on a filesystem that
+doesn't tell them apart, which goes through. A file or an empty folder made at a move's
+destination between the runner's check and the move itself is replaced, as the system's rename
+does. The project's folder itself, Git's own `.git` and what is in it (a name `.git` in any
+case, or a folder or entry that resolves into it through a link or a Windows short name), a
+path that is badly formed, goes through a file or leads out of the project's directory (as
+through a link), an entry or a destination folder that is missing, and a folder moved into
+itself are `INVALID_DIRECTORY`. The system refusing (permission, a read-only or full disk, a
+file in use, a move to another disk, a name too long, something added inside a folder while it
+is deleted, or on Windows a name it keeps for a device or won't hold) is `WRITE_REFUSED`, whose
+message says why in plain words. A missing
+project, or one being removed, is `NOT_FOUND`. A link is renamed or deleted as a link; a folder
+the runner made on the way is removed again if the make fails. See
+[Project Files](../SECURITY.md#project-files) for what the confinement promises.
 `sessions.save({ sessionId, state, visitedAt })` replaces a session's `state`, a string the
 runner stores with the session without reading it, such as a UI layout, and `visitedAt`,
 when the person last visited it (null: never). Sessions list both; the latest visit picks a
@@ -2003,7 +2024,7 @@ one from an earlier runner.
   sends it where a step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
-`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
+`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change a project's file; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
 `INVALID_CURSOR`, `UPLOAD_TOO_LARGE`, `RESOURCE_LIMIT` (too many calls in flight; retry later),
 `TERMINAL_LIMIT` (the runner's terminal cap is reached), and `SLOW_CONSUMER`. A
 `CONFLICT` about typing into an agent's terminal (`agents.prompt`, `agents.answer`,

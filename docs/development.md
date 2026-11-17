@@ -480,12 +480,29 @@ Agents:
   folder is empty.") or two entries and a "More not shown" row; "Files read normally again"
   ends them all. Every sample project has a small tree of its own. `node_modules` is the demo's
   empty folder: it opens onto a muted "Empty" row.
-  A right-click on a row opens its menu, Copy Path (`~/projects/storefront/…`, also
-  Shift+Alt+C on a focused row) and Copy Relative Path, and one on the tree's empty space, a
-  muted note row, or the line in the tree's place ("The project's folder is empty" and "The
-  project's files can't be read" above) the project folder's, Copy Path and Refresh, which reads
-  the root and the open folders again as the header's Refresh button does; a copy that works
-  shows nothing.
+  A right-click on a row opens its menu, New File… and New Folder…, Copy Path
+  (`~/projects/storefront/…`, also Shift+Alt+C on a focused row) and Copy Relative Path, then
+  Rename… (F2) and Delete (Delete, ⌘⌫ on macOS); one on the tree's empty space, a muted note
+  row, or the line in the tree's place ("The project's folder is empty" and "The project's files
+  can't be read" above) the project folder's, New File…, New Folder…, Copy Path and Refresh,
+  which reads the root and the open folders again as the header's Refresh button does; a copy
+  that works shows nothing. A row only an agent's work has (`src/checkout/OrderSummary.tsx`) or
+  one an agent deleted (`LegacyCheckout.tsx`) offers no New, Rename… or Delete. Making,
+  renaming and deleting are reachable by normal use: each project's tree is the demo's copy in
+  memory, until it boots again, refused as the runner refuses (a taken name, `.git`), and the
+  agents' marks and cursors follow a rename and go with a delete. The naming field's red line
+  shows by typing a name already beside it, such as `src` at the top. A file the project window
+  shows (double-click `package.json`) opens there at its new name when renamed, and says
+  "package.json isn't there any more." once deleted (the demo's window follows the person's
+  deletes and moves, as the runner's watch does); a name a hiding pattern matches, as `debug.log`
+  with `**/*.log` added in Hidden files, is made with a line above the tree naming the pattern. A
+  field whose row leaves the tree, as one an agent's turn end reads away, goes with it. "Next file
+  operation fails" has the next New File…, New Folder…, Rename… or Delete fail, once, with a
+  red-edged line above the tree saying why, until "Files read normally again" lifts it. "File
+  operations not offered" boots the demo again with a backend that makes, renames and deletes
+  nothing, as a runner without them: the menus lose those items and F2 and Delete on a row do
+  nothing; "File operations offered" boots it with them again. On macOS only ⌘⌫ deletes; a
+  forward Delete on a row does nothing.
   "Copying a path fails" has the browser refuse the clipboard, every copy in the page, until
   "Files read normally again" or the demo boots again, as the Plan group's "Copying plan edits
   fails" does (`frontend/demo-debug/src/clipboard.ts`): a copy then puts a red-edged line above
@@ -1064,7 +1081,7 @@ folder of `frontend/ui/src/`:
 | `frontend/core/src/messages.ts`                                 | The contract for agents' messages: threads, states, the pause, and a tab's count.                                              |
 | `frontend/core/src/conversation.ts`                             | The contract for an agent's conversation: transcript items, requests, the port.                                                |
 | `frontend/core/src/inbox.ts`                                    | The contract for the Inbox: rows by source, their type, how they ended, answers, the port.                                     |
-| `frontend/core/src/files.ts`                                    | The contract for the Files panel: a project's folders, listed one at a time, and what its agents changed.                      |
+| `frontend/core/src/files.ts`                                    | The Files panel's contract: folders listed one at a time, agents' changes, hide patterns, making, renaming and deleting files. |
 | `frontend/core/src/conversation/picks.ts`                       | What the person has picked and written for a dialog's questions, and the answer it makes.                                      |
 | `frontend/core/src/conversation/turns.ts`                       | A conversation grouped into blocks, the turn's status.                                                                         |
 | `frontend/core/src/roster.ts`                                   | A session's terminals and undocked windows, laid out as tiles, their order and status.                                         |

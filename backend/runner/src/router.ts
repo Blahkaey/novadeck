@@ -28,6 +28,7 @@ import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
+import { createEntry, moveEntry, removeEntry } from "./workspaces/entries.js"
 import { filesExcludeOf, saveFilesExclude } from "./workspaces/files-exclude.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
@@ -181,6 +182,18 @@ export const createRouter = (options: {
       setFilesExclude: api.projects.setFilesExclude.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         saveFilesExclude(store, input.projectId, input.patterns)
+      }),
+      createEntry: api.projects.createEntry.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return createEntry(store.project(input.projectId).cwd, input.path, input.folder)
+      }),
+      moveEntry: api.projects.moveEntry.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return moveEntry(store.project(input.projectId).cwd, input.from, input.to)
+      }),
+      removeEntry: api.projects.removeEntry.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return removeEntry(store.project(input.projectId).cwd, input.path)
       }),
       browse: api.projects.browse.handler(({ input }) => browseFolder(input.path)),
     },

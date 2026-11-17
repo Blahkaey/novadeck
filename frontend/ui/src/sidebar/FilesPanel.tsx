@@ -4,9 +4,11 @@ import {
   type FolderListing,
   type FilesProject,
 } from "@novadeck/core/files"
+import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
+import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { ChevronsDownUp, EyeOff, RefreshCw, X } from "lucide-react"
+import { ChevronsDownUp, EyeOff, File, Folder, RefreshCw, X } from "lucide-react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import { currentPlatform, filesShortcutBindings, matchesShortcut } from "../interaction/shortcuts"
@@ -19,7 +21,22 @@ import {
   stripSlots,
   type Squad,
 } from "./files-agents"
-import { exactPattern, hiddenUnder, hidesOf } from "./files-exclude"
+import {
+  atOrBelow,
+  changeable,
+  checkName,
+  listingsMade,
+  listingsMoved,
+  listingsRemoved,
+  moved,
+  nameOf,
+  newEntryIn,
+  parentOf,
+  rowAfterLeaving,
+  type EntryChanges,
+  type Naming,
+} from "./files-edit"
+import { exactPattern, hiddenUnder, hidesOf, hidingPattern } from "./files-exclude"
 import { textWidth } from "./files-fonts"
 import { filesMenu } from "./files-menu"
 import {
@@ -30,7 +47,9 @@ import {
   expandable,
   foldChips,
   initialOpen,
+  isNaming,
   isNote,
+  isRow,
   keepListings,
   marksOf,
   shownWork,
@@ -40,6 +59,7 @@ import {
   type FilesRow,
 } from "./files-tree"
 import { FilesExcludeDialog } from "./FilesExcludeDialog"
+import { NameRow } from "./FilesNameRow"
 import { FilesStrip } from "./FilesStrip"
 import { NoteRow, TreeRow, type Pointed } from "./FilesTreeRows"
 import { panelLabels } from "./panel-labels"
@@ -57,7 +77,31 @@ const noFolders: ReadonlySet<string> = new Set()
 const noListings: Listings = new Map()
 const noPatterns: FilesExclude = {}
 
-const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
+// The strip the question to delete a row opens on: its icon, its name, and its folder.
+const deleteBar = (row: FilesRow): React.JSX.Element => (
+  <SubjectBar>
+    <SubjectSide>
+      {row.node.folder ? (
+        <Folder size={14} strokeWidth={1.5} aria-hidden="true" />
+      ) : (
+        <File size={14} strokeWidth={1.5} aria-hidden="true" />
+      )}
+      <SubjectName>{row.node.name}</SubjectName>
+    </SubjectSide>
+    <SubjectDetail end>{parentOf(row.node.path) || "Project folder"}</SubjectDetail>
+  </SubjectBar>
+)
+
+// Whether the panel may still move the page's focus, to a row it wants focused: focus is on
+// nothing, on a row of the tree `tree`, or left in the closing question whose answer deleted a
+// row (a dialog gives back no focus a page placed meanwhile). Never out of the field a name is
+// typed in, nor from anywhere else the person put it.
+const focusMovable = (tree: HTMLElement | null): boolean => {
+  const focused = document.activeElement
+  if (focused === null || focused === document.body) return true
+  if (focused.closest('[role="alertdialog"][data-state="closed"]')) return true
+  return tree?.contains(focused) === true && !focused.closest(".files-naming-row")
+}
 
 // The path of the row an event happened in, from anywhere in it, its chips too; none on the
 // tree's empty space or a note.
@@ -77,7 +121,10 @@ const pathAt = (target: EventTarget): string | undefined =>
 // couldn't do shows above the tree while it shows. What the person's patterns for every project
 // and the project's own over them match leaves the tree, and the agents' work there with it;
 // the project's are read when the panel is shown, and edited in the dialog the header's Hidden
-// files opens, or added to by a row's Hide in This Project.
+// files opens, or added to by a row's Hide in This Project. Where the backend makes them, the
+// menu and the keys (F2, Delete) make a new file or folder, named in a field in the tree, rename
+// a row in its place, and delete one once the person confirms; then the folders involved are read
+// again and the row made or renamed takes the selection.
 export const FilesPanel = ({
   project,
   directory,
@@ -85,6 +132,8 @@ export const FilesPanel = ({
   exclude,
   projectExclude,
   onExcludeSettings,
+  entries,
+  onMoved,
   turn,
   watch,
   onOpenFile,
@@ -109,6 +158,11 @@ export const FilesPanel = ({
   projectExclude?: ProjectExcludeSource | undefined
   // Opens Preferences where the person's patterns for every project are edited.
   onExcludeSettings: () => void
+  // How the backend makes, moves and deletes the project's files and folders, each where it can;
+  // left out, nothing is offered.
+  entries?: EntryChanges | undefined
+  // Told an entry moved, by its paths from the root, so what shows it can follow it.
+  onMoved?: ((from: string, to: string) => void) | undefined
   // When an agent's turn last ended in the project, which has the folders read again.
   turn: number
   // Follows the works `project` comes from until the returned release is called, where it
@@ -170,11 +224,27 @@ export const FilesPanel = ({
   const [kept, setKept] = useState<ReadonlySet<string>>(noAgents)
   const stillKept = useMemo(() => keptWorking(shown, kept), [shown, kept])
   if (stillKept.size !== kept.size) setKept(stillKept)
+  // What the person is naming in a field in the tree, a new entry or a row anew; and the row they
+  // asked to delete, while the dialog asks.
+  const [naming, setNaming] = useState<Naming | null>(null)
+  const [deleting, setDeleting] = useState<FilesRow | null>(null)
   const lines = useMemo(
-    () => visibleLines(tree, open, rootTruncated, stillKept),
-    [tree, open, rootTruncated, stillKept],
+    () => visibleLines(tree, open, rootTruncated, stillKept, naming),
+    [tree, open, rootTruncated, stillKept, naming],
   )
-  const rows = useMemo(() => lines.filter((line): line is FilesRow => !isNote(line)), [lines])
+  const rows = useMemo(() => lines.filter(isRow), [lines])
+  // The line in the tree's place where the root has nothing to show: none while a name is typed,
+  // which the tree shows.
+  const inPlace =
+    naming !== null
+      ? undefined
+      : rootRead === "failed"
+        ? "Can't read this project's files."
+        : rootEmpty
+          ? "This project's folder is empty."
+          : rootHidden
+            ? "Everything in this project's folder is hidden."
+            : undefined
 
   const { read, isReading } = useFolderReader(list, setListings)
   // The works the changes come from are followed while the panel shows.
@@ -186,7 +256,7 @@ export const FilesPanel = ({
     return [
       "",
       ...all.flatMap((line) =>
-        !isNote(line) && line.node.folder && line.open ? [line.node.path] : [],
+        isRow(line) && line.node.folder && line.open ? [line.node.path] : [],
       ),
     ]
   }, [lines, tree, open, stillKept])
@@ -276,6 +346,29 @@ export const FilesPanel = ({
   // The row that holds the tree's one Tab stop: the last one focused, or the first.
   const [stop, setStop] = useState<string | null>(null)
   const tabStop = rows.some((row) => row.node.path === stop) ? stop : (rows[0]?.node.path ?? null)
+  // The row that takes focus once it shows, as a row made or renamed with the keyboard, unless
+  // the panel may no longer move the focus by then (`focusMovable`). A change of the rows comes
+  // with every one.
+  const focusing = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const path = focusing.current
+    if (path === null || !rows.some((row) => row.node.path === path)) return
+    focusing.current = null
+    if (!focusMovable(treeNode)) return
+    treeNode?.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)?.focus()
+  }, [rows, treeNode])
+  // A field whose row, or the folder it adds to, left the tree, as when a reading or the agents
+  // kept no longer show it, goes with it, and the tree's tab stop takes the focus it had. A field
+  // is open from when it shows until a key or a blur ends it; one that ends otherwise was lost.
+  const fieldOpen = useRef(false)
+  if (naming !== null && !lines.some(isNaming)) setNaming(null)
+  useLayoutEffect(() => {
+    if (naming !== null) fieldOpen.current = true
+    if (naming !== null || !fieldOpen.current) return
+    fieldOpen.current = false
+    if (tabStop === null || !focusMovable(treeNode)) return
+    treeNode?.querySelector<HTMLElement>(`[data-path="${CSS.escape(tabStop)}"]`)?.focus()
+  }, [naming, tabStop, treeNode])
 
   const { pulses, end: endPulses } = usePulses(project?.changes, rows, open, showing, hides)
   // Hiding the panel ends the pulses, and showing it again starts the trails over so each reads
@@ -359,15 +452,11 @@ export const FilesPanel = ({
     (row: FilesRow): void => {
       setFailure(null)
       const { path } = row.node
-      const index = rows.findIndex((each) => each.node.path === path)
-      const stays = (each: FilesRow): boolean =>
-        each.node.path !== path && !each.node.path.startsWith(`${path}/`)
-      const next = rows.slice(index + 1).find(stays) ?? rows.slice(0, index).findLast(stays)
+      const next = rowAfterLeaving(rows, path)
       change((current) => ({ ...current, [exactPattern(path)]: true })).then(
         () => {
           // The row may have left already, and focus with it: then it is nowhere.
-          const focused = document.activeElement
-          if (focused === document.body || treeNode?.contains(focused)) focusRow(next)
+          if (focusMovable(treeNode)) focusRow(next)
         },
         (error: unknown) =>
           setFailure({
@@ -376,6 +465,146 @@ export const FilesPanel = ({
           }),
       )
     }
+  const focusOnceShown = (path: string | null): void => {
+    focusing.current = path
+  }
+  // What a change to the project's files couldn't do, with the backend's reason, above the tree;
+  // in the showing it was asked in only, as a copy's. The folders `involved` are read again, as
+  // a refusal may come once part of the change was made.
+  const failing =
+    (what: string, involved: readonly string[]) =>
+    (error: unknown): void => {
+      involved.forEach(read)
+      setFailure({
+        text: `${what}: ${error instanceof Error ? error.message : "Novadeck could not change it."}`,
+        shown: shownTimes,
+      })
+    }
+  // Starts naming a new file or folder where the menu was asked: inside a folder, which opens,
+  // beside a file, or in the root off a row.
+  const startNew = (row: FilesRow | undefined, folder: boolean): void => {
+    const parent = newEntryIn(row)
+    setFailure(null)
+    if (parent !== "" && !open.has(parent)) toggle(parent, true)
+    setNaming({ kind: "new", parent, folder, from: row?.node.path })
+  }
+  const startRename = (row: FilesRow): void => {
+    setFailure(null)
+    setNaming({ kind: "rename", path: row.node.path, folder: row.node.folder })
+  }
+  // Ends the naming with nothing changed; a key gives the row it was asked on its focus back.
+  const endNaming = (asked: Naming, keyboard: boolean): void => {
+    fieldOpen.current = false
+    setNaming(null)
+    if (keyboard) focusOnceShown(asked.kind === "rename" ? asked.path : (asked.from ?? tabStop))
+  }
+  // Once an entry is made or renamed at `path` it is the row selected (a file) and the tree's tab
+  // stop, which a key also gives the focus, and the agents kept let go so it shows; one the
+  // patterns hide says so above the tree, naming the pattern, and a key gives the focus to the
+  // row `instead`, where it is one.
+  const changed = (
+    path: string,
+    folder: boolean,
+    keyboard: boolean,
+    done: string,
+    instead: string | null,
+  ): void => {
+    const pattern = hidingPattern(exclude, projectPatterns ?? noPatterns, path)
+    if (pattern !== undefined) {
+      setFailure({
+        text: `${done} ${path}, which the pattern ${pattern} hides.`,
+        shown: shownTimes,
+      })
+      if (keyboard) focusOnceShown(instead)
+      return
+    }
+    setKept(noAgents)
+    if (!folder) setSelected(path)
+    setStop(path)
+    if (keyboard) focusOnceShown(path)
+  }
+  // Makes the entry the person named in the folder `parent`, opening and reading again the
+  // folders on the way to it; one the patterns hide leaves the focus on the row asked on.
+  const make = (
+    create: NonNullable<EntryChanges["create"]>,
+    asked: Extract<Naming, { readonly kind: "new" }>,
+    path: string,
+    keyboard: boolean,
+  ): void => {
+    const { parent, folder } = asked
+    create(path, folder).then(
+      (made) => {
+        const names = made.split("/")
+        const way = names.slice(0, -1).map((_, at) => names.slice(0, at + 1).join("/"))
+        setListings((known) => listingsMade(known, made, folder))
+        setOpenFolders((current) => current && new Set([...current, ...way]))
+        ;["", ...way].forEach(read)
+        changed(made, folder, keyboard, "Made", asked.from ?? null)
+      },
+      failing(`Couldn't make ${path}`, [parent]),
+    )
+  }
+  // Renames the entry at `from` to `to`; an open folder keeps what it lists and what is open in
+  // it, and the selection and tab stop follow, as does what shows it outside the panel. Where the
+  // patterns hide its new name, the row `after` takes the focus in its place.
+  const rename = (
+    move: NonNullable<EntryChanges["move"]>,
+    asked: Extract<Naming, { readonly kind: "rename" }>,
+    to: string,
+    keyboard: boolean,
+  ): void => {
+    const { path: from, folder } = asked
+    // The row after it among the rows it is one of, read before its field leaves.
+    const after = keyboard
+      ? (rowAfterLeaving(visibleLines(tree, open, rootTruncated, stillKept).filter(isRow), from)
+          ?.node.path ?? null)
+      : null
+    move(from, to).then(
+      (path) => {
+        setListings((known) => listingsMoved(known, from, path))
+        setOpenFolders(
+          (current) => current && new Set([...current].map((each) => moved(each, from, path))),
+        )
+        setSelected((current) => current && moved(current, from, path))
+        setStop((current) => current && moved(current, from, path))
+        new Set([parentOf(from), parentOf(path)]).forEach(read)
+        onMoved?.(from, path)
+        changed(path, folder, keyboard, "Renamed to", after)
+      },
+      failing(`Couldn't rename ${from} to ${nameOf(to)}`, []),
+    )
+  }
+  // Makes or renames what the person named, which the menu and the keys ask for only where the
+  // backend makes that change. With a key, the row it was asked on holds the focus meanwhile,
+  // and keeps it if the change is refused.
+  const commitName = (asked: Naming, path: string, keyboard: boolean): void => {
+    fieldOpen.current = false
+    setNaming(null)
+    setFailure(null)
+    if (keyboard) focusOnceShown(asked.kind === "rename" ? asked.path : (asked.from ?? tabStop))
+    if (asked.kind === "new" && entries?.create) make(entries.create, asked, path, keyboard)
+    if (asked.kind === "rename" && entries?.move) rename(entries.move, asked, path, keyboard)
+  }
+  // Deletes the row the person confirmed; the row after it, else the one before, takes the focus
+  // unless the person put it somewhere else meanwhile. A refusal reads its folder again, and the
+  // folder itself where it is open, as part of it may be gone.
+  const remove = (removeEntry: NonNullable<EntryChanges["remove"]>, row: FilesRow): void => {
+    const { path } = row.node
+    const next = rowAfterLeaving(rows, path)
+    setFailure(null)
+    removeEntry(path).then(
+      () => {
+        setListings((known) => listingsRemoved(known, path))
+        setOpenFolders(
+          (current) => current && new Set([...current].filter((each) => !atOrBelow(each, path))),
+        )
+        setSelected((current) => (current !== null && atOrBelow(current, path) ? null : current))
+        read(parentOf(path))
+        focusOnceShown(next?.node.path ?? null)
+      },
+      failing(`Couldn't delete ${path}`, [parentOf(path), ...(open.has(path) ? [path] : [])]),
+    )
+  }
   // Escape in the strip or the tree lets go of every kept agent, back to following the selected
   // terminal. With nothing kept it is left for whatever else listens.
   const onEscape = (event: React.KeyboardEvent): void => {
@@ -391,12 +620,30 @@ export const FilesPanel = ({
     const index = rows.findIndex((row) => row.node.path === path)
     const row = rows[index]
     if (!row) return
+    const keys = filesShortcutBindings(platform)
     // Shift+Alt+C copies the focused row's path. It stops here, or the workspace would type its
     // character into the selected terminal.
-    if (matchesShortcut(event, filesShortcutBindings(platform).copyPath)) {
+    if (matchesShortcut(event, keys.copyPath)) {
       event.preventDefault()
       event.stopPropagation()
       copy(absolutePath(directory, row.node.path))
+      return
+    }
+    // F2 renames the row and Delete deletes it, where the backend may and the row is the
+    // project's. Both stop here whatever they do: while navigating, the keymap would rename or
+    // close the active terminal. On macOS only ⌘⌫ deletes, as in Finder, and a plain forward
+    // Delete stops here too, doing nothing.
+    const renaming = matchesShortcut(event, keys.rename)
+    const forwardDelete =
+      platform === "mac" &&
+      event.key === "Delete" &&
+      !(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+    if (renaming || forwardDelete || matchesShortcut(event, keys.delete)) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (forwardDelete || !changeable(row.node)) return
+      if (renaming && entries?.move) startRename(row)
+      if (!renaming && entries?.remove) setDeleting(row)
       return
     }
     if (event.altKey || event.ctrlKey || event.metaKey) return
@@ -514,6 +761,9 @@ export const FilesPanel = ({
             onCopy: copy,
             onRefresh: refresh,
             ...(editing && { onHide: hideIn(editing) }),
+            ...(entries?.create && { onNew: startNew }),
+            ...(entries?.move && { onRename: startRename }),
+            ...(entries?.remove && { onDelete: setDeleting }),
           })}
           trigger={
             // The tree, or the line in its place: a right-click anywhere in it, off a row, is on
@@ -526,14 +776,8 @@ export const FilesPanel = ({
                 if (event.pointerType !== "mouse") setMenuRow(rowAt(event.target))
               }}
             >
-              {rootRead === "failed" ? (
-                <p className="files-empty text-control">Can't read this project's files.</p>
-              ) : rootEmpty ? (
-                <p className="files-empty text-control">This project's folder is empty.</p>
-              ) : rootHidden ? (
-                <p className="files-empty text-control">
-                  Everything in this project's folder is hidden.
-                </p>
+              {inPlace !== undefined ? (
+                <p className="files-empty text-control">{inPlace}</p>
               ) : (
                 <div
                   ref={setTreeNode}
@@ -558,6 +802,14 @@ export const FilesPanel = ({
                   {lines.map((line) =>
                     isNote(line) ? (
                       <NoteRow key={`${line.path}\0${line.note}`} line={line} />
+                    ) : isNaming(line) ? (
+                      <NameRow
+                        key="\0naming"
+                        line={line}
+                        check={(typed) => checkName(line.naming, typed, listings)}
+                        onCommit={(path, keyboard) => commitName(line.naming, path, keyboard)}
+                        onEnd={(keyboard) => endNaming(line.naming, keyboard)}
+                      />
                     ) : (
                       <TreeRow
                         key={line.node.path}
@@ -581,6 +833,27 @@ export const FilesPanel = ({
           }
         />
       )}
+      <ConfirmDialog
+        subject={deleting}
+        bar={deleteBar}
+        title={(row) => `Delete ${row.node.name}?`}
+        description={(row) =>
+          row.node.folder
+            ? `${row.node.path} and everything in it will be deleted. This can't be undone.`
+            : `${row.node.path} will be deleted. This can't be undone.`
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (deleting && entries?.remove) remove(entries.remove, deleting)
+          setDeleting(null)
+        }}
+        onCancel={() => setDeleting(null)}
+        returnFocus={(row) =>
+          treeNode?.querySelector<HTMLElement>(`[data-path="${CSS.escape(row.node.path)}"]`) ?? null
+        }
+        widthClassName="w-[min(360px,calc(100vw-32px))]"
+      />
       {editing && (
         <FilesExcludeDialog
           open={excluding}

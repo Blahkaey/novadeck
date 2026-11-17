@@ -2,7 +2,7 @@ import { vi } from "vitest"
 import { page, userEvent } from "vitest/browser"
 
 import { expectStaysTrue } from "../support/layouts"
-import { layoutSettled, openWorkspace, sidebarPanel } from "../support/workspace"
+import { layoutSettled, openWorkspace, sidebarPanel, terminal } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The agents demo has a Files panel with the storefront's files. Specs run with reduced motion,
@@ -251,6 +251,64 @@ describe("The Files panel", () => {
       await userEvent.keyboard("{Escape}")
       await expect.element(preferences).not.toBeInTheDocument()
       await expect.element(manifest).not.toBeInTheDocument()
+    })
+  })
+
+  context("when the person makes, renames and deletes files", () => {
+    it("makes a file from a row's menu, focused, and deletes it with the keys once asked, Cancel first, giving the next row the focus", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const files = page.getByRole("region", { name: "Files" })
+
+      await page.getByRole("treeitem", { name: /^README\.md/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: "New File…" }).click()
+      const name = files.getByRole("textbox", { name: "Name of the new file" })
+      await expect.element(name).toHaveFocus()
+      await name.fill("index.html")
+      await expect
+        .element(files.getByText("There's already a file named index.html here."))
+        .toBeVisible()
+      await name.fill("NOTES.md")
+      await userEvent.keyboard("{Enter}")
+      const notes = page.getByRole("treeitem", { name: /^NOTES\.md/ })
+      await expect.element(notes).toHaveFocus()
+
+      await userEvent.keyboard("{Delete}")
+      const asked = page.getByRole("alertdialog", { name: "Delete NOTES.md?" })
+      await expect.element(asked.getByRole("button", { name: "Cancel" })).toHaveFocus()
+      await userEvent.keyboard("{Tab}")
+      await expect.element(asked.getByRole("button", { name: "Delete" })).toHaveFocus()
+      await userEvent.keyboard("{Enter}")
+
+      await expect.element(notes).not.toBeInTheDocument()
+      await expect.element(page.getByRole("treeitem", { name: /^package\.json/ })).toHaveFocus()
+    })
+
+    it("has the project window follow a file renamed on F2, and say once it is deleted that it is gone", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const manifest = page.getByRole("treeitem", { name: /^package\.json/ })
+      await manifest.dblClick()
+      await expect.element(terminal("package.json")).toBeVisible()
+
+      manifest.element().focus()
+      await userEvent.keyboard("{F2}")
+      const renaming = page.getByRole("textbox", { name: "New name for package.json" })
+      await expect.element(renaming).toHaveFocus()
+      await renaming.fill("manifest.json")
+      await userEvent.keyboard("{Enter}")
+      await expect.element(terminal("manifest.json")).toBeVisible()
+      await expect.element(terminal("package.json")).not.toBeInTheDocument()
+
+      await page.getByRole("treeitem", { name: /^manifest\.json/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Delete/ }).click()
+      await page
+        .getByRole("alertdialog", { name: "Delete manifest.json?" })
+        .getByRole("button", { name: "Delete" })
+        .click()
+      await expect
+        .element(terminal("manifest.json").getByText("manifest.json isn't there any more."))
+        .toBeVisible()
     })
   })
 

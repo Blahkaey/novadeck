@@ -14,6 +14,7 @@ import {
   type CompanionItem,
   type ClosedTerminal,
   type CompanionWindow,
+  type EntryChanged,
   type FeedbackDraft,
   type FilesExclude,
   type FolderBrowse,
@@ -164,6 +165,35 @@ export type Runner = {
       readonly projectId: string
       readonly patterns: FilesExclude
     }): Promise<void>
+    /**
+     * Makes an empty file, or with `folder` an empty folder, at `path` from the project's root,
+     * and the folders on the way that are missing, and answers its path. Rejects with
+     * `CONFLICT` for a name taken (nothing is overwritten), `INVALID_DIRECTORY` for the root,
+     * Git's `.git`, or a path badly formed, through a file or leading out of the project,
+     * `WRITE_REFUSED` saying why the system refused, and `NOT_FOUND` for a project the runner
+     * doesn't have.
+     */
+    createEntry(input: {
+      readonly projectId: string
+      readonly path: string
+      readonly folder: boolean
+    }): Promise<EntryChanged>
+    /**
+     * Renames the file or folder at `from`, or moves it into another folder of the project, to
+     * `to`, and answers that path. Rejects as `createEntry` does, and with `INVALID_DIRECTORY`
+     * for an entry that is missing, a folder moved into itself, or a folder to go into that is
+     * missing.
+     */
+    moveEntry(input: {
+      readonly projectId: string
+      readonly from: string
+      readonly to: string
+    }): Promise<EntryChanged>
+    /**
+     * Deletes the file or folder at `path` for good, a folder with everything in it, a link as a
+     * link. Rejects as `moveEntry` does.
+     */
+    removeEntry(input: { readonly projectId: string; readonly path: string }): Promise<void>
     /**
      * A folder of the runner's machine by its absolute `path`, or the runner owner's home
      * folder without one: its real path, its parent's (null at the root), and the folders in
@@ -867,6 +897,9 @@ export const connectRunner = async (
       folder: (input) => call((client) => client.projects.folder(input)),
       filesExclude: (input) => call((client) => client.projects.filesExclude(input)),
       setFilesExclude: (input) => call((client) => client.projects.setFilesExclude(input)),
+      createEntry: (input) => call((client) => client.projects.createEntry(input)),
+      moveEntry: (input) => call((client) => client.projects.moveEntry(input)),
+      removeEntry: (input) => call((client) => client.projects.removeEntry(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
     },
     sessions: {

@@ -9,6 +9,7 @@ import {
 import { handleText } from "@novadeck/core/terminals/handle"
 
 import { dimmedBy } from "./files-agents"
+import type { Naming } from "./files-edit"
 import { hiddenUnder, type Hides } from "./files-exclude"
 
 // The Files panel's rules, apart from how it draws: the tree the project's folders and an
@@ -35,6 +36,8 @@ export type FilesNode = {
   readonly folder: boolean
   // Itself ignored, or inside an ignored folder.
   readonly ignored: boolean
+  // Its folder's listing has it: it is in the project's folder, not only in an agent's work.
+  readonly listed: boolean
   // How an agent changed this file; folders have none.
   readonly kind: FileChange | undefined
   // A file's own writes by agent; a folder's latest write by each agent inside it.
@@ -65,9 +68,17 @@ export type FilesNote = {
   readonly depth: number
 }
 
-type SourceLine = FilesRow | FilesNote
+// The field the person types a name in: a new entry's, first in the folder it goes in, or a
+// row's new name, in that row's place.
+export type FilesNaming = { readonly naming: Naming; readonly depth: number }
+
+type SourceLine = FilesRow | FilesNote | FilesNaming
 
 export const isNote = (line: SourceLine): line is FilesNote => "note" in line
+
+export const isNaming = (line: SourceLine): line is FilesNaming => "naming" in line
+
+export const isRow = (line: SourceLine): line is FilesRow => !isNote(line) && !isNaming(line)
 
 // Folders first, then by name without case or a leading dot, so `.github` sits among the g's.
 const sortKey = (name: string): string => name.replace(/^\./, "").toLowerCase()
@@ -116,7 +127,13 @@ export const buildTree = (
   for (const [handle, path] of Object.entries(writingBy))
     writing.set(path, [...(writing.get(path) ?? []), handle])
 
-  const make = (path: string, name: string, folder: boolean, hidden: boolean): FilesNode => {
+  const make = (
+    path: string,
+    name: string,
+    folder: boolean,
+    hidden: boolean,
+    listed: boolean,
+  ): FilesNode => {
     if (!folder) {
       const change = changes[path]
       return {
@@ -124,6 +141,7 @@ export const buildTree = (
         name,
         folder,
         ignored: hidden,
+        listed,
         kind: change?.kind,
         touched: change?.touched ?? {},
         writing: writing.get(path) ?? [],
@@ -140,6 +158,7 @@ export const buildTree = (
       name,
       folder,
       ignored: hidden,
+      listed,
       kind: undefined,
       touched: latestPerAgent(inside),
       writing: [...new Set(inside.flatMap((child) => child.writing))],
@@ -152,20 +171,21 @@ export const buildTree = (
   const childrenOf = (folder: string, hidden: boolean): readonly FilesNode[] => {
     const listing = listings.get(folder)
     // A name both listed and changed is one node; a path with something below it is a folder.
-    const names = new Map<string, { folder: boolean; ignored: boolean }>()
+    const names = new Map<string, { folder: boolean; ignored: boolean; listed: boolean }>()
     for (const entry of typeof listing === "object" ? listing.entries : [])
-      names.set(entry.name, { folder: entry.folder, ignored: entry.ignored })
+      names.set(entry.name, { folder: entry.folder, ignored: entry.ignored, listed: true })
     for (const [name, isFolder] of changed.get(folder) ?? []) {
       const known = names.get(name)
       names.set(name, {
         folder: isFolder || (known?.folder ?? false),
         ignored: known?.ignored ?? false,
+        listed: known !== undefined,
       })
     }
     return [...names]
       .filter(([name]) => !hides(childOf(folder, name)))
       .map(([name, entry]) =>
-        make(childOf(folder, name), name, entry.folder, hidden || entry.ignored),
+        make(childOf(folder, name), name, entry.folder, hidden || entry.ignored, entry.listed),
       )
       .toSorted(byOrder)
   }
@@ -238,27 +258,37 @@ export const initialOpen = (tree: readonly FilesNode[]): ReadonlySet<string> => 
 // note of what its listing lacks; `rootTruncated` ends the root's with one too. With agents in
 // `only`, the tree holds just their work: the files they touched or are writing and the folders
 // those are in. What a listing lacks doesn't matter then, as their files are there whether or not
-// it lists them, so no notes.
+// it lists them, so no notes. Where the person is `naming`, a field: a new entry's first in its
+// folder, which says nothing of being empty meanwhile, and a row's new name in its place.
 export const visibleLines = (
   tree: readonly FilesNode[],
   open: ReadonlySet<string>,
   rootTruncated = false,
   only: ReadonlySet<string> = new Set(),
+  naming: Naming | null = null,
 ): readonly SourceLine[] => {
   const lines: SourceLine[] = []
   const filtered = only.size > 0
+  const adding = naming?.kind === "new" ? naming : undefined
   const visit = (node: FilesNode, depth: number): void => {
     if (dimmedBy(node, only)) return
     const isOpen = expandable(node) && open.has(node.path)
-    lines.push({ node, depth, open: isOpen })
+    lines.push(
+      naming?.kind === "rename" && naming.path === node.path
+        ? { naming, depth }
+        : { node, depth, open: isOpen },
+    )
     if (!isOpen) return
+    const added = adding?.parent === node.path
+    if (added) lines.push({ naming: adding, depth: depth + 1 })
     node.children.forEach((child) => visit(child, depth + 1))
     if (filtered) return
     if (node.read === "failed") lines.push({ note: "failed", path: node.path, depth: depth + 1 })
     else if (node.truncated) lines.push({ note: "truncated", path: node.path, depth: depth + 1 })
-    else if (node.read === "read" && node.children.length === 0)
+    else if (node.read === "read" && node.children.length === 0 && !added)
       lines.push({ note: "empty", path: node.path, depth: depth + 1 })
   }
+  if (adding?.parent === "") lines.push({ naming: adding, depth: 0 })
   tree.forEach((node) => visit(node, 0))
   if (rootTruncated && !filtered) lines.push({ note: "truncated", path: "", depth: 0 })
   return lines

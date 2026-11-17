@@ -8,7 +8,10 @@
    `.files-note-row`, which carries the guides). The tree, or the line in its place, sits in a
    `.files-body`, whose right-click opens the panel's menu. What the panel couldn't do, as a
    copy the clipboard refused, is a `.files-failure` line at the top, a `.sidebar-refusal`
-   (sidebar.css).
+   (sidebar.css). A name being typed, a new entry's or a row's in its place, is a
+   `.files-naming-row` (carrying the guides) whose `.files-naming-line` holds the twisty's room,
+   the icon and a `.files-naming-field`: the `.files-naming-input` and, under it while the name
+   won't do, a `.files-naming-problem` line in --color-danger-fg.
 
    Hooks: on a row, data-kind="modified" | "added" | "deleted" (absent: untouched),
    data-folder, data-ignored, data-dim (an agent is lit and did not touch it), data-pulse="a" |
@@ -251,6 +254,46 @@
 /* As wide as the tree's rows. */
 .files-failure {
   margin: 8px 0 0;
+}
+
+.files-naming-row {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.files-naming-line {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 4px 2px 0;
+}
+.files-naming-line > :is(.files-twisty, .files-icon) {
+  height: 22px;
+  align-items: center;
+}
+.files-naming-field {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+.files-naming-input {
+  height: 22px;
+  min-width: 0;
+  padding: 0 4px;
+  outline-offset: -1px;
+}
+.files-naming-input[aria-invalid="true"] {
+  --_border-color: var(--color-danger-fg);
+}
+.files-naming-problem {
+  padding: 0 0 2px 1px;
+  color: var(--color-danger-fg);
+  overflow-wrap: anywhere;
 }
 
 .files-note-row {

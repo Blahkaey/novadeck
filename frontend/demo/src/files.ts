@@ -8,10 +8,11 @@ import {
   type FilesProject,
   type FilesState,
 } from "@novadeck/core/files"
+import type { ItemContent, ItemId } from "@novadeck/core/items"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceSeed } from "@novadeck/core/seed"
 import { createStore } from "@novadeck/core/store"
-import type { Workspace } from "@novadeck/core/types"
+import type { Workspace, WorkspaceTarget } from "@novadeck/core/types"
 
 import type { DemoTurns } from "./agents/turns"
 import { demoHandle } from "./handles"
@@ -25,7 +26,9 @@ import { terminalOf } from "./workspace"
 // works: its terminal's agent status says it works and asks nothing of the person. Then it
 // writes while the page is in view, a file every few seconds, now and then resting between
 // turns; waiting on the person or at rest, it writes nothing and shows no cursor. Each project's
-// own patterns for hiding files are kept in memory, as the runner keeps them, from none.
+// own patterns for hiding files are kept in memory, as the runner keeps them, from none. The
+// person makes, renames and deletes files in memory too, in a copy of the project's tree the
+// agents' work follows, and a window showing a file they deleted, or moved away, says it is gone.
 
 const projectId = "storefront"
 const session = { projectId, workspaceSessionId: "initial" }
@@ -131,16 +134,18 @@ export const storefrontFiles = (
 })
 
 // The project with `handle`'s write to `path` at `at`: the file is changed by it, a
-// new one added, an existing one modified, and it is the file the agent is writing now.
+// new one added, an existing one modified, and it is the file the agent is writing now. `tree`
+// is the project's tree as it stands, the fixtures' before the person changes it.
 export const writeTo = (
   project: FilesProject,
   handle: string,
   path: string,
   at: number,
+  tree: readonly string[],
 ): FilesProject => {
   const was = project.changes[path]
   const kind =
-    was && was.kind !== "deleted" ? was.kind : entries.includes(path) || was ? "modified" : "added"
+    was && was.kind !== "deleted" ? was.kind : tree.includes(path) || was ? "modified" : "added"
   return {
     ...project,
     changes: { ...project.changes, [path]: file(kind, { ...was?.touched, [handle]: at }) },
@@ -150,13 +155,14 @@ export const writeTo = (
 
 // The project with `handle`'s change to `path` as `kind` (at `at`), or, with no kind, with it
 // no longer changing it: the file is as the others' changes leave it, and gone from the changes
-// when nobody is left.
+// when nobody is left. `tree` is as for `writeTo`.
 export const markIn = (
   project: FilesProject,
   handle: string,
   path: string,
   kind: TouchedFile["kind"] | undefined,
   at: number,
+  tree: readonly string[],
 ): FilesProject => {
   const was = project.changes[path]
   if (kind !== undefined)
@@ -173,7 +179,7 @@ export const markIn = (
     changes:
       Object.keys(touched).length === 0
         ? rest
-        : { ...rest, [path]: file(entries.includes(path) ? "modified" : "added", touched) },
+        : { ...rest, [path]: file(tree.includes(path) ? "modified" : "added", touched) },
   }
 }
 
@@ -185,6 +191,35 @@ export const endTurnIn = (project: FilesProject, handle: string): FilesProject =
 }
 
 const trimmed = (path: string): string => (path.endsWith("/") ? path.slice(0, -1) : path)
+
+// Whether `each` is `path` or lies below it.
+const atOrBelow = (each: string, path: string): boolean =>
+  each === path || each.startsWith(`${path}/`)
+
+// A path at or below `from` as it is once `from` moved to `to`; any other as it is.
+const movedTo = (each: string, from: string, to: string): string =>
+  atOrBelow(each, from) ? `${to}${each.slice(from.length)}` : each
+
+// The project's changes and cursors once the person moved `from` to `to`: the agents' work on
+// it, and on what is in it, follows it.
+const movedIn = (project: FilesProject, from: string, to: string): FilesProject => ({
+  changes: Object.fromEntries(
+    Object.entries(project.changes).map(([path, change]) => [movedTo(path, from, to), change]),
+  ),
+  writing: Object.fromEntries(
+    Object.entries(project.writing).map(([handle, path]) => [handle, movedTo(path, from, to)]),
+  ),
+})
+
+// The project's changes and cursors once the person deleted `path`: none at it or in it.
+const removedIn = (project: FilesProject, path: string): FilesProject => ({
+  changes: Object.fromEntries(
+    Object.entries(project.changes).filter(([each]) => !atOrBelow(each, path)),
+  ),
+  writing: Object.fromEntries(
+    Object.entries(project.writing).filter(([, each]) => !atOrBelow(each, path)),
+  ),
+})
 
 // A project's tree, as the fixtures hold it: an entry ending in `/` is a folder with nothing in
 // it, and `ignored` names what the project's VCS ignores.
@@ -286,6 +321,38 @@ const plain: Tree = {
 
 const treeOf = (id: string): Tree => (id === projectId ? storefront : (trees[id] ?? plain))
 
+// What a tree holds at `path`: a file, a folder (empty, or holding paths below), or nothing.
+const holds = (tree: Tree, path: string): "file" | "folder" | undefined => {
+  for (const entry of tree.entries) {
+    const each = trimmed(entry)
+    if (each === path) return entry.endsWith("/") ? "folder" : "file"
+    if (each.startsWith(`${path}/`)) return "folder"
+  }
+  return undefined
+}
+
+// A tree with `path` and what is below it gone, its folder kept, empty, where nothing else is in
+// it.
+const without = (tree: Tree, path: string): Tree => {
+  const left = tree.entries.filter((entry) => !atOrBelow(trimmed(entry), path))
+  const folder = path.slice(0, Math.max(0, path.lastIndexOf("/")))
+  const kept =
+    folder === "" || holds({ ...tree, entries: left }, folder) ? left : [...left, `${folder}/`]
+  return { entries: kept, ignored: tree.ignored.filter((each) => !atOrBelow(trimmed(each), path)) }
+}
+
+// Why the runner refuses to change `path`: the project's folder itself, and Git's own `.git`.
+const untouchable = (path: string): string | undefined =>
+  path === ""
+    ? "Novadeck doesn't change the project's folder itself."
+    : path.split("/").some((name) => name.toLowerCase() === ".git")
+      ? "Novadeck doesn't change Git's own .git."
+      : undefined
+
+// The runner's words for a name taken in `folder`.
+const takenIn = (folder: string, name: string): string =>
+  `There's already something named ${name} in ${folder === "" ? "the project's folder" : folder}.`
+
 // What `folder` of a tree lists: its files, and the folders that hold the paths below. Ignored
 // folders hold only ignored files, which the panel carries down.
 const listFixture = (tree: Tree, folder: string): readonly FolderEntry[] => {
@@ -385,6 +452,9 @@ const between = (range: { min: number; max: number }, roll: number): number =>
 
 export type DemoFiles = ProjectFiles & {
   readonly exclude: NonNullable<ProjectFiles["exclude"]>
+  readonly create: NonNullable<ProjectFiles["create"]>
+  readonly move: NonNullable<ProjectFiles["move"]>
+  readonly remove: NonNullable<ProjectFiles["remove"]>
   // Has the next reads of `folder` go as `fault` says, or normally for none. The panel reads
   // a folder again when it is shown again or an agent's turn ends.
   readonly degrade: (folder: string, fault: FilesFault | undefined) => void
@@ -393,6 +463,13 @@ export type DemoFiles = ProjectFiles & {
   readonly failNextExcludeSave: (fails?: boolean) => void
   // Has every read of a project's patterns for hiding files fail, or, with false, answer again.
   readonly failExcludeReads: (fails?: boolean) => void
+  // Has the next file made, renamed or deleted fail, once, or, with false, go through again.
+  readonly failNextChange: (fails?: boolean) => void
+  // Whether the person deleted the file at `path` of a project, or a folder it was in, or moved
+  // it away, and it isn't there again.
+  readonly gone: (projectId: string, path: string) => boolean
+  // Calls `on` whenever the person makes, moves or deletes a file or folder, until stopped.
+  readonly watchGone: (on: () => void) => () => void
   // Has `handle` write a file now, `path` or else the one it would next, as its turn goes on.
   readonly write: (handle: string, path?: string) => void
   // Has `handle` change `path` as `kind` without writing it now, or no longer change it.
@@ -436,6 +513,9 @@ export const createDemoFiles = (
       return next && next !== project ? { projects: { ...was.projects, [projectId]: next } } : was
     })
   }
+  // Each project's tree as the person changed it; the fixtures' until they do.
+  const changed = new Map<string, Tree>()
+  const treeNow = (id: string): Tree => changed.get(id) ?? treeOf(id)
   const write = (handle: string, path?: string): void =>
     change((project) =>
       writeTo(
@@ -443,11 +523,14 @@ export const createDemoFiles = (
         handle,
         path ?? nextFile(project, handle, clock.random(), clock.random()),
         clock.now(),
+        treeNow(projectId).entries,
       ),
     )
   const endTurn = (handle: string): void => change((project) => endTurnIn(project, handle))
   const mark = (handle: string, path: string, kind: TouchedFile["kind"] | undefined): void =>
-    change((project) => markIn(project, handle, path, kind, clock.now()))
+    change((project) =>
+      markIn(project, handle, path, kind, clock.now(), treeNow(projectId).entries),
+    )
 
   const faults = new Map<string, FilesFault>()
   const degrade = (folder: string, fault: FilesFault | undefined): void => {
@@ -487,7 +570,7 @@ export const createDemoFiles = (
     const fault = faults.get(folder)
     if (fault === "fail") throw new Error("This folder can't be read")
     if (fault === "empty") return { entries: [], truncated: false }
-    const tree = treeOf(id)
+    const tree = treeNow(id)
     const known = tree.entries.some(
       (path) => trimmed(path) === folder || path.startsWith(`${folder}/`),
     )
@@ -496,6 +579,94 @@ export const createDemoFiles = (
     return fault === "truncate"
       ? { entries: all.slice(0, truncatedTo), truncated: true }
       : { entries: all, truncated: false }
+  }
+
+  // The person's changes, refused as the runner refuses them, in its words. Each project's paths
+  // the person deleted or moved away, until made there again.
+  const away = new Map<string, readonly string[]>()
+  const goneWatchers = new Set<() => void>()
+  let changeFails = false
+  const failNextChange = (fails = true): void => {
+    changeFails = fails
+  }
+  // Throws as the runner would for `path`, and once as the debug panel asked.
+  const refuse = (path: string): void => {
+    if (changeFails) {
+      changeFails = false
+      throw new Error("The demo was told to fail this change.")
+    }
+    const why = untouchable(path)
+    if (why) throw new Error(why)
+  }
+  // The project's tree is now `tree`; `left` went from it, `arrived` came.
+  const settle = (id: string, tree: Tree, left: string | undefined, arrived: string): void => {
+    changed.set(id, tree)
+    const before = (away.get(id) ?? []).filter((each) => !atOrBelow(each, arrived))
+    away.set(id, left === undefined ? before : [...before, left])
+    goneWatchers.forEach((on) => on())
+  }
+  const create: DemoFiles["create"] = async (id, path, folder) => {
+    refuse(path)
+    const tree = treeNow(id)
+    const names = path.split("/")
+    for (const at of names.keys()) {
+      const way = names.slice(0, at + 1).join("/")
+      const there = holds(tree, way)
+      if (at === names.length - 1 && there)
+        throw new Error(takenIn(names.slice(0, -1).join("/"), names.at(-1)!))
+      if (there === "file") throw new Error(`${way} isn't a folder.`)
+    }
+    // A folder that held nothing holds it now.
+    const kept = tree.entries.filter((entry) => !(entry.endsWith("/") && path.startsWith(entry)))
+    settle(id, { ...tree, entries: [...kept, folder ? `${path}/` : path] }, undefined, path)
+    return path
+  }
+  const move: DemoFiles["move"] = async (id, from, to) => {
+    refuse(from)
+    refuse(to)
+    const tree = treeNow(id)
+    if (!holds(tree, from)) throw new Error(`${from} isn't there any more.`)
+    const folder = to.slice(0, Math.max(0, to.lastIndexOf("/")))
+    if (folder !== "" && holds(tree, folder) !== "folder")
+      throw new Error(`${folder} isn't there any more.`)
+    if (holds(tree, from) === "folder" && atOrBelow(to, from))
+      throw new Error("A folder can't move into itself.")
+    if (holds(tree, to)) throw new Error(takenIn(folder, to.slice(to.lastIndexOf("/") + 1)))
+    const left = without(tree, from)
+    settle(
+      id,
+      {
+        entries: [
+          ...left.entries.filter((entry) => !(entry.endsWith("/") && to.startsWith(entry))),
+          ...tree.entries
+            .filter((entry) => atOrBelow(trimmed(entry), from))
+            .map((entry) => movedTo(entry, from, to)),
+        ],
+        ignored: [
+          ...left.ignored,
+          ...tree.ignored
+            .filter((each) => atOrBelow(trimmed(each), from))
+            .map((each) => movedTo(each, from, to)),
+        ],
+      },
+      from,
+      to,
+    )
+    if (id === projectId) change((project) => movedIn(project, from, to))
+    return to
+  }
+  const remove: DemoFiles["remove"] = async (id, path) => {
+    refuse(path)
+    const tree = treeNow(id)
+    if (!holds(tree, path)) throw new Error(`${path} isn't there any more.`)
+    settle(id, without(tree, path), path, path)
+    if (id === projectId) change((project) => removedIn(project, path))
+  }
+  const gone = (id: string, path: string): boolean =>
+    (away.get(id) ?? []).some((each) => atOrBelow(path, each)) && !holds(treeNow(id), path)
+  const watchGone = (on: () => void): (() => void) => {
+    goneWatchers.add(on)
+    return () => goneWatchers.delete(on)
   }
 
   // One agent's turns, a write every few seconds and a rest between them, until stopped.
@@ -577,6 +748,12 @@ export const createDemoFiles = (
     degrade,
     failNextExcludeSave,
     failExcludeReads,
+    create,
+    move,
+    remove,
+    failNextChange,
+    gone,
+    watchGone,
     write,
     mark,
     endTurn,
@@ -585,6 +762,9 @@ export const createDemoFiles = (
     halt,
   }
 }
+
+// What a window shows of a file the person deleted, or moved away, as the runner's watch reports it.
+const missing: ItemContent = { state: "unavailable", reason: "missing", size: null }
 
 // A backend with the demo's files for the storefront project.
 export const withFiles = (
@@ -599,9 +779,48 @@ export const withFiles = (
     const agent = terminal?.state === "running" ? terminal.agent : undefined
     return agent?.working === true && !agent.attention
   }
+  // Whether the item shows a file of its project the person deleted, or moved away.
+  const showsGone = (target: WorkspaceTarget, itemId: ItemId): boolean => {
+    const project = latest?.projects.find((each) => each.id === target.projectId)
+    const shown = project?.history.find((each) => each.id === target.workspaceSessionId)
+    const path = shown?.state.items.find((each) => each.id === itemId)?.path
+    const inside = project && `${project.directory}/`
+    return (
+      inside !== undefined &&
+      path?.startsWith(inside) === true &&
+      files.gone(target.projectId, path.slice(inside.length))
+    )
+  }
+  const { companions } = backend
   return {
     ...backend,
     files,
+    ...(companions && {
+      companions: {
+        ...companions,
+        // A window that shows a file the person deleted, or moved away, says it is gone, until
+        // it shows another file or the file is there again.
+        follow: (target, itemId, options, on) => {
+          let last: ItemContent | undefined
+          let wasGone = false
+          const tell = (fresh: boolean): void => {
+            const isGone = showsGone(target, itemId)
+            if (!last || (!fresh && isGone === wasGone)) return
+            wasGone = isGone
+            on(isGone ? missing : last)
+          }
+          const unwatch = files.watchGone(() => tell(false))
+          const stop = companions.follow(target, itemId, options, (content) => {
+            last = content
+            tell(true)
+          })
+          return () => {
+            stop()
+            unwatch()
+          }
+        },
+      },
+    }),
     commit: (workspace, actions) => {
       latest = workspace
       backend.commit(workspace, actions)

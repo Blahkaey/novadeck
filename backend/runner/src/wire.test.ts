@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -381,6 +381,77 @@ describe("workspace metadata API", () => {
     await expect(
       client.projects.folder({ projectId: project.id, folder: "x".repeat(5000) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("makes, renames and deletes a project's files, and refuses what isn't the project's to change", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, ".git"), { recursive: true })
+    await writeFile(join(cwd, "notes.md"), "# Notes\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Entries", cwd })
+    const projectId = project.id
+
+    await expect(
+      client.projects.createEntry({ projectId, path: "src/cart/total.ts", folder: false }),
+    ).resolves.toEqual({ path: "src/cart/total.ts" })
+    await expect(
+      client.projects.createEntry({ projectId, path: "docs", folder: true }),
+    ).resolves.toEqual({ path: "docs" })
+    await expect(
+      client.projects.moveEntry({ projectId, from: "notes.md", to: "docs/notes.md" }),
+    ).resolves.toEqual({ path: "docs/notes.md" })
+    await client.projects.removeEntry({ projectId, path: "src" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "docs"])
+    await expect(readFile(join(cwd, "docs", "notes.md"), "utf8")).resolves.toBe("# Notes\n")
+
+    await expect(
+      client.projects.createEntry({ projectId, path: "docs/notes.md", folder: false }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "There's already something named notes.md in docs.",
+    })
+    await Promise.all(
+      [
+        client.projects.createEntry({ projectId, path: "../escaped.md", folder: false }),
+        client.projects.createEntry({ projectId, path: ".git/hooks/pre-commit", folder: false }),
+        client.projects.moveEntry({ projectId, from: "docs", to: "docs/inner" }),
+        client.projects.moveEntry({ projectId, from: "docs/notes.md", to: ".GIT" }),
+        client.projects.removeEntry({ projectId, path: "" }),
+        client.projects.removeEntry({ projectId, path: "missing.md" }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })),
+    )
+    await expect(
+      client.projects.removeEntry({ projectId: randomUUID(), path: "docs" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      client.projects.removeEntry({ projectId, path: "x".repeat(5000) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "docs"])
+    expect(await readdir(app.directory)).not.toContain("escaped.md")
+  })
+
+  it("says why the system refused a change to a project's files", async ({ resources, skip }) => {
+    skip(
+      process.platform === "win32" || process.getuid?.() === 0,
+      "Root, and Windows, are never refused by a folder's permissions.",
+    )
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, "locked"), { recursive: true })
+    await chmod(join(cwd, "locked"), 0o555)
+    resources.defer(() => chmod(join(cwd, "locked"), 0o755))
+    const project = await client.projects.create({ id: randomUUID(), name: "Locked", cwd })
+
+    await expect(
+      client.projects.createEntry({ projectId: project.id, path: "locked/a.md", folder: false }),
+    ).rejects.toMatchObject({
+      code: "WRITE_REFUSED",
+      message: "The system doesn't allow it: permission denied.",
+    })
   })
 
   it("keeps a project's patterns for hiding files, within limits, for any connection", async ({

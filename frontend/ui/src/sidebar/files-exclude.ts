@@ -25,10 +25,30 @@ export const hidesOf = (everywhere: FilesExclude, project: FilesExclude): Hides 
   return (path) => matches(path)
 }
 
-// Whether the tree leaves a path out: it, or a folder above it, is hidden.
-export const hiddenUnder = (hides: Hides, path: string): boolean => {
+// The path and each folder above it, outermost first.
+const pathsTo = (path: string): string[] => {
   const parts = path.split("/")
-  return parts.some((_, index) => hides(parts.slice(0, index + 1).join("/")))
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"))
+}
+
+// Whether the tree leaves a path out: it, or a folder above it, is hidden.
+export const hiddenUnder = (hides: Hides, path: string): boolean =>
+  pathsTo(path).some((each) => hides(each))
+
+// The pattern that leaves a path out of the tree, matching it or a folder above it, where one
+// does: the first that is on once the project's are laid over the person's.
+export const hidingPattern = (
+  everywhere: FilesExclude,
+  project: FilesExclude,
+  path: string,
+): string | undefined => {
+  const merged = { ...everywhere, ...project }
+  const paths = pathsTo(path)
+  return Object.keys(merged).find((pattern) => {
+    if (!merged[pattern]) return false
+    const matches = picomatch(pattern, options)
+    return paths.some((each) => matches(each))
+  })
 }
 
 // The pattern that hides exactly this path: what the matcher reads as more than itself escaped,

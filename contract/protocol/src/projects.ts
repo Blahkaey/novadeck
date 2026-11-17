@@ -27,6 +27,15 @@ export const folderListing = z.strictObject({
   truncated: z.boolean(),
 })
 
+// A file or folder of a project's directory by its path from the project's root, `/` between
+// names, as the Files panel makes, renames, moves and deletes them (`projects.createEntry`,
+// `moveEntry`, `removeEntry`). The runner refuses "" (the root itself) and anything that leads
+// out of the root.
+export const entryPath = z.string().max(4096)
+
+// What a change to a project's entries made: the path of the entry it made or moved.
+export const entryChanged = z.strictObject({ path: entryPath })
+
 /**
  * How many patterns a project's own list of hidden files holds at most, and how long each
  * runs, in UTF-16 code units (`projects.setFilesExclude`).
@@ -65,5 +74,6 @@ export const workspaceSession = z.strictObject({
 export type Project = z.infer<typeof project>
 export type FolderListing = z.infer<typeof folderListing>
 export type FolderBrowse = z.infer<typeof folderBrowse>
+export type EntryChanged = z.infer<typeof entryChanged>
 export type FilesExclude = z.infer<typeof filesExclude>
 export type WorkspaceSession = z.infer<typeof workspaceSession>

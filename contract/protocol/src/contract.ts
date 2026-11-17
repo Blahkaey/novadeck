@@ -50,6 +50,8 @@ import { terminalMessages, threadId } from "./messages.js"
 import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
 import {
   clientState,
+  entryChanged,
+  entryPath,
   filesExclude,
   folderBrowse,
   folderListing,
@@ -90,6 +92,11 @@ export const errors = {
   CONFLICT: { status: 409, data: conflictReason.optional() },
   // A plan can't be written, and why (`planUnwritable`): saving it again won't help.
   PLAN_UNWRITABLE: { status: 409, data: planUnwritable },
+  // The system refused to make, move or delete a file or folder of a project, as for want of
+  // permission, a disk that is full or read-only, a file in use, a move to another disk or a
+  // name it won't keep; the message says which in plain words. Nothing changed but what the
+  // system had done before it refused, as the files a deleted folder lost first.
+  WRITE_REFUSED: { status: 409 },
   TERMINAL_LIMIT: { status: 429 },
   TERMINAL_NOT_FOUND: { status: 404 },
   TERMINAL_EXITED: { status: 409 },
@@ -167,6 +174,35 @@ export const contract = {
     // have is NOT_FOUND.
     setFilesExclude: procedure
       .input(z.strictObject({ projectId: id, patterns: filesExclude }))
+      .output(z.void()),
+    // Makes an empty file, or with `folder` an empty folder, at `path` in the project's
+    // directory, and the folders on the way to it that are missing, and answers its path. A
+    // name that is taken is a CONFLICT: nothing found there is overwritten. The root itself,
+    // Git's own `.git` and what is in it (by its name in any case, or through a link or a short
+    // name that resolves into it), or a path that is badly formed, goes through a file or leads
+    // out of the project's directory, as through a link, is INVALID_DIRECTORY; the system
+    // refusing is WRITE_REFUSED, saying why. A project the runner doesn't have is NOT_FOUND.
+    // Whoever holds the token can change any file through a shell anyway.
+    createEntry: procedure
+      .input(z.strictObject({ projectId: id, path: entryPath, folder: z.boolean() }))
+      .output(entryChanged),
+    // Renames the file or folder at `from`, or moves it into another folder of the project, to
+    // `to`, and answers that path. A link moves as a link. A name taken at `to` is a CONFLICT,
+    // unless it is `from` itself spelled in other letters' case in its own folder, on a
+    // filesystem that doesn't tell them apart; a file or an empty folder made at `to` after that
+    // check is replaced, as the system's rename does. A folder into itself, an entry at `from`
+    // or a folder for `to` that is missing (a move makes none), and what `createEntry` refuses
+    // are INVALID_DIRECTORY; the system refusing, as for a move to another disk, is
+    // WRITE_REFUSED, saying why.
+    moveEntry: procedure
+      .input(z.strictObject({ projectId: id, from: entryPath, to: entryPath }))
+      .output(entryChanged),
+    // Deletes the file or folder at `path` for good, a folder with everything in it; a link
+    // goes, not what it leads to. An entry that is missing, and what `createEntry` refuses, are
+    // INVALID_DIRECTORY; the system refusing, as when something is added inside a folder while
+    // it goes, is WRITE_REFUSED, saying why.
+    removeEntry: procedure
+      .input(z.strictObject({ projectId: id, path: entryPath }))
       .output(z.void()),
     // A folder of the runner's machine and the folders in it, for a client that picks a
     // project's folder there, as the desktop app of a runner on another machine does: `path`

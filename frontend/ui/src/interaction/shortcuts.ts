@@ -250,17 +250,17 @@ export const workspaceShortcutBindings = (): Record<WorkspaceShortcutName, Short
   },
 })
 
-export type FilesShortcutName = "copyPath"
+export type FilesShortcutName = "copyPath" | "rename" | "delete"
 
 // Keys the Files panel's tree takes itself, on the row with focus, and stops there: the keymap
-// leaves them be, and Preferences' list, of the workspace's keys, doesn't name them. Each is
-// known by its letter or its place, as Option changes the letter a Mac types.
+// leaves them be, and Preferences' list, of the workspace's keys, doesn't name them. Copy Path's is
+// known by its letter or its place, as Option changes the letter a Mac types. Each is VS Code's.
+// While navigating, the keymap would take F2 to rename the active terminal and Delete to close it.
 export const filesShortcutBindings = (
   platform: Platform = currentPlatform(),
 ): Record<FilesShortcutName, Shortcut> => {
   const mac = platform === "mac"
   return {
-    // As in VS Code.
     copyPath: {
       label: "Copy Path",
       key: "c",
@@ -271,6 +271,32 @@ export const filesShortcutBindings = (
       alt: true,
       display: ["Shift", mac ? "⌥" : "Alt", "C"],
     },
+    rename: {
+      label: "Rename",
+      key: "F2",
+      ctrl: false,
+      meta: false,
+      shift: false,
+      display: ["F2"],
+    },
+    // A Mac's Delete key is Backspace, and deletes with ⌘.
+    delete: mac
+      ? {
+          label: "Delete",
+          key: "Backspace",
+          ctrl: false,
+          meta: true,
+          shift: false,
+          display: ["⌘", "⌫"],
+        }
+      : {
+          label: "Delete",
+          key: "Delete",
+          ctrl: false,
+          meta: false,
+          shift: false,
+          display: ["Delete"],
+        },
   }
 }
 

@@ -1,4 +1,5 @@
 import type { SandboxState } from "@novadeck/core/desktop/sandbox"
+import type { ProjectFiles } from "@novadeck/core/files"
 import type {
   Backend,
   BackendConnectionState,
@@ -90,7 +91,16 @@ export type DemoLaunch = {
   readonly forges: boolean
   // Boots again with the backend offering forge integrations or not.
   readonly setForges: (offered: boolean) => void
+  // Whether the backend makes, renames and deletes a project's files; false for a runner
+  // without them.
+  readonly fileOperations: boolean
+  // Boots again with the backend making, renaming and deleting files or not.
+  readonly setFileOperations: (offered: boolean) => void
 }
+
+// A backend's files with no file made, renamed or deleted, as a runner without them.
+const readOnly = ({ create: _create, move: _move, remove: _remove, ...files }: ProjectFiles) =>
+  files
 
 // What the panel's groups read and change of the shell around the demo.
 export type DemoShell = {
@@ -215,6 +225,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
   }
 
   const { worktrees: offered, forges: forgesOffered, ...withoutWorktrees } = inner
+  const files = inner.files && !launch.fileOperations ? readOnly(inner.files) : inner.files
   const installs = createDemoInstalls()
   // On the panel's own agents, which the tour runs one of. The inner demo's tour is the one its
   // player follows, so the panel's actions reach it.
@@ -224,6 +235,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
     ...withoutWorktrees,
     ...(launch.worktrees && offered ? { worktrees: offered } : {}),
     ...(launch.forges && forgesOffered ? { forges: forgesOffered } : {}),
+    ...(files && { files }),
     commit: (workspace, actions) => {
       latest = workspace
       inner.commit(workspace, actions)
@@ -302,7 +314,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...voiceGroups(isDemoVoice(inner.voice) ? inner.voice : undefined),
           ...historyGroups(inner.history),
           ...notesGroups(inner.notes),
-          ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined),
+          ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined, launch),
           ...worksGroups(inner.works),
           ...forgesGroups(launch, inner),
         ],
