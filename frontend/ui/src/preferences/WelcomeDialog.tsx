@@ -1,4 +1,4 @@
-import { harnesses } from "@novadeck/core/harnesses"
+import { harnesses, type AgentName } from "@novadeck/core/harnesses"
 import type { SchemePreference } from "@novadeck/core/types"
 import { Checkbox } from "@novadeck/toolkit/Checkbox"
 import { Dialog, DialogDescription, DialogTitle } from "@novadeck/toolkit/Dialog"
@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import {
   Fragment,
+  useEffect,
   useRef,
   useState,
   type ComponentType,
@@ -77,7 +78,7 @@ const pluginNote = (names: readonly string[]): string =>
     ? "You can connect agents later in Preferences."
     : `Adds a small plugin to ${listed(names)}. Remove it anytime in Preferences.`
 
-const headline = "Room to build."
+const headline = "not a babysitter."
 
 // The command that installs an agent that isn't here, where the backend knows one.
 const installerOf = ({ available, installer }: AgentSwitch): string | undefined =>
@@ -112,6 +113,7 @@ const ChoiceCard = ({
   value,
   checked,
   disabled = false,
+  busy = false,
   onChange,
   onLook,
 }: {
@@ -124,6 +126,9 @@ const ChoiceCard = ({
   readonly value: string
   readonly checked: boolean
   readonly disabled?: boolean
+  // Mid-change: looks disabled and ignores clicks, but stays focusable, so focus in the dialog
+  // is not dropped while it changes.
+  readonly busy?: boolean
   readonly onChange: (checked: boolean) => void
   // Told whether the pointer is over the card, or focus in it: the card is looked at while either is.
   readonly onLook?: ((how: "pointer" | "focus", looking: boolean) => void) | undefined
@@ -137,9 +142,9 @@ const ChoiceCard = ({
           onBlur: () => onLook("focus", false),
         }
       : {})}
-    className={`choice-card solid flex min-h-[60px] min-w-0 items-start gap-3 px-3 py-2.5 ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+    className={`choice-card solid flex min-h-[60px] min-w-0 items-start gap-3 px-3 py-2.5 ${disabled || busy ? "cursor-not-allowed" : "cursor-pointer"}`}
     data-state={checked ? "checked" : "unchecked"}
-    data-disabled={disabled || undefined}
+    data-disabled={disabled || busy || undefined}
   >
     <Tile icon={icon} />
     {/* As tall as the tile at least, so one line sits level with its middle and more start
@@ -163,9 +168,12 @@ const ChoiceCard = ({
         value={value}
         checked={checked}
         disabled={disabled}
+        aria-disabled={busy || undefined}
         aria-label={label}
         aria-describedby={note ? noteId : undefined}
-        onChange={onChange}
+        onChange={(next) => {
+          if (!busy) onChange(next)
+        }}
       />
     </span>
   </label>
@@ -191,6 +199,7 @@ const InstallCard = ({
   label,
   noteId,
   disabled,
+  installing,
   command,
   onInstall,
 }: {
@@ -198,6 +207,8 @@ const InstallCard = ({
   readonly label: string
   readonly noteId: string
   readonly disabled: boolean
+  // Its installer runs in a terminal behind the dialog, so the card says so.
+  readonly installing: boolean
   readonly onInstall: () => void
 } & Installable): React.JSX.Element => {
   const [shown, setShown] = useState(false)
@@ -213,15 +224,21 @@ const InstallCard = ({
         <span className="flex min-h-[38px] min-w-0 flex-1 flex-col items-start justify-center">
           <span className="text-body font-medium">Add {label}</span>
           {/* "Add" and Install say it isn't here; the line keeps to the command, so it fits one. */}
-          <button
-            type="button"
-            className="button link addon-action !mt-0 text-left text-caption leading-4"
-            aria-expanded={shown}
-            aria-controls={commandId}
-            onClick={() => setShown((open) => !open)}
-          >
-            {shown ? "Hide install command" : "Show install command"}
-          </button>
+          {installing ? (
+            <span className="settings-note text-caption leading-4" role="status">
+              Installing in a terminal of its own…
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="button link addon-action !mt-0 text-left text-caption leading-4"
+              aria-expanded={shown}
+              aria-controls={commandId}
+              onClick={() => setShown((open) => !open)}
+            >
+              {shown ? "Hide install command" : "Show install command"}
+            </button>
+          )}
           {/* What the button reads out: the whole command, shown or not. */}
           <span id={noteId} className="sr-only">
             Not installed. Install runs {command}
@@ -233,11 +250,16 @@ const InstallCard = ({
             className="button primary min-h-8 shrink-0 gap-1.5 px-3 text-control"
             aria-label={`Install ${label}`}
             aria-describedby={noteId}
+            // Not `disabled` while it installs, which would drop focus out of the dialog.
             disabled={disabled}
-            onClick={onInstall}
+            aria-disabled={installing || undefined}
+            aria-busy={installing || undefined}
+            onClick={() => {
+              if (!installing) onInstall()
+            }}
           >
             <Download size={13} aria-hidden="true" className="max-[420px]:hidden" />
-            Install
+            {installing ? "Installing…" : "Install"}
           </button>
         </span>
       </div>
@@ -255,6 +277,7 @@ const WelcomeForm = ({
   agents,
   onChange,
   onInstall,
+  installing,
   transcripts,
   chatView,
   scheme,
@@ -264,6 +287,7 @@ const WelcomeForm = ({
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
+  readonly installing?: ReadonlySet<AgentName> | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   readonly chatView?: ChatViewSetting | undefined
   readonly scheme?: SchemeSetting | undefined
@@ -280,9 +304,32 @@ const WelcomeForm = ({
   const [lookingAtChat, setLookingAtChat] = useState({ pointer: false, focus: false })
   const offerSettings = offerTranscripts || chatView !== undefined
 
-  // As "Let’s build something" applies the choices; `install` then also starts installing
-  // an agent that isn't here, whose terminal opens as the dialog closes.
-  const submit = (install?: { agent: AgentSwitch["agent"]; command: string }): void => {
+  // An agent that turns installed while the dialog is open, once its installer ends, joins the
+  // choices ticked: the person asked for it.
+  const seen = useRef(
+    new Set(agents.filter(({ available }) => available).map(({ agent }) => agent)),
+  )
+  useEffect(() => {
+    const arrived = agents.filter(({ agent, available }) => available && !seen.current.has(agent))
+    if (arrived.length === 0) return
+    for (const { agent } of arrived) seen.current.add(agent)
+    setChoices((current) => ({
+      ...current,
+      ...Object.fromEntries(arrived.map(({ agent }) => [agent, true])),
+    }))
+    // Its Install button, where focus was, is gone: focus its checkbox instead, so focus stays
+    // in the dialog.
+    const form = formRef.current
+    if (form && !form.contains(document.activeElement))
+      form
+        .querySelector<HTMLInputElement>(`input[name="agents"][value="${arrived[0]!.agent}"]`)
+        ?.focus()
+  }, [agents])
+
+  // As "Let’s build something" applies the choices, whatever an installer is doing: an agent
+  // not installed yet is no choice, and one mid-change is left to its own change.
+  const formRef = useRef<HTMLFormElement>(null)
+  const submit = (): void => {
     for (const toggle of agents) {
       const connected = choices[toggle.agent]
       if (toggle.available && !toggle.busy && connected !== toggle.connected) {
@@ -293,10 +340,10 @@ const WelcomeForm = ({
       transcripts.onChange(keepTranscripts)
     if (chatView && showChat !== chatView.enabled) chatView.onChange(showChat)
     onDone()
-    if (install) onInstall?.(install.agent, install.command)
   }
   return (
     <form
+      ref={formRef}
       // The preview takes the room a wide window gives; the choices keep enough for a command.
       className="grid min-h-0 min-[820px]:grid-cols-[minmax(0,1.5fr)_minmax(380px,1fr)]"
       onSubmit={(event) => {
@@ -338,10 +385,10 @@ const WelcomeForm = ({
             className="welcome-headline m-0 text-[46px] leading-[1.06] font-medium max-[819px]:text-[38px] max-[420px]:text-[34px]"
           >
             {/* Read whole at once; the typed copy is for the eyes only. */}
-            <span className="sr-only">Big ideas. {headline}</span>
+            <span className="sr-only">You’re a runner, {headline}</span>
             <span aria-hidden="true">
               <span className="welcome-rise" style={at(420)}>
-                Big ideas.
+                You’re a runner,
               </span>
               <br />
               {[...headline].map((letter, index) => (
@@ -362,7 +409,7 @@ const WelcomeForm = ({
             className="modal-description welcome-enter mt-4 mb-0 max-w-[350px] text-lead leading-[1.7]"
             style={at(1300)}
           >
-            Terminals, agents, and projects in one workspace.
+            Novadeck runs your agents in one window. When one needs you, it asks in your Inbox.
           </DialogDescription>
         </div>
         <div className="welcome-enter flex min-h-0 flex-1 flex-col" style={at(500)}>
@@ -399,8 +446,9 @@ const WelcomeForm = ({
                     label={agentLabels[toggle.agent]}
                     noteId={`welcome-${toggle.agent}-description`}
                     disabled={toggle.busy}
+                    installing={installing?.has(toggle.agent) === true}
                     command={command}
-                    onInstall={() => submit({ agent: toggle.agent, command })}
+                    onInstall={() => onInstall(toggle.agent, command)}
                   />
                 ) : (
                   <ChoiceCard
@@ -413,7 +461,8 @@ const WelcomeForm = ({
                     name="agents"
                     value={toggle.agent}
                     checked={choices[toggle.agent]}
-                    disabled={toggle.busy || !toggle.available}
+                    disabled={!toggle.available}
+                    busy={toggle.busy}
                     onChange={(checked) =>
                       setChoices((current) => ({ ...current, [toggle.agent]: checked }))
                     }
@@ -477,6 +526,9 @@ const WelcomeForm = ({
           className="welcome-enter welcome-actions -mx-8 px-8 pb-7 max-[420px]:-mx-5 max-[420px]:px-5"
           style={at(1000)}
         >
+          <p className="modal-description m-0 mb-2.5 text-caption leading-[1.65]">
+            You can change any of this later in Preferences.
+          </p>
           <button
             type="submit"
             className="button primary welcome-start relative min-h-11 w-full justify-between gap-3 overflow-hidden px-4 py-3 text-body font-medium"
@@ -484,26 +536,21 @@ const WelcomeForm = ({
             Let’s build something
             <ArrowRight size={16} className="welcome-arrow" aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            className="button ghost welcome-skip mt-2 min-h-9 w-full px-3 py-2 text-control"
-            onClick={onDone}
-          >
-            Skip for now
-          </button>
         </div>
       </div>
     </form>
   )
 }
 
-// Choices stay local until submission. Dismissing changes no agent, chat view or transcript
-// setting; Preferences keeps its immediate switches. The scheme alone applies at once.
+// Choices stay local until the start button applies them, which is the only way out: Escape and
+// the backdrop leave it open, so what the person sees chosen is what they get. Preferences keeps
+// its immediate switches. The scheme alone applies at once.
 export const WelcomeDialog = ({
   open,
   agents,
   onChange,
   onInstall,
+  installing,
   transcripts,
   chatView,
   scheme,
@@ -512,7 +559,10 @@ export const WelcomeDialog = ({
   readonly open: boolean
   readonly agents: readonly AgentSwitch[]
   readonly onChange: (agent: AgentSwitch["agent"], connected: boolean) => void
+  // Starts an agent's installer, whose terminal opens behind the dialog; the dialog stays open.
   readonly onInstall?: ((agent: AgentSwitch["agent"], command: string) => void) | undefined
+  // The agents whose installer runs now.
+  readonly installing?: ReadonlySet<AgentName> | undefined
   readonly transcripts?: TranscriptsSetting | undefined
   // Given, the person chooses here whether agents show as a chat, as starting applies.
   readonly chatView?: ChatViewSetting | undefined
@@ -524,10 +574,9 @@ export const WelcomeDialog = ({
   return (
     <Dialog
       open={open}
-      closeOnInteractOutside
-      onOpenChange={(expanded) => {
-        if (!expanded) onDone()
-      }}
+      closeOnInteractOutside={false}
+      closeOnEscape={false}
+      onOpenChange={() => {}}
       label="Welcome to Novadeck"
       initialFocusEl={() => heading.current}
       backdropClassName="overlay welcome-overlay fixed inset-0 z-50"
@@ -538,6 +587,7 @@ export const WelcomeDialog = ({
         agents={agents}
         onChange={onChange}
         onInstall={onInstall}
+        installing={installing}
         transcripts={transcripts}
         chatView={chatView}
         scheme={scheme}

@@ -27,16 +27,11 @@ import { WorkspaceFooter } from "../shell/WorkspaceFooter"
 import { programIcon } from "../terminals/processes/profiles"
 import { useRenderAt } from "../terminals/useRenderAt"
 import { chatOfferDue, selectedAgentCanChat } from "./chat-offer"
-import {
-  useFeatureFlag,
-  useUiState,
-  useWorkspaceServices,
-  useWorkspaceState,
-} from "./controller/context"
+import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useAccounts } from "./controller/footer-accounts"
 import { crashLoopQuestion, currentState, shallowEqual } from "./selectors"
 import { useTourBusy, useTourOffer } from "./TourProvider"
-import { chatViewOn, dismissWhatsNew } from "./ui-store"
+import { chatViewOn, dismissWhatsNew, onboardingTourOn } from "./ui-store"
 import { useBusyTerminals } from "./use-busy-terminals"
 import { useOfferNews } from "./use-offer-news"
 
@@ -68,9 +63,10 @@ export const FooterSection = memo((): React.JSX.Element => {
     [store],
   )
   const crashes = useUiState((state) => state.crashLoop)
-  // The Help menu is an experimental feature: it shows only while IS_EXPERIMENTAL is on, and
-  // where the backend has a tour, which its one item offers.
-  const experimental = useFeatureFlag("IS_EXPERIMENTAL")
+  // The Help menu offers the onboarding tour, an experimental feature: it shows only while
+  // IS_EXPERIMENTAL and the tour's own switch are on, and where the backend has a tour, which
+  // its one item offers.
+  const tourOn = useUiState(onboardingTourOn)
   const tour = useTourOffer()
   const helpItems = useMemo(
     () => (tour ? [{ value: "tour", label: "Take the tour", onSelect: () => tour.offer() }] : []),
@@ -109,15 +105,17 @@ export const FooterSection = memo((): React.JSX.Element => {
     () => backend.agents?.welcome.getSnapshot() ?? false,
   )
   // A tour that runs, or whose closing card is up: its spotlight and coach are not a dialog, so
-  // the offer, whose Turn on would change how the tour's agent shows, waits until it ends.
+  // the offer, whose Try Agent Chat would change how the tour's agent shows, waits until it ends.
   const tourBusy = useTourBusy()
   const chatView = useUiState(chatViewOn)
   const chatOfferAnswered = useUiState((state) => state.chatOfferAnswered)
+  const chatOfferHeld = useUiState((state) => state.chatOfferHeld)
   const canChat = useWorkspaceState(selectedAgentCanChat, Object.is)
   const chatOfferWanted = chatOfferDue({
     reads: backend.conversations !== undefined,
     chatView,
     answered: chatOfferAnswered,
+    held: chatOfferHeld,
     welcome,
     canChat,
     touring: tourBusy,
@@ -358,7 +356,7 @@ export const FooterSection = memo((): React.JSX.Element => {
           <FeedbackButton feedback={backend.feedback} titleOf={titleOf} iconOf={programIcon} />
         )
       }
-      help={experimental && tour && <FooterHelp items={helpItems} />}
+      help={tourOn && tour && <FooterHelp items={helpItems} />}
     />
   )
 })

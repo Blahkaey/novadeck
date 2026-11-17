@@ -1,3 +1,4 @@
+import { cleanup } from "vitest-browser-react"
 import { userEvent } from "vitest/browser"
 import { page, type Locator } from "vitest/browser"
 
@@ -18,7 +19,7 @@ import { context, describe, expect, it } from "../test"
 // view off and no note that it was offered. The agents demo's terminals "Build" and
 // "Checkout implementation" run agents; "Dev server" is a shell.
 const card = (): Locator => page.getByRole("region", { name: "Agent Chat", exact: true })
-const turnOn = (): Locator => card().getByRole("button", { name: "Turn on" })
+const turnOn = (): Locator => card().getByRole("button", { name: "Try Agent Chat" })
 const noThanks = (): Locator => card().getByRole("button", { name: "No thanks" })
 const announcer = (): Locator => page.getByRole("status").filter({ hasText: /^Agent Chat: / })
 const answeredKey = "novadeck.agent-chat-offer-answered"
@@ -32,13 +33,9 @@ describe("Agent Chat's offer", () => {
       await openAsExistingUser()
       await terminalTab("Build").click()
       await expect.element(card()).toBeVisible()
+      await expect.element(card().getByText("Talk to your agents in a chat")).toBeVisible()
       await expect
-        .element(card().getByText("Read and reply to agents in a chat instead of their terminal."))
-        .toBeVisible()
-      await expect
-        .element(
-          card().getByText("You can change this any time in Preferences → Appearance → Layout."),
-        )
+        .element(card().getByText("Preferences → Appearance", { exact: true }))
         .toBeVisible()
       await expect.element(turnOn()).toBeVisible()
       await expect.element(noThanks()).toBeVisible()
@@ -76,7 +73,7 @@ describe("Agent Chat's offer", () => {
     })
   })
 
-  context("with Turn on", () => {
+  context("with Try Agent Chat", () => {
     it("shows the selected agent as a chat, and never offers again", async () => {
       await openAsExistingUser()
       await terminalTab("Build").click()
@@ -158,22 +155,59 @@ describe("Agent Chat's offer", () => {
       await expectStaysAbsent(card())
     })
 
-    it("is answered by finishing the welcome dialog, either way", async () => {
+    it("is answered by finishing the welcome dialog with Agent Chat ticked, so it is never offered", async () => {
       await openWorkspace("/?demo=welcome")
       const welcome = page.getByRole("dialog", { name: "Welcome to Novadeck" })
-      await welcome.getByRole("checkbox", { name: "Agent Chat" }).click()
-      await welcome.getByRole("button", { name: "Skip for now" }).click()
+      await expect.element(welcome.getByRole("checkbox", { name: "Agent Chat" })).toBeChecked()
+      await welcome.getByRole("button", { name: "Let’s build something" }).click()
       await expect.element(welcome).not.toBeInTheDocument()
       expect(localStorage.getItem(answeredKey)).toBe("true")
       await terminalTab("Build").click()
+      await expectStaysAbsent(card())
+    })
+
+    it("is not answered by finishing the welcome dialog with Agent Chat unticked: held back for that run, offered at the next launch", async () => {
+      await openWorkspace("/?demo=welcome")
+      const welcome = page.getByRole("dialog", { name: "Welcome to Novadeck" })
+      await welcome.getByRole("checkbox", { name: "Agent Chat" }).click()
+      await welcome.getByRole("button", { name: "Let’s build something" }).click()
+      await expect.element(welcome).not.toBeInTheDocument()
+      expect(localStorage.getItem(answeredKey)).not.toBe("true")
+      // This run: no offer, even on an agent's terminal.
+      await terminalTab("Build").click()
       await expect.element(commandInput("Build")).toBeVisible()
       await expectStaysAbsent(card())
+      // A later launch, with the same storage: the welcome is behind, the offer is due.
+      await cleanup()
+      await openWorkspace("/?demo=agents")
+      await terminalTab("Build").click()
+      await expect.element(card()).toBeVisible()
+    })
+
+    it("is held, not answered, when the chat view was already on and the welcome dialog turns it off", async () => {
+      localStorage.setItem("novadeck.preferences", JSON.stringify({ chatView: true }))
+      await openWorkspace("/?demo=welcome")
+      const welcome = page.getByRole("dialog", { name: "Welcome to Novadeck" })
+      await welcome.getByRole("checkbox", { name: "Agent Chat" }).click()
+      await welcome.getByRole("button", { name: "Let’s build something" }).click()
+      await expect.element(welcome).not.toBeInTheDocument()
+      expect(localStorage.getItem(answeredKey)).not.toBe("true")
+      await terminalTab("Build").click()
+      await expect.element(commandInput("Build")).toBeVisible()
+      await expectStaysAbsent(card())
+      await cleanup()
+      await openWorkspace("/?demo=agents")
+      await terminalTab("Build").click()
+      await expect.element(card()).toBeVisible()
     })
   })
 
   context("while the tour runs", () => {
     it("waits, as the tour's agent is not for the offer to change", async () => {
-      localStorage.setItem("novadeck.preferences", JSON.stringify({ chatView: false }))
+      localStorage.setItem(
+        "novadeck.preferences",
+        JSON.stringify({ chatView: false, onboardingTour: true }),
+      )
       await openWorkspace("/?demo=agents&tourStory=off&channel=experimental")
       await openPreferencesOn("Agents")
       const claude = preferencesDialog().getByRole("switch", { name: "Claude Code" })

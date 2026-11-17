@@ -26,7 +26,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react"
 
 import { prefersReducedMotion } from "../../interaction/reduced-motion"
@@ -40,10 +39,12 @@ import {
   canvasStep,
   chromeScaleAt,
   fitOptions,
+  headerGrowthAt,
   inSight,
   terminalHeaderHeight,
   windowSize,
 } from "./geometry"
+import { keepUnchanged } from "./nodes"
 import {
   arrangedTiles,
   beginStay,
@@ -53,7 +54,12 @@ import {
   stayPlaces,
   type CanvasStay,
 } from "./stay"
-import { NodeVisibilityContext, TerminalContent, nodeTypes } from "./TerminalNode"
+import {
+  NodeVisibilityContext,
+  TerminalContent,
+  nodeTypes,
+  type CanvasContent,
+} from "./TerminalNode"
 import type {
   CanvasProps,
   CanvasHandle,
@@ -71,6 +77,9 @@ export type { CanvasHandle } from "./types"
 const nodeMargin = "400px 550px"
 // The chrome that reads `--_canvas-chrome-scale` (canvas.css, terminal-status.css).
 const chromeReaders = ".terminal-heading, .terminal-ending"
+// What reads `--_canvas-grown` (canvas.css): each window's heading and its terminal's screen,
+// handed the very same value, so the screen keeps its size to the last pixel.
+const growthReaders = ".canvas-node .terminal-heading, .canvas-node .terminal-xterm"
 
 // How long a window dropped from a taskbar takes to settle onto the canvas's grid.
 const settleMs = 160
@@ -164,6 +173,9 @@ const TerminalCanvas = ({
       const scale = String(chromeScaleAt(zoom))
       for (const chrome of element.querySelectorAll<HTMLElement>(chromeReaders))
         chrome.style.setProperty("--_canvas-chrome-scale", scale)
+      const grown = `${headerGrowthAt(zoom)}px`
+      for (const reader of element.querySelectorAll<HTMLElement>(growthReaders))
+        reader.style.setProperty("--_canvas-grown", grown)
       clearTimeout(resting)
       resting = setTimeout(() => {
         element.style.setProperty("--_canvas-chrome-scale", scale)
@@ -382,17 +394,28 @@ const TerminalCanvas = ({
     [hidden, preview, removed, selected, team, keyboardFocusRequest],
   )
 
-  const contentOf = useCallback(
-    (id: string, onScreen: boolean): ReactNode => {
-      const terminal = terminals.find((item) => item.id === id)
-      if (!terminal) return null
-      return render(terminal, {
-        onScreen,
-        legible,
-        onFlyTo: () => flyTo(terminal),
-      })
-    },
-    [flyTo, legible, render, terminals],
+  // A window's fly-to, the same function for the canvas's life: it reaches the latest
+  // terminals and flight, so handing it to a window never makes the window draw again.
+  const latest = useRef({ terminals, flyTo })
+  useLayoutEffect(() => {
+    latest.current = { terminals, flyTo }
+  })
+  const flyToId = useCallback((id: string): void => {
+    const terminal = latest.current.terminals.find((item) => item.id === id)
+    if (terminal) latest.current.flyTo(terminal)
+  }, [])
+  const byId = useMemo(
+    () => new Map(terminals.map((terminal) => [terminal.id, terminal])),
+    [terminals],
+  )
+  const content = useMemo(
+    (): CanvasContent => ({
+      tileOf: (id) => byId.get(id),
+      render,
+      legible,
+      flyTo: flyToId,
+    }),
+    [byId, flyToId, legible, render],
   )
 
   // The canvas places its windows: where this stay has them, as its windows, their teams
@@ -492,7 +515,7 @@ const TerminalCanvas = ({
     }
     setNodes((previous) => {
       const existing = new Map(previous.map((node) => [node.id, node]))
-      return terminals.map((terminal) => {
+      const placedNodes = terminals.map((terminal) => {
         const placed = {
           ...nodeFrom(terminal, settling.get(terminal.id) ?? places.get(terminal.id)),
           zIndex: levels.get(terminal.id) ?? 0,
@@ -504,6 +527,7 @@ const TerminalCanvas = ({
           : placed
         return current.className ? { ...positioned, className: current.className } : positioned
       })
+      return keepUnchanged(previous, placedNodes)
     })
     // A window dropped from a taskbar glides onto the grid from where its ghost was.
     for (const id of settling.keys()) {
@@ -577,7 +601,7 @@ const TerminalCanvas = ({
       }}
     >
       <NodeVisibilityContext.Provider value={visibility}>
-        <TerminalContent.Provider value={contentOf}>
+        <TerminalContent.Provider value={content}>
           {opened && (
             <ReactFlow<TerminalNode>
               defaultNodes={terminals.map((terminal) =>

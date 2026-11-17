@@ -60,7 +60,7 @@ import {
   shallowEqual,
 } from "./selectors"
 import { useTourOffer, useTourRun } from "./TourProvider"
-import { switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
+import { chatViewOn, switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
 
@@ -407,6 +407,7 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           agents={agents.list}
           onChange={backend.agents.set}
           onInstall={installs.install}
+          installing={installs.installing}
           transcripts={transcripts}
           {...(schemeCountOfTheme(preferences.appearance.theme) > 1
             ? {
@@ -427,13 +428,19 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
                 chatView: {
                   enabled: preferences.chatView,
                   onChange: (chatView: boolean) =>
-                    updatePreferences({ ...ui.getSnapshot().preferences, chatView }),
+                    updatePreferences(
+                      { ...ui.getSnapshot().preferences, chatView },
+                      { answersOffer: false },
+                    ),
                 },
               }
             : {})}
           onDone={() => {
-            // The welcome dialog offers Agent Chat too, so those who saw it are not asked again.
-            commands.declineChatOffer()
+            // The welcome dialog offers Agent Chat too. Starting has applied its choice already:
+            // kept on, the offer is moot and answered; unticked on purpose, it is no answer, so
+            // the offer only waits out this run and comes at a later launch.
+            if (chatViewOn(ui.getSnapshot())) commands.declineChatOffer()
+            else commands.holdChatOffer()
             backend.agents?.finishWelcome()
           }}
         />
@@ -557,6 +564,7 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           {...(transcripts ? { transcripts } : {})}
           {...(hibernation ? { hibernation } : {})}
           {...(worktrees ? { worktrees } : {})}
+          tour={tour !== undefined}
           notices={backend.notices !== undefined}
           systemSounds={backend.notices?.sounds === true}
           hearSound={dingOf(backend, ui).preview}

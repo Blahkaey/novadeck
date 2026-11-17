@@ -24,7 +24,7 @@ describe("answering Agent Chat's offer", () => {
     expect(app.chatView()).toBe(false)
   })
 
-  context("with Turn on", () => {
+  context("with Try Agent Chat", () => {
     it("turns the chat view on, through the preferences, and is answered for good", () => {
       const app = open()
       app.commands.acceptChatOffer()
@@ -44,6 +44,35 @@ describe("answering Agent Chat's offer", () => {
       expect(app.chatView()).toBe(false)
       expect(app.answered()).toBe(true)
       expect(readChatOfferAnswered()).toBe(true)
+    })
+  })
+
+  context("when the welcome dialog is finished with Agent Chat unticked", () => {
+    it("holds the offer for this run, answering nothing, so a reload offers it again", () => {
+      const app = open()
+      app.commands.holdChatOffer()
+      expect(app.ui.getSnapshot().chatOfferHeld).toBe(true)
+      expect(app.answered()).toBe(false)
+      expect(readChatOfferAnswered()).toBe(false)
+    })
+  })
+
+  context("when the welcome dialog changes the chat view", () => {
+    it("is no answer by itself, so the dialog's finish decides: held after unticking an on setting", () => {
+      const fresh = open()
+      fresh.commands.updatePreferences(
+        { ...fresh.ui.getSnapshot().preferences, chatView: true },
+        { answersOffer: false },
+      )
+      expect(fresh.answered()).toBe(false)
+      fresh.commands.updatePreferences(
+        { ...fresh.ui.getSnapshot().preferences, chatView: false },
+        { answersOffer: false },
+      )
+      expect(fresh.answered()).toBe(false)
+      fresh.commands.holdChatOffer()
+      expect(fresh.ui.getSnapshot().chatOfferHeld).toBe(true)
+      expect(fresh.answered()).toBe(false)
     })
   })
 

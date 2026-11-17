@@ -31,7 +31,13 @@ import {
   sameTarget,
   windowedDestination,
 } from "../selectors"
-import { answerChatOffer, chatViewOn, notePortableCardShown, type UiState } from "../ui-store"
+import {
+  answerChatOffer,
+  chatViewOn,
+  holdChatOffer,
+  notePortableCardShown,
+  type UiState,
+} from "../ui-store"
 import { createChatCommands, type ChatCommands } from "./chat"
 import { createCompanionCommands, type CompanionCommands } from "./companion"
 import type { CommandContext } from "./context"
@@ -88,11 +94,17 @@ export type WorkspaceCommands = ShellCommands &
     readonly select: (id: string, fit?: boolean) => void
     readonly setSelected: (terminal: string) => void
     // Saves the preferences. Changing the chat view's setting also answers Agent Chat's offer.
-    readonly updatePreferences: (next: PreferencesValue) => void
+    // `answersOffer: false` is for a change that is no answer to Agent Chat's offer: the welcome
+    // dialog's, which answers or holds it as it finishes.
+    readonly updatePreferences: (
+      next: PreferencesValue,
+      options?: { readonly answersOffer?: boolean },
+    ) => void
     // Agent Chat's one-time offer: turns the chat view on (which answers it), or answers it
     // with No thanks. Either way it is never made again.
     readonly acceptChatOffer: () => void
     readonly declineChatOffer: () => void
+    readonly holdChatOffer: () => void
     // Turns a feature flag on or off.
     readonly setFeatureFlag: (flag: FeatureFlag, on: boolean) => void
     readonly changeView: (next: ViewMode) => void
@@ -471,16 +483,18 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     restoreProjectArrangement: (arrangement) => arrange(() => arrangement),
     acceptChatOffer: () => self.updatePreferences({ ...preferences(), chatView: true }),
     declineChatOffer: () => answerChatOffer(ui),
-    updatePreferences: (next) => {
+    holdChatOffer: () => holdChatOffer(ui),
+    updatePreferences: (next, { answersOffer = true } = {}) => {
       const snapshot = workspace.getSnapshot()
       const { view } = currentState(snapshot)
       effects.cancelTransition()
-      // Choosing the chat view's setting, in Preferences or the welcome dialog, is an answer to
-      // Agent Chat's offer, noted in the same change so no one sees one without the other.
+      // Choosing the chat view's setting in Preferences is an answer to Agent Chat's offer, noted
+      // in the same change so no one sees one without the other.
       changeChatView((state) => ({
         ...state,
         preferences: next,
-        chatOfferAnswered: state.chatOfferAnswered || next.chatView !== state.preferences.chatView,
+        chatOfferAnswered:
+          state.chatOfferAnswered || (answersOffer && next.chatView !== state.preferences.chatView),
       }))
       workspace.dispatch({
         type: "preferences/reconcile",

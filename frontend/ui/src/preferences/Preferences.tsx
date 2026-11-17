@@ -159,6 +159,7 @@ export const Preferences = ({
   onFocusedAgent,
   transcripts,
   hibernation,
+  tour = false,
   worktrees,
   forges,
   agents,
@@ -199,6 +200,8 @@ export const Preferences = ({
     readonly minutes: number | null
     readonly onChange: (minutes: number | null) => void
   }
+  // Whether the backend has a tour, which the Onboarding tour switch offers from the footer.
+  tour?: boolean
   // Whether agents get git worktrees, an Experimental feature the backend keeps; absent
   // where the backend has none.
   worktrees?: {
@@ -328,6 +331,16 @@ export const Preferences = ({
       disabled: false,
     },
     {
+      id: "onboarding-tour",
+      label: "Onboarding tour",
+      description: tour
+        ? "Add a Help menu to the footer that offers a short tour: your own agent, on its cheapest model, in a sandbox folder."
+        : "Not available here.",
+      checked: tour && value.onboardingTour,
+      onToggle: (onboardingTour: boolean) => onChange({ ...value, onboardingTour }),
+      disabled: !tour,
+    },
+    {
       id: "agent-worktrees",
       label: "Agent worktrees",
       description: worktrees
@@ -367,7 +380,7 @@ export const Preferences = ({
       label="Preferences"
       backdropClassName="overlay fixed inset-0 z-50"
       positionerClassName="fixed inset-0 z-50 flex items-center justify-center"
-      className="modal flex h-[min(640px,calc(100dvh-48px))] w-[min(540px,calc(100vw-32px))] flex-col overflow-hidden max-[480px]:w-[calc(100vw-24px)]"
+      className="modal flex h-[min(640px,calc(100dvh-48px))] w-[min(640px,calc(100vw-32px))] flex-col overflow-clip max-[480px]:w-[calc(100vw-24px)]"
     >
       <Tabs value={shown} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col">
         <TabInView tab={shown} within={dialog} />
@@ -385,17 +398,23 @@ export const Preferences = ({
             </button>
           </div>
           <TabList
-            // On a phone the tabs are wider than the dialog: the list scrolls. Scrolling clips
-            // what the indicator's glow draws outside the list, so the list pads out by the glow
-            // and takes the padding back in its margin, and the indicator keeps its place.
-            className="preferences-tabs mt-3 flex gap-5 max-[480px]:-mx-2 max-[480px]:-mb-2 max-[480px]:overflow-x-auto max-[480px]:px-2 max-[480px]:pb-2 max-[480px]:[scrollbar-width:none]"
+            // Whenever the tabs are wider than the dialog (a phone, a larger text size, another
+            // tab), the list scrolls on its own, never the dialog. Scrolling clips what the
+            // indicator's glow draws outside the list, so the list pads out by the glow and takes
+            // the padding back in its margin (the top too, for the focus ring), and the indicator
+            // keeps its place.
+            className="preferences-tabs mt-1.5 -mx-2 -mb-2 flex gap-5 overflow-x-auto px-2 pt-1.5 pb-2 [scrollbar-width:none]"
             label="Preference sections"
-            indicatorClassName="bottom-[-1px] h-0.5 max-[480px]:bottom-[calc(0.5rem-1px)]"
+            indicatorClassName="bottom-[calc(0.5rem-1px)] h-0.5"
           >
             {preferencesTabs
               .filter(({ id }) => !hidden(id))
               .map(({ id, label }) => (
-                <Tab key={id} value={id} className="relative min-h-9 px-0.5 text-left text-body">
+                <Tab
+                  key={id}
+                  value={id}
+                  className="relative min-h-9 shrink-0 px-0.5 text-left text-body"
+                >
                   {label}
                 </Tab>
               ))}
