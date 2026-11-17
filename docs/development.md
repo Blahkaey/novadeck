@@ -480,6 +480,16 @@ Agents:
   folder is empty.") or two entries and a "More not shown" row; "Files read normally again"
   ends them all. Every sample project has a small tree of its own. `node_modules` is the demo's
   empty folder: it opens onto a muted "Empty" row.
+  A right-click on a row opens its menu, Copy Path (`~/projects/storefront/…`, also
+  Shift+Alt+C on a focused row) and Copy Relative Path, and one on the tree's empty space, a
+  muted note row, or the line in the tree's place ("The project's folder is empty" and "The
+  project's files can't be read" above) the project folder's, Copy Path and Refresh, which reads
+  the root and the open folders again as the header's Refresh button does; a copy that works
+  shows nothing.
+  "Copying a path fails" has the browser refuse the clipboard, every copy in the page, until
+  "Files read normally again" or the demo boots again, as the Plan group's "Copying plan edits
+  fails" does (`frontend/demo-debug/src/clipboard.ts`): a copy then puts a red-edged line above
+  the tree saying it couldn't copy that path, with Dismiss, which hiding the panel clears too.
   A strip of agent chips above the tree lists the agents with work in the project, in the
   session's roster order, each light-able by a click (any number, Escape lets them go; with
   none kept the selected terminal's agent is lit). The `messages` variant has a squad, as

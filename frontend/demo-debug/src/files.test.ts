@@ -1,6 +1,7 @@
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoFiles, demoPaths } from "@novadeck/demo/files"
 
+import { restoreClipboard } from "./clipboard"
 import { filesGroups } from "./files"
 import { describe, expect, it } from "./test"
 import type { DemoActionContext } from "./types"
@@ -130,5 +131,33 @@ describe("the debug panel's Files group", () => {
     expect((await files.list("storefront", "src/cart")).entries.length).toBeGreaterThan(0)
     expect((await files.list("storefront", "src/components")).truncated).toBe(false)
     expect((await files.list("storefront", "")).entries.length).toBeGreaterThan(0)
+  })
+
+  it("has copying a path refused until the files read normally again", async () => {
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: async (text: string) => void copied.push(text) },
+      configurable: true,
+    })
+    try {
+      const files = createDemoFiles(1)
+      run(files, "Copying a path fails")
+      await expect(navigator.clipboard.writeText("src/cart")).rejects.toThrow("refused")
+
+      run(files, "Files read normally again")
+      await navigator.clipboard.writeText("src/cart")
+
+      expect(copied).toEqual(["src/cart"])
+    } finally {
+      restoreClipboard()
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
+  })
+
+  it("puts the copy failure before the way back to normal", () => {
+    const labels = filesGroups(createDemoFiles(1))[0]!.actions.map((action) => action.label)
+    expect(labels.indexOf("Copying a path fails")).toBe(
+      labels.indexOf("Files read normally again") - 1,
+    )
   })
 })

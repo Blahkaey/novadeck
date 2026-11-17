@@ -250,6 +250,30 @@ export const workspaceShortcutBindings = (): Record<WorkspaceShortcutName, Short
   },
 })
 
+export type FilesShortcutName = "copyPath"
+
+// Keys the Files panel's tree takes itself, on the row with focus, and stops there: the keymap
+// leaves them be, and Preferences' list, of the workspace's keys, doesn't name them. Each is
+// known by its letter or its place, as Option changes the letter a Mac types.
+export const filesShortcutBindings = (
+  platform: Platform = currentPlatform(),
+): Record<FilesShortcutName, Shortcut> => {
+  const mac = platform === "mac"
+  return {
+    // As in VS Code.
+    copyPath: {
+      label: "Copy Path",
+      key: "c",
+      code: "KeyC",
+      ctrl: false,
+      meta: false,
+      shift: true,
+      alt: true,
+      display: ["Shift", mac ? "⌥" : "Alt", "C"],
+    },
+  }
+}
+
 export { workspaceShortcutTarget, workspaceOverlayOpen } from "./dom"
 
 export type ShortcutInput = Pick<

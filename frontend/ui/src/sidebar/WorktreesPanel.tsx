@@ -680,7 +680,7 @@ export const WorktreesPanel = ({
       onClose={onClose}
     >
       {refusal && (
-        <div className="worktrees-refusal" role="alert">
+        <div className="sidebar-refusal worktrees-refusal" role="alert">
           <p className="text-control">
             <strong>{refusal.title}</strong> {refusal.text}
           </p>

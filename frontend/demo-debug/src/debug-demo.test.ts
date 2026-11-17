@@ -6,6 +6,7 @@ import { noTheme } from "@novadeck/terminal-views/theme"
 import { vi } from "vitest"
 
 import { createBootRehearsals } from "./boot-rehearsal"
+import { refuseClipboard, restoreClipboard } from "./clipboard"
 import { createDebugDemo, type DemoLaunch, type DemoShell } from "./debug-demo"
 import { runProgram } from "./terminals"
 import { describe, expect, it } from "./test"
@@ -70,6 +71,26 @@ const launch = (): DemoLaunch => ({
 })
 
 describe("the debug layer's demo", () => {
+  it("gives the page its own clipboard back as it boots, whichever group refused it", async () => {
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: async (text: string) => void copied.push(text) },
+      configurable: true,
+    })
+    try {
+      refuseClipboard()
+      await expect(navigator.clipboard.writeText("before")).rejects.toThrow("refused")
+
+      createDebugDemo(launch())
+      await navigator.clipboard.writeText("after")
+
+      expect(copied).toEqual(["after"])
+    } finally {
+      restoreClipboard()
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
+  })
+
   it("starts its terminals with it, and stops them with it, so a reboot leaves none behind", () => {
     life.calls.length = 0
     const backend = createDebugDemo(launch())

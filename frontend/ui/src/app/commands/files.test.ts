@@ -5,7 +5,6 @@ import type { CompanionWindowMeta } from "@novadeck/core/types"
 
 import { context, describe, expect, it } from "../../test"
 import { openCommands } from "../../test/commands"
-import { absolutePath } from "./files"
 
 const readme = itemFixture("readme", "01", {
   kind: "file",
@@ -244,14 +243,6 @@ describe("files commands", () => {
       const app = open(() => Promise.reject(new Error("gone")))
       await expect(app.commands.openProjectFile("package.json")).rejects.toThrow("gone")
       expect(app.state().roster.windows).toEqual([])
-    })
-  })
-
-  context("when writing a path from a project's directory", () => {
-    it("joins with the separator the directory uses", () => {
-      expect(absolutePath("/home/me/shop", "src/a.ts")).toBe("/home/me/shop/src/a.ts")
-      expect(absolutePath("/home/me/shop/", "a.ts")).toBe("/home/me/shop/a.ts")
-      expect(absolutePath("C:\\Users\\me\\shop", "src/a.ts")).toBe("C:\\Users\\me\\shop\\src\\a.ts")
     })
   })
 })

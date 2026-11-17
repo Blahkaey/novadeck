@@ -31,14 +31,16 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
   ordered: readonly Tile[]
   sidebarPanel: PanelId
   sidebarVisible: boolean
-  // Where the backend reads the projects' files: what its agents changed in the project, if it says, how to
-  // read a folder, when an agent's turn last ended, how to follow the works the changes come
-  // from while the panel shows, if they do, how to open a file, the handle of the selected
-  // terminal, and the session's agents for the strip: every terminal's handle in roster order,
-  // and the teams as handles, each lead first. Left out, there is no Files panel.
+  // Where the backend reads the projects' files: what its agents changed in the project, if it
+  // says, the project's directory as the backend's machine writes it, how to read a folder, when
+  // an agent's turn last ended, how to follow the works the changes come from while the panel
+  // shows, if they do, how to open a file, the handle of the selected terminal, and the session's
+  // agents for the strip: every terminal's handle in roster order, and the teams as handles, each
+  // lead first. Left out, there is no Files panel.
   files:
     | {
         project: FilesProject | undefined
+        directory: string
         list: (folder: string) => Promise<FolderListing>
         turn: number
         watch: (() => () => void) | undefined
@@ -148,6 +150,7 @@ export const WorkspaceSidebar = ({
       <FilesPanel
         key={projectId}
         project={files.project}
+        directory={files.directory}
         list={files.list}
         turn={files.turn}
         watch={files.watch}

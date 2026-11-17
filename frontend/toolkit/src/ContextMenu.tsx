@@ -17,7 +17,7 @@ export type ContextMenuAction = {
   readonly icon?: ReactNode
   // Shown but not chosen, for an action that can't happen now.
   readonly disabled?: boolean
-  // What it says at its end, muted, as a count.
+  // What it says at its end, muted: a count, or the keys of its shortcut (`Chord`).
   readonly detail?: ReactNode
   // A hairline above it, setting it apart from the items before.
   readonly separated?: boolean

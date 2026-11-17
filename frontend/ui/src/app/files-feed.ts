@@ -1,10 +1,9 @@
-import type { FilesState } from "@novadeck/core/files"
+import { absolutePath, type FilesState } from "@novadeck/core/files"
 import { createStore } from "@novadeck/core/store"
 import type { WorkspaceSession } from "@novadeck/core/types"
 import type { Work, WorksState } from "@novadeck/core/works"
 
 import { projectPath, type Owner } from "../sidebar/files-works"
-import { absolutePath } from "./commands/files"
 
 // What the Files panel and the file preview share of the backend's files and works.
 

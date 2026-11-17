@@ -474,6 +474,31 @@ terminals. They close and go to History, and you can restore them into another s
 A project's last session can't be deleted. The order, names and deletions are the runner's,
 so they stay after a reload, and the project opens the session you were in last.
 
+## Files
+
+**Files** is a panel on the sidebar's rail with the open project's files as a tree, each
+folder read as you open it. Where a backend doesn't read a project's files, the panel isn't
+there.
+
+Right-click a file or folder for its menu:
+
+- **Copy Path** copies its full path on the computer the project is on, which is the
+  runner's. `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or folder
+  with the keyboard on it.
+- **Copy Relative Path** copies its path from the project's folder, as `src/cart/useCart.ts`.
+
+Both paths are written as that computer writes them, with backslashes for a project on
+Windows. A file that only an agent's work has, which the project's folder doesn't hold yet,
+copies the path it will have there. Right-click the tree's empty space, or the line in its
+place when the folder is empty or can't be read, for the project's folder itself: **Copy
+Path** copies the folder's own path, and **Refresh** reads the files again. A copy that works
+says nothing. One that can't, as where a browser doesn't let the page use the clipboard, puts a
+line above the tree saying so until you dismiss it or hide the panel.
+
+The tree reads its open folders again when the panel is shown and when an agent's turn ends
+in the project; it doesn't watch the folder for changes. **Refresh**, beside **Collapse
+folders** at the top of the panel, reads them again now, for a change made outside Novadeck.
+
 ## Notes
 
 **Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
@@ -788,7 +813,8 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 
 In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and
 previous of its tabs, and on a tab with focus the arrow keys, `Home` and `End` move along
-them and `Delete` closes it.
+them and `Delete` closes it. In the Files panel, `Shift+Alt+C` (`Shift+Option+C` on macOS)
+copies the path of the file or folder with the keyboard on it.
 
 The keyboard's home is the selected terminal. A mouse click on the sidebar, a header or
 the view switch leaves typing there, and the shortcuts above work from terminal input.

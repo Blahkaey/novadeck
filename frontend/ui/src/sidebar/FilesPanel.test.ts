@@ -1,7 +1,7 @@
 import type { FolderListing, FilesProject } from "@novadeck/core/files"
 import { nextFrame, render } from "@novadeck/test-kit/render"
 import { act, createElement, StrictMode } from "react"
-import { afterEach, vi } from "vitest"
+import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
 import { folderListings } from "../test/files"
@@ -45,7 +45,52 @@ afterEach(() => {
   treeWidth = 0
   measured = null
   observers.clear()
+  Reflect.deleteProperty(navigator, "clipboard")
 })
+
+// The page's clipboard as a test gives it: what it was asked to copy, each copy refused when it
+// `refuses`. Without one the page has none, as in jsdom.
+const clipboard = (refuses = false): string[] => {
+  const copied: string[] = []
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: (text: string) => {
+        copied.push(text)
+        return refuses ? Promise.reject(new Error("Write permission denied.")) : Promise.resolve()
+      },
+    },
+  })
+  return copied
+}
+
+// A menu opens, closes and runs what was chosen over animation frames.
+const frames = async (): Promise<void> => {
+  for (let frame = 0; frame < 6; frame += 1)
+    // eslint-disable-next-line no-await-in-loop -- Each frame comes after the one before.
+    await nextFrame()
+}
+const rightClick = async (target: Element): Promise<void> => {
+  act(() => {
+    target.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }),
+    )
+  })
+  await frames()
+}
+const openMenu = (): HTMLElement | null =>
+  document.querySelector('[data-scope="menu"][data-part="content"][data-state="open"]')
+const menuItems = (): string[] =>
+  Array.from(openMenu()?.querySelectorAll('[data-part="item-text"]') ?? []).map(
+    (each) => each.textContent ?? "",
+  )
+const choose = async (label: string): Promise<void> => {
+  const item = Array.from(openMenu()!.querySelectorAll<HTMLElement>('[data-part="item"]')).find(
+    (each) => each.querySelector('[data-part="item-text"]')?.textContent === label,
+  )!
+  act(() => item.click())
+  await frames()
+}
 
 const recent = Date.now() - 1000
 
@@ -59,6 +104,8 @@ const work = (parts: Partial<FilesProject> = {}): FilesProject => ({
 })
 
 const files = ["src/cart/useCart.ts", "src/cart/Cart.tsx", "docs/readme.md", "package.json"]
+// Where the project is on the backend's machine.
+const directory = "/home/me/shop"
 
 // The backend a test gives the panel: the folders of `files` unless a test says otherwise. Every
 // read it gets is recorded, and `answer` can hold one back until the test lets it go.
@@ -108,6 +155,7 @@ const mount = async (
   let turn = 0
   const props = (next: FilesProject | undefined, handle: string | undefined) => ({
     project: next,
+    directory,
     list: reads.list,
     turn,
     watch,
@@ -862,6 +910,7 @@ describe("The Files panel", () => {
       const view = render(
         createElement(FilesPanel, {
           project: undefined,
+          directory,
           list: reads.list,
           turn: 0,
           onOpenFile: () => Promise.resolve(),
@@ -1179,6 +1228,325 @@ describe("The Files panel", () => {
     })
   })
 
+  context("when the person asks for a row's menu", () => {
+    // A browser lets go of focus held in what it hides, as the closing menu does; jsdom keeps it
+    // there, and won't blur what is hidden, so the menu is shown again for the blur.
+    const fixup = new MutationObserver(() => {
+      const active = document.activeElement
+      const hidden = active instanceof HTMLElement ? active.closest<HTMLElement>("[hidden]") : null
+      if (!hidden) return
+      hidden.hidden = false
+      ;(active as HTMLElement).blur()
+      hidden.hidden = true
+    })
+    beforeEach(() =>
+      fixup.observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["hidden"],
+      }),
+    )
+    afterEach(() => fixup.disconnect())
+    const select = (panel: Awaited<ReturnType<typeof mount>>, name: string): HTMLElement =>
+      panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
+
+    it("focuses the row, which keeps the tree's tab stop and has focus back once the menu closes", async () => {
+      const panel = await mount(work())
+      await rightClick(select(panel, "package.json"))
+
+      expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
+      expect(panel.view.container.querySelector("[role=treeitem][tabindex='0']")?.textContent).toBe(
+        "package.json",
+      )
+      act(() => {
+        document.activeElement!.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        )
+      })
+      await frames()
+
+      expect(openMenu()).toBeNull()
+      expect(document.activeElement).toBe(select(panel, "package.json"))
+      panel.view.unmount()
+    })
+
+    it("copies its path on the backend's machine, or from the project's root, and says nothing", async () => {
+      const copied = clipboard()
+      const panel = await mount(work())
+
+      await rightClick(select(panel, "useCart.ts"))
+      await choose("Copy Path")
+      await rightClick(select(panel, "useCart.ts"))
+      await choose("Copy Relative Path")
+      await panel.settle()
+
+      expect(copied).toEqual(["/home/me/shop/src/cart/useCart.ts", "src/cart/useCart.ts"])
+      expect(panel.view.container.querySelector("[role=alert]")).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("is the row's from its chips too", async () => {
+      const copied = clipboard()
+      const panel = await mount(work())
+
+      await rightClick(panel.row("useCart.ts").querySelector(".files-chip")!)
+      await choose("Copy Relative Path")
+
+      expect(copied).toEqual(["src/cart/useCart.ts"])
+      panel.view.unmount()
+    })
+
+    it("is aimed at the row a long press began on, which opens it with no right-click", async () => {
+      const copied = clipboard()
+      const panel = await mount(work())
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+      act(() => {
+        select(panel, "package.json").dispatchEvent(
+          new PointerEvent("pointerdown", {
+            pointerType: "touch",
+            bubbles: true,
+            clientX: 10,
+            clientY: 10,
+          }),
+        )
+      })
+      await act(() => vi.advanceTimersByTimeAsync(1000))
+      vi.useRealTimers()
+      await frames()
+      await choose("Copy Relative Path")
+
+      expect(copied).toEqual(["package.json"])
+      panel.view.unmount()
+    })
+  })
+
+  context("when the person asks for the menu of the tree's empty space", () => {
+    it("copies the project's folder itself, and refreshes", async () => {
+      const copied = clipboard()
+      const reads = backend()
+      const panel = await mount(undefined, undefined, undefined, reads)
+      await panel.click("docs")
+      const tree = panel.view.container.querySelector("[role=tree]")!
+
+      await rightClick(tree)
+      expect(menuItems()).toEqual(["Copy Path", "Refresh"])
+      await choose("Copy Path")
+      reads.folders.length = 0
+      await rightClick(tree)
+      await choose("Refresh")
+      await panel.settle()
+
+      expect(copied).toEqual(["/home/me/shop"])
+      expect(reads.folders.toSorted()).toEqual(["", "docs"])
+      panel.view.unmount()
+    })
+
+    it("is what a note's right-click opens, as a note has no menu of its own", async () => {
+      const panel = await mount(
+        undefined,
+        undefined,
+        undefined,
+        backend(undefined, [...files, "dist/"]),
+      )
+      await panel.click("dist")
+
+      await rightClick(panel.view.container.querySelector(".files-note")!)
+
+      expect(menuItems()).toEqual(["Copy Path", "Refresh"])
+      panel.view.unmount()
+    })
+
+    it("is on the line that says the project's folder is empty, which still copies the folder", async () => {
+      const copied = clipboard()
+      const panel = await mount(undefined, undefined, undefined, backend(undefined, []))
+
+      await rightClick(panel.view.container.querySelector(".files-empty")!)
+      expect(menuItems()).toEqual(["Copy Path", "Refresh"])
+      await choose("Copy Path")
+      await panel.settle()
+
+      expect(copied).toEqual(["/home/me/shop"])
+      panel.view.unmount()
+    })
+
+    it("is on the line that says the files can't be read, whose Refresh reads them again", async () => {
+      clipboard()
+      let unreadable = false
+      const reads = backend((folder, listing) => {
+        if (folder === "" && unreadable) throw new Error("gone")
+        return listing
+      })
+      const panel = await mount(undefined, undefined, undefined, reads)
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Path")
+      unreadable = true
+      act(() =>
+        panel.view.container.querySelector<HTMLElement>("button[aria-label=Refresh]")!.click(),
+      )
+      await panel.settle()
+      const line = Array.from(panel.view.container.querySelectorAll(".files-empty")).find(
+        (each) => each.textContent === "Can't read this project's files.",
+      )!
+
+      // The menu asked last was a row's, which the line doesn't keep.
+      await rightClick(line)
+      expect(menuItems()).toEqual(["Copy Path", "Refresh"])
+      unreadable = false
+      await choose("Refresh")
+      await panel.settle()
+
+      expect(panel.rows()).toContain("package.json")
+      panel.view.unmount()
+    })
+  })
+
+  context("when a copy fails", () => {
+    const alert = (panel: Awaited<ReturnType<typeof mount>>): Element | null =>
+      panel.view.container.querySelector("[role=alert]")
+
+    it("says so above the tree when the clipboard refuses, until dismissed", async () => {
+      clipboard(true)
+      const panel = await mount(undefined)
+
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Path")
+      await panel.settle()
+
+      expect(alert(panel)?.textContent).toBe(
+        "Couldn't copy /home/me/shop/package.json to the clipboard.",
+      )
+      act(() => alert(panel)!.querySelector<HTMLElement>("button[aria-label=Dismiss]")!.click())
+      expect(alert(panel)).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("says so where the page has no clipboard, and forgets it once the panel hides", async () => {
+      const panel = await mount(undefined)
+
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Relative Path")
+      expect(alert(panel)?.textContent).toBe("Couldn't copy package.json to the clipboard.")
+
+      await panel.show(false)
+      expect(alert(panel)).toBeNull()
+      await panel.show(true)
+      expect(alert(panel)).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("says nothing of a copy that fails once the panel is hidden, there or when it shows again", async () => {
+      let refuse = (): void => {}
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: () =>
+            new Promise<void>((_, reject) => {
+              refuse = () => reject(new Error("Write permission denied."))
+            }),
+        },
+      })
+      const panel = await mount(undefined)
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Path")
+
+      await panel.show(false)
+      await act(async () => refuse())
+      await panel.settle()
+      expect(alert(panel)).toBeNull()
+      await panel.show(true)
+
+      expect(alert(panel)).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("says nothing of a copy chosen from a menu left open as the panel hid", async () => {
+      clipboard(true)
+      const panel = await mount(undefined)
+      await rightClick(panel.row("package.json"))
+
+      await panel.show(false)
+      await choose("Copy Path")
+      await panel.settle()
+      expect(alert(panel)).toBeNull()
+      await panel.show(true)
+
+      expect(alert(panel)).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("stops saying so once a copy works", async () => {
+      const panel = await mount(undefined)
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Path")
+      expect(alert(panel)).not.toBeNull()
+
+      clipboard()
+      await rightClick(panel.row("package.json"))
+      await choose("Copy Path")
+      await panel.settle()
+
+      expect(alert(panel)).toBeNull()
+      panel.view.unmount()
+    })
+  })
+
+  context("when the person presses Shift+Alt+C on a row", () => {
+    const chord = (key: string): KeyboardEvent =>
+      new KeyboardEvent("keydown", {
+        key,
+        code: "KeyC",
+        shiftKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+
+    it("copies its path, whatever character the keys type, and keeps the keys from the workspace", async () => {
+      const copied = clipboard()
+      const panel = await mount(work())
+      const reached: KeyboardEvent[] = []
+      const listen = (event: KeyboardEvent): void => void reached.push(event)
+      window.addEventListener("keydown", listen)
+      const button = panel.row("useCart.ts").querySelector<HTMLElement>("[role=treeitem]")!
+      // Option and Shift on a Mac type Ç.
+      const [plain, mac] = [chord("C"), chord("Ç")]
+
+      act(() => {
+        button.focus()
+        button.dispatchEvent(plain)
+        button.dispatchEvent(mac)
+      })
+      window.removeEventListener("keydown", listen)
+      await panel.settle()
+
+      expect(copied).toEqual([
+        "/home/me/shop/src/cart/useCart.ts",
+        "/home/me/shop/src/cart/useCart.ts",
+      ])
+      expect([plain.defaultPrevented, mac.defaultPrevented]).toEqual([true, true])
+      expect(reached).toEqual([])
+      panel.view.unmount()
+    })
+  })
+
+  context("when the person refreshes", () => {
+    it("reads the root and the open folders again", async () => {
+      const reads = backend()
+      const panel = await mount(undefined, undefined, undefined, reads)
+      await panel.click("docs")
+      reads.folders.length = 0
+
+      act(() =>
+        panel.view.container.querySelector<HTMLElement>("button[aria-label=Refresh]")!.click(),
+      )
+      await panel.settle()
+
+      expect(reads.folders.toSorted()).toEqual(["", "docs"])
+      panel.view.unmount()
+    })
+  })
+
   context("when the person uses the keyboard", () => {
     const press = (panel: Awaited<ReturnType<typeof mount>>, name: string, key: string): void => {
       const button = panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
@@ -1282,6 +1650,7 @@ describe("The Files panel", () => {
           null,
           createElement(FilesPanel, {
             project: undefined,
+            directory,
             list: () => new Promise<FolderListing>(() => {}),
             turn: 0,
             onOpenFile: () => Promise.resolve(),

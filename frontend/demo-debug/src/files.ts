@@ -4,6 +4,7 @@ import type { Workspace } from "@novadeck/core/types"
 import { demoPaths, filesThird, type DemoFiles } from "@novadeck/demo/files"
 import { terminalOf } from "@novadeck/demo/workspace"
 
+import { refuseClipboard, restoreClipboard } from "./clipboard"
 import type { DemoActionGroup } from "./types"
 
 // Files exist for the storefront project only.
@@ -80,12 +81,18 @@ export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGr
               run: () => files.degrade("", "truncate"),
             },
             {
+              label: "Copying a path fails",
+              hint: "Every copy in the page fails until Files read normally again or a reboot: in Files, Copy Path or Copy Relative Path on a row's right-click, Copy Path on the empty space's, or Shift+Alt+C on a focused row shows a red-edged line above the tree saying it couldn't copy that path, with a Dismiss button; hiding the panel clears it",
+              run: refuseClipboard,
+            },
+            {
               label: "Files read normally again",
-              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again",
-              run: () =>
-                (["", "src/cart", "src/components"] as const).forEach((folder) =>
-                  files.degrade(folder, undefined),
-                ),
+              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and paths copy again at once",
+              run: () => {
+                restoreClipboard()
+                for (const folder of ["", "src/cart", "src/components"])
+                  files.degrade(folder, undefined)
+              },
             },
             {
               label: "Agent creates a file in a folder",

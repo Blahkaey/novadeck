@@ -1,3 +1,4 @@
+import { absolutePath } from "@novadeck/core/files"
 import { activeProject } from "@novadeck/core/state"
 import type { Workspace, WorkspaceState, WorkspaceTarget } from "@novadeck/core/types"
 
@@ -22,13 +23,6 @@ export type FileCommands = {
 type SourceDependencies = {
   readonly markCreated: (created: { readonly context: string; readonly id: string }) => void
   readonly pulse: () => void
-}
-
-// The path of a file from a project's directory, in the separator the directory is written in.
-export const absolutePath = (directory: string, path: string): string => {
-  const windows = directory.includes("\\") && !directory.includes("/")
-  const base = directory.replace(/[\\/]+$/, "")
-  return windows ? `${base}\\${path.replaceAll("/", "\\")}` : `${base}/${path}`
 }
 
 const sessionState = (workspace: Workspace, target: WorkspaceTarget): WorkspaceState | undefined =>

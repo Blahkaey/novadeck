@@ -57,6 +57,21 @@ export type ProjectFiles = {
   readonly list: (projectId: string, folder: string) => Promise<FolderListing>
 }
 
+// A project's directory is written as the backend's machine writes it: a Windows one with
+// backslashes and no slash.
+const windowsDirectory = (directory: string): boolean =>
+  directory.includes("\\") && !directory.includes("/")
+
+// A path from a project's root (`src/cart/useCart.ts`) in the separator its directory is
+// written in.
+export const relativePath = (directory: string, path: string): string =>
+  windowsDirectory(directory) ? path.replaceAll("/", "\\") : path
+
+// The path of a file from a project's directory, on the backend's machine, in the separator
+// the directory is written in.
+export const absolutePath = (directory: string, path: string): string =>
+  `${directory.replace(/[\\/]+$/, "")}${windowsDirectory(directory) ? "\\" : "/"}${relativePath(directory, path)}`
+
 // How an agent's trail fades once it stops writing a file: from this opacity, by this much every
 // `trailTimeMs`, gone below `trailGone`. The panel's CSS keyframes (files.css) follow the same
 // curve, in the Files tree and the file preview alike.

@@ -95,6 +95,8 @@ export const SidebarSection = memo((): React.JSX.Element => {
     (folder: string) => filesFeed!.list(projectId, folder),
     [filesFeed, projectId],
   )
+  // Where the panel's paths are copied from.
+  const directory = useWorkspaceState((workspace) => activeProject(workspace)!.directory)
   // Its folders are read again when an agent's turn ends in the project.
   const turn = useWorkspaceState((workspace) => latestTurnEnd(activeProject(workspace)!))
   const selectedHandle = useWorkspaceState((workspace) => {
@@ -169,6 +171,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
       filesFeed
         ? {
             project: filesProject ?? worksOverlay,
+            directory,
             list,
             turn,
             watch: watchWorks,
@@ -183,6 +186,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
       filesFeed,
       filesProject,
       worksOverlay,
+      directory,
       list,
       turn,
       watchWorks,

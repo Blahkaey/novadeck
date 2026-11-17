@@ -1,26 +1,8 @@
 import type { Backend } from "@novadeck/core/port"
 import { isShowcase, type PlanFault } from "@novadeck/demo/showcase/simulation"
 
+import { refuseClipboard, restoreClipboard } from "./clipboard"
 import type { DemoAction, DemoActionGroup } from "./types"
-
-// Undoes the clipboard that refuses every copy, while one stands in for the browser's. A new
-// boot of the demo undoes it too, as a variant without the Plan group has no way back.
-let restoreClipboard: (() => void) | undefined
-
-// Has the browser refuse to copy, as where it denies the page the clipboard: a write rejects.
-const refuseClipboard = (): void => {
-  if (restoreClipboard) return
-  const own = Object.getOwnPropertyDescriptor(navigator, "clipboard")
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: () => Promise.reject(new Error("The clipboard refused the copy.")) },
-    configurable: true,
-  })
-  restoreClipboard = () => {
-    if (own) Object.defineProperty(navigator, "clipboard", own)
-    else Reflect.deleteProperty(navigator, "clipboard")
-    restoreClipboard = undefined
-  }
-}
 
 const faults: readonly {
   readonly label: string
@@ -72,9 +54,8 @@ const copyFails: DemoAction = {
 
 // The panel's group for what can go wrong with a plan the person edits, on the selected
 // terminal's agent. Only a showcase with agents has plans.
-export const planGroups = (companions: Backend["companions"]): readonly DemoActionGroup[] => {
-  restoreClipboard?.()
-  return companions && isShowcase(companions) && companions.plans
+export const planGroups = (companions: Backend["companions"]): readonly DemoActionGroup[] =>
+  companions && isShowcase(companions) && companions.plans
     ? [
         {
           section: "Agents",
@@ -84,7 +65,7 @@ export const planGroups = (companions: Backend["companions"]): readonly DemoActi
               label,
               hint,
               run: ({ selected, note }) => {
-                if (fault === undefined) restoreClipboard?.()
+                if (fault === undefined) restoreClipboard()
                 const key = selected()
                 if (!key || !companions.fault(key, fault))
                   note("Select a terminal whose agent wrote a plan first.")
@@ -96,4 +77,3 @@ export const planGroups = (companions: Backend["companions"]): readonly DemoActi
         },
       ]
     : []
-}

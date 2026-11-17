@@ -27,6 +27,7 @@ import { sessionOf, terminalOf } from "@novadeck/demo/workspace"
 import { approvalGroups, createDemoApprovals } from "./approvals"
 import { babciaGroups } from "./babcia"
 import type { BootRehearsals } from "./boot-rehearsal"
+import { restoreClipboard } from "./clipboard"
 import { createDebugPanel, type DebugPanel } from "./DebugPanel"
 import { createDemoPortable, type DemoPortable } from "./desktop/portable"
 import { createDemoSandbox } from "./desktop/sandbox"
@@ -125,6 +126,8 @@ export const debugPanelOf = (backend: Backend): DebugPanel | undefined => panels
 // that can drop, a crash loop that can trip, a boot that takes its time, and the states
 // the runner's terminals, agents and desktop can be in, all driven by the debug panel.
 export const createDebugDemo = (launch: DemoLaunch): Backend => {
+  // A clipboard the last boot's panel refused is the page's own again.
+  restoreClipboard()
   const connection = createStore<BackendConnectionState>("connected")
   const crashes = createStore(0)
   const turns = demoTurns()

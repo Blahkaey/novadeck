@@ -1,3 +1,4 @@
+import { vi } from "vitest"
 import { page, userEvent } from "vitest/browser"
 
 import { expectStaysTrue } from "../support/layouts"
@@ -153,6 +154,49 @@ describe("The Files panel", () => {
       expect(seen.filter(({ truncated }) => truncated)).toEqual([])
       expect(seen.filter(({ width, count }) => width >= needed + 2 && count !== 2)).toEqual([])
       expect(seen.filter(({ width, count }) => width < needed && count !== 1)).toEqual([])
+    })
+  })
+
+  context("when the person asks for a row's menu", () => {
+    it("copies the row's path in the project's folder, and its path from the root", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const copied = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+      const select = page.getByRole("treeitem", { name: /^Checkout\.tsx,/ })
+      const menu = page.getByRole("menu", { name: "Checkout.tsx actions" })
+
+      await select.click({ button: "right" })
+      await expect.element(menu).toBeVisible()
+      // The right-click moved the tree's one tab stop onto the row.
+      await expect.element(select).toHaveAttribute("tabindex", "0")
+      await menu.getByRole("menuitem", { name: /^Copy Path/ }).click()
+      await select.click({ button: "right" })
+      await menu.getByRole("menuitem", { name: "Copy Relative Path" }).click()
+
+      await expect
+        .poll(() => copied.mock.calls)
+        .toEqual([
+          ["~/projects/storefront/src/checkout/Checkout.tsx"],
+          ["src/checkout/Checkout.tsx"],
+        ])
+      await expect.element(page.getByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("says above the tree that it couldn't copy, until dismissed", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"))
+      const files = page.getByRole("region", { name: "Files" })
+
+      await page.getByRole("treeitem", { name: /^Checkout\.tsx,/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Copy Relative Path" }).click()
+
+      const failure = files.getByRole("alert")
+      await expect
+        .element(failure)
+        .toHaveTextContent("Couldn't copy src/checkout/Checkout.tsx to the clipboard.")
+      await failure.getByRole("button", { name: "Dismiss" }).click()
+      await expect.element(failure).not.toBeInTheDocument()
     })
   })
 

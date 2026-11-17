@@ -285,22 +285,10 @@ a.worktrees-pr:focus-visible {
   color: var(--color-ink);
 }
 
-/* Why a close was refused, above the list. */
+/* Why a close was refused, above the list: a `.sidebar-refusal` (sidebar.css), inset from the
+   panel's sides. */
 .worktrees-refusal {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
   margin: 8px 8px 0;
-  padding: 8px 10px;
-  border: var(--border-width) solid var(--color-danger-fg);
-  border-radius: var(--radius-control, 4px);
-  color: var(--color-ink);
-}
-.worktrees-refusal p {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 /* What closing keeps, in the dialog. */

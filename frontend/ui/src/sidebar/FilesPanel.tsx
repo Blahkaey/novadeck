@@ -1,8 +1,10 @@
-import type { FolderListing, FilesProject } from "@novadeck/core/files"
+import { absolutePath, type FolderListing, type FilesProject } from "@novadeck/core/files"
+import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { ChevronsDownUp } from "lucide-react"
+import { ChevronsDownUp, RefreshCw, X } from "lucide-react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
+import { currentPlatform, filesShortcutBindings, matchesShortcut } from "../interaction/shortcuts"
 import {
   keptWorking,
   litSet,
@@ -13,6 +15,7 @@ import {
   type Squad,
 } from "./files-agents"
 import { textWidth } from "./files-fonts"
+import { filesMenu } from "./files-menu"
 import {
   buildTree,
   chipsOf,
@@ -42,14 +45,25 @@ const noListings: Listings = new Map()
 
 const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
 
+// The path of the row an event happened in, from anywhere in it, its chips too; none on the
+// tree's empty space or a note.
+const pathAt = (target: EventTarget): string | undefined =>
+  target instanceof Element
+    ? target.closest(".files-row")?.querySelector<HTMLElement>("[data-path]")?.dataset["path"]
+    : undefined
+
 // The project's files, a folder read when the person opens it, and read again when the panel is
 // shown again or an agent's turn ends. Where the backend tells what its agents changed (the
 // demo), every live agent's work is in them: who owns each file, what they did and which one they
 // are writing now. Keeping agents' chips in the strip leaves only their work in the tree: the files
 // they touched or are writing and the folders those are in; with nothing kept every file shows.
 // Lighting an agent otherwise, by selecting its terminal or pointing at a chip, only dims the rest.
+// A right-click on a row, or off one, on the tree's empty space or the line in the tree's place,
+// which stand for the project's folder, opens the menu `filesMenu` builds for it; what the panel
+// couldn't do shows above the tree while it shows.
 export const FilesPanel = ({
   project,
+  directory,
   list,
   turn,
   watch,
@@ -64,6 +78,8 @@ export const FilesPanel = ({
 }: {
   // What the demo's agents changed in the project, laid over its files; a runner has none.
   project: FilesProject | undefined
+  // The project's directory, as the backend's machine writes it.
+  directory: string
   // Reads a folder of the project, by its path from the project's root.
   list: (folder: string) => Promise<FolderListing>
   // When an agent's turn last ended in the project, which has the folders read again.
@@ -89,6 +105,7 @@ export const FilesPanel = ({
   onHide: () => void
 }): React.JSX.Element => {
   const showing = active && visible
+  const platform = currentPlatform()
   const [listings, setListings] = useState<Listings>(noListings)
   const tree = useMemo(() => buildTree(listings, project), [listings, project])
   // The listings of a folder that vanished are dropped, to be read anew if it comes back.
@@ -146,6 +163,14 @@ export const FilesPanel = ({
     for (const folder of wanted) if (!listings.has(folder) && !isReading(folder)) read(folder)
   }, [showing, wanted, listings, read, isReading])
   const [selected, setSelected] = useState<string | null>(null)
+  // The row the menu was last asked on; undefined for the tree's empty space.
+  const [menuRow, setMenuRow] = useState<FilesRow | undefined>()
+  // What the panel couldn't do last, and in which showing of it (`shownTimes`): a line above the
+  // tree says so through that showing only, until dismissed. What fails once the panel is
+  // hidden, as a copy chosen from a menu left open as it hid, says nothing then or later.
+  const [failure, setFailure] = useState<{ readonly text: string; readonly shown: number } | null>(
+    null,
+  )
   // A chip can leave from under the pointer, folded into `+N` by another agent's write or a
   // narrower tree, with no pointerleave to say so: the agent stays lit only while that row still
   // shows that chip.
@@ -227,6 +252,7 @@ export const FilesPanel = ({
       setStripHover(undefined)
     }
   }
+  const failed = showing && failure?.shown === shownTimes ? failure.text : undefined
 
   const toggle = (path: string, to?: boolean): void => {
     const next = new Set(open)
@@ -254,6 +280,31 @@ export const FilesPanel = ({
     setStop(row.node.path)
     treeNode?.querySelector<HTMLElement>(`[data-path="${CSS.escape(row.node.path)}"]`)?.focus()
   }
+  const rowAt = (target: EventTarget): FilesRow | undefined => {
+    const path = pathAt(target)
+    return rows.find((row) => row.node.path === path)
+  }
+  // The menu is the row's under the pointer, which a right-click focuses, or the empty space's.
+  const aim = (event: React.MouseEvent): void => {
+    const row = rowAt(event.target)
+    setMenuRow(row)
+    focusRow(row)
+  }
+  // Puts text on the clipboard; a page that may not, or a clipboard that refuses, says so above
+  // the tree. A copy that works says nothing.
+  const copy = (text: string): void => {
+    setFailure(null)
+    const refused = (): void =>
+      setFailure({ text: `Couldn't copy ${text} to the clipboard.`, shown: shownTimes })
+    const write = navigator.clipboard?.writeText(text)
+    if (!write) {
+      refused()
+      return
+    }
+    void write.catch(refused)
+  }
+  // Reads the root and the open folders again, as showing the panel does.
+  const refresh = (): void => wanted.forEach((folder) => read(folder))
   // Escape in the strip or the tree lets go of every kept agent, back to following the selected
   // terminal. With nothing kept it is left for whatever else listens.
   const onEscape = (event: React.KeyboardEvent): void => {
@@ -265,11 +316,19 @@ export const FilesPanel = ({
   // Enter opens it.
   const onKeyDown = (event: React.KeyboardEvent): void => {
     onEscape(event)
-    if (event.altKey || event.ctrlKey || event.metaKey) return
-    const path = (event.target as HTMLElement).closest<HTMLElement>("[data-path]")?.dataset["path"]
+    const path = pathAt(event.target)
     const index = rows.findIndex((row) => row.node.path === path)
     const row = rows[index]
     if (!row) return
+    // Shift+Alt+C copies the focused row's path. It stops here, or the workspace would type its
+    // character into the selected terminal.
+    if (matchesShortcut(event, filesShortcutBindings(platform).copyPath)) {
+      event.preventDefault()
+      event.stopPropagation()
+      copy(absolutePath(directory, row.node.path))
+      return
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey) return
     const handled = ((): boolean => {
       switch (event.key) {
         case "ArrowDown":
@@ -314,18 +373,43 @@ export const FilesPanel = ({
       active={active}
       onClose={onHide}
       actions={
-        <Tooltip content="Collapse folders">
-          <button
-            className="icon-button dim quiet size-7"
-            type="button"
-            aria-label="Collapse folders"
-            onClick={() => setOpenFolders(new Set())}
-          >
-            <ChevronsDownUp size={14} strokeWidth={1.6} />
-          </button>
-        </Tooltip>
+        <>
+          <Tooltip content="Refresh">
+            <button
+              className="icon-button dim quiet size-7"
+              type="button"
+              aria-label="Refresh"
+              onClick={refresh}
+            >
+              <RefreshCw size={14} strokeWidth={1.6} />
+            </button>
+          </Tooltip>
+          <Tooltip content="Collapse folders">
+            <button
+              className="icon-button dim quiet size-7"
+              type="button"
+              aria-label="Collapse folders"
+              onClick={() => setOpenFolders(new Set())}
+            >
+              <ChevronsDownUp size={14} strokeWidth={1.6} />
+            </button>
+          </Tooltip>
+        </>
       }
     >
+      {failed && (
+        <div className="sidebar-refusal files-failure" role="alert">
+          <p className="text-control">{failed}</p>
+          <button
+            type="button"
+            className="icon-button small dim quiet"
+            aria-label="Dismiss"
+            onClick={() => setFailure(null)}
+          >
+            <X size={14} strokeWidth={1.5} />
+          </button>
+        </div>
+      )}
       {slots.length > 0 && (
         <FilesStrip
           slots={slots}
@@ -336,52 +420,77 @@ export const FilesPanel = ({
           onKeyDown={onEscape}
         />
       )}
-      {rootRead === "failed" ? (
-        <p className="files-empty text-control">Can't read this project's files.</p>
-      ) : rootRead === undefined ? null : rootEmpty ? (
-        <p className="files-empty text-control">This project's folder is empty.</p>
-      ) : (
-        <div
-          ref={setTreeNode}
-          role="tree"
-          aria-label="Project files"
-          aria-description={
-            stillKept.size > 0
-              ? `Only the work of ${namedAgents(stillKept)} is shown.${
-                  pointing
-                    ? ` Of that, the work of ${namedAgents(lit)} is lit; the rest is dimmed.`
-                    : ""
-                }`
-              : lit.size > 0
-                ? `The work of ${namedAgents(lit)} is lit; files and folders they did not touch are dimmed.`
-                : "No agent is lit."
+      {rootRead !== undefined && (
+        <ContextMenu
+          label={menuRow ? `${menuRow.node.name} actions` : "Project folder actions"}
+          items={filesMenu({
+            row: menuRow,
+            directory,
+            platform,
+            onCopy: copy,
+            onRefresh: refresh,
+          })}
+          trigger={
+            // The tree, or the line in its place: a right-click anywhere in it, off a row, is on
+            // the project's folder.
+            <div
+              className="files-body flex min-h-0 flex-1 flex-col"
+              onContextMenu={aim}
+              // A long press, as on a phone, may open the menu with no right-click: a touch aims it.
+              onPointerDown={(event) => {
+                if (event.pointerType !== "mouse") setMenuRow(rowAt(event.target))
+              }}
+            >
+              {rootRead === "failed" ? (
+                <p className="files-empty text-control">Can't read this project's files.</p>
+              ) : rootEmpty ? (
+                <p className="files-empty text-control">This project's folder is empty.</p>
+              ) : (
+                <div
+                  ref={setTreeNode}
+                  role="tree"
+                  aria-label="Project files"
+                  aria-description={
+                    stillKept.size > 0
+                      ? `Only the work of ${namedAgents(stillKept)} is shown.${
+                          pointing
+                            ? ` Of that, the work of ${namedAgents(lit)} is lit; the rest is dimmed.`
+                            : ""
+                        }`
+                      : lit.size > 0
+                        ? `The work of ${namedAgents(lit)} is lit; files and folders they did not touch are dimmed.`
+                        : "No agent is lit."
+                  }
+                  className="files-tree mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto pb-3"
+                  data-lit={lit.size > 0 ? [...lit].join(" ") : undefined}
+                  onKeyDown={onKeyDown}
+                  onPointerLeave={() => setHovered(undefined)}
+                >
+                  {lines.map((line) =>
+                    isNote(line) ? (
+                      <NoteRow key={`${line.path}\0${line.note}`} line={line} />
+                    ) : (
+                      <TreeRow
+                        key={line.node.path}
+                        row={line}
+                        chips={chipsByPath.get(line.node.path)}
+                        lit={lit}
+                        selected={selected === line.node.path}
+                        tabStop={tabStop === line.node.path}
+                        pulse={pulses[line.node.path]}
+                        shownTimes={shownTimes}
+                        onActivate={activate}
+                        onOpenFile={openFile}
+                        onFocus={setStop}
+                        onLight={setHovered}
+                      />
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
           }
-          className="files-tree mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto pb-3"
-          data-lit={lit.size > 0 ? [...lit].join(" ") : undefined}
-          onKeyDown={onKeyDown}
-          onPointerLeave={() => setHovered(undefined)}
-        >
-          {lines.map((line) =>
-            isNote(line) ? (
-              <NoteRow key={`${line.path}\0${line.note}`} line={line} />
-            ) : (
-              <TreeRow
-                key={line.node.path}
-                row={line}
-                chips={chipsByPath.get(line.node.path)}
-                lit={lit}
-                selected={selected === line.node.path}
-                tabStop={tabStop === line.node.path}
-                pulse={pulses[line.node.path]}
-                shownTimes={shownTimes}
-                onActivate={activate}
-                onOpenFile={openFile}
-                onFocus={setStop}
-                onLight={setHovered}
-              />
-            ),
-          )}
-        </div>
+        />
       )}
     </SidebarPanel>
   )

@@ -5,7 +5,10 @@
    sits inside. A file's marks are a `.files-cursor` for each agent writing it now, or else a
    `.files-trail` fading from its latest write. A panel with no tree shows `.files-empty`; an open folder
    that could not be read in full, or holds nothing, ends with a `.files-note` (in a
-   `.files-note-row`, which carries the guides).
+   `.files-note-row`, which carries the guides). The tree, or the line in its place, sits in a
+   `.files-body`, whose right-click opens the panel's menu. What the panel couldn't do, as a
+   copy the clipboard refused, is a `.files-failure` line at the top, a `.sidebar-refusal`
+   (sidebar.css).
 
    Hooks: on a row, data-kind="modified" | "added" | "deleted" (absent: untouched),
    data-folder, data-ignored, data-dim (an agent is lit and did not touch it), data-pulse="a" |
@@ -243,6 +246,11 @@
   margin: 0;
   padding: 12px 2px;
   color: var(--color-muted);
+}
+
+/* As wide as the tree's rows. */
+.files-failure {
+  margin: 8px 0 0;
 }
 
 .files-note-row {
