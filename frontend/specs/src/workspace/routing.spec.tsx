@@ -125,6 +125,7 @@ describe("deep links", () => {
     it("falls back from a link to a disabled view", async () => {
       await openWorkspace()
       await page.getByRole("button", { name: "Workspace preferences" }).click()
+      await preferencesDialog().getByRole("tab", { name: "Appearance" }).click()
       await preferencesDialog().getByText("Canvas", { exact: true }).click()
       await expect
         .element(preferencesDialog().getByRole("checkbox", { name: "Canvas" }))
@@ -254,7 +255,7 @@ describe("browser history", () => {
 
       history.back()
       await expect
-        .element(preferencesDialog().getByRole("tab", { name: "General" }))
+        .element(preferencesDialog().getByRole("tab", { name: "Agents" }))
         .toHaveAttribute("aria-selected", "true")
 
       history.back()

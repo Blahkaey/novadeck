@@ -37,7 +37,7 @@ describe("Agent Chat's offer", () => {
         .toBeVisible()
       await expect
         .element(
-          card().getByText("You can change this any time in Preferences → General → Agents."),
+          card().getByText("You can change this any time in Preferences → Appearance → Layout."),
         )
         .toBeVisible()
       await expect.element(turnOn()).toBeVisible()
@@ -84,10 +84,9 @@ describe("Agent Chat's offer", () => {
       await expect.element(card()).not.toBeInTheDocument()
       await expect.element(chatOf("Build")).toBeVisible()
       // It is the chat view's own setting from now on: a person who turns it off is not asked.
-      await openPreferencesOn("General")
-      const chatView = preferencesDialog().getByRole("switch", { name: "Agent Chat" })
-      await expect.element(chatView).toHaveAttribute("aria-checked", "true")
-      await chatView.click()
+      await openPreferencesOn("Appearance")
+      await expect.element(preferencesDialog().getByRole("radio", { name: "Chat" })).toBeChecked()
+      await preferencesDialog().getByRole("radio", { name: "Terminal" }).click()
       await closePreferences()
       await reloadWorkspace()
       await terminalTab("Build").click()
@@ -144,17 +143,17 @@ describe("Agent Chat's offer", () => {
   })
 
   context("when the person settles the chat view some other way", () => {
-    it("is answered by the Preferences switch, so turning it off again is not followed by an offer", async () => {
+    it("is answered by the choice in Preferences, so going back to the terminal is not followed by an offer", async () => {
       await openAsExistingUser()
       await terminalTab("Build").click()
       await expect.element(card()).toBeVisible()
-      await openPreferencesOn("General")
+      await openPreferencesOn("Appearance")
       // A dialog holds the corner.
       await expect.element(card()).not.toBeInTheDocument()
-      const chatView = preferencesDialog().getByRole("switch", { name: "Agent Chat" })
-      await chatView.click()
-      await chatView.click()
-      await expect.element(chatView).toHaveAttribute("aria-checked", "false")
+      await preferencesDialog().getByRole("radio", { name: "Chat" }).click()
+      const terminal = preferencesDialog().getByRole("radio", { name: "Terminal" })
+      await terminal.click()
+      await expect.element(terminal).toBeChecked()
       await closePreferences()
       await expectStaysAbsent(card())
     })
@@ -176,7 +175,7 @@ describe("Agent Chat's offer", () => {
     it("waits, as the tour's agent is not for the offer to change", async () => {
       localStorage.setItem("novadeck.preferences", JSON.stringify({ chatView: false }))
       await openWorkspace("/?demo=agents&tourStory=off&channel=experimental")
-      await openPreferencesOn("General")
+      await openPreferencesOn("Agents")
       const claude = preferencesDialog().getByRole("switch", { name: "Claude Code" })
       await claude.click()
       await expect.element(claude).toHaveAttribute("aria-checked", "true")

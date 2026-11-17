@@ -48,7 +48,7 @@ describe("answering Agent Chat's offer", () => {
   })
 
   context("when the person chooses the chat view themselves", () => {
-    it("is answered by the Preferences switch, on or off", () => {
+    it("is answered by the choice in Preferences, either way", () => {
       const app = open()
       app.commands.updatePreferences({ ...app.ui.getSnapshot().preferences, chatView: true })
       expect(app.answered()).toBe(true)

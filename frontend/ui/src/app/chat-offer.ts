@@ -14,7 +14,7 @@ export const selectedAgentCanChat = (workspace: Workspace): boolean => {
   return terminal !== undefined && chatAvailable(terminal)
 }
 
-// Whether the offer is due: the backend reads conversations (the chat view has a switch in
+// Whether the offer is due: the backend reads conversations (the chat view has a choice in
 // Preferences), the chat view is off, the offer was not answered yet, the welcome dialog,
 // which offers the same, is not up, no tour is running (its agent is not for the offer to
 // change), and the selected terminal has a chat to show.

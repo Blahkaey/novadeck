@@ -38,7 +38,7 @@ describe("Agent Chat's offer card", () => {
       const text = card(page)!.textContent
       expect(text).toContain("Agent Chat")
       expect(text).toContain("Read and reply to agents in a chat instead of their terminal.")
-      expect(text).toContain("You can change this any time in Preferences → General → Agents.")
+      expect(text).toContain("You can change this any time in Preferences → Appearance → Layout.")
       expect(
         [...card(page)!.querySelectorAll("button")].map(
           (b) => b.getAttribute("aria-label") ?? b.textContent,

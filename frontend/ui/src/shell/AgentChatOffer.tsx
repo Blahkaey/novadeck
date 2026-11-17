@@ -15,12 +15,12 @@ export type AgentChatOfferProps = {
   readonly returnFocus: () => boolean
 }
 
-// The words are the Preferences row's (Preferences.tsx), so the offer and the switch it points
+// The words are the Show agents as choice's (Preferences.tsx), so the offer and the choice it points
 // to say the same.
 export const chatOfferText = {
   title: "Agent Chat",
   line: "Read and reply to agents in a chat instead of their terminal.",
-  quiet: "You can change this any time in Preferences → General → Agents.",
+  quiet: "You can change this any time in Preferences → Appearance → Layout.",
   accept: "Turn on",
   decline: "No thanks",
 } as const

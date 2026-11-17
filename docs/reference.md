@@ -185,7 +185,7 @@ setting in Preferences or finishing the welcome dialog; the answer is kept in lo
 (`novadeck.agent-chat-offer-answered`, `frontend/core/src/agents/chat-offer.ts`), not in the
 preferences, so preferences saved earlier load as before.
 
-With **Agent Chat** on (Preferences → General → Agents, or the welcome dialog), a terminal
+With **Agent Chat** on (Preferences → Appearance → Layout, or the welcome dialog), a terminal
 running an agent (Claude Code, Codex or Antigravity) has a **Chat** button in
 its window header wherever the backend reads the agents' transcripts
 (`backend.conversations`). Chat shows the agent's own conversation as it records it,

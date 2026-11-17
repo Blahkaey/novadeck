@@ -20,14 +20,21 @@ import {
 } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
-/** Opens Preferences on its Appearance tab, which holds the theme, the mode and the sound. */
+/** Opens Preferences on its Appearance tab, which holds the theme, the mode, the layout and the text. */
 const openAppearance = async (): Promise<void> => {
   await openPreferencesOn("Appearance")
   await expect.element(tab("Appearance")).toHaveAttribute("aria-selected", "true")
 }
 
-const tab = (name: "General" | "Appearance" | "Addons" | "Shortcuts" | "About"): Locator =>
-  preferencesDialog().getByRole("tab", { name })
+/** Opens Preferences on its General tab, which holds the notifications, the bell and the transcripts. */
+const openGeneral = async (): Promise<void> => {
+  await openPreferencesOn("General")
+  await expect.element(tab("General")).toHaveAttribute("aria-selected", "true")
+}
+
+const tab = (
+  name: "Agents" | "General" | "Appearance" | "Addons" | "Shortcuts" | "About",
+): Locator => preferencesDialog().getByRole("tab", { name })
 
 const viewModeChoice = (name: "Focus" | "Grid" | "Canvas"): Locator =>
   preferencesDialog().getByRole("group", { name: "View modes" }).getByRole("checkbox", { name })
@@ -131,7 +138,7 @@ describe("Preferences", () => {
   context("when choosing whether terminals keep transcripts", () => {
     it("keeps them by default, says they are saved encrypted, and turns them off", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openPreferencesOn("General")
       await expect.element(transcriptsSwitch()).toHaveAttribute("aria-checked", "true")
       await expect
         .element(transcriptsSwitch())
@@ -139,7 +146,7 @@ describe("Preferences", () => {
       await transcriptsSwitch().click()
       await expect.element(transcriptsSwitch()).toHaveAttribute("aria-checked", "false")
       await closePreferences()
-      await openPreferences()
+      await openPreferencesOn("General")
       await expect.element(transcriptsSwitch()).toHaveAttribute("aria-checked", "false")
     })
   })
@@ -147,7 +154,7 @@ describe("Preferences", () => {
   context("when choosing how long idle agents run", () => {
     it("stops them after an hour by default, and keeps another choice, or never", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openPreferencesOn("Agents")
       const idle = () =>
         preferencesDialog().getByRole("combobox", { name: "Stop idle agents after" })
       await expect.element(idle()).toHaveTextContent("1 hour")
@@ -155,7 +162,7 @@ describe("Preferences", () => {
       await preferencesDialog().getByRole("option", { name: "4 hours" }).click()
       await expect.element(idle()).toHaveTextContent("4 hours")
       await closePreferences()
-      await openPreferences()
+      await openPreferencesOn("Agents")
       await expect.element(idle()).toHaveTextContent("4 hours")
       await idle().click()
       await preferencesDialog().getByRole("option", { name: "Off" }).click()
@@ -166,7 +173,7 @@ describe("Preferences", () => {
   context("when the app cannot keep transcripts encrypted", () => {
     it("shows the switch off and disabled, and says why", async () => {
       await openWorkspace("/?transcripts=unavailable")
-      await openPreferences()
+      await openPreferencesOn("General")
       await expect.element(transcriptsSwitch()).toHaveAttribute("aria-checked", "false")
       await expect.element(transcriptsSwitch()).toBeDisabled()
       await expect
@@ -181,7 +188,7 @@ describe("Preferences", () => {
       await outputDrawn()
       expect(outputStyle("fontFamily")).toMatch(/^"JetBrains Mono Variable"/)
       expect(outputStyle("fontVariantLigatures")).toBe("none")
-      await openPreferences()
+      await openPreferencesOn("Appearance")
       await expect.element(ligaturesSwitch()).toHaveAttribute("aria-checked", "false")
       await ligaturesSwitch().click()
       await expect.element(ligaturesSwitch()).toHaveAttribute("aria-checked", "true")
@@ -194,20 +201,72 @@ describe("Preferences", () => {
   })
 
   context("when opened from the header", () => {
-    it("shows the General section with its settings", async () => {
+    it("opens the first tab, Agents, with the agents' settings", async () => {
       await openWorkspace()
 
       await openPreferences()
+
+      await expect.element(tab("Agents")).toHaveAttribute("aria-selected", "true")
+      await expect.element(tab("General")).toHaveAttribute("aria-selected", "false")
+      const agents = preferencesDialog().getByRole("tabpanel", { name: "Agents" })
+      await expect.element(agents.getByRole("switch", { name: "Claude Code" })).toBeVisible()
+    })
+
+    it("opens General, which holds the notifications and the transcripts, when it is chosen", async () => {
+      await openWorkspace()
+
+      await openPreferencesOn("General")
 
       await expect.element(tab("General")).toHaveAttribute("aria-selected", "true")
       await expect.element(tab("Shortcuts")).toHaveAttribute("aria-selected", "false")
       const general = preferencesDialog().getByRole("tabpanel", { name: "General" })
       await expect
-        .element(general.getByRole("combobox", { name: "Text size" }))
-        .toHaveTextContent("13px")
-      await expect.element(viewModeChoice("Focus")).toBeChecked()
-      await expect.element(viewModeChoice("Grid")).toBeChecked()
-      await expect.element(viewModeChoice("Canvas")).toBeChecked()
+        .element(general.getByRole("switch", { name: "Notify when an agent needs you" }))
+        .toBeVisible()
+      await expect.element(general.getByRole("switch", { name: "Transcripts" })).toBeVisible()
+    })
+
+    it("lists Agents first, then Appearance and General", async () => {
+      await openWorkspace()
+
+      await openPreferences()
+
+      const names = preferencesDialog()
+        .getByRole("tab")
+        .elements()
+        .map((element) => element.textContent)
+      expect(names.slice(0, 3)).toEqual(["Agents", "Appearance", "General"])
+    })
+  })
+
+  context("when linked to an old General section", () => {
+    it("opens General, which still holds what it did of the notifications", async () => {
+      await openWorkspace(
+        "/projects/storefront/sessions/initial/focus?dialog=preferences&section=general",
+      )
+
+      await expect.element(tab("General")).toHaveAttribute("aria-selected", "true")
+      await expect
+        .element(
+          preferencesDialog().getByRole("switch", { name: "Notify when an agent needs you" }),
+        )
+        .toBeVisible()
+    })
+  })
+
+  context("when linked to the Agents section", () => {
+    it("opens it with the agents and when to stop the idle ones", async () => {
+      await openWorkspace(
+        "/projects/storefront/sessions/initial/focus?dialog=preferences&section=agents",
+      )
+
+      await expect.element(tab("Agents")).toHaveAttribute("aria-selected", "true")
+      const agents = preferencesDialog().getByRole("tabpanel", { name: "Agents" })
+      await expect.element(agents.getByRole("switch", { name: "Claude Code" })).toBeVisible()
+      await expect.element(agents.getByRole("switch", { name: "Codex" })).toBeVisible()
+      await expect
+        .element(agents.getByRole("combobox", { name: "Stop idle agents after" }))
+        .toBeVisible()
     })
   })
 
@@ -543,7 +602,7 @@ describe("View mode preferences", () => {
   context("when a view is turned off", () => {
     it("removes it from the view switcher and keeps that after reopening", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openAppearance()
 
       await viewModeChoice("Grid").click()
       await closePreferences()
@@ -560,7 +619,7 @@ describe("View mode preferences", () => {
   context("when the current view is turned off", () => {
     it("moves to the next enabled view", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openAppearance()
 
       await viewModeChoice("Focus").click()
       await closePreferences()
@@ -574,7 +633,7 @@ describe("View mode preferences", () => {
   context("when only one view is left", () => {
     it("keeps that view from being turned off", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openAppearance()
 
       await viewModeChoice("Grid").click()
       await viewModeChoice("Canvas").click()
@@ -592,7 +651,7 @@ describe("Terminal text size preference", () => {
       await openWorkspace()
       await outputDrawn()
       const initial = outputTextSize()
-      await openPreferences()
+      await openAppearance()
 
       await preferencesDialog().getByRole("combobox", { name: "Text size" }).click()
       await preferencesDialog().getByRole("option", { name: "15px" }).click()
@@ -605,7 +664,7 @@ describe("Terminal text size preference", () => {
 
       await reloadWorkspace()
       await expect.poll(outputTextSize).toBeGreaterThan(initial)
-      await openPreferences()
+      await openAppearance()
       await expect
         .element(preferencesDialog().getByRole("combobox", { name: "Text size" }))
         .toHaveTextContent("15px")
@@ -775,7 +834,7 @@ describe("Appearance preference", () => {
   })
 
   context("on the Appearance tab", () => {
-    it("holds the theme and the mode, which General no longer does", async () => {
+    it("holds the theme, the mode, the layout and the text, which General no longer does", async () => {
       await openWorkspace()
       await openAppearance()
 
@@ -784,13 +843,20 @@ describe("Appearance preference", () => {
         .element(appearance.getByRole("combobox", { name: "Theme" }))
         .toHaveTextContent("Coolant")
       await expect.element(modeChoice("System")).toBeChecked()
+      await expect.element(viewModeChoice("Focus")).toBeChecked()
+      await expect.element(viewModeChoice("Grid")).toBeChecked()
+      await expect.element(viewModeChoice("Canvas")).toBeChecked()
+      await expect
+        .element(appearance.getByRole("combobox", { name: "Text size" }))
+        .toHaveTextContent("13px")
+      await expect.element(appearance.getByRole("switch", { name: "Ligatures" })).toBeVisible()
       await tab("General").click()
       await expect
         .element(preferencesDialog().getByRole("combobox", { name: "Theme" }))
         .not.toBeInTheDocument()
       await expect
         .element(preferencesDialog().getByRole("combobox", { name: "Text size" }))
-        .toBeVisible()
+        .not.toBeInTheDocument()
     })
   })
 
@@ -802,10 +868,9 @@ describe("Appearance preference", () => {
     it("follows the theme until another sound is chosen, which it keeps", async () => {
       await openWorkspace("/?desktop=on")
       await openAppearance()
-
-      await expect.element(sound()).toHaveTextContent("Theme's bell (Felt)")
       await preferencesDialog().getByRole("combobox", { name: "Theme" }).click()
       await preferencesDialog().getByRole("option", { name: "Phosphor Amber" }).click()
+      await tab("General").click()
       await expect.element(sound()).toHaveTextContent("Theme's bell (Afterglow)")
 
       await sound().click()
@@ -822,7 +887,7 @@ describe("Appearance preference", () => {
       await expect.element(sound()).toHaveTextContent("Beam")
       await expect.poll(savedChoice).toBe("beam")
       await closePreferences()
-      await openAppearance()
+      await openGeneral()
       await expect.element(sound()).toHaveTextContent("Beam")
     })
 
@@ -835,7 +900,7 @@ describe("Appearance preference", () => {
       }
       try {
         await openWorkspace("/?desktop=on")
-        await openAppearance()
+        await openGeneral()
 
         await sound().click()
         await preferencesDialog().getByRole("option", { name: "Settle" }).click()
@@ -850,7 +915,7 @@ describe("Appearance preference", () => {
 
     it("is set where the app shows desktop notifications, its sound and volume only while it rings", async () => {
       await openWorkspace("/?desktop=on")
-      await openAppearance()
+      await openGeneral()
       const volume = () => preferencesDialog().getByRole("slider", { name: "Volume" })
       const hear = () => preferencesDialog().getByRole("button", { name: "Hear it" })
 
@@ -869,20 +934,20 @@ describe("Appearance preference", () => {
 
     it("keeps the volume it is set to, said as a percentage", async () => {
       await openWorkspace("/?desktop=on")
-      await openAppearance()
+      await openGeneral()
       const volume = () => preferencesDialog().getByRole("slider", { name: "Volume" })
 
       await expect.element(volume()).toHaveAttribute("aria-valuetext", "60%")
       await volume().fill("0.3")
       await expect.element(volume()).toHaveAttribute("aria-valuetext", "30%")
       await closePreferences()
-      await openAppearance()
+      await openGeneral()
       await expect.element(volume()).toHaveValue("0.3")
     })
 
     it("is left out where the app shows no desktop notifications", async () => {
       await openWorkspace()
-      await openPreferences()
+      await openPreferencesOn("General")
 
       await expect
         .element(
@@ -890,10 +955,6 @@ describe("Appearance preference", () => {
         )
         .toBeVisible()
       await expect.element(soundSwitch()).not.toBeInTheDocument()
-      await tab("Appearance").click()
-      await expect
-        .element(preferencesDialog().getByRole("combobox", { name: "Theme" }))
-        .toBeVisible()
       await expectStaysAbsent(soundSwitch())
       await expect
         .element(preferencesDialog().getByRole("combobox", { name: "Sound" }))
