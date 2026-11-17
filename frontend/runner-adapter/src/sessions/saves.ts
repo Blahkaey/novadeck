@@ -1,8 +1,7 @@
 import type { Workspace, WorkspaceSession } from "@novadeck/core/types"
-import { maxClientStateLength } from "@novadeck/protocol"
+import { fitsRunner, maxClientStateLength } from "@novadeck/protocol"
 import { hasCode } from "@novadeck/runner-client"
 
-import { fitsRunner } from "../fits"
 import { reportCaught } from "../streams"
 import { encodeSession } from "./state"
 

@@ -76,6 +76,10 @@ const blockedText = (reason: PlanUnwritableReason, agent: string): string => {
       return "Novadeck can't write to this, since it isn't a plan file, so your edits can't be saved. Your edits are kept here until you close this plan."
     case "outside":
       return "Novadeck saves plans only in the project's folder or the agent's own plans folder, and this one is elsewhere, so your edits can't be saved. Your edits are kept here until you close this plan."
+    case "moved":
+      return "This plan now points at another file, so your edits can't be saved into it. Your edits are kept here until you close this plan."
+    case "not-text":
+      return "This plan's file is no longer text Novadeck can edit, so your edits can't be saved. Your edits are kept here until you close this plan."
     case "transcript":
       return readOnlyText(agent)
   }

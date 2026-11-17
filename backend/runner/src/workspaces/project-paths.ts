@@ -24,3 +24,13 @@ export const within = (root: string, path: string): boolean => {
   const route = relative(root, path)
   return route === "" || (!isAbsolute(route) && route.split(sep)[0] !== "..")
 }
+
+/**
+ * Whether `path` is Git's own `.git`, or in it, by its way from `root`, the project's real
+ * folder: a name `.git` on the way in any letters' case, as a filesystem that doesn't tell
+ * them apart reads it. Both are real paths, so a link or a short name to it is found too.
+ */
+export const inGit = (root: string, path: string): boolean =>
+  relative(root, path)
+    .split(sep)
+    .some((name) => name.toLowerCase() === ".git")

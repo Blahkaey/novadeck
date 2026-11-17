@@ -565,9 +565,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
       const texts: string[] = []
       const controller = new AbortController()
       const reading = (async () => {
-        for await (const content of shell
-          .items(manager)
-          .content(item!.id, undefined, controller.signal))
+        for await (const content of shell.items(manager).content(item!.id, {}, controller.signal))
           if (content.state === "ready" && content.content.kind === "plan")
             texts.push(content.content.text)
       })()

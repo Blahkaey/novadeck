@@ -14,6 +14,7 @@ import type { SessionContext } from "@novadeck/wire/server"
 import { implement, ORPCError } from "@orpc/server"
 
 import { savePlan } from "./companions/content.js"
+import { refuseMoved } from "./companions/editing.js"
 import type { CompanionItems } from "./companions/items.js"
 import { planSaveFolders } from "./companions/plan-folders.js"
 import { DomainError } from "./errors.js"
@@ -152,7 +153,7 @@ export const createRouter = (options: {
     content.state === "ready" && content.content.kind === "plan" && agent !== undefined
       ? { ...content, content: { ...content.content, skill: await agents.connected(agent) } }
       : content
-  // The save of each plan under way, which the next waits for.
+  // The save of each plan or file under way, which the next waits for.
   const saving = new Map<string, Promise<void>>()
   const api = implement(served).$context<SessionContext>()
 
@@ -365,7 +366,7 @@ export const createRouter = (options: {
         items.answerLook(input, context.session.id),
       ),
       content: api.companions.content.handler(async function* ({ input, signal }) {
-        for await (const content of items.content(input.itemId, input.reveal, signal))
+        for await (const content of items.content(input.itemId, input, signal))
           yield await withSkill(content, store.item(input.itemId)?.plan?.agent)
       }),
       changeFile: api.companions.changeFile.handler(({ input }) => items.changeFile(input)),
@@ -373,8 +374,11 @@ export const createRouter = (options: {
       save: api.companions.save.handler(async ({ input }) => {
         const item = store.item(input.itemId)
         if (!item) throw new DomainError("NOT_FOUND", "Item not found")
-        // One save of a plan at a time, each judged by the file the one before left.
+        // One save of an item at a time, each judged by the file the one before left. A file's
+        // is judged by its item as it is then, which a project window may have re-pointed.
         const run = async () => {
+          if (item.plan === null) return items.saveFile(input)
+          refuseMoved(item, input.path)
           const folders = await planSaveFolders(item, {
             projectFolder: (sessionId) => store.project(store.session(sessionId).projectId).cwd,
             place: (terminalId) => terminals.place(terminalId),
@@ -382,7 +386,7 @@ export const createRouter = (options: {
           })
           const result = await savePlan(item, input.text, input.basedOn, folders)
           if (result.saved) return result
-          const skill = item.plan ? await agents.connected(item.plan.agent) : false
+          const skill = await agents.connected(item.plan.agent)
           return { ...result, current: { ...result.current, skill } }
         }
         const answer = (saving.get(item.id) ?? Promise.resolve()).then(run, run)
@@ -397,9 +401,9 @@ export const createRouter = (options: {
         try {
           return await answer
         } catch (error) {
-          // A plan that can't be written is told to the client; anything else is only seen here.
+          // An edit that can't be written is told to the client; anything else is only seen here.
           if (!(error instanceof DomainError))
-            log.error("companions.plan-save-failed", "Novadeck could not save a plan", {
+            log.error("companions.plan-save-failed", "Novadeck could not save a plan or file", {
               data: { path: item.path ?? null },
               err: error,
             })

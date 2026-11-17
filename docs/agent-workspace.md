@@ -295,16 +295,35 @@ through the backend's seed and actions, as terminals do; the person's moves are
 workspace actions the backend makes so. The pane loads content through the backend
 port's optional `companions` capability (`frontend/core/src/items.ts`):
 
-| `companions`                                | What it carries                                                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `follow(target, itemId, { reveal }, on)`    | What an item holds now, then again as it changes: ready with a stamp, or why not                             |
-| `save(target, itemId, text, basedOn)`       | The user's edit written to the plan file, unless it changed since stamp `basedOn`                            |
-| `openInProject?(target, path, windowId)`    | A file the person opened from Files, in the project window; absent where it can't be                         |
-| `changeFile?(target, itemId, path, layers)` | One file of a change for the layers selected: its diff and both sides' text; absent where it can't be        |
-| `changeRead?(target, itemId, path)`         | The person read a file of a change: the content's `read` names it until it changes; absent where it can't be |
+| `companions`                                    | What it carries                                                                                                  |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `follow(target, itemId, { reveal, edit? }, on)` | What an item holds now, then again as it changes: ready with a stamp, or why not; with `edit`, a text file whole |
+| `save(target, itemId, text, basedOn, path?)`    | The user's edit written to the plan file, or the project window's file, unless it changed since stamp `basedOn`  |
+| `openInProject?(target, path, windowId)`        | A file the person opened from Files, in the project window; absent where it can't be                             |
+| `changeFile?(target, itemId, path, layers)`     | One file of a change for the layers selected: its diff and both sides' text; absent where it can't be            |
+| `changeRead?(target, itemId, path)`             | The person read a file of a change: the content's `read` names it until it changes; absent where it can't be     |
 
 A file that may hold secrets is `secret` until the person asks to see it, and `reveal` is the path
 they asked for: the item re-pointed to another file reads `secret` again.
+
+A file followed with `edit` is its whole text (`TextContent`): decoded as UTF-8 without its
+byte-order mark, line breaks as they are, no line cut, with `writable`, or why a save would be
+refused, known before any edit is offered. Only the file the person opened in the
+session's project window, inside the project's folder as the real paths they are, is
+writable: a file on a terminal's bar or in an undocked window is `not-a-plan` even inside the
+project; one in Git's own `.git`, however a link leads there, or in agents' worktrees where
+the project's folder holds them, is `outside`, as is an agent's worktree copy opened in the
+project window, though a project the person made of a worktree is editable like any; and a
+file or folder the runner may not write is `folder`. A file past 256 KiB, past what one save
+carries once JSON-escaped, or not valid UTF-8 is its lines as without `edit`, with
+`uneditable` saying why; a binary file stays `binary`. A file that may hold secrets is held until revealed, then
+edited and saved as any other: the gate is about what shows on screen, and whoever holds the
+runner's token can write any file through a shell anyway, so the runner adds no gate of its
+own to saving one. A backend that edits no files reports a file as without `edit`. A file's
+save must name the `path` its edit was made on, and writes nothing where the item points at
+another file now (`moved`, as is a file's save that names none), so one that lands after
+another window pointed the project window at the next file never writes one file's text into
+another.
 
 A change (the `changes` item kind) is read-only and has two views, in `frontend/items/src/kinds/changes/`,
 on the pane's own ground (`--pane-bg`). The **list view** is where it opens: a row for the work
@@ -374,6 +393,20 @@ for a moment, or goes unanswered for 20 seconds, is tried again after 2, 4, 8 an
 seconds, then stalls after 5 tries with a Retry button. Until it is saved the plan shows it
 isn't, and the edits stay in the editor, which can Copy my edits. The
 file keeps its line breaks when it uses one kind throughout; a mixed file saves as LF.
+
+The project window's file is saved through the same `companions.save` and the same writer
+(`backend/runner/src/companions/replace.ts`): a temporary file beside it, its permission bits
+kept, synced, the stamp compared before and after, then renamed over it; a rename still refused
+with `EACCES` or `EPERM` after its tries is `folder`, for plans and files alike. The
+plan-specific checks stay with plans (`savePlan` in `content.ts`); a file's are its own
+(`saveText` in `editing.ts`): the item must be the project window's, its real path inside the
+session's project's folder and outside its `.git` and the agents' worktrees it holds (a project
+made of a worktree aside), the file one the runner may write, its text within one save,
+and the file on disk still UTF-8 text. A save
+keeps the byte-order mark the file has as it is saved, and a stale stamp answers the file's
+current text without it, for a client to merge the edit into. A save that names a `path` other
+than the file its item points at now, or a file's that names none, is refused as `moved` and
+writes nothing.
 
 ### The runner's items
 

@@ -15,6 +15,7 @@ import type {
   PageLook,
   PageLookAnswer,
   PageTrouble,
+  PlanSaveResult,
 } from "@novadeck/protocol"
 import { KeyedChanges } from "@novadeck/wire/server"
 
@@ -25,6 +26,7 @@ import { logs } from "../log.js"
 import { agentLabel } from "../messaging/messages.js"
 import { mention } from "../terminals/handles.js"
 import { tail } from "../text.js"
+import { worktreesRoot } from "../worktrees/root.js"
 import { displayed, repositoryOf, samePlace, worktreeBranch } from "./changes.js"
 import {
   hashOf,
@@ -38,6 +40,7 @@ import {
   type PlanText,
   type Pointed,
 } from "./content.js"
+import { loadText, saveText, type SaveFolders } from "./editing.js"
 import { findRepository, LayerReader, type ReadMarks } from "./layers.js"
 import { PageLooks } from "./looks.js"
 import type { ItemRecord, ItemRecords, WindowRecord } from "./records.js"
@@ -87,6 +90,8 @@ type CompanionOptions = {
   readonly terminal: (terminalId: string) => TerminalPlace | undefined
   /** The folder of a session's project, which the person's project window opens files from; undefined for an unknown session. */
   readonly project: (sessionId: string) => string | undefined
+  /** The folder agents' worktrees live in, whose files the person never saves; `worktreesRoot()` where omitted. */
+  readonly worktrees?: string
   /**
    * What the terminal a text plan came from has of it live, while it still runs that
    * plan's session: read before its transcript or rollout, never instead of it.
@@ -787,7 +792,7 @@ export class CompanionItems {
   /** What an item points at, read now; NOT_FOUND for one not kept. */
   async load(itemId: string, reveal: boolean): Promise<ItemContent> {
     const item = this.item(itemId)
-    return this.read(item, reveal, this.live(item))
+    return this.read(item, reveal, this.live(item), false)
   }
 
   /**
@@ -795,11 +800,15 @@ export class CompanionItems {
    * deleted or `signal` aborts. A file that may hold secrets is `secret` unless `reveal` is
    * the path the item points at: a reveal is for the file the person chose, so an item
    * pointed at another since (a project window re-pointed) shows its gate again, and the
-   * file revealed again if pointed back.
+   * file revealed again if pointed back. With `edit`, a file is its whole text, for the
+   * person to edit (see `loadText`).
    */
   async *content(
     itemId: string,
-    reveal: string | undefined,
+    {
+      reveal,
+      edit = false,
+    }: { readonly reveal?: string | undefined; readonly edit?: boolean | undefined },
     signal?: AbortSignal,
   ): AsyncGenerator<ItemContent> {
     if (this.stopping) throw new DomainError("CLOSING")
@@ -831,7 +840,12 @@ export class CompanionItems {
         if (now !== probed) {
           const began = Date.now()
           // eslint-disable-next-line no-await-in-loop -- As above.
-          const content = await this.read(item, reveal !== undefined && reveal === item.path, live)
+          const content = await this.read(
+            item,
+            reveal !== undefined && reveal === item.path,
+            live,
+            edit,
+          )
           if (reader.signal.aborted) return
           took = Date.now() - began
           probed = now
@@ -1352,6 +1366,34 @@ export class CompanionItems {
     if (removed) this.removed(removed.item, removed.window)
   }
 
+  /**
+   * Writes the person's edit to the file their session's project window holds, as its item
+   * is now (see `saveText`); anything else is PLAN_UNWRITABLE `not-a-plan`. NOT_FOUND for an
+   * unknown item.
+   */
+  async saveFile(input: {
+    readonly itemId: string
+    readonly text: string
+    readonly basedOn: string
+    readonly path?: string | undefined
+  }): Promise<PlanSaveResult> {
+    const item = this.item(input.itemId)
+    return saveText(item, input, this.saveFolders(item))
+  }
+
+  /**
+   * Where the person may save an item's file: in its session's project's folder, outside
+   * agents' worktrees, for the file their project window holds; undefined for any other item,
+   * or one whose session is gone.
+   */
+  private saveFolders(item: ItemRecord): SaveFolders | undefined {
+    if (item.windowId === null || this.records.window(item.windowId)?.home !== "project")
+      return undefined
+    const project = this.options.project(item.sessionId)
+    if (project === undefined) return undefined
+    return { project, worktrees: this.options.worktrees ?? worktreesRoot() }
+  }
+
   /** An item of a project window stays in it: CONFLICT. */
   private keepInProject(item: ItemRecord): void {
     if (item.windowId !== null && this.records.window(item.windowId)?.home === "project")
@@ -1444,6 +1486,7 @@ export class CompanionItems {
     item: ItemRecord,
     reveal: boolean,
     live: PlanText | undefined,
+    edit: boolean,
   ): Promise<ItemContent> {
     if (item.kind === "changes") return this.readChange(item)
     if (item.kind === "shells") return this.readShells(item)
@@ -1462,6 +1505,8 @@ export class CompanionItems {
       })
     }
     if (item.kind === "plan") return loadPlan(item, live)
+    if (edit && item.kind === "file")
+      return loadText(item, reveal, this.saveFolders(item), this.environment())
     return loadFile(item, reveal, this.environment())
   }
 

@@ -646,12 +646,14 @@ export type Runner = {
     /**
      * Follows what an item points at: read now, then again each time it changes, across
      * reconnections. A file that may hold secrets is `held` unless `reveal` is the
-     * path the item points at, the file the person chose to show. Iteration
-     * ends once the item is deleted, the runner closes, or on `return()`.
+     * path the item points at, the file the person chose to show. With `edit`, a file is
+     * its whole text, saying whether `save` writes it, where it can be edited whole, or its
+     * lines saying why not. Iteration ends once the item is deleted, the runner closes, or on
+     * `return()`.
      */
     content(
       itemId: string,
-      options?: { readonly reveal?: string },
+      options?: { readonly reveal?: string; readonly edit?: boolean },
     ): AsyncIterableIterator<ItemContent, undefined>
     /**
      * One file of a changes item as a selection of its layers changed it: one run, from the
@@ -669,16 +671,21 @@ export type Runner = {
      */
     changeRead(input: { readonly itemId: string; readonly path: string }): Promise<void>
     /**
-     * Writes the person's edit to a plan kept in a file, unless it changed since `basedOn`,
-     * the stamp the edit was made on: then nothing is written and the plan as it now
-     * stands is `current`. Rejects with `NOT_FOUND`, or `PLAN_UNWRITABLE` saying why for a
-     * plan the agent keeps in its transcript, past 256 KiB, a file gone, or in a folder the
-     * runner may not write to (or no plan at all).
+     * Writes the person's edit to a plan kept in a file, or to the file they opened in the
+     * session's project window, unless it changed since `basedOn`, the stamp the edit was
+     * made on: then nothing is written and the text as it now stands is `current`. `path` is
+     * the path the edit was made on: an item pointed at another file since writes nothing. A
+     * plan's save may leave it out; a file's must give it, or is refused as moved. Rejects
+     * with `NOT_FOUND`, or `PLAN_UNWRITABLE` saying why for a plan
+     * the agent keeps in its transcript, past 256 KiB, a file gone, outside the folders it is
+     * saved in, or in a folder the runner may not write to, an item moved to another file, a
+     * file no longer text (or neither a plan nor the project window's file).
      */
     save(input: {
       readonly itemId: string
       readonly text: string
       readonly basedOn: string
+      readonly path?: string
     }): Promise<PlanSaveResult>
     /**
      * Attaches a file to a terminal's bar, by a path absolute or from the terminal's
@@ -1056,10 +1063,14 @@ export const connectRunner = async (
       list: (input) => call((client) => client.companions.list(input)),
       watch: () =>
         followAll(connection, (client, signal) => client.companions.watch(undefined, { signal })),
-      content: (itemId, { reveal } = {}) =>
+      content: (itemId, { reveal, edit } = {}) =>
         followRestarting(connection, (client, signal) =>
           client.companions.content(
-            { itemId, ...(reveal !== undefined && { reveal }) },
+            {
+              itemId,
+              ...(reveal !== undefined && { reveal }),
+              ...(edit !== undefined && { edit }),
+            },
             { signal },
           ),
         ),

@@ -10,6 +10,7 @@ import {
   filesExcludeLimits,
   protocolVersion,
   type contract,
+  type ItemContent,
   type TerminalEvent,
   type WireClient,
 } from "@novadeck/protocol"
@@ -22,6 +23,7 @@ import { startServer, type ServerOptions } from "./server.js"
 import { describe, expect, it } from "./test.js"
 import { ptyOptions } from "./testing/pty.js"
 import type { Resources } from "./testing/resources.js"
+import { WorkspaceStore } from "./workspaces/store.js"
 
 const token = "novadeck-api-tests-only-not-a-production-credential"
 const fixture = async (resources: Resources, options: ServerOptions = {}) => {
@@ -603,6 +605,120 @@ describe("workspace metadata API", () => {
     await expect(
       client.terminals.resize({ terminalId: randomUUID(), cols: 80, rows: 24 }),
     ).rejects.toMatchObject({ code: "TERMINAL_NOT_FOUND" })
+  })
+})
+
+describe("companion items API", () => {
+  it("follows the project window's file whole with edit, and saves it only as the file the edit was made on", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(cwd)
+    await writeFile(join(cwd, "a.ts"), "const a = 1\r\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Editing", cwd })
+    const session = await client.sessions.create({
+      id: randomUUID(),
+      projectId: project.id,
+      name: "Session",
+    })
+    const { item } = await client.companions.openInProject({
+      sessionId: session.id,
+      path: "a.ts",
+      windowId: randomUUID(),
+    })
+    const controller = new AbortController()
+    resources.defer(async () => controller.abort())
+    const stream = await client.companions.content(
+      { itemId: item.id, edit: true },
+      { signal: controller.signal },
+    )
+    const first = (await stream.next()).value as ItemContent
+    expect(first).toMatchObject({
+      state: "ready",
+      content: { kind: "text", path: item.path, text: "const a = 1\r\n", writable: true },
+    })
+    const basedOn = first.state === "ready" ? first.stamp : ""
+    const edit = { itemId: item.id, text: "const a = 2\r\n", basedOn }
+    // Made on another file, or on none it names: no file's edit is this one's.
+    for (const named of [{ path: join(cwd, "b.ts") }, {}])
+      // eslint-disable-next-line no-await-in-loop -- Each save after the other.
+      await expect(client.companions.save({ ...edit, ...named })).rejects.toMatchObject({
+        code: "PLAN_UNWRITABLE",
+        data: { reason: "moved" },
+      })
+    await expect(readFile(join(cwd, "a.ts"), "utf8")).resolves.toBe("const a = 1\r\n")
+    await expect(client.companions.save({ ...edit, path: item.path! })).resolves.toMatchObject({
+      saved: true,
+    })
+    await expect(readFile(join(cwd, "a.ts"), "utf8")).resolves.toBe("const a = 2\r\n")
+    await expect(client.companions.save({ ...edit, path: "x".repeat(5000) })).rejects.toMatchObject(
+      { code: "BAD_REQUEST" },
+    )
+  })
+
+  it("refuses a plan's edit made on another file than its item points at now", async ({
+    resources,
+  }) => {
+    // A plan its agent showed on a terminal's bar, kept from before the runner started.
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-api-plan-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const database = join(directory, "workspace.sqlite")
+    const plan = join(directory, "plan.md")
+    await writeFile(plan, "# Plan\n")
+    const seeded = new WorkspaceStore(database)
+    const project = await seeded.createProject({ id: randomUUID(), name: "Plans", cwd: directory })
+    const session = seeded.createSession({ id: randomUUID(), projectId: project.id, name: "S" })
+    const terminalId = randomUUID()
+    seeded.saveTerminal({
+      id: terminalId,
+      sessionId: session.id,
+      cwd: directory,
+      agents: {},
+      promptedAt: null,
+      handle: "moth",
+      naming: { person: null, opener: null, murmur: null, own: null, summary: null },
+      openedBy: null,
+      ledBy: null,
+      command: null,
+      lastProgram: null,
+      work: null,
+    })
+    const itemId = randomUUID()
+    seeded.saveItem({
+      id: itemId,
+      sessionId: session.id,
+      terminalId,
+      windowId: null,
+      pointerKey: "plan:agent-session:",
+      kind: "plan",
+      path: plan,
+      url: null,
+      lines: null,
+      plan: { agent: "claude", session: "agent-session", actor: null, format: "file" },
+      name: "Plan",
+      detail: "",
+      secret: false,
+      by: "agent",
+      from: { terminalId, handle: "moth" },
+      version: 1,
+      openAsked: false,
+      shownAt: 1,
+      observedAt: 1,
+    })
+    seeded.close()
+    const app = await fixture(resources, { database })
+    const { client } = await app.connect()
+    await expect(
+      client.companions.save({
+        itemId,
+        text: "# Mine\n",
+        basedOn: "",
+        path: join(directory, "other.md"),
+      }),
+    ).rejects.toMatchObject({ code: "PLAN_UNWRITABLE", data: { reason: "moved" } })
+    await expect(readFile(plan, "utf8")).resolves.toBe("# Plan\n")
   })
 })
 

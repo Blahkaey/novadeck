@@ -11,13 +11,13 @@ import {
   stat,
   unlink,
 } from "node:fs/promises"
-import { dirname, join, relative, sep } from "node:path"
+import { dirname, join } from "node:path"
 
 import type { EntryChanged } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { copyInto, copyName, copyTop, type Copied } from "./copy.js"
-import { invalid, segments, within } from "./project-paths.js"
+import { inGit, invalid, segments, within } from "./project-paths.js"
 
 // The person's changes to a project's files from the Files panel: an empty file or folder
 // made, an entry renamed, moved or copied, an entry deleted. Each works on a path from the
@@ -160,12 +160,7 @@ const projectFolder = async (root: string): Promise<string> => {
  * name such as `GIT~1`.
  */
 const outsideGit = (real: string, path: string): void => {
-  if (
-    relative(real, path)
-      .split(sep)
-      .some((name) => name.toLowerCase() === ".git")
-  )
-    throw gitsOwn()
+  if (inGit(real, path)) throw gitsOwn()
 }
 
 /**

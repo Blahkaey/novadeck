@@ -77,6 +77,8 @@ const it = base.extend<{ fixture: Fixture }>({
       records: store,
       terminal: (terminalId) => places.get(terminalId),
       project: (sessionId) => (sessionId === session.id ? directory : undefined),
+      // Inside the project's folder, as a project of the person's home folder holds them.
+      worktrees: join(directory, "worktrees"),
       livePlan: (item) => live.get(item.id),
       pollMs: 10,
       changesMs: 10,
@@ -647,7 +649,7 @@ describe("the project window", () => {
     const gone: string[] = []
     fixture.items.listen({ troubled: () => {}, gone: (item) => gone.push(item.path ?? "") })
     const controller = new AbortController()
-    const stream = fixture.items.content(first.item.id, undefined, controller.signal)
+    const stream = fixture.items.content(first.item.id, {}, controller.signal)
     expect(lines(await next(stream))).toEqual(["alpha"])
 
     const watch = new AbortController()
@@ -702,7 +704,7 @@ describe("the project window", () => {
     const controller = new AbortController()
     const asked = join(fixture.directory, ".env")
     // The person revealed .env; that is not a reveal of the next file.
-    const stream = fixture.items.content(first.item.id, asked, controller.signal)
+    const stream = fixture.items.content(first.item.id, { reveal: asked }, controller.signal)
     expect(lines(await next(stream))).toEqual(["TOKEN=x"])
     const other = await fixture.items.openInProject({
       sessionId,
@@ -713,11 +715,11 @@ describe("the project window", () => {
     await expect(next(stream)).resolves.toMatchObject({ state: "unavailable", reason: "secret" })
     // A stream asked for .env while the window shows .env.local starts held too: the
     // person's click may have raced the re-point.
-    const late = fixture.items.content(first.item.id, asked, controller.signal)
+    const late = fixture.items.content(first.item.id, { reveal: asked }, controller.signal)
     await expect(next(late)).resolves.toMatchObject({ state: "unavailable", reason: "secret" })
     // A reveal asked for .env.local reveals it.
     const there = join(fixture.directory, ".env.local")
-    const revealing = fixture.items.content(first.item.id, there, controller.signal)
+    const revealing = fixture.items.content(first.item.id, { reveal: there }, controller.signal)
     expect(lines(await next(revealing))).toEqual(["OTHER=y"])
     // Pointed back at the file a stream was asked for, it reads revealed again.
     await fixture.items.openInProject({ sessionId, path: ".env", windowId: randomUUID() })
@@ -842,6 +844,161 @@ describe("the project window", () => {
     })
     fixture.items.sessionsRemoved([fixture.sessionId])
     expect(fixture.items.list(fixture.sessionId)).toEqual({ items: [], windows: [] })
+  })
+})
+
+describe("editing the file the person opened", () => {
+  const stampOf = (content: ItemContent | undefined) =>
+    content?.state === "ready" ? content.stamp : ""
+  /** What an item holds as it is first read to be edited. */
+  const edited = (items: CompanionItems, itemId: string) =>
+    next(items.content(itemId, { edit: true }))
+
+  it("is the project window's file in the project's folder: its whole text, saved through its item", async ({
+    fixture,
+  }) => {
+    writeFileSync(join(fixture.directory, "a.ts"), "const a = 1\r\n")
+    const { item } = await fixture.items.openInProject({
+      sessionId: fixture.sessionId,
+      path: "a.ts",
+      windowId: randomUUID(),
+    })
+    const controller = new AbortController()
+    const stream = fixture.items.content(item.id, { edit: true }, controller.signal)
+    const first = await next(stream)
+    expect(first).toMatchObject({
+      state: "ready",
+      content: { kind: "text", path: item.path, text: "const a = 1\r\n", writable: true },
+    })
+    const edit = { itemId: item.id, text: "const a = 2\r\n", basedOn: stampOf(first) }
+    const saved = await fixture.items.saveFile({ ...edit, path: item.path! })
+    expect(saved).toMatchObject({ saved: true })
+    await expect(next(stream)).resolves.toMatchObject({
+      stamp: saved.saved ? saved.stamp : "",
+      content: { text: "const a = 2\r\n" },
+    })
+    // Without `edit`, it lists its lines as ever.
+    expect(lines(await fixture.items.load(item.id, false))).toEqual(["const a = 2"])
+    controller.abort()
+  })
+
+  it("is no file on a terminal's bar or in a window undocked from one, even in the project's folder", async ({
+    fixture,
+  }) => {
+    writeFileSync(join(fixture.directory, "a.ts"), "a\n")
+    writeFileSync(join(fixture.directory, "b.ts"), "b\n")
+    const moth = fixture.terminal("moth")
+    const attached = await fixture.items.attach({ terminalId: moth.terminalId, path: "a.ts" })
+    const shown = await fixture.items.show(moth, { file: { path: "b.ts" } })
+    const undocked = shown.ok ? shown.id : ""
+    fixture.items.undock(undocked, randomUUID())
+    for (const id of [attached.id, undocked]) {
+      // eslint-disable-next-line no-await-in-loop -- Each item after the other.
+      const content = await edited(fixture.items, id)
+      expect(content).toMatchObject({ content: { writable: false, reason: "not-a-plan" } })
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      await expect(
+        fixture.items.saveFile({ itemId: id, text: "x\n", basedOn: stampOf(content) }),
+      ).rejects.toMatchObject({ code: "PLAN_UNWRITABLE", data: { reason: "not-a-plan" } })
+    }
+    expect(readFileSync(join(fixture.directory, "a.ts"), "utf8")).toBe("a\n")
+    expect(readFileSync(join(fixture.directory, "b.ts"), "utf8")).toBe("b\n")
+    await expect(
+      fixture.items.saveFile({ itemId: randomUUID(), text: "x", basedOn: "" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+
+  it("is not an agent's copy outside the project's folder, opened in the project window", async ({
+    fixture,
+  }) => {
+    const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), "novadeck-copy-")))
+    try {
+      writeFileSync(join(elsewhere, "new.ts"), "new\n")
+      const { item } = await fixture.items.openInProject({
+        sessionId: fixture.sessionId,
+        path: join(elsewhere, "new.ts"),
+        windowId: randomUUID(),
+      })
+      const content = await edited(fixture.items, item.id)
+      expect(content).toMatchObject({
+        content: { kind: "text", text: "new\n", writable: false, reason: "outside" },
+      })
+      await expect(
+        fixture.items.saveFile({
+          itemId: item.id,
+          text: "mine\n",
+          basedOn: stampOf(content),
+          path: item.path!,
+        }),
+      ).rejects.toMatchObject({ code: "PLAN_UNWRITABLE", data: { reason: "outside" } })
+      expect(readFileSync(join(elsewhere, "new.ts"), "utf8")).toBe("new\n")
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
+  })
+
+  it("never writes an edit into the next file the window was pointed at", async ({ fixture }) => {
+    writeFileSync(join(fixture.directory, "a.ts"), "alpha\n")
+    writeFileSync(join(fixture.directory, "b.ts"), "bravo\n")
+    const sessionId = fixture.sessionId
+    const windowId = randomUUID()
+    const first = await fixture.items.openInProject({ sessionId, path: "a.ts", windowId })
+    const loaded = await edited(fixture.items, first.item.id)
+    // Another window of the session points it at the next file.
+    await fixture.items.openInProject({ sessionId, path: "b.ts", windowId })
+    const pointed = await edited(fixture.items, first.item.id)
+    const edit = { itemId: first.item.id, text: "alpha, edited\n" }
+    for (const late of [
+      { basedOn: stampOf(loaded), path: first.item.path! },
+      // Without its path, an edit is no one file's: not even as made on the next file's stamp.
+      { basedOn: stampOf(loaded) },
+      { basedOn: stampOf(pointed) },
+    ])
+      // eslint-disable-next-line no-await-in-loop -- Each save after the other.
+      await expect(fixture.items.saveFile({ ...edit, ...late })).rejects.toMatchObject({
+        code: "PLAN_UNWRITABLE",
+        data: { reason: "moved" },
+      })
+    expect(readFileSync(join(fixture.directory, "a.ts"), "utf8")).toBe("alpha\n")
+    expect(readFileSync(join(fixture.directory, "b.ts"), "utf8")).toBe("bravo\n")
+  })
+
+  it("is not Git's own .git, nor an agent's worktree the project's folder holds", async ({
+    fixture,
+  }) => {
+    mkdirSync(join(fixture.directory, ".git"))
+    writeFileSync(join(fixture.directory, ".git", "config"), "[core]\n")
+    mkdirSync(join(fixture.directory, "worktrees", "shop"), { recursive: true })
+    writeFileSync(join(fixture.directory, "worktrees", "shop", "a.ts"), "a\n")
+    const paths = [".git/config", "worktrees/shop/a.ts"]
+    if (process.platform !== "win32") {
+      // A link in the project that leads into .git, as the Files panel lists its files.
+      symlinkSync(join(fixture.directory, ".git"), join(fixture.directory, "g"))
+      paths.push("g/config")
+    }
+    const windowId = randomUUID()
+    for (const path of paths) {
+      // eslint-disable-next-line no-await-in-loop -- Each file after the other.
+      const { item } = await fixture.items.openInProject({
+        sessionId: fixture.sessionId,
+        path,
+        windowId,
+      })
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      const content = await edited(fixture.items, item.id)
+      expect(content).toMatchObject({ content: { writable: false, reason: "outside" } })
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      await expect(
+        fixture.items.saveFile({
+          itemId: item.id,
+          text: "x\n",
+          basedOn: stampOf(content),
+          path: item.path!,
+        }),
+      ).rejects.toMatchObject({ code: "PLAN_UNWRITABLE", data: { reason: "outside" } })
+    }
+    expect(readFileSync(join(fixture.directory, ".git", "config"), "utf8")).toBe("[core]\n")
+    expect(readFileSync(join(fixture.directory, "worktrees", "shop", "a.ts"), "utf8")).toBe("a\n")
   })
 })
 
@@ -996,7 +1153,7 @@ describe("an item's content", () => {
     const moth = fixture.terminal("moth")
     const shown = await fixture.items.show(moth, { file: { path: "a.ts" } })
     const itemId = shown.ok ? shown.id : ""
-    const stream = fixture.items.content(itemId, undefined)
+    const stream = fixture.items.content(itemId, {})
     expect(lines(await next(stream))).toEqual(["one"])
     writeFileSync(path, "one\ntwo\n")
     expect(lines(await next(stream))).toEqual(["one", "two"])
@@ -1535,7 +1692,7 @@ describe.skipIf(!gitInstalled)("the changes of a repository", () => {
     const { root, place } = repository(fixture)
     const shown = await fixture.items.show(place, { changes: {} })
     const itemId = shown.ok ? shown.id : ""
-    const stream = fixture.items.content(itemId, undefined)
+    const stream = fixture.items.content(itemId, {})
     const read = (content: ItemContent | undefined) =>
       content?.state === "ready" && content.content.kind === "changes" ? content.content.read : []
     expect(read(await next(stream))).toEqual([])
@@ -1556,7 +1713,7 @@ describe.skipIf(!gitInstalled)("the changes of a repository", () => {
     const { root, place } = repository(fixture)
     const shown = await fixture.items.show(place, { changes: {} })
     const itemId = shown.ok ? shown.id : ""
-    const stream = fixture.items.content(itemId, undefined)
+    const stream = fixture.items.content(itemId, {})
     const first = await next(stream)
     expect(first).toMatchObject({ state: "ready", content: { kind: "changes" } })
     expect(
@@ -1653,7 +1810,7 @@ describe.skipIf(!gitInstalled)("the changes of a repository", () => {
     const { root, place } = repository(fixture)
     const shown = await fixture.items.show(place, { changes: {} })
     const itemId = shown.ok ? shown.id : ""
-    const stream = fixture.items.content(itemId, undefined)
+    const stream = fixture.items.content(itemId, {})
     expect(await next(stream)).toMatchObject({ state: "ready" })
     const head = join(root, ".git", "HEAD")
     const good = readFileSync(head)
@@ -1699,7 +1856,7 @@ describe.skipIf(!gitInstalled)("the changes of a repository", () => {
     git("config", "filter.slow.clean", "sleep 0.3; cat")
     writeFileSync(join(root, "a.txt"), "one\ntwo\nthree\n")
     const shown = await fixture.items.show(place, { changes: {} })
-    const stream = fixture.items.content(shown.ok ? shown.id : "", undefined)
+    const stream = fixture.items.content(shown.ok ? shown.id : "", {})
     const starts: number[] = []
     timing.slowMs = 100
     timing.saw = (args) => {
@@ -1918,7 +2075,7 @@ describe("background shells beside their terminal", () => {
     writeFileSync(log, "a\n")
     fixture.items.shellsObserved(fixture.shell(moth, [running("1", log)]))
     const [item] = shellsOn(fixture, moth.terminalId)
-    const stream = fixture.items.content(item!.id, undefined)
+    const stream = fixture.items.content(item!.id, {})
     const total = (content: ItemContent | undefined) => {
       const output =
         content?.state === "ready" && content.content.kind === "shells"

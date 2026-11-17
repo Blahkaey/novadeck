@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { constants, type Stats } from "node:fs"
-import { lstat, open, realpath, rename, stat, unlink, type FileHandle } from "node:fs/promises"
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { open, realpath, stat, type FileHandle } from "node:fs/promises"
+import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 
 import type { PlanSource } from "@novadeck/harness-core/events"
@@ -10,15 +10,15 @@ import {
   type AgentName,
   type ItemContent,
   type PlanSaveResult,
-  type PlanUnwritable,
 } from "@novadeck/protocol"
 
-import { DomainError } from "../errors.js"
 import { harnesses } from "../harnesses/registry.js"
 import { cut, tail } from "../text.js"
 import type { ItemRecord } from "./records.js"
+import { replaceFile, unwritable, type ReplaceWords } from "./replace.js"
 import { failure, type RequestFailure } from "./request.js"
 import { secret } from "./secrets.js"
+import { isMissing, stampOf } from "./stamps.js"
 
 // What is shown as an image, by extension.
 const images: { readonly [extension: string]: string } = {
@@ -36,8 +36,8 @@ export const maxImageBytes = 8 * 1024 * 1024
 const textBudget = 4 * 1024 * 1024
 // How much of a file is read at a time.
 const chunkBytes = 64 * 1024
-// A text file has no NUL byte in this much of its start.
-const sniffBytes = 8 * 1024
+/** A text file has no NUL byte in this much of its start. */
+export const sniffBytes = 8 * 1024
 // A file this long is shown whole; a longer one, around what was pointed at.
 const wholeLines = 400
 const contextLines = 40
@@ -45,8 +45,11 @@ const contextLines = 40
 const maxPlanBytes = companionLimits.plan
 
 /** What an item's content reads of a pointer: unavailable, with why, or ready. */
-type Unavailable = Extract<ItemContent, { state: "unavailable" }>
-const unavailable = (reason: Unavailable["reason"], size: number | null = null): Unavailable => ({
+export type Unavailable = Extract<ItemContent, { state: "unavailable" }>
+export const unavailable = (
+  reason: Unavailable["reason"],
+  size: number | null = null,
+): Unavailable => ({
   state: "unavailable",
   reason,
   size,
@@ -134,15 +137,12 @@ export const pageAt = (
 }
 
 /** Why a file can't be read, by its error. */
-const reasonOf = (error: unknown): Unavailable["reason"] => {
+export const reasonOf = (error: unknown): Unavailable["reason"] => {
   const code = (error as NodeJS.ErrnoException | undefined)?.code
   if (code === "ENOENT" || code === "ENOTDIR") return "missing"
   if (code === "EISDIR") return "not-a-file"
   return "unreadable"
 }
-
-/** What says a file changed: its size, when it last changed, and which file it is. */
-const stampOf = (stats: Stats): string => `${stats.size}:${stats.mtimeMs}:${stats.ino}`
 
 /** A short digest of a text, as a stamp. */
 export const hashOf = (text: string): string =>
@@ -152,7 +152,7 @@ export const hashOf = (text: string): string =>
  * Opens a plain file for reading: a pipe or device put in its place never blocks the
  * reader, and a symlink put there since it was resolved isn't followed.
  */
-const openPlain = async (
+export const openPlain = async (
   path: string,
 ): Promise<{ handle: FileHandle; stats: Stats } | Unavailable> => {
   const handle = await open(
@@ -172,7 +172,7 @@ const openPlain = async (
  * Reads up to `limit` bytes of a file, to its end rather than its reported size, which a
  * file in /proc gives as 0; `more` when it holds more than that.
  */
-const readUpTo = async (
+export const readUpTo = async (
   handle: FileHandle,
   limit: number,
 ): Promise<{ bytes: Buffer; more: boolean }> => {
@@ -254,6 +254,39 @@ const readLines = async (
   return { kept, count, ended: true }
 }
 
+/** An item's file, opened to read, symlinks resolved: its real path, and what it is now. */
+type Opened = { readonly path: string; readonly handle: FileHandle; readonly stats: Stats }
+
+/**
+ * Opens the file at `path`, an item's, as it is now, symlinks resolved; or why it can't be
+ * shown. One that may hold secrets (`secret`, or by its real path) is `secret` unless
+ * `reveal`. The caller closes what is opened.
+ */
+export const openShown = async (
+  path: string,
+  shown: { readonly secret: boolean; readonly reveal: boolean },
+  env?: NodeJS.ProcessEnv,
+): Promise<Opened | Unavailable> => {
+  let real: string
+  try {
+    real = await realpath(path)
+  } catch (error) {
+    return unavailable(reasonOf(error))
+  }
+  let opened: Awaited<ReturnType<typeof openPlain>>
+  try {
+    opened = await openPlain(real)
+  } catch (error) {
+    return unavailable(reasonOf(error))
+  }
+  if ("state" in opened) return opened
+  if ((shown.secret || secret(real, env)) && !shown.reveal) {
+    await opened.handle.close().catch(() => {})
+    return unavailable("secret", opened.stats.size)
+  }
+  return { path: real, ...opened }
+}
+
 /**
  * An image or a text file, as it is now, symlinks resolved. One that may hold secrets is
  * `secret` unless `reveal`; an image past the preview limit is `too-large`; a text file
@@ -266,22 +299,10 @@ export const loadFile = async (
   env?: NodeJS.ProcessEnv,
 ): Promise<ItemContent> => {
   if (item.path === null) return unavailable("missing")
-  let path: string
-  try {
-    path = await realpath(item.path)
-  } catch (error) {
-    return unavailable(reasonOf(error))
-  }
-  let opened: Awaited<ReturnType<typeof openPlain>>
-  try {
-    opened = await openPlain(path)
-  } catch (error) {
-    return unavailable(reasonOf(error))
-  }
+  const opened = await openShown(item.path, { secret: item.secret, reveal }, env)
   if ("state" in opened) return opened
-  const { handle, stats } = opened
+  const { path, handle, stats } = opened
   try {
-    if ((item.secret || secret(path, env)) && !reveal) return unavailable("secret", stats.size)
     const stamp = stampOf(stats)
     if (item.kind === "image") {
       if (stats.size > maxImageBytes) return unavailable("too-large", stats.size)
@@ -328,18 +349,6 @@ export type PlanText = {
   readonly text: string
   readonly truncated: boolean
   readonly changedAt: number | null
-}
-
-/** The error code of a failed file operation, such as `EACCES`. */
-const errnoOf = (error: unknown): string | undefined =>
-  typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined
-
-/** Whether an error says a path is not there: nothing to read, rather than a failed read. */
-const isMissing = (error: unknown): boolean => {
-  const code = errnoOf(error)
-  return code === "ENOENT" || code === "ENOTDIR"
 }
 
 /**
@@ -525,36 +534,8 @@ type SavedPlan =
   | Extract<PlanSaveResult, { saved: true }>
   | { saved: false; current: Omit<Extract<PlanSaveResult, { saved: false }>["current"], "skill"> }
 
-const renameTries = 3
-const renameWait = 100
-
-/**
- * Renames over a plan. Another program holding the plan open (a scanner, an indexer, an
- * editor) makes this fail for a moment on Windows with EPERM, EACCES or EBUSY, so it is
- * tried a few times before giving up.
- */
-const renameSettled = async (from: string, to: string): Promise<void> => {
-  for (let tried = 1; ; tried++) {
-    try {
-      // eslint-disable-next-line no-await-in-loop -- One try after another.
-      await rename(from, to)
-      return
-    } catch (error) {
-      const code = errnoOf(error)
-      if (tried >= renameTries || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY"))
-        throw error
-      // eslint-disable-next-line no-await-in-loop -- Waits between tries.
-      await new Promise((done) => setTimeout(done, renameWait))
-    }
-  }
-}
-
-/** Why a plan can't be written, as `PLAN_UNWRITABLE` carries it. */
-const unwritable = (reason: PlanUnwritable["reason"], message: string) =>
-  new DomainError("PLAN_UNWRITABLE", message, { reason })
-
 /** Whether the real path `path` is under one of `folders`, which are resolved too; the ones missing hold nothing. */
-const inside = async (path: string, folders: readonly string[]): Promise<boolean> => {
+export const inside = async (path: string, folders: readonly string[]): Promise<boolean> => {
   for (const folder of folders) {
     // eslint-disable-next-line no-await-in-loop -- A few folders, one after the other.
     const real = await realpath(folder).catch(() => undefined)
@@ -565,18 +546,25 @@ const inside = async (path: string, folders: readonly string[]): Promise<boolean
   return false
 }
 
+const planWords: ReplaceWords = {
+  gone: "The plan's file is gone.",
+  folder: "The plan's folder can't be written to.",
+  unread: "The plan couldn't be read.",
+}
+
 /**
  * Writes the person's edit to a plan kept in a file, unless the file is no longer as it
  * was at stamp `basedOn`: then nothing is written and `current` is what it holds now. The
- * text goes to a temporary file beside the plan, which replaces it at once, so a reader
- * sees the old plan or the new, never a part. Only the plan's own regular file is written.
+ * text replaces the plan at once (see `replaceFile`), so a reader sees the old plan or the
+ * new, never a part. Only the plan's own regular file is written.
  * What can never succeed is refused as PLAN_UNWRITABLE, saying why: a plan in an agent's
  * transcript, a file that is gone or no longer a plain file, a text or file past 256 KiB,
  * a folder the runner may not write to, an item that is no plan, a file outside `folders`
  * (the project's folder and the agent's own plans folders, compared as the real paths they
  * are, so a link out of them gets nothing). Any other failure, such as
  * a full disk, is not classified: it may pass, so it is raised as it is. The rewritten file
- * keeps its permissions, and no temporary file is left behind.
+ * keeps its permission bits; `replaceFile` says what else it keeps, and when a temporary file
+ * stays.
  */
 export const savePlan = async (
   item: Pick<ItemRecord, "path" | "plan">,
@@ -608,57 +596,11 @@ export const savePlan = async (
     const { text: now, truncated, stamp } = before
     return { saved: false, current: { stamp, text: now, truncated } }
   }
-  const stats = await lstat(path).catch((error: unknown) => {
-    if (isMissing(error)) return undefined
-    throw error
-  })
-  if (!stats?.isFile()) throw unwritable("gone", "The plan's file is gone.")
-  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`)
-  const mode = stats.mode & 0o777
-  let renaming = false
-  try {
-    const handle = await open(
-      temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-      mode,
-    )
-    let written: Stats
-    try {
-      // The umask clipped the mode it was created with.
-      // A file system without modes (FAT, some network shares) refuses; the save goes on.
-      await handle.chmod(mode).catch(() => {})
-      await handle.writeFile(text)
-      await handle.sync()
-      written = await handle.stat()
-    } finally {
-      await handle.close()
-    }
-    // The agent may have rewritten the plan since it was read: its version stands.
-    // A failed read is not the folder refusing: it is raised without its code.
-    const now = await readPlanFile(path).catch((error: unknown) => {
-      throw new Error("The plan couldn't be read.", { cause: error })
-    })
-    if (!now) throw unwritable("gone", "The plan's file is gone.")
-    if (now.stamp !== before.stamp) {
-      await unlink(temporary).catch(() => {})
-      const { text: current, truncated, stamp } = now
-      return { saved: false, current: { stamp, text: current, truncated } }
-    }
-    renaming = true
-    await renameSettled(temporary, path)
-    // Its size, change time and file survive the rename.
-    return { saved: true, stamp: stampOf(written) }
-  } catch (error) {
-    await unlink(temporary).catch(() => {})
-    if (error instanceof DomainError) throw error
-    const code = errnoOf(error)
-    // The folder refuses the runner: saving again won't help. A rename refused after the
-    // temporary file was written in that folder is a plan another program holds: it passes.
-    if (code === "EROFS" || (!renaming && (code === "EACCES" || code === "EPERM")))
-      throw unwritable("folder", "The plan's folder can't be written to.")
-    if (code === "ENOENT") throw unwritable("gone", "The plan's file is gone.")
-    throw error
-  }
+  // The agent may have rewritten the plan since it was read: its version stands.
+  const replaced = await replaceFile(path, text, before.stamp, readPlanFile, planWords)
+  if (replaced.saved) return replaced
+  const { text: current, truncated, stamp } = replaced.now
+  return { saved: false, current: { stamp, text: current, truncated } }
 }
 
 /**

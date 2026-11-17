@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -30,7 +30,7 @@ const hero = itemIdOf("hero")
 // Items over a runner whose content streams the test feeds.
 const following = ({ livePages = false } = {}) => {
   const streams = new Map<string, ReturnType<typeof channel<RunnerContent>>>()
-  const asked: { readonly itemId: string; readonly reveal: string | undefined }[] = []
+  const asked: { readonly itemId: string; readonly reveal?: string; readonly edit?: boolean }[] = []
   const opened: unknown[] = []
   const projectOpened = {
     item: {
@@ -60,7 +60,7 @@ const following = ({ livePages = false } = {}) => {
       titleSource: { kind: "default" as const },
     },
   }
-  const saves: { itemId: string; text: string; basedOn: string }[] = []
+  const saves: { itemId: string; text: string; basedOn: string; path?: string }[] = []
   const readAsked: { itemId: string; path: string }[] = []
   const changeAsked: { itemId: string; path: string; layers: readonly string[] }[] = []
   let changed: ChangeFileDiff = { run: null }
@@ -69,7 +69,7 @@ const following = ({ livePages = false } = {}) => {
   const companions = createRunnerCompanions(
     {
       content: (itemId, options) => {
-        asked.push({ itemId, reveal: options?.reveal })
+        asked.push({ itemId, ...options })
         const stream = channel<RunnerContent>()
         streams.set(itemId, stream)
         return stream.iterator
@@ -95,8 +95,10 @@ const following = ({ livePages = false } = {}) => {
     { livePages },
   )
   const seen: ItemContent[] = []
-  const follow = (reveal?: string) =>
-    companions.follow(target, hero, { reveal }, (content) => seen.push(content))
+  const follow = (reveal?: string, edit?: boolean) =>
+    companions.follow(target, hero, { reveal, ...(edit !== undefined && { edit }) }, (content) =>
+      seen.push(content),
+    )
   return {
     companions,
     asked,
@@ -369,7 +371,17 @@ describe("the runner's companion content", () => {
 
   it("says why a plan can't be written, and leaves any other failure as it is", async () => {
     const app = following()
-    for (const reason of ["gone", "folder", "transcript", "too-large", "not-a-plan", "outside"]) {
+    const reasons = [
+      "gone",
+      "folder",
+      "transcript",
+      "too-large",
+      "not-a-plan",
+      "outside",
+      "moved",
+      "not-text",
+    ]
+    for (const reason of reasons) {
       app.saveFails(new WireError("PLAN_UNWRITABLE", "no", { data: { reason } }))
       // eslint-disable-next-line no-await-in-loop -- Each step waits for the one before.
       const rejected = await app.companions.save(target, hero, "# New\n", "a1").catch((e) => e)
@@ -401,6 +413,81 @@ describe("the runner's companion content", () => {
     const fits = "#".repeat(200 * 1024)
     await app.companions.save(target, hero, fits, "a1")
     expect(app.saves.map((each) => each.text.length)).toEqual([fits.length])
+  })
+
+  it("follows a file to be edited: its whole text, saying whether it can be saved", async () => {
+    const app = following()
+    app.follow(undefined, true)
+    app.follow("/p/.env", true)
+    const writable = {
+      kind: "text" as const,
+      path: "/p/a.ts",
+      text: "a\r\n",
+      writable: true as const,
+    }
+    const outside = {
+      kind: "text" as const,
+      path: "/w/a.ts",
+      text: "a\n",
+      writable: false as const,
+      reason: "outside" as const,
+    }
+    app.push({ state: "ready", stamp: "1", content: writable })
+    app.push({ state: "ready", stamp: "2", content: outside })
+    await settle()
+    expect(app.asked).toStrictEqual([
+      { itemId: "hero", edit: true },
+      { itemId: "hero", reveal: "/p/.env", edit: true },
+    ])
+    expect(app.seen).toEqual([
+      { state: "ready", stamp: "1", content: writable },
+      { state: "ready", stamp: "2", content: outside },
+    ])
+    // Not asked to edit, it asks for no more than before.
+    app.follow(undefined, false)
+    app.follow()
+    expect(app.asked.slice(2)).toStrictEqual([{ itemId: "hero" }, { itemId: "hero" }])
+  })
+
+  it("passes on why a file followed to be edited can't be edited whole", async () => {
+    const app = following()
+    app.follow(undefined, true)
+    const listing = {
+      kind: "file" as const,
+      path: "/p/big.log",
+      firstLine: 1,
+      lines: ["a"],
+      from: 1,
+      to: 1,
+      total: null,
+      truncated: true,
+      clamped: false,
+      uneditable: "too-large" as const,
+    }
+    app.push({ state: "ready", stamp: "1", content: listing })
+    await settle()
+    expect(app.seen).toEqual([{ state: "ready", stamp: "1", content: listing }])
+  })
+
+  it("saves a file's edit as the path it was made on, and hands back its text as it now stands", async () => {
+    const app = following()
+    await app.companions.save(target, hero, "a\r\n", "a1", "/p/a.ts")
+    await app.companions.save(target, hero, "# Plan\n", "a1")
+    expect(app.saves).toStrictEqual([
+      { itemId: "hero", text: "a\r\n", basedOn: "a1", path: "/p/a.ts" },
+      { itemId: "hero", text: "# Plan\n", basedOn: "a1" },
+    ])
+    app.saveReturns({
+      saved: false,
+      current: { stamp: "c3", text: "theirs\n", truncated: false, skill: false },
+    })
+    await expect(app.companions.save(target, hero, "a\n", "a1", "/p/a.ts")).resolves.toEqual({
+      saved: false,
+      current: {
+        stamp: "c3",
+        plan: { kind: "plan", text: "theirs\n", truncated: false, writable: true, skill: false },
+      },
+    })
   })
 
   it("passes on a file cut short or pointing past its end", async () => {
@@ -481,6 +568,52 @@ describe("the runner's companion content", () => {
         )
       } finally {
         await runner.close()
+      }
+    })
+
+    it("edits the file opened in the project window, saved only as the file it was made on", async () => {
+      const runner = await startTestRunner()
+      const directory = await mkdtemp(join(tmpdir(), "novadeck-edit-"))
+      try {
+        await writeFile(join(directory, "a.ts"), "const a = 1\r\n")
+        const project = await runner.client.projects.create({
+          id: crypto.randomUUID(),
+          name: "Storefront",
+          cwd: directory,
+        })
+        const session = await runner.client.sessions.create({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          name: "Session",
+        })
+        const there = { projectId: project.id, workspaceSessionId: session.id }
+        const companions = createRunnerCompanions(runner.client.companions)
+        const { item } = await companions.openInProject!(there, "a.ts", crypto.randomUUID())
+        const seen: ItemContent[] = []
+        companions.follow(there, item.id, { reveal: undefined, edit: true }, (content) =>
+          seen.push(content),
+        )
+        await vi.waitFor(() =>
+          expect(seen[0]).toMatchObject({
+            content: { kind: "text", path: item.path, text: "const a = 1\r\n", writable: true },
+          }),
+        )
+        const stamp = seen[0]?.state === "ready" ? seen[0].stamp : ""
+        const moved = await companions
+          .save(there, item.id, "x", stamp, join(directory, "b.ts"))
+          .catch((error: unknown) => error)
+        expect(moved).toBeInstanceOf(PlanUnwritableError)
+        expect((moved as PlanUnwritableError).reason).toBe("moved")
+        await expect(
+          companions.save(there, item.id, "const a = 2\r\n", stamp, item.path!),
+        ).resolves.toMatchObject({ saved: true })
+        await expect(readFile(join(directory, "a.ts"), "utf8")).resolves.toBe("const a = 2\r\n")
+        await vi.waitFor(() =>
+          expect(seen.at(-1)).toMatchObject({ content: { text: "const a = 2\r\n" } }),
+        )
+      } finally {
+        await runner.close()
+        await rm(directory, { recursive: true, force: true })
       }
     })
   })

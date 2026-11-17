@@ -752,10 +752,17 @@ export const contract = {
     // deleted. A file that may hold secrets is unavailable as `secret` unless `reveal` is the
     // path the item points at, the file the person chose to show: an item pointed at
     // another file since (a project window re-pointed) is `secret` again, and revealed again
-    // if pointed back.
+    // if pointed back. With `edit`, a file is its whole text, saying whether `save` writes it,
+    // where it can be edited whole, or its listing saying why not (see `itemContent`).
     // An unknown item is NOT_FOUND.
     content: procedure
-      .input(z.strictObject({ itemId: id, reveal: z.string().max(4096).optional() }))
+      .input(
+        z.strictObject({
+          itemId: id,
+          reveal: z.string().max(4096).optional(),
+          edit: z.boolean().optional(),
+        }),
+      )
       .output(eventIterator(itemContent)),
     // One file of a changes item as a selection of its layers changed it: the file's diff
     // and the text of each side, as one range of layers (see
@@ -777,18 +784,24 @@ export const contract = {
     changeRead: procedure
       .input(z.strictObject({ itemId: id, path: z.string().min(1).max(companionLimits.path) }))
       .output(z.void()),
-    // Writes the person's edit to a plan kept in a file, atomically, unless the file
-    // changed since `basedOn`, the stamp the edit was made on: then nothing is written and
-    // the plan as it now stands comes back. A plan kept in an agent's transcript can't be
+    // Writes the person's edit to a plan kept in a file, or to the file they opened in the
+    // session's project window, atomically, unless the file changed since `basedOn`, the
+    // stamp the edit was made on: then nothing is written and the text as it now stands
+    // comes back. `path` is the path the edit was made on: an item pointed at another file
+    // since writes nothing (`moved`). A plan's save may leave it out; a file's must give it,
+    // or is refused as `moved`, as its edit can't be told to be this file's. A plan kept in an
+    // agent's transcript can't be
     // written, and nor can one past 256 KiB, a file that is gone, one in a folder the
-    // runner may not write to, or an item that is no plan: PLAN_UNWRITABLE, saying why
-    // (`gone`, `folder`, `transcript`, `too-large`, `not-a-plan`, `outside`). An unknown item is NOT_FOUND.
+    // runner may not write to, or an item that is neither: PLAN_UNWRITABLE, saying why
+    // (`gone`, `folder`, `transcript`, `too-large`, `not-a-plan`, `outside`, `moved`,
+    // `not-text`). An unknown item is NOT_FOUND.
     save: procedure
       .input(
         z.strictObject({
           itemId: id,
           text: z.string().max(companionLimits.plan),
           basedOn: z.string().max(128),
+          path: z.string().max(companionLimits.path).optional(),
         }),
       )
       .output(planSaveResult),

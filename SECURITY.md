@@ -268,6 +268,33 @@ deleting one leaves the others, and a copy makes a file of its own of each. A ru
 through a copy, as by a crash, leaves the part it made. The demo (`frontend/demo/src/files.ts`)
 changes only an in-memory copy of its fixture trees.
 
+A file the person opened from the Files panel is written back through `companions.save`
+(`saveText` in `backend/runner/src/companions/editing.ts`), by the same callers. Only the item the
+session's project window holds is written, and only where its file, resolved through any links,
+lies inside the session's project's folder resolved the same way, outside Git's own `.git` there
+(a name `.git` on the way in any letters' case, so a link in the project that leads into it is
+refused too) and outside agents' worktrees (`~/.novadeck/worktrees`) where the project's folder
+holds them, as a project of the person's home folder does: an agent's copy is never written. A
+project whose own folder lies in there, one the person made of a worktree on purpose, is written
+like any other. A link that leads out, an agent's worktree copy opened in the window, and a file on a
+terminal's bar or in an undocked window (inside the project or not) are refused. So are a file the
+runner may not write, though a rename over it would succeed, and one in a folder it may not write
+in; on Windows, where the system's check reads only a file's read-only attribute, a file an ACL
+denies is found as the rename is refused, which is tried three times and then refused the same
+way, as is a file another program holds that long. A file's save must name the path its edit was
+made on, and is refused where the item points at another file since, so one file's text never
+lands in another, as when a second window pointed the project window at the next file. The text
+replaces the file whole, from a temporary file beside it (`.name.pid.ms.tmp`) renamed over it;
+nothing is written where the file changed since the edit's stamp, and a file grown past 256 KiB
+or no longer UTF-8 text is refused. The new file keeps the old one's permission bits and
+byte-order mark, and nothing else of it: setuid, setgid and the sticky bit are dropped; it is
+owned by the runner's account and group, so a group-writable file someone else owns becomes the
+runner's account's; it has none of the old one's ACLs or extended attributes; and another name
+hard-linked to the old file keeps the old text. A runner stopped partway, as by a crash, leaves the
+temporary file in the project's folder. A file that may hold secrets is written as any other: its
+gate keeps it off screen until the person reveals it, and the token's holder can write it through a
+shell anyway. The checks come before the rename, as above.
+
 ## Terminal Runner
 
 The desktop app's **Runner → Remote Runner…** form runs no script, has no preload or

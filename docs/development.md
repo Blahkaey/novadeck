@@ -198,8 +198,10 @@ and its changes. The pane loads what an item points at through the backend's opt
 `companions` capability (`frontend/core/src/items.ts`): its content as it changes, and a save
 that writes the person's edits and notes into the plan file unless it changed since, in
 which case the pane merges and saves again. Edits save once typing pauses and when focus
-leaves the plan. The runner reads content from disk and can't write plans yet, so its
-plans are read-only; the content-preview demo writes them, with sample agents in
+leaves the plan. The runner reads content from disk and writes plans kept in files
+(`companions.save`), and, followed with `edit`, gives the file the person opened in the
+project window whole and writes it back the same way; the content-preview demo writes plans
+in memory, with sample agents in
 `frontend/demo/src/showcase/` that revise their plans over the file as the person left it and
 remove the notes they apply. `docs/agent-workspace.md` ("Companion pane") describes the
 runner's side. The editor and its merge code load when a plan first opens.
