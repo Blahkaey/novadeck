@@ -134,6 +134,39 @@ describe("voice.record", () => {
 })
 
 describe("an attached terminal", () => {
+  // A runner whose attachments go on after the position asked for, opening afresh with a
+  // snapshot without one; each asks for what `asked` records, and waits for `gate` first.
+  const resuming = async (gate: () => Promise<void> = async () => {}) => {
+    const terminalId = crypto.randomUUID()
+    const asked: (number | undefined)[] = []
+    const fake = await fakeRunner({
+      terminals: {
+        attach: api.terminals.attach.handler(async function* ({ input }) {
+          asked.push(input.afterSequence)
+          yield { terminalId, type: "attached", mode: "control" } as const
+          await gate()
+          if (input.afterSequence === undefined)
+            yield {
+              terminalId,
+              type: "snapshot",
+              sequence: 5,
+              data: "$ ",
+              cols: 80,
+              rows: 24,
+              exit: null,
+            } as const
+          else {
+            const sequence = input.afterSequence + 1
+            yield { terminalId, type: "output", sequence, data: `event ${sequence}` } as const
+          }
+          await never
+        }),
+        ack: api.terminals.ack.handler(() => {}),
+      },
+    })
+    return { ...fake, terminalId, asked }
+  }
+
   context("sent a frame it can't read", () => {
     it("resumes after the last event it read, and takes input again", async () => {
       const terminalId = crypto.randomUUID()
@@ -163,6 +196,103 @@ describe("an attached terminal", () => {
       expect(resumed).toEqual([undefined, 1])
       await terminal.write("x")
       expect(written).toEqual(["x"])
+    })
+  })
+
+  context("attached again from where an earlier attachment stood", () => {
+    it("is sent the events after it", async () => {
+      const { runner, terminalId, asked, epoch } = await resuming()
+      const first = await runner.terminals.attach(terminalId)
+      expect(first.position()).toBeUndefined()
+      await first.next()
+      expect(first.position()).toEqual({ epoch: epoch(), sequence: 5 })
+      const after = first.position()!
+      await first.detach()
+
+      const again = await runner.terminals.attach(terminalId, { after })
+      onTestFinished(() => again.detach())
+      expect((await again.next()).value).toMatchObject({ type: "output", sequence: 6 })
+      expect(asked).toEqual([undefined, 5])
+      expect(again.position()).toEqual({ epoch: epoch(), sequence: 6 })
+    })
+
+    it("opens with a fresh screen once the runner has restarted", async () => {
+      const { runner, terminalId, asked, epoch, restart } = await resuming()
+      const first = await runner.terminals.attach(terminalId)
+      await first.next()
+      const after = first.position()!
+      await first.detach()
+      restart()
+      await vi.waitFor(() => expect(runner.status).toEqual({ state: "connected", epoch: epoch() }))
+
+      const again = await runner.terminals.attach(terminalId, { after })
+      onTestFinished(() => again.detach())
+      expect((await again.next()).value).toMatchObject({ type: "snapshot", sequence: 5 })
+      expect(asked).toEqual([undefined, undefined])
+    })
+
+    it("opens with a fresh screen when the runner can't go on from it", async () => {
+      const terminalId = crypto.randomUUID()
+      const asked: (number | undefined)[] = []
+      const { runner, epoch } = await fakeRunner({
+        terminals: {
+          attach: api.terminals.attach.handler(async function* ({ input }) {
+            asked.push(input.afterSequence)
+            // A cursor past the last event, as a terminal started afresh under its id has.
+            if (input.afterSequence !== undefined)
+              throw new ORPCError("INVALID_CURSOR", { status: 400 })
+            yield { terminalId, type: "attached", mode: "control" } as const
+            yield {
+              terminalId,
+              type: "snapshot",
+              sequence: 1,
+              data: "$ ",
+              cols: 80,
+              rows: 24,
+              exit: null,
+            } as const
+            await never
+          }),
+          ack: api.terminals.ack.handler(() => {}),
+        },
+      })
+      const terminal = await runner.terminals.attach(terminalId, {
+        after: { epoch: epoch(), sequence: 40 },
+      })
+      onTestFinished(() => terminal.detach())
+      expect((await terminal.next()).value).toMatchObject({ type: "snapshot", sequence: 1 })
+      expect(asked).toEqual([40, undefined])
+    })
+  })
+
+  context("reattached to a restarted runner", () => {
+    it("stands where its last event was read, in that event's epoch, until it reads the next", async () => {
+      let opened = 0
+      let open = () => {}
+      // The reattachment's snapshot waits until the test lets it go.
+      const held = new Promise<void>((resolve) => {
+        open = resolve
+      })
+      const { runner, terminalId, asked, epoch, restart } = await resuming(() => {
+        opened += 1
+        return opened > 1 ? held : Promise.resolve()
+      })
+      const terminal = await runner.terminals.attach(terminalId)
+      onTestFinished(() => terminal.detach())
+      await terminal.next()
+      const before = epoch()
+      expect(terminal.position()).toEqual({ epoch: before, sequence: 5 })
+
+      restart()
+      const next = terminal.next()
+      await vi.waitFor(() => expect(asked).toHaveLength(2))
+      // Open in the new epoch, it has read nothing there yet.
+      expect(asked).toEqual([undefined, undefined])
+      expect(terminal.position()).toEqual({ epoch: before, sequence: 5 })
+      open()
+      expect((await next).value).toMatchObject({ type: "snapshot", sequence: 5 })
+      expect(epoch()).not.toBe(before)
+      expect(terminal.position()).toEqual({ epoch: epoch(), sequence: 5 })
     })
   })
 

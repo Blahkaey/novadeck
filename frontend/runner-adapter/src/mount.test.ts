@@ -8,6 +8,7 @@ import { createStore } from "@novadeck/core/store"
 import { terminalFixture } from "@novadeck/core/testing"
 import type { TerminalMetadata, ViewMode } from "@novadeck/core/types"
 import { createRendererPool, type Drawing, type Terminal } from "@novadeck/emulator/browser"
+import type { TerminalPosition } from "@novadeck/runner-client"
 import { createTerminalMount } from "@novadeck/terminal-views/mount"
 import { noTheme } from "@novadeck/terminal-views/theme"
 import {
@@ -110,7 +111,7 @@ const propsOf = (terminal: TerminalMetadata, view: ViewMode = "focus"): Terminal
 
 // Mounts a terminal in an element in the page, over the screens `options` open, or `screens`.
 const mountOver = (
-  options: TerminalScreensOptions<TerminalKey>,
+  options: TerminalScreensOptions<TerminalKey, TerminalPosition>,
   props: TerminalMountProps,
   screens: TerminalScreens<TerminalKey> = createTerminalScreens(options),
 ): Mounted => {

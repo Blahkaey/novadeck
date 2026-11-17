@@ -64,14 +64,18 @@ beside the wire's own handshake.
   - `follow(wire, { open, resume, gone })`, a stream followed across the connection's
     sessions, which its reader sees as one. `open(client, { after, signal })` opens it on a
     session. It resumes one of two ways:
-    - from a cursor (`{ cursor, ack }`): a new session's stream picks up after the last item
-      read (`after`), unless the epoch changed, the server refused the reader as too slow
+    - from a cursor (`{ cursor, ack, from }`): a new session's stream picks up after the last
+      item read (`after`), unless the epoch changed, the server refused the reader as too slow
       (`SLOW_CONSUMER`) or can't resume from its cursor (`INVALID_CURSOR`), which start it
       afresh. Each item counts as read once the next is asked for, and `ack` tells the
       server, one acknowledgement in flight at a time, a refused one retried after
-      `min(50·2ⁿ, 3000)` ms. Its first stream opens on the live session or fails.
-      Once it has yielded, only a lost connection is resumed: any other failure, or why the
-      connection closed, ends it, thrown to the reader;
+      `min(50·2ⁿ, 3000)` ms. Its first stream opens on the live session or fails; with
+      `from`, a `Cursor` (`{ epoch, position }`) where an earlier reader stood, it asks for
+      what comes after it on a session of that epoch, and starts afresh on one of another or
+      once the server refuses it (`INVALID_CURSOR`, `SLOW_CONSUMER`). The `Following`'s
+      `cursor` says where its reader stands: the last item's position, in the epoch it came
+      from. Once it has yielded, only a lost connection is resumed: any other failure, or why
+      the connection closed, ends it, thrown to the reader;
     - by starting over (`{ restart: true, reset, holdReset }`): each stream it opens says
       `reset` first, so the reader replaces what it has with what follows, up to its own
       marker (such as `synced`). With `holdReset`, `reset` waits for a stream opened again

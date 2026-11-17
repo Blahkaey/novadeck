@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { MessageChannel } from "node:worker_threads"
 
+import { createScreen, readScreen } from "@novadeck/emulator/headless"
 import { maxUploadBytes, type TerminalEvent } from "@novadeck/protocol"
 import {
   connectRunner,
@@ -159,6 +160,20 @@ const view = (terminal: AttachedTerminal, resources: Resources) => {
   return { next, until, events, text: () => text }
 }
 
+/** The screen `events` draw, read as a renderer would have drawn them in turn. */
+const drawn = async (resources: Resources, events: readonly TerminalEvent[]) => {
+  const screen = createScreen({ cols: 80, rows: 24, scrollback: 1000 })
+  resources.defer(() => screen.dispose())
+  for (const event of events) {
+    if (event.type === "snapshot" || event.type === "resized") screen.resize(event.cols, event.rows)
+    if (event.type === "snapshot") screen.reset()
+    if (event.type === "snapshot" || event.type === "output")
+      // eslint-disable-next-line no-await-in-loop -- Events are drawn in order.
+      await new Promise<void>((resolve) => screen.write(event.data, resolve))
+  }
+  return readScreen(screen)
+}
+
 const print = (terminal: AttachedTerminal, value: string) =>
   terminal.write(command({ type: "write", data: `${value}\r\n` }))
 
@@ -288,6 +303,58 @@ describe("runner client over WebSocket", () => {
     await runner.close()
     await status.watching
     expect(status.seen).toEqual(["connected", "reconnecting", "connected", "closed"])
+  })
+
+  it("goes on from where a detached attachment stood, with only the events since", async ({
+    resources,
+  }) => {
+    const app = await deployed(resources)
+    const owner = await app.connect()
+    const { id: sessionId } = await session(owner, app.directory)
+    const created = await owner.terminals.create(shell(sessionId))
+    const writer = await owner.terminals.attach(created.id)
+    const writing = view(writer, resources)
+    await writing.until("PTY_READY")
+    // Another window follows it, until it parks out of sight.
+    const viewer = await app.connect()
+    const first = await viewer.terminals.attach(created.id, { mode: "observe" })
+    const seen = view(first, resources)
+    await print(writer, "BEFORE_PARK")
+    await seen.until("BEFORE_PARK")
+    const after = first.position()
+    expect(after).toEqual({
+      epoch: (viewer.status as { epoch: string }).epoch,
+      sequence: seen.events.at(-1)!.sequence,
+    })
+    await first.detach()
+    await print(writer, "WHILE_PARKED")
+    await writing.until("WHILE_PARKED")
+
+    const resumed = view(
+      await viewer.terminals.attach(created.id, { mode: "observe", after: after! }),
+      resources,
+    )
+    await resumed.until("WHILE_PARKED")
+    expect(resumed.text()).not.toContain("BEFORE_PARK")
+    expect(
+      resumed.events.every(
+        (event) => event.type !== "snapshot" && event.sequence > after!.sequence,
+      ),
+    ).toBe(true)
+    // What it kept, with what came since, is the screen a fresh attachment draws.
+    const fresh = view(
+      await (await app.connect()).terminals.attach(created.id, { mode: "observe" }),
+      resources,
+    )
+    const snapshot = await fresh.next()
+    expect(snapshot.type).toBe("snapshot")
+    while (resumed.events.at(-1)!.sequence < snapshot.sequence) {
+      // eslint-disable-next-line no-await-in-loop -- Up to where the snapshot stands.
+      await resumed.next()
+    }
+    expect(await drawn(resources, [...seen.events, ...resumed.events])).toEqual(
+      await drawn(resources, [snapshot]),
+    )
   })
 
   it("resynchronizes a slow viewer with a fresh snapshot instead of failing", async ({

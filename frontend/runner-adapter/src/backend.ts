@@ -44,6 +44,7 @@ import {
   hasCode,
   type AttachedTerminal,
   type Runner,
+  type TerminalPosition,
   type TerminalWatchItem,
 } from "@novadeck/runner-client"
 import { createTerminalMount } from "@novadeck/terminal-views/mount"
@@ -269,7 +270,8 @@ export type SurfaceRuntime = {
   // The surface's attachment, until the returned release; releasing leaves one that
   // took its place, as another surface's, alone.
   readonly attached: (key: TerminalKey, attachment: AttachedTerminal) => () => void
-  readonly attach: (terminalId: string) => Promise<AttachedTerminal>
+  // Attaches to the terminal; with `after`, going on from where an earlier attachment stood.
+  readonly attach: (terminalId: string, after?: TerminalPosition) => Promise<AttachedTerminal>
   // Saves a file pasted into a terminal on the runner's machine; resolves with its path.
   readonly upload: Runner["terminals"]["upload"]
   // Resolves once the runner is reachable again, or closed for good.
@@ -1658,7 +1660,7 @@ export const runnerBackend = (
         if (entry?.attachment === attachment) entry.attachment = undefined
       }
     },
-    attach: (terminalId) => runner.terminals.attach(terminalId),
+    attach: (terminalId, from) => runner.terminals.attach(terminalId, from && { after: from }),
     upload: (terminalId, file) => track(runner.terminals.upload(terminalId, file)),
     connected,
     lost: (key, error) => {

@@ -60,14 +60,18 @@ vi.hoisted(() => {
 
 const key = { projectId: "p", workspaceSessionId: "s", terminalId: "t" }
 
-// A runtime that gives `attached` for every attach and records what it is told.
+// A runtime that gives `attached` for every attach and records what it is told and asked.
 const runtimeOf = (attached: AttachedTerminal) => {
   const noted: AttachedTerminal[] = []
+  const asked: unknown[] = []
   const released = vi.fn<() => void>()
   const runtime: SurfaceRuntime = {
     seen: () => () => {},
     entry: () => undefined,
-    attach: async () => attached,
+    attach: async (...call) => {
+      asked.push(call)
+      return attached
+    },
     upload: async () => "",
     resized: () => {},
     attached: (_key, attachment) => {
@@ -83,7 +87,7 @@ const runtimeOf = (attached: AttachedTerminal) => {
     screen: () => {},
     shown: () => false,
   }
-  return { runtime, noted, released }
+  return { runtime, noted, asked, released }
 }
 
 describe("the runner's terminal screens' options", () => {
@@ -97,11 +101,19 @@ describe("the runner's terminal screens' options", () => {
       write: vi.fn<AttachedTerminal["write"]>(async () => {}),
       resize: vi.fn<AttachedTerminal["resize"]>(async () => {}),
       detach: vi.fn<AttachedTerminal["detach"]>(async () => {}),
+      position: () => ({ epoch: "e1", sequence: 7 }),
     }
-    const { runtime, noted, released } = runtimeOf(attached)
+    const { runtime, noted, asked, released } = runtimeOf(attached)
     const options = screensOptions(runtime, { theme: noTheme })
     const stream = await options.attach(key)
     expect(stream.mode).toBe("control")
+    // It stands where the attachment does, which the next attach goes on from.
+    expect(stream.position?.()).toEqual({ epoch: "e1", sequence: 7 })
+    await options.attach(key, stream.position?.())
+    expect(asked).toEqual([
+      ["t", undefined],
+      ["t", { epoch: "e1", sequence: 7 }],
+    ])
     await stream.write("ls\r")
     await stream.resize(100, 30)
     stream.close()
@@ -191,6 +203,7 @@ describe("the runner's terminal screens over a runtime", () => {
       write: async () => {},
       resize: async () => {},
       detach: async () => {},
+      position: () => undefined,
     }
     return attached
   }

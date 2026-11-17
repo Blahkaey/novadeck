@@ -1,5 +1,5 @@
 import type { Screen } from "@novadeck/emulator/headless"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { describe as context, describe, expect, it, onTestFinished, vi } from "vitest"
 
 import type { TerminalEvent } from "../contract.js"
 import type { NativeSpawn } from "../pty/pty.js"
@@ -742,6 +742,56 @@ describe("a terminal's events", () => {
     expect((await drain(terminal, "recent", recent, 3)).map((event) => event.sequence)).toEqual([
       6, 7, 8,
     ])
+  })
+
+  context("replayed after a cursor, weighed against the screen as a snapshot", () => {
+    // Output that draws over one row again and again: much to send, a small screen to show.
+    const overwrite = "\rabcdefghij".repeat(300)
+    const drawn = async (program: Program, settled: () => Promise<void>, times: number) => {
+      for (let index = 0; index < times; index += 1) {
+        program.draw(overwrite)
+        // eslint-disable-next-line no-await-in-loop -- One event a draw.
+        await settled()
+      }
+    }
+
+    it("go as they are while they weigh little, though the snapshot would weigh less", async () => {
+      const { terminal, program, settled } = terminalOf()
+      await drawn(program, settled, 4)
+      const resumed = terminal.attach("viewer", { after: 0, mode: "observe" })
+      const events = await drain(terminal, "viewer", resumed, 4)
+      expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4])
+    })
+
+    it("give way to the snapshot once they outweigh it", async () => {
+      const { terminal, program, settled } = terminalOf()
+      await drawn(program, settled, 8)
+      const resumed = terminal.attach("viewer", { after: 0, mode: "observe" })
+      const opened = await resumed.next()
+      expect(opened).toMatchObject({ type: "snapshot", sequence: 8 })
+      expect(eventBytes(opened!)).toBeLessThan(1024)
+    })
+
+    it("go as they are where they weigh less than the snapshot, as a long scrollback makes it", async () => {
+      const { terminal, program, settled } = terminalOf({ cols: 80 })
+      for (let line = 0; line < 1000; line += 1) program.draw(`line ${line} ${"y".repeat(60)}\r\n`)
+      await settled()
+      const after = terminal.sequence
+      await drawn(program, settled, 8)
+      const resumed = terminal.attach("viewer", { after, mode: "observe" })
+      const events = await drain(terminal, "viewer", resumed, 8)
+      expect(events.map((event) => event.type)).toEqual(Array.from({ length: 8 }, () => "output"))
+      expect(events[0]!.sequence).toBe(after + 1)
+    })
+
+    it("go as they are where the screen is too large for a snapshot", async () => {
+      const { terminal, program, settled } = terminalOf({
+        limits: { ...limits, snapshotBytes: 64 },
+      })
+      await drawn(program, settled, 8)
+      const resumed = terminal.attach("viewer", { after: 0, mode: "observe" })
+      expect(await resumed.next()).toMatchObject({ type: "output", sequence: 1 })
+    })
   })
 
   it("refuse a cursor past the last event, or not a count", async () => {

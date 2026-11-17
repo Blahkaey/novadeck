@@ -14,7 +14,8 @@ resumable stream of it, its browser view, and shell integration.
     codes to its own errors; `SLOW_CONSUMER` and `INVALID_CURSOR` name the same failures a
     transport's resumable streams do.
   - `AttachStream`: one attached stream as a client holds it, its events acknowledged as it
-    reads the next.
+    reads the next, and, where its owner can say, where it stands (`position`) after the
+    event it last yielded, opaque to the view.
 
 - `./view` (browser): the terminal's view, which the app's terminals mount on.
   - `createTerminalScreens(options)` (`TerminalScreensOptions`) keeps one screen per terminal:
@@ -23,9 +24,14 @@ resumable stream of it, its browser view, and shell integration.
     `Hold` to `place` the screen in an element, `update`, `focus`, `restart` and `release`; its
     `state` is a store of what the person is told (`live`, `resuming`, `waits`, `lock`, `notice`).
     A released screen parks after `park.afterMs`, closes after `retain.afterMs` away, and the
-    parked longest closes past `park.keep`. `setFont` sets the font every screen opens in and
-    the open ones fit to, and `typeInto(key, text)` pastes text, such as dictation, into a
-    screen that is drawing its live terminal, and says whether it did.
+    parked longest closes past `park.keep`. Shown again, a parked screen attaches going on from
+    where its stream stood after the last event it drew (`attach(key, after)`), so the owner
+    can send only what came since; it goes live once granted. Where its pane changed size
+    meanwhile, it draws what came since at the size it was made for, sends the pane's, and
+    takes it at the `resized` the host answers with. One whose draw failed, whose stream ended
+    with its shell, or that closed and opened again attaches afresh. `setFont` sets the font
+    every screen opens in and the open ones fit to, and `typeInto(key, text)` pastes text, such
+    as dictation, into a screen that is drawing its live terminal, and says whether it did.
   - The owner gives the emulator, theme, stream, wording and policies as options; the screens
     know no app, wire or protocol. `store` is optional (a plain store otherwise); an owner
     that observes its stores passes its own. Files pasted in are saved on the terminal's host
@@ -46,8 +52,10 @@ resolve it.
     budget (shorter as the host shuts down), and `remove` keeps a closed one until its viewers
     have read the rest (its caller refuses its id meanwhile; `draining` tells, and `closing`
     whether a close or the shutdown is ending its program). `shutdown` ends every program,
-    then lets every terminal go. `attach` attaches a viewer once the draws before it are
-    drawn, keeping the terminal meanwhile, and yields `attached`, then the events; `release`
+    then lets every terminal go. A terminal opened under an id it let go before starts its
+    stream past that one's, so a cursor from it gets a snapshot. `attach` attaches a viewer
+    once the draws before it are drawn, keeping the terminal meanwhile, and yields `attached`,
+    then the events; `release`
     ends an owner's attachments and control on every terminal. `on` adds a listener. `restart` starts a new run of an exited terminal in place, one restart at a time,
     after its caller's waiting.
   - Each `Terminal` the host opens runs its program in a pty with a headless screen, and keeps
@@ -70,8 +78,10 @@ resolve it.
     written. A deferred hold counts them only once delivered, and drops
     the mouse's wheel and motion.
   - It sequences each event and keeps a replay ring bounded in bytes. A viewer attaches from a
-    cursor the ring still holds, or else from a snapshot of the screen, with as much
-    scrollback as fits its own cap. One attachment controls the terminal and the rest observe.
+    cursor the ring still holds, with the events since, or else from a snapshot of the screen,
+    with as much scrollback as fits its own cap. Events since that weigh more than 16 KiB are
+    weighed against that snapshot, and the snapshot goes where it weighs less. One attachment
+    controls the terminal and the rest observe.
   - Each attachment has a queue bounded in bytes, and an ack window that holds delivery until
     the viewer catches up. A viewer that falls behind fails with `SLOW_CONSUMER`, to reconnect
     and resume.

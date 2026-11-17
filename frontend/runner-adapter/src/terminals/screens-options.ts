@@ -4,7 +4,7 @@ import { terminalKeyId } from "@novadeck/core/terminals/registry"
 import type { RendererPool } from "@novadeck/emulator/browser"
 import { maxUploadBytes } from "@novadeck/protocol"
 import { desktopApp } from "@novadeck/protocol/bridge"
-import { hasCode, type AttachedTerminal } from "@novadeck/runner-client"
+import { hasCode, type AttachedTerminal, type TerminalPosition } from "@novadeck/runner-client"
 import type { AttachStream, Exit } from "@novadeck/terminal"
 import { openEmulator } from "@novadeck/terminal-views/emulator"
 import { screenMarkup } from "@novadeck/terminal-views/mount"
@@ -21,16 +21,18 @@ import { exitStatus, restartable } from "./activity"
 // a project within a working break finds its output in place instead of a screen to reopen.
 export const retainMs = 30 * 60 * 1000
 
-// The runner's attachment, which the screens follow as the terminal library's stream. The
+// The runner's attachment, which the screens follow as the terminal library's stream, standing
+// where the attachment does: a screen shown again after it parked goes on from there. The
 // runtime notes the attachment itself, so the stream is mapped back to it.
 const attachments = new WeakMap<AttachStream, AttachedTerminal>()
-const streamOf = (attached: AttachedTerminal): AttachStream => {
-  const stream: AttachStream = {
+const streamOf = (attached: AttachedTerminal): AttachStream<TerminalPosition> => {
+  const stream: AttachStream<TerminalPosition> = {
     mode: attached.mode,
     [Symbol.asyncIterator]: () => attached[Symbol.asyncIterator](),
     write: (data) => attached.write(data),
     resize: (cols, rows) => attached.resize({ cols, rows }),
     close: () => void attached.detach(),
+    position: () => attached.position(),
   }
   attachments.set(stream, attached)
   return stream
@@ -63,13 +65,13 @@ export const screensOptions = (
     cap = parkedCap,
     theme,
   }: { pool?: RendererPool; cap?: number; theme: ThemeSource },
-): TerminalScreensOptions<TerminalKey> => ({
+): TerminalScreensOptions<TerminalKey, TerminalPosition> => ({
   keyOf: terminalKeyId,
   emulator: openEmulator({ pool, screenReader: true }),
   theme: terminalTheme(theme),
   store: createStore,
   markup: screenMarkup,
-  attach: async (key) => streamOf(await runtime.attach(key.terminalId)),
+  attach: async (key, after) => streamOf(await runtime.attach(key.terminalId, after)),
   lifecycle: (key) => runtime.entry(key),
   connection: runtime.connection,
   reconnected: () => runtime.connected(),

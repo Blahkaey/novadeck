@@ -8,6 +8,7 @@ export {
 export {
   follow,
   lost,
+  type Cursor,
   type CursorResume,
   type FollowOptions,
   type Following,

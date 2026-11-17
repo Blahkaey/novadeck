@@ -28,9 +28,13 @@ export type ViewEvents<K> = {
   readonly attached?: (key: K, stream: AttachStream) => () => void
 }
 
-// What following a terminal asks of its owner.
-export type FollowOptions<K> = {
-  readonly attach: (key: K) => Promise<AttachStream>
+// What following a terminal asks of its owner. `P` is where the owner's streams stand
+// (`AttachStream.position`), which the view hands back without reading it.
+export type FollowOptions<K, P = unknown> = {
+  // Attaches to the terminal. `after` is where an earlier stream stood after the last event
+  // the screen drew, for the stream to go on from with the events since; an owner that can't
+  // starts it with a snapshot, as without one.
+  readonly attach: (key: K, after?: P) => Promise<AttachStream<P>>
   readonly lifecycle: (key: K) => Lifecycle | undefined
   // How the link is doing; a stream takes up again when it comes back.
   readonly connection: Store<ViewLink>
@@ -74,16 +78,21 @@ export type Screen = {
 // waits stays small.
 const gatherCap = 256 * 1024
 
+// An event as the view read it, with where its stream stood once it had: where the screen
+// stands once it has drawn the event.
+type Read<P> = { readonly event: TerminalEvent; readonly at: P | undefined }
+
 export type FollowedTerminal = {
   // Sends typed input; dropped while there is no attachment.
   readonly input: (data: string) => void
-  // Tells the owner the size that fits now, and the stream if it changed. Whether it sent
-  // the stream a size it had not sent before.
+  // Tells the owner the size that fits now, and the stream if it changed, fitting the screen to
+  // it at once, or, while the screen waits for the host's answer, where the host takes it.
+  // Whether it sent the stream a size it had not sent before.
   readonly refit: () => boolean
   // Lets go of the stream while no view shows the terminal, so its output costs nothing
-  // here while the screen keeps what it last drew; `unpark` attaches again, and the
-  // host's fresh screen brings it up to date. A fresh shell started meanwhile waits
-  // for it too.
+  // here while the screen keeps what it last drew; `unpark` attaches again, going on from
+  // the last event the screen drew, so the host sends what came since, or its fresh screen
+  // where it can't. A fresh shell started meanwhile waits for it too.
   readonly park: () => void
   readonly unpark: () => void
   readonly stop: () => void
@@ -103,8 +112,8 @@ const redrawMs = { first: 250, most: 5_000, apart: 60_000 }
 // shell and attaches again. A terminal another window controls is reported instead. A
 // screen that failed to draw lets go of the stream and attaches again, for a fresh screen
 // from the host: the shell is fine, only what this screen shows is in doubt.
-export const followTerminal = <K>(
-  options: FollowOptions<K>,
+export const followTerminal = <K, P = unknown>(
+  options: FollowOptions<K, P>,
   key: K,
   screen: Screen,
 ): FollowedTerminal => {
@@ -115,14 +124,32 @@ export const followTerminal = <K>(
   const halted = new Promise<void>((resolve) => {
     stop = resolve
   })
-  let attachment: AttachStream | undefined
+  let attachment: AttachStream<P> | undefined
+  // The size last sent, or told by the host.
   let sent: string | undefined
+  // The host's size as of the last event drawn: a snapshot's, or the last resize's.
+  let hostSize: string | undefined
   // Resolves once the stream may attach, as it may unless parked.
   let unparked: Promise<void> | undefined
   let wake: (() => void) | undefined
   // A park ended the stream: the same shell runs on, so it attaches again, even when
   // shown before the stream wound down.
   let cut = false
+  // Where the stream stood after the last event the screen drew, which the attach after a
+  // park goes on from. None once the screen is in doubt, or once a stream ended other than by
+  // a park: an exited, replaced or lost shell has nothing to go on from.
+  let drawnTo: P | undefined
+  // A stream that went on from what the screen kept, until it draws its first resize: one made
+  // in another window while this screen was parked, which it takes the pane's size back from,
+  // as a snapshot's fit does.
+  let reclaim = false
+  // While set, the screen takes no size of its own, only the host's: what the host sends before
+  // it takes the pane's size was made at the size before, so the screen takes the pane's at the
+  // `resized` the host answers with (`awaited`), in its place among the events. Set as a stream
+  // that went on from what the screen kept starts, and as it takes a size back; over once the
+  // pane is the host's size, the host answers, a snapshot comes, or the stream ends.
+  let holding = false
+  let awaited: string | undefined
   // The failures to draw in a row, and when the last was.
   let failures = 0
   let failedAt = 0
@@ -130,10 +157,14 @@ export const followTerminal = <K>(
     const size = screen.fit()
     if (size) on?.resized?.(key, size)
     if (!size || !attachment) return false
-    screen.resize(size)
+    if (!holding) screen.resize(size)
     const next = `${size.cols}x${size.rows}`
-    if (next === sent) return false
+    if (next === sent) {
+      holding &&= awaited !== undefined
+      return false
+    }
     sent = next
+    if (holding) awaited = next
     const attached = attachment
     void attached.resize(size.cols, size.rows).catch(() => {
       sent = undefined
@@ -144,15 +175,22 @@ export const followTerminal = <K>(
     })
     return true
   }
+  // The stream draws the current shell on the screen, whose input goes to it from now on.
+  const shown = (): void => {
+    // A park that came meanwhile has let go of this stream already.
+    if (!unparked) screen.live(true)
+    on?.stage?.(key, "shown")
+  }
   const apply = async (event: TerminalEvent): Promise<void> => {
     if (event.type === "snapshot") {
       screen.reset()
       screen.resize(event)
-      sent = `${event.cols}x${event.rows}`
+      sent = hostSize = `${event.cols}x${event.rows}`
+      // The host's screen as it is, at its size: nothing before it waits to be drawn.
+      holding = false
+      awaited = undefined
       await screen.write(event.data)
-      // A park that came while it drew has let go of this stream already.
-      if (!unparked) screen.live(true)
-      on?.stage?.(key, "shown")
+      shown()
       if (event.exit) {
         on?.exited?.(key, event.exit)
         screen.exited(options.waitsAfter(event.exit))
@@ -163,18 +201,30 @@ export const followTerminal = <K>(
       on?.exited?.(key, event.exit)
       screen.exited(options.waitsAfter(event.exit))
     } else if (event.type === "resized") {
-      sent = `${event.cols}x${event.rows}`
+      sent = hostSize = `${event.cols}x${event.rows}`
       screen.resize(event)
+      if (sent === awaited) {
+        holding = false
+        awaited = undefined
+      }
+      if (reclaim) {
+        reclaim = false
+        holding = true
+        refit()
+      }
     }
   }
   const wanted = (entry: Lifecycle): boolean => !stopped && !unparked && !entry.closed
-  // Attaches, retrying after the host comes back; undefined when it cannot, or once
-  // parked, which marks the stream cut.
-  const open = async (entry: Lifecycle): Promise<AttachStream | undefined> => {
+  // Attaches, going on after `after` where given, retrying after the host comes back;
+  // undefined when it cannot, or once parked, which marks the stream cut.
+  const open = async (
+    entry: Lifecycle,
+    after: P | undefined,
+  ): Promise<AttachStream<P> | undefined> => {
     while (wanted(entry)) {
       try {
         // eslint-disable-next-line no-await-in-loop -- Retry after the host comes back.
-        const attached = await options.attach(key)
+        const attached = await options.attach(key, after)
         if (wanted(entry)) return attached
         cut ||= Boolean(unparked)
         // Release before giving up.
@@ -199,24 +249,45 @@ export const followTerminal = <K>(
     cut ||= Boolean(unparked)
     return undefined
   }
-  // Follows the stream until it ends; whether the screen failed to draw it.
-  const follow = async (attached: AttachStream): Promise<boolean> => {
+  // Follows the stream until it ends; whether the screen failed to draw it. One that goes on
+  // from what the screen kept (`resumed`) brings no snapshot to make it live: it is once
+  // granted. It sends the pane's size where the pane changed meanwhile, and keeps drawing at
+  // the host's until the host answers (`holding`). A resize made elsewhere meanwhile comes
+  // among the events since (`reclaim`).
+  const follow = async (attached: AttachStream<P>, resumed: boolean): Promise<boolean> => {
     attachment = attached
+    reclaim = resumed
+    holding = resumed
+    awaited = undefined
     const release = on?.attached?.(key, attached)
+    if (resumed) {
+      shown()
+      // Where the host stood at the last event drawn, whatever was sent after it.
+      sent = hostSize
+      refit()
+    }
     let failed = false
     try {
       // Read by hand, so a paced screen can look ahead for output to draw with what it has.
       const events = attached[Symbol.asyncIterator]()
-      let ahead: Promise<IteratorResult<TerminalEvent>> | undefined
-      const pull = (): Promise<IteratorResult<TerminalEvent>> => (ahead ??= events.next())
+      let ahead: Promise<Read<P> | undefined> | undefined
+      // Where the stream stands is taken as each read lands, before the next is asked for.
+      const pull = (): Promise<Read<P> | undefined> =>
+        (ahead ??= events
+          .next()
+          .then((read) =>
+            read.done ? undefined : { event: read.value, at: attached.position?.() },
+          ))
       // The events to apply next, from `first`: on a paced screen, its output with what
       // follows it within the pace, up to the first event of another kind, which comes after.
+      // Output drawn as one stands where the last of it did.
       const gather = async (
-        first: TerminalEvent,
-      ): Promise<{ readonly batch: readonly TerminalEvent[]; readonly ended: boolean }> => {
+        first: Read<P>,
+      ): Promise<{ readonly batch: readonly Read<P>[]; readonly ended: boolean }> => {
         const ms = screen.pace?.() ?? 0
-        if (first.type !== "output" || !ms) return { batch: [first], ended: false }
-        let output = first
+        if (first.event.type !== "output" || !ms) return { batch: [first], ended: false }
+        let output = first.event
+        let { at } = first
         const deadline = Date.now() + ms
         const changed = screen.paced?.() ?? new Promise<void>(() => {})
         while (output.data.length < gatherCap) {
@@ -234,14 +305,16 @@ export const followTerminal = <K>(
             ])
             if (next === "waited") break
             ahead = undefined
-            if (next.done) return { batch: [output], ended: true }
-            if (next.value.type !== "output") return { batch: [output, next.value], ended: false }
-            output = { ...next.value, data: output.data + next.value.data }
+            if (!next) return { batch: [{ event: output, at }], ended: true }
+            if (next.event.type !== "output")
+              return { batch: [{ event: output, at }, next], ended: false }
+            output = { ...next.event, data: output.data + next.event.data }
+            at = next.at
           } finally {
             clearTimeout(timer)
           }
         }
-        return { batch: [output], ended: false }
+        return { batch: [{ event: output, at }], ended: false }
       }
       let ended = false
       try {
@@ -251,11 +324,11 @@ export const followTerminal = <K>(
           // eslint-disable-next-line no-await-in-loop -- Drawing paces acknowledgement.
           const read = await pull()
           ahead = undefined
-          if (read.done) break
+          if (!read) break
           // eslint-disable-next-line no-await-in-loop -- As above.
-          const gathered = await gather(read.value)
+          const gathered = await gather(read)
           ended = gathered.ended
-          for (const event of gathered.batch) {
+          for (const { event, at } of gathered.batch) {
             if (stopped) break
             try {
               // eslint-disable-next-line no-await-in-loop -- Drawing paces acknowledgement.
@@ -263,8 +336,10 @@ export const followTerminal = <K>(
             } catch {
               // The screen is in doubt; the emulator threw the error again, for the page's log.
               failed = !stopped
+              drawnTo = undefined
               break
             }
+            drawnTo = at
           }
         }
       } finally {
@@ -275,6 +350,11 @@ export const followTerminal = <K>(
       if (!stopped) on?.lost?.(key, error)
     } finally {
       release?.()
+      // Held for an answer that never came, as a terminal that exited while parked gives none:
+      // the screen takes the pane's size, as it would have after a snapshot. One parked again
+      // keeps the host's, which the events it goes on from next were made at.
+      const size = holding && !cut && screen.fit()
+      if (size) screen.resize(size)
       attachment = undefined
       screen.live(false)
     }
@@ -296,10 +376,12 @@ export const followTerminal = <K>(
       const ready = await Promise.race([entry.ready, halted])
       // Parked while it started: it attaches once shown.
       if (unparked) continue
+      const after = drawnTo
       // eslint-disable-next-line no-await-in-loop -- Then attach to it.
-      const attached = ready && (await track(open(entry)))
+      const attached = ready && (await track(open(entry, after)))
       // eslint-disable-next-line no-await-in-loop -- One attachment at a time.
-      const failed = attached && (await follow(attached))
+      const failed = attached && (await follow(attached, after !== undefined))
+      if (!cut) drawnTo = undefined
       if (cut || unparked) {
         cut = false
         continue
@@ -322,7 +404,7 @@ export const followTerminal = <K>(
   // Until a call through it succeeds, input would be lost, so the view stays locked;
   // re-sending the current size is a harmless call to find out.
   let resumes = 0
-  const resume = async (attached: AttachStream): Promise<void> => {
+  const resume = async (attached: AttachStream<P>): Promise<void> => {
     const turn = (resumes += 1)
     screen.live(false, true)
     const current = (): boolean =>

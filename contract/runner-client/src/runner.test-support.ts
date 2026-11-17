@@ -15,10 +15,11 @@ type Router = Record<string, unknown>
 
 /**
  * A runner that serves `router` (beside the handshake) to a client over ports held in memory,
- * one pair per connection. A test cuts the link with `drop()`, and the client reconnects.
+ * one pair per connection. A test cuts the link with `drop()`, and the client reconnects; with
+ * `restart()`, to a runner of a new lifetime.
  */
 export const fakeRunner = async (router: Router) => {
-  const epoch = crypto.randomUUID()
+  let epoch = crypto.randomUUID()
   const links: MessagePortLike[] = []
   const handshake = {
     wire: {
@@ -41,5 +42,12 @@ export const fakeRunner = async (router: Router) => {
     send: (data: unknown) => links.at(-1)?.postMessage(data),
     /** Cuts the live link; the client reconnects to the same runner. */
     drop: () => links.at(-1)?.close(),
+    /** Cuts the live link as the runner restarts; the client reconnects in its new epoch. */
+    restart: () => {
+      epoch = crypto.randomUUID()
+      links.at(-1)?.close()
+    },
+    /** The runner's lifetime now. */
+    epoch: () => epoch,
   }
 }

@@ -44,8 +44,9 @@ export const pasteNoticeMs = 4_000
 export const copyNoticeMs = 1_200
 
 // What the screens are built from: the owner's emulator, theme, stream and policies. The
-// screens know no app, wire or protocol; whatever is the owner's comes in here.
-export type TerminalScreensOptions<K> = FollowOptions<K> & {
+// screens know no app, wire or protocol; whatever is the owner's comes in here, as where its
+// streams stand (`P`).
+export type TerminalScreensOptions<K, P = unknown> = FollowOptions<K, P> & {
   // The key as a string, which names its screen.
   readonly keyOf: (key: K) => string
   // Opens an emulator in `container`. The screens subscribe to its renderer changes themselves.
@@ -226,13 +227,15 @@ const defaultFontSize = 13
 const releaseCheckMs = 1000
 // How long a screen nobody shows keeps following its terminal's output before it parks:
 // long enough for the next view to take it as it is, short enough that a dozen busy agents
-// out of sight cost nothing to draw. Shown again, it takes the host's screen as it is then.
+// out of sight cost nothing to draw. Shown again, it goes on from the last output it drew,
+// taking what came since, or the host's screen as it is then where the host can't send that.
 export const parkMs = 5_000
 // How many parked screens stay before the one parked longest closes. Each holds its emulator's
 // buffer, so without a count a long session's grows without bound. With 16, a Grid of up to 16
 // terminals finds every screen still parked, not closed, after a trip to another session or
 // view; a bigger one loses those parked first. Fewer would close some of a common Grid's, and
-// a closed screen costs a full snapshot resync when it is shown again.
+// a closed screen has nothing to go on from: it costs a full snapshot when it is shown again,
+// where a parked one costs what came since.
 export const parkedCap = 16
 
 // Whether keys typed now go into `element`: a text field, or editable content.
@@ -253,7 +256,9 @@ const writeLabel = (screen: OpenScreen, label: string): void => {
 // exists, so the other views, and later the other sessions and projects, find it ready; it
 // closes once its terminal does, its session has stayed off screen for `retain.afterMs`, or more than
 // `park.keep` screens are parked and it was parked longest.
-export const createTerminalScreens = <K>(o: TerminalScreensOptions<K>): TerminalScreens<K> => {
+export const createTerminalScreens = <K, P = unknown>(
+  o: TerminalScreensOptions<K, P>,
+): TerminalScreens<K> => {
   const id = o.keyOf
   const parkAfterMs = o.park?.afterMs ?? parkMs
   const cap = o.park?.keep ?? parkedCap

@@ -177,8 +177,8 @@ export const later = <T>() => {
   return { promise, give: (value: T) => give?.(value) }
 }
 
-export const snapshot = (data: string, exit: Exit | null = null): TerminalEvent => ({
-  sequence: 1,
+export const snapshot = (data: string, exit: Exit | null = null, sequence = 1): TerminalEvent => ({
+  sequence,
   type: "snapshot",
   cols: 80,
   rows: 24,
@@ -190,6 +190,12 @@ export const output = (data: string, sequence: number): TerminalEvent => ({
   type: "output",
   data,
 })
+export const resized = (cols: number, rows: number, sequence: number): TerminalEvent => ({
+  sequence,
+  type: "resized",
+  cols,
+  rows,
+})
 export const exited = (exit: Exit, sequence: number): TerminalEvent => ({
   sequence,
   type: "exited",
@@ -198,19 +204,28 @@ export const exited = (exit: Exit, sequence: number): TerminalEvent => ({
 
 // A stream of `events`, recording what is written and resized through it. It then stays open
 // until closed, as a live shell's does, or ends when `ends` says, as the host ends one
-// after an exit; `push` gives it another event.
-export const streamOf = (events: readonly TerminalEvent[] = [], { ends = false } = {}) => {
+// after an exit; `push` gives it another event. With `placed`, it says where it stands: the
+// sequence of the event it last yielded.
+export const streamOf = (
+  events: readonly TerminalEvent[] = [],
+  { ends = false, placed = false } = {},
+) => {
   const queue = [...events]
   const written: string[] = []
-  const resized: string[] = []
+  const sizes: string[] = []
   let closed = false
+  let last: number | undefined
   let wake: (() => void) | undefined
   const close = vi.fn<() => void>(() => {
     closed = true
     wake?.()
   })
   const next = async (): Promise<IteratorResult<TerminalEvent>> => {
-    if (!closed && queue.length) return { value: queue.shift()!, done: false }
+    const value = closed ? undefined : queue.shift()
+    if (value) {
+      last = value.sequence
+      return { value, done: false }
+    }
     if (closed || ends) return { value: undefined, done: true }
     await new Promise<void>((resolve) => (wake = resolve))
     return next()
@@ -219,14 +234,15 @@ export const streamOf = (events: readonly TerminalEvent[] = [], { ends = false }
     mode: "control",
     [Symbol.asyncIterator]: () => ({ next }),
     write: async (data) => void written.push(data),
-    resize: async (cols, rows) => void resized.push(`${cols}x${rows}`),
+    resize: async (cols, rows) => void sizes.push(`${cols}x${rows}`),
     close,
+    ...(placed && { position: () => last }),
   }
   return {
     attached,
     close,
     written,
-    resized,
+    resized: sizes,
     push: (event: TerminalEvent): void => {
       queue.push(event)
       wake?.()

@@ -31,6 +31,9 @@ const modeReport = /^\x1b\[\??\d+;\d+\$y$/
 
 // One output event's characters at most.
 const outputChars = 4096
+// The most a replay weighs, as the transport sends it, that goes as it is: serializing the
+// screen to weigh a snapshot against it would cost more than the snapshot could save.
+const unweighedReplayBytes = 16 * 1024
 // How much read output may wait to be drawn before the program is paused, in characters.
 // Pausing for every chunk until it is drawn waits on a timer each time, about 15 ms on
 // Windows: a TUI that redraws for every key of a paste, as Codex does there, where the
@@ -114,6 +117,11 @@ export type TerminalOptions = {
   }
   /** The first run, started at once; a spawn that fails throws `SPAWN_FAILED`. */
   readonly spec: RunSpec
+  /**
+   * The last sequence an earlier terminal under its name reached: this one's stream starts
+   * past it, a number skipped as a restart skips one, so a cursor from that one gets a snapshot.
+   */
+  readonly after?: number
   /** The screen's scrollback, in lines. */
   readonly scrollback: number
   /** Who controls it at first: the creator, unless its connection was let go meanwhile. */
@@ -169,13 +177,16 @@ export type Terminal = {
   readonly exit: Exit | null
   /** Which run this is: 1 at the first, one more for each restart. */
   readonly run: number
+  /** The last event's sequence, which a snapshot taken now carries. */
+  readonly sequence: number
   /** The screen's size: its run's spec's, then as each resize leaves it once drawn. */
   readonly size: { readonly cols: number; readonly rows: number }
   /** The current run's exit, once handled. */
   readonly exited: Promise<void>
   /**
-   * Attaches `owner`: from the ring after `after` where it still holds it, else from a
-   * snapshot; ended at once, after what it replays, once the terminal has exited. Throws
+   * Attaches `owner`: from the ring after `after` where it still holds what came since and
+   * that weighs no more than a snapshot, else from a snapshot; ended at once, after what it
+   * replays, once the terminal has exited. Throws
    * `ALREADY_ATTACHED`, `CONTROL_IN_USE`, `INVALID_CURSOR` or `SNAPSHOT_TOO_LARGE`. Call it
    * in `enqueue`, so the snapshot shows every draw queued before.
    */
@@ -270,7 +281,7 @@ type Read = { readonly run: Pty; readonly data: string }
 
 export const createTerminal = (options: TerminalOptions): HostedTerminal => {
   const { eventBytes, limits } = options
-  let sequence = 0
+  let sequence = options.after === undefined ? 0 : options.after + 1
   let history: Retained[] = []
   let historyBytes = 0
   const subscribers = new Map<string, Subscription>()
@@ -531,6 +542,30 @@ export const createTerminal = (options: TerminalOptions): HostedTerminal => {
     return eventOf(data)
   }
 
+  /**
+   * What an attachment after `after` opens with: the events since, where the ring still holds
+   * them, they fit the attachment's own queue (past it they would fail it at once, as would
+   * every resume from the same cursor), and they weigh no more than the screen as a snapshot;
+   * else that snapshot. A replay a screen too large for a snapshot can't outweigh goes as it is.
+   */
+  const opening = (after: number | undefined): TerminalEvent[] => {
+    const first = history[0]?.event.sequence ?? sequence + 1
+    if (after === undefined || after < first - 1) return [snapshot()]
+    const replayed = history.filter(({ event }) => event.sequence > after)
+    const bytes = replayed.reduce((total, one) => total + one.bytes, 0)
+    if (bytes > limits.subscriberBytes) return [snapshot()]
+    const events = replayed.map(({ event }) => event)
+    if (bytes <= unweighedReplayBytes) return events
+    let screen: Snapshot
+    try {
+      screen = snapshot()
+    } catch (error) {
+      if (error instanceof TerminalError && error.code === "SNAPSHOT_TOO_LARGE") return events
+      throw error
+    }
+    return eventBytes(screen) < bytes ? [screen] : events
+  }
+
   const detach = (owner: string, subscription: Subscription) => {
     if (subscribers.get(owner) !== subscription) return
     subscribers.delete(owner)
@@ -666,6 +701,9 @@ export const createTerminal = (options: TerminalOptions): HostedTerminal => {
     get run() {
       return runs
     },
+    get sequence() {
+      return sequence
+    },
     get size() {
       return size
     },
@@ -689,19 +727,8 @@ export const createTerminal = (options: TerminalOptions): HostedTerminal => {
       subscribers.set(owner, subscription)
       if (mode === "control") controller = owner
       else if (controller === owner) controller = undefined
-      const first = history[0]?.event.sequence ?? sequence + 1
-      const replayed =
-        after !== undefined && after >= first - 1
-          ? history.filter(({ event }) => event.sequence > after)
-          : undefined
-      // A replay past the attachment's own queue would fail it at once, as would every
-      // resume from the same cursor: it takes a snapshot instead.
-      const fits =
-        replayed !== undefined &&
-        replayed.reduce((total, { bytes }) => total + bytes, 0) <= limits.subscriberBytes
       try {
-        if (fits) for (const { event } of replayed) subscription.push(event)
-        else subscription.push(snapshot())
+        for (const event of opening(after)) subscription.push(event)
       } catch (error) {
         subscription.cancel()
         detach(owner, subscription)

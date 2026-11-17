@@ -5,6 +5,9 @@ import { hasCode, normalize, WireError } from "./errors.js"
 import { sleep } from "./sleep.js"
 import { until } from "./until.js"
 
+/** A position in a stream, in the server's epoch it belongs to: no other epoch knows it. */
+export type Cursor = { readonly epoch: string; readonly position: number }
+
 /**
  * A stream that resumes from a cursor: each item may carry its position, a reconnection asks
  * for what comes after the last one read, and the server is told what was read with `ack`.
@@ -14,6 +17,13 @@ export type CursorResume<C extends AnyContractRouter, T> = {
   readonly cursor: (item: T) => number | undefined
   /** Tells the server the reader is done with everything up to `position`. */
   readonly ack: (client: ContractRouterClient<C>, position: number) => Promise<unknown>
+  /**
+   * Where a reader that read the stream before stands, as an earlier `Following.cursor` told
+   * it: the first stream asks for what comes after it on a session of its epoch, and starts
+   * afresh on one of another, or once the server refuses it as a cursor it can't resume from
+   * (`INVALID_CURSOR`) or as too far behind (`SLOW_CONSUMER`).
+   */
+  readonly from?: Cursor
 }
 
 /** A stream that starts over each time it opens again, as one of the whole state does. */
@@ -50,6 +60,12 @@ export type Following<C extends AnyContractRouter, T> = AsyncIterableIterator<T,
   return(): Promise<IteratorResult<T, undefined>>
   /** The session the stream has yielded on, until it opens again; undefined until one yields. */
   readonly session: Session<C> | undefined
+  /**
+   * For a stream that resumes from a cursor: where its reader stands, the position of the last
+   * item handed out that had one, in the epoch that item came from. Undefined before such an
+   * item, and from when a stream that starts afresh opens until its first one.
+   */
+  readonly cursor: Cursor | undefined
   /**
    * Why it's over: `ended` by its server (a cursor's stream ended, or its subject is gone),
    * `stopped` by its reader or the connection's close, or `failed` with the error it threw.
@@ -117,10 +133,21 @@ class Follower<C extends AnyContractRouter, T> implements Following<C, T> {
   constructor(
     private readonly wire: Wire<C>,
     private readonly options: FollowOptions<C, T>,
-  ) {}
+  ) {
+    const { resume } = options
+    if (isCursor(resume) && resume.from) {
+      this.epoch = resume.from.epoch
+      this.position = resume.from.position
+    }
+  }
 
   get session(): Session<C> | undefined {
     return this.live ? this.stream?.session : undefined
+  }
+
+  get cursor(): Cursor | undefined {
+    if (this.epoch === undefined || this.position === undefined) return undefined
+    return { epoch: this.epoch, position: this.position }
   }
 
   [Symbol.asyncIterator](): this {
@@ -203,7 +230,8 @@ class Follower<C extends AnyContractRouter, T> implements Following<C, T> {
     const cursor = isCursor(resume)
     let session: Session<C> | undefined
     try {
-      // A cursor's first stream opens on the live session or fails: there's nothing to resume.
+      // A cursor's first stream opens on the live session or fails, `from` or not: nothing it
+      // read waits for a session to come back.
       session =
         cursor && !this.read
           ? this.wire.session()
@@ -284,6 +312,12 @@ class Follower<C extends AnyContractRouter, T> implements Following<C, T> {
         this.drop()
         return
       }
+      // So does a first stream that went on from where an earlier reader stood (`from`).
+      if (this.position !== undefined && hasCode(cause, "SLOW_CONSUMER", "INVALID_CURSOR")) {
+        this.position = undefined
+        this.drop()
+        return
+      }
       throw this.fail(cause)
     }
     if (cause instanceof WireError && gone?.(cause)) {
@@ -357,10 +391,11 @@ class Follower<C extends AnyContractRouter, T> implements Following<C, T> {
 
 /**
  * Follows a stream across a connection's sessions. A stream that resumes from a cursor picks
- * up after the last item read, acknowledging each once the next is asked for, and throws when
- * it can't go on; one that restarts opens again on each new session and never throws, backing
- * off (`min(200·2ⁿ, 3000)` ms) after refusals. Either ends once its reader returns it or the
- * connection closes; a cursor's stream throws why, if it closed with an error.
+ * up after the last item read, or at first after the cursor `from` gives, acknowledging each
+ * once the next is asked for, and throws when it can't go on; one that restarts opens again
+ * on each new session and never throws, backing off (`min(200·2ⁿ, 3000)` ms) after
+ * refusals. Either ends once its reader returns it or the connection closes; a cursor's
+ * stream throws why, if it closed with an error.
  *
  * A restarting stream's reader should keep what it has until the stream says `reset`, then
  * replace it with what follows (up to a marker of its own, such as `synced`): the stream

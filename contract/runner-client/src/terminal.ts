@@ -8,6 +8,12 @@ import type { RunnerWire } from "./follow.js"
 export type TerminalMode = "control" | "observe"
 
 /**
+ * Where an attachment stands in its terminal's stream: the sequence of the last event it
+ * yielded, in the runner's lifetime (`epoch`) that event came from.
+ */
+export type TerminalPosition = { readonly epoch: string; readonly sequence: number }
+
+/**
  * One attachment to a running terminal. Iterate it for screen events; each event is
  * acknowledged when the next one is requested. The attachment follows the runner
  * through reconnections, resuming after the last event it produced, so a consumer
@@ -26,16 +32,25 @@ export type AttachedTerminal = AsyncIterableIterator<TerminalEvent> & {
   resize(size: { readonly cols: number; readonly rows: number }): Promise<void>
   /** Releases this attachment and ends iteration. The shell keeps running. */
   detach(): Promise<void>
+  /**
+   * Where it stands after the last event it yielded, as that event was read, which a later
+   * attachment goes on from (`after`). Undefined before its first event.
+   */
+  position(): TerminalPosition | undefined
 }
 
 /**
  * Attaches to a terminal, resolving once the runner grants it: its events follow the runner
  * across reconnections from the last one read, each acknowledged as the next is asked for.
+ * With `from`, where an earlier attachment stood, the first events are those since, where
+ * the runner can send them: in another of its lifetimes, or where it no longer holds them or
+ * a fresh screen costs less, they open with that screen as without `from`.
  */
 export const attachTerminal = async (
   connection: RunnerWire,
   id: string,
   mode: TerminalMode,
+  from?: TerminalPosition,
 ): Promise<AttachedTerminal> => {
   const stream = follow<typeof contract, TerminalAttached | TerminalEvent>(connection, {
     // Each attachment opens with the runner's grant, which a reattachment must also have.
@@ -57,8 +72,12 @@ export const attachTerminal = async (
     resume: {
       cursor: (event) => (event.type === "attached" ? undefined : event.sequence),
       ack: (client, sequence) => client.terminals.ack({ terminalId: id, sequence }),
+      ...(from && { from: { epoch: from.epoch, position: from.sequence } }),
     },
   })
+  // Taken as each event is handed out: the stream's cursor moves on with the next read, and
+  // leaves the event's epoch once a stream of another opens.
+  let position: TerminalPosition | undefined
   // Why the attachment couldn't go on, once it couldn't: what its events threw.
   let failure: WireError | undefined
   const read = async () => {
@@ -95,9 +114,13 @@ export const attachTerminal = async (
         const result = await read()
         if (result.done) return result
         // A reattachment's grant is the stream's own business.
-        if (result.value.type !== "attached") return { value: result.value, done: false }
+        if (result.value.type === "attached") continue
+        const { cursor } = stream
+        position = cursor && { epoch: cursor.epoch, sequence: cursor.position }
+        return { value: result.value, done: false }
       }
     },
+    position: () => position,
     async return() {
       await stream.return()
       return { value: undefined, done: true }

@@ -575,6 +575,117 @@ describe("follow", () => {
       expect(ending.session).toBeUndefined()
     })
 
+    it("tells where its reader stands, in the epoch of the last item handed out", async () => {
+      const driven = connection()
+      driven.connect("e1")
+      const { opened, open, last } = streams<Event>()
+      const items = follow(driven.wire, { open, resume: cursor([]) })
+      const first = items.next()
+      await vi.waitFor(() => expect(opened).toHaveLength(1))
+      expect(items.cursor).toBeUndefined()
+      last().feed.push(event(4), marker)
+      await first
+      expect(items.cursor).toEqual({ epoch: "e1", position: 4 })
+      // A marker moves nothing.
+      await items.next()
+      expect(items.cursor).toEqual({ epoch: "e1", position: 4 })
+      // Restarted: the stream of the new epoch has handed out nothing yet.
+      driven.drop()
+      last().feed.fail(new WireError("DISCONNECTED"))
+      const next = items.next()
+      driven.connect("e2")
+      await vi.waitFor(() => expect(opened).toHaveLength(2))
+      expect(items.cursor).toBeUndefined()
+      last().feed.push(event(1))
+      await next
+      expect(items.cursor).toEqual({ epoch: "e2", position: 1 })
+    })
+
+    context("given where an earlier reader stood", () => {
+      it("goes on after it on a session of its epoch", async () => {
+        const driven = connection()
+        driven.connect("e1")
+        const { opened, open, last } = streams<Event>()
+        const items = follow(driven.wire, {
+          open,
+          resume: { ...cursor([]), from: { epoch: "e1", position: 4 } },
+        })
+        const first = items.next()
+        await vi.waitFor(() => expect(opened).toHaveLength(1))
+        expect(opened[0]!.after).toBe(4)
+        last().feed.push(event(5))
+        expect(await first).toEqual({ value: event(5), done: false })
+        expect(items.cursor).toEqual({ epoch: "e1", position: 5 })
+      })
+
+      it("starts afresh on a session of another epoch", async () => {
+        const driven = connection()
+        driven.connect("e2")
+        const { opened, open, last } = streams<Event>()
+        const items = follow(driven.wire, {
+          open,
+          resume: { ...cursor([]), from: { epoch: "e1", position: 4 } },
+        })
+        const first = items.next()
+        await vi.waitFor(() => expect(opened).toHaveLength(1))
+        expect(opened[0]!.after).toBeUndefined()
+        expect(items.cursor).toBeUndefined()
+        last().feed.push(event(1))
+        expect(await first).toEqual({ value: event(1), done: false })
+        expect(items.cursor).toEqual({ epoch: "e2", position: 1 })
+      })
+
+      for (const code of ["INVALID_CURSOR", "SLOW_CONSUMER"]) {
+        it(`starts afresh when its server refuses it with ${code}`, async () => {
+          const driven = connection()
+          driven.connect("e1")
+          const { opened, refusals, open, last } = streams<Event>()
+          refusals.push(new WireError(code))
+          const items = follow(driven.wire, {
+            open,
+            resume: { ...cursor([]), from: { epoch: "e1", position: 4 } },
+          })
+          const first = items.next()
+          await vi.waitFor(() => expect(opened).toHaveLength(1))
+          expect(opened[0]!.after).toBeUndefined()
+          last().feed.push(event(9))
+          expect(await first).toEqual({ value: event(9), done: false })
+        })
+      }
+
+      it("starts afresh when its first stream fails as one it can't go on with", async () => {
+        const driven = connection()
+        driven.connect("e1")
+        const { opened, open, last } = streams<Event>()
+        const items = follow(driven.wire, {
+          open,
+          resume: { ...cursor([]), from: { epoch: "e1", position: 4 } },
+        })
+        const first = items.next()
+        await vi.waitFor(() => expect(opened).toHaveLength(1))
+        last().feed.fail(new WireError("INVALID_CURSOR"))
+        await vi.waitFor(() => expect(opened).toHaveLength(2))
+        expect(opened.map((each) => each.after)).toEqual([4, undefined])
+        last().feed.push(event(9))
+        expect(await first).toEqual({ value: event(9), done: false })
+      })
+
+      it("throws any other failure before its first item, as a first stream does", async () => {
+        const driven = connection()
+        driven.connect("e1")
+        const { opened, refusals, open } = streams<Event>()
+        refusals.push(new WireError("CONTROL_IN_USE"))
+        const from = { epoch: "e1", position: 4 }
+        const items = follow(driven.wire, { open, resume: { ...cursor([]), from } })
+        await expect(items.next()).rejects.toMatchObject({ code: "CONTROL_IN_USE" })
+        expect(opened).toHaveLength(0)
+        // Nor does it wait for a session: there's none to go on from yet.
+        driven.drop()
+        const offline = follow(driven.wire, { open, resume: { ...cursor([]), from } })
+        await expect(offline.next()).rejects.toMatchObject({ code: "DISCONNECTED" })
+      })
+    })
+
     it("throws a failure before its first item, with nothing to resume", async () => {
       const driven = connection()
       driven.connect()

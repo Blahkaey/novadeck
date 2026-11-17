@@ -49,7 +49,10 @@ export type TerminalHostOptions = {
  * `done`, opened or not, as a terminal starting does beside the open ones.
  */
 export type Reservation = {
-  /** Starts the terminal in its place; a spawn that fails throws `SPAWN_FAILED`. */
+  /**
+   * Starts the terminal in its place; a spawn that fails throws `SPAWN_FAILED`. Under an id
+   * the host let go before, its stream starts past that terminal's (`TerminalOptions.after`).
+   */
   open(spec: RunSpec, controller: string | undefined): Terminal
   /** The caller is done starting it, whether it opened or not. */
   done(): void
@@ -149,6 +152,10 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
   const drained = new Map<string, Entry>()
   const reserved = new Set<symbol>()
   const evicted = new Set<Listeners["evicted"]>()
+  // The last sequence each terminal the host let go reached, by id: one hosted again under its
+  // id, as a woken sleeper or a lost terminal started anew is, starts its stream past it, so a
+  // cursor from the earlier one gets the new one's screen.
+  const reached = new Map<string, number>()
   let exits = 0
   let shutdownBy: number | undefined
   let stopping = false
@@ -157,6 +164,12 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
   // left of its time, never under a quarter second.
   const runMs = (usual: number) =>
     shutdownBy === undefined ? usual : Math.max(250, Math.min(usual, shutdownBy - Date.now()))
+
+  // Lets a terminal go for good: its screen and listeners, keeping where its stream reached.
+  const dispose = ({ id, terminal }: Entry) => {
+    reached.set(id, terminal.sequence)
+    terminal.dispose()
+  }
 
   const evict = (room = false) => {
     const idle = [...open.entries()]
@@ -174,7 +187,7 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
       if (excess <= 0 && !full) return
       excess -= 1
       entry.terminal.gone()
-      entry.terminal.dispose()
+      dispose(entry)
       open.delete(id)
       for (const listener of evicted) listener(id, entry.terminal)
     }
@@ -184,7 +197,7 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
     const entry = drained.get(id)
     if (!entry || entry.terminal.attached > 0 || entry.kept > 0) return
     drained.delete(id)
-    entry.terminal.dispose()
+    dispose(entry)
   }
 
   /**
@@ -256,10 +269,12 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
         open: (spec, controller) => {
           // The caller keeps an id from being taken twice; a host never loses one it holds.
           if (open.has(id) || drained.has(id)) throw new Error(`Terminal ${id} is already open.`)
+          const earlier = reached.get(id)
           const terminal = createTerminal({
             eventBytes: (event) => options.eventBytes(event, id),
             limits,
             spec,
+            ...(earlier !== undefined && { after: earlier }),
             scrollback: options.scrollback,
             controller,
             ...(options.pty && { pty: options.pty }),
@@ -300,7 +315,7 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
       const entry = open.get(id)
       if (!entry || stopping || entry.terminal.exit === null) return
       entry.terminal.gone()
-      entry.terminal.dispose()
+      dispose(entry)
       open.delete(id)
     },
     release: (owner) => {

@@ -232,8 +232,18 @@ everything else:
   flow control follows the renderer's actual pace.
 - **Reconnection.** After a connection drops, the attachment resumes after the
   last event it produced. Missed output is replayed, or a fresh snapshot replaces
-  the screen when the history has expired. A cursor never crosses runner
-  lifetimes.
+  the screen when the history has expired or the snapshot weighs less. A cursor never
+  crosses runner lifetimes.
+- **Going on later.** `terminal.position()` says where the attachment stands after the
+  last event it yielded: that event's `sequence`, with the runner's `epoch` it came from.
+  A later `runner.terminals.attach(id, { after: position })`, once the first is detached,
+  goes on from there, sent only the events since, as a screen that kept what it drew needs.
+  It opens with a fresh snapshot instead where the runner can't send them: a position from
+  another of its lifetimes, history that has expired or that weighs more than the
+  snapshot, or a position the runner refuses (`INVALID_CURSOR`), as from a terminal started
+  anew under the same id. The events since were made at the size the terminal had then: a
+  screen whose window changed size meanwhile draws them at that size, sends its own, and
+  takes it at the `resized` the runner answers with, where the runner took it.
 - **Slow viewers.** A viewer that falls too far behind skips its backlog and
   resumes from a fresh snapshot instead of failing.
 - **Errors.** Iteration ends normally when the shell exits, the terminal is
@@ -661,10 +671,13 @@ not command completion.
   tell a shell that failed at startup from one that ended later. It is null while
   the terminal runs.
 - Reconnect with a new socket/client and handshake. Attach using `afterSequence`
-  from the last fully applied event. Available history is replayed; an expired
-  cursor falls back to a fresh snapshot. A future cursor is rejected. Scope saved
-  cursors to both runner identity and terminal ID. `connectRunner` does this for
-  its attachments; raw wire clients must do it themselves.
+  from the last fully applied event. Available history is replayed, unless it weighs
+  more than the fresh snapshot the runner would send instead: history past 16 KiB is
+  weighed against that snapshot, and the lighter goes. An expired cursor, or history
+  past the attachment's own queue, falls back to a fresh snapshot. A future cursor is
+  rejected. Scope saved cursors to both runner identity and terminal ID. `connectRunner`
+  does this for its attachments, across reconnections and for `after`; raw wire clients
+  must do it themselves.
 - Default limits are 32 connections, 32 calls in flight per WebSocket connection
   (1,024 for the trusted MessagePort connection: the desktop app keeps ACKs, input,
   resizes and state saves in flight across many terminals at once),
@@ -724,7 +737,9 @@ not command completion.
   summary's `run` counts shells, 1 at creation and one more per restart, so a client
   can discard a late report about an earlier run. Watchers receive `changed`;
   viewers attach again and get the new screen as a snapshot, even with a cursor from
-  the previous run. A running terminal rejects with `CONFLICT`, and a shell that
+  the previous run. So do they for a terminal the runner starts anew under the same ID,
+  as a woken sleeper or a lost terminal created again: its sequence starts past the
+  earlier one's. A running terminal rejects with `CONFLICT`, and a shell that
   cannot start rejects with `SPAWN_FAILED`, leaving the terminal exited.
 - Closing sends a hangup to the owned shell, escalating if the shell ignores it.
   Where the terminal's bound agent holds the foreground, what the agent started is

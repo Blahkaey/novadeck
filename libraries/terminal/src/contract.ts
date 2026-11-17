@@ -75,8 +75,9 @@ export class TerminalError extends Error {
 /**
  * One attached stream, as a client holds it: its events as it reads them, acknowledging
  * each as it asks for the next, and the terminal's input and size while it holds control.
+ * `P` is where a stream stands, which is its owner's: the view only hands it back.
  */
-export type AttachStream = AsyncIterable<TerminalEvent> & {
+export type AttachStream<P = unknown> = AsyncIterable<TerminalEvent> & {
   readonly mode: "control" | "observe"
   /** Control only. */
   write(data: string): Promise<void>
@@ -87,4 +88,9 @@ export type AttachStream = AsyncIterable<TerminalEvent> & {
    * way before it attaches again, without waiting.
    */
   close(): void
+  /**
+   * Where the stream stands after the event it last yielded, for a later attach to go on
+   * from; undefined where it can't say. Absent from a stream that never can.
+   */
+  position?(): P | undefined
 }

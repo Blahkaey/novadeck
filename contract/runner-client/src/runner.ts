@@ -63,7 +63,12 @@ import { connect, type Transport, type WireStatus } from "@novadeck/wire/client"
 import { lost, type RunnerErrorCode } from "./errors.js"
 import { followAll, followRestarting, followSession, type Reset } from "./follow.js"
 import { base64Parts } from "./parts.js"
-import { attachTerminal, type AttachedTerminal, type TerminalMode } from "./terminal.js"
+import {
+  attachTerminal,
+  type AttachedTerminal,
+  type TerminalMode,
+  type TerminalPosition,
+} from "./terminal.js"
 
 export type ConnectOptions = {
   /** Cancels the initial connection. Afterwards, use `runner.close()`. */
@@ -332,10 +337,15 @@ export type Runner = {
       terminalId: string,
       options: { readonly cols: number; readonly rows: number; readonly resume?: AgentName },
     ): Promise<TerminalSummary>
-    /** Resolves once the runner has granted the attachment; `control` is the default mode. */
+    /**
+     * Resolves once the runner has granted the attachment; `control` is the default mode.
+     * With `after`, an earlier attachment's `position()`, it goes on from there: the runner
+     * sends the events since, unless it no longer holds them, they would cost more than a
+     * fresh screen, or `after` is of another of its lifetimes, where it sends that screen.
+     */
     attach(
       terminalId: string,
-      options?: { readonly mode?: TerminalMode },
+      options?: { readonly mode?: TerminalMode; readonly after?: TerminalPosition },
     ): Promise<AttachedTerminal>
   }
   readonly agents: {
@@ -908,8 +918,8 @@ export const connectRunner = async (
         call((client) =>
           client.terminals.restart({ terminalId, cols, rows, ...(resume && { resume }) }),
         ),
-      attach: (terminalId, { mode = "control" } = {}) =>
-        attachTerminal(connection, terminalId, mode),
+      attach: (terminalId, { mode = "control", after } = {}) =>
+        attachTerminal(connection, terminalId, mode, after),
     },
     agents: {
       list: (look) => call((client) => client.agents.list(look)),

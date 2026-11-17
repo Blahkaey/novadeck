@@ -246,7 +246,11 @@ again. A terminal no view shows keeps them while its session is on screen, and f
 minutes after its session leaves the screen, so going back to a session or project finds
 its output in place; they go when that time passes or the terminal closes. Of the screens
 no view shows, `screens.ts` keeps at most the 16 parked most recently, closing the one
-parked longest first (a closed one resyncs from the runner's snapshot when shown again);
+parked longest first (a closed one resyncs from the runner's snapshot when shown again; a
+parked one goes on from the last output it drew, and the runner sends only what came since,
+or its snapshot where that weighs less or it no longer holds what came since; what came since
+is drawn at the size it was made for, and a pane that changed size meanwhile takes its own
+where the runner does);
 screens a view shows, Focus's kept windows among them, don't count. A Canvas node or a Grid
 tile out of sight keeps its mount but lets its screen go, so the screen parks after 5 s and
 counts toward the cap, and its content is hidden until it is back in sight. Those coming

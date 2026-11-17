@@ -5,11 +5,16 @@ import {
   closeScreens,
   emulatorPrototype,
   inputOf,
+  later,
   openedTerminals,
   optionsOf,
+  output,
   retainMs,
   running,
+  shown,
   slot,
+  snapshot,
+  streamOf,
   themed,
   screensOf,
 } from "./fakes.test-support.js"
@@ -459,5 +464,93 @@ describe("the screens over options of their own", () => {
       closeScreens()
       vi.useRealTimers()
     }
+  })
+})
+
+describe("a parked screen shown again", () => {
+  // Screens that keep `keep` parked, whose terminals' streams draw a screen and a line when
+  // attached afresh, nothing more when going on, and say where they stand; each attach waits
+  // for `grant`, and is recorded with where it went on from.
+  const parking = (keep: number) => {
+    const opened = openedTerminals()
+    const asked: unknown[] = []
+    const streams: ReturnType<typeof streamOf>[] = []
+    let grant = later<void>()
+    const screens = screensOf(
+      optionsOf({
+        attach: async (_key, after) => {
+          asked.push(after)
+          await grant.promise
+          const stream = streamOf(
+            after === undefined ? [snapshot("$ KEPT\r\n"), output("LINE\r\n", 2)] : [],
+            { placed: true },
+          )
+          streams.push(stream)
+          return stream.attached
+        },
+        park: { afterMs: parkMs, keep },
+      }),
+    )
+    grant.give()
+    const page = shown(screens, "a")
+    // The text of the screen opened last.
+    const text = () =>
+      [0, 1].map((row) => opened.at(-1)?.buffer.active.getLine(row)?.translateToString(true))
+    // Out of sight long enough for its screen to park, or for `away`.
+    const park = (away = parkMs) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+      try {
+        page.hold.release({ unmount: true })
+        vi.advanceTimersByTime(away)
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    // The next attach waits until the test grants it.
+    const withhold = () => {
+      grant = later<void>()
+      return grant
+    }
+    const showAgain = () => shown(screens, "a", {}, page.element)
+    return { asked, streams, page, text, park, withhold, showAgain }
+  }
+
+  it("shows what it kept while its stream is granted, then takes input with no fresh screen", async () => {
+    const { asked, streams, text, park, withhold, showAgain } = parking(16)
+    await vi.waitFor(() => expect(text()).toEqual(["$ KEPT", "LINE"]))
+    park()
+    expect(streams[0]!.close).toHaveBeenCalled()
+    const granting = withhold()
+    const { hold } = showAgain()
+    await vi.waitFor(() => expect(asked).toEqual([undefined, 2]))
+    // What it drew stays, behind the lock of a screen on its way.
+    expect(hold.state.getSnapshot()).toMatchObject({ live: false, lock: "loading" })
+    expect(text()).toEqual(["$ KEPT", "LINE"])
+    granting.give()
+    await vi.waitFor(() =>
+      expect(hold.state.getSnapshot()).toMatchObject({ live: true, lock: null }),
+    )
+    expect(text()).toEqual(["$ KEPT", "LINE"])
+    closeScreens()
+  })
+
+  it("opens afresh, with nothing to go on from, once the cap closed it", async () => {
+    const { asked, text, park, showAgain } = parking(0)
+    await vi.waitFor(() => expect(text()).toEqual(["$ KEPT", "LINE"]))
+    park()
+    const { hold } = showAgain()
+    await vi.waitFor(() => expect(hold.state.getSnapshot().live).toBe(true))
+    expect(asked).toEqual([undefined, undefined])
+    closeScreens()
+  })
+
+  it("opens afresh, with nothing to go on from, once its retention closed it", async () => {
+    const { asked, text, park, showAgain } = parking(16)
+    await vi.waitFor(() => expect(text()).toEqual(["$ KEPT", "LINE"]))
+    park(retainMs + 60_000)
+    const { hold } = showAgain()
+    await vi.waitFor(() => expect(hold.state.getSnapshot().live).toBe(true))
+    expect(asked).toEqual([undefined, undefined])
+    closeScreens()
   })
 })

@@ -370,6 +370,30 @@ describe("a terminal host's attach", () => {
     expect(await stream.next()).toEqual({ value: undefined, done: true })
   })
 
+  it("gives a snapshot for a cursor from an earlier terminal under the same id", async () => {
+    const { host, open, exit, programs } = hostOf()
+    const first = open("a")
+    programs[0]!.draw("one")
+    await first.readScreen()
+    // Where a viewer that read its output stands.
+    const after = first.sequence
+    await exit("a", 0)
+    host.discard("a")
+    // Hosted again under its id, as a woken sleeper or a lost terminal started anew is, and
+    // sent more events since than that cursor counts.
+    const again = open("a")
+    for (const text of ["two", "three", "four"]) {
+      programs[1]!.draw(text)
+      // eslint-disable-next-line no-await-in-loop -- One event a draw.
+      await again.readScreen()
+    }
+    const stream = host.attach("a", "viewer", { after, mode: "observe" })
+    expect(await stream.next()).toMatchObject({ value: { type: "attached" } })
+    const { value } = await stream.next()
+    expect(value).toMatchObject({ type: "snapshot", sequence: again.sequence })
+    expect(value).toHaveProperty("data", expect.stringContaining("twothreefour"))
+  })
+
   it("refuses in order: the caller's check, then the terminal's own", async () => {
     const { host, open } = hostOf()
     open("a")
