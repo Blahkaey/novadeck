@@ -154,6 +154,14 @@ beside the wire's own handshake.
     before it. Unknown paths are 404, other origins 403, and sockets beyond
     `maxConnections` (32) 429. A peer's close frame releases its session before the reply,
     so it can reconnect at once.
+    To a client that offers permessage-deflate, as browsers, Node's `WebSocket` and `ws`'s
+    client do, it sends each message of 1 KiB or more compressed on its own (zlib level 3),
+    and smaller ones, such as a keystroke's echo or an acknowledgement, as they are. It asks
+    the client to compress each of its messages alone too, so `ws`'s client sends those under
+    its own 1 KiB threshold as they are. A client that doesn't offer it gets every message as
+    it is. `sendBudgetBytes` counts a message in full while it waits to be compressed and as
+    compressed once it's on the socket, so it bounds what a socket holds either way;
+    `maxPayloadBytes` bounds a compressed message as it inflates.
   - `servePort(sessions, port, { maxCalls })`, one trusted client over a DOM `MessagePort`
     or Electron's `MessagePortMain`: holding the port is the credential, so no token. A
     message it can't read, or an answer it can't post, goes to `failed`, never to the host as

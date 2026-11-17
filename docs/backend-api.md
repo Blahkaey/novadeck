@@ -163,6 +163,11 @@ With a remote runner:
   number, or `none` for no cap; any other value stops the start.
 - The app and the runner must be the same build: the protocol's version doesn't change
   with every change to its calls.
+- The runner compresses what it sends, which the app's connection asks for: a terminal's
+  screen, as an attachment's snapshot sends it, crosses in about a fifth of its bytes or
+  less, and its output in a fraction of them, while a keystroke's echo and other messages
+  under 1 KiB go as they are. An SSH tunnel may compress what it carries too (`ssh -C`) or
+  not; the runner's compression doesn't rely on it.
 
 ## Runner API
 
@@ -569,6 +574,15 @@ The CLI (`pnpm --filter @novadeck/runner start`) and `startServer` from
 `@novadeck/runner/server` compose the WebSocket form with the HTTP status
 endpoint.
 
+The WebSocket compresses what it sends (permessage-deflate) to a client that offers to, as
+browsers, Node's `WebSocket` and `ws`'s client do: each message of 1 KiB or more on its
+own, so a terminal's snapshot or a burst of its output, whose escapes take six bytes each
+as JSON text, crosses in a fraction of its bytes. Smaller messages, such as a keystroke's
+echo or an acknowledgement, go as they are, and a client that doesn't offer compression
+gets every message as it is. The send budget counts a message in full while it waits to be
+compressed, and as compressed once it is on the socket. A port (`servePort`) sends every
+message as it is: its messages stay on the machine.
+
 ### Desktop app
 
 The Electron host runs the runner in a utility process, so shells live outside the
@@ -654,7 +668,8 @@ not command completion.
 - Default limits are 32 connections, 32 calls in flight per WebSocket connection
   (1,024 for the trusted MessagePort connection: the desktop app keeps ACKs, input,
   resizes and state saves in flight across many terminals at once),
-  `maxWebSocketMessageBytes` (256 KiB) per incoming WebSocket message, 16,384
+  `maxWebSocketMessageBytes` (256 KiB) per incoming WebSocket message (a compressed one
+  as it inflates), 16,384
   characters per input call, 1 MiB replay per terminal, 4 MiB queued or
   unacknowledged events per attachment, and a 256 KiB ACK window. The desktop
   runner starts any number of terminals; a standalone runner (`startServer` and the

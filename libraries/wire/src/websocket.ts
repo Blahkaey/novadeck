@@ -27,7 +27,10 @@ export type WebSocketOptions = {
   readonly authMs?: number
   /** The largest message a peer may send. */
   readonly maxPayloadBytes: number
-  /** Bytes a socket may have waiting to send; a peer that can't keep up past it is dropped. */
+  /**
+   * Bytes a socket may have waiting to send, a message counted in full until it is
+   * compressed; a peer that can't keep up past it is dropped.
+   */
   readonly sendBudgetBytes: number
 }
 
@@ -64,8 +67,27 @@ export const serveWebSocket = (sessions: Sessions, options: WebSocketOptions) =>
   const handler = new RPCHandler(sessions.router)
   const wss = new WebSocketServer({
     noServer: true,
+    // Bounds a compressed message too, as it inflates: ws stops inflating past it.
     maxPayload,
-    perMessageDeflate: false,
+    // Compresses what it sends to a client that offers permessage-deflate; a client that
+    // doesn't gets every message as it is.
+    perMessageDeflate: {
+      // A message under 1 KiB, as a keystroke's echo or an acknowledgement is, fits in one
+      // TCP segment even on a 1280-byte MTU, so compressing it saves no packet: it goes as is.
+      threshold: 1024,
+      // Each message is compressed on its own, so its size tells nothing of the messages
+      // before it, which may be another terminal's. ws applies `threshold` only then, and
+      // keeps each socket's zlib streams either way.
+      serverNoContextTakeover: true,
+      // The client compresses each message on its own too, so ws's client applies its own
+      // threshold and sends its keystrokes as they are.
+      clientNoContextTakeover: true,
+      // Most of zlib's default saving on terminal output, in under half its time.
+      zlibDeflateOptions: { level: 3 },
+      // One limit for the whole process (ws sets it as the first socket negotiates), so
+      // zlib's jobs leave libuv's thread pool room for the runner's file reads.
+      concurrencyLimit: 2,
+    },
   })
   let closing: Promise<void> | undefined
 

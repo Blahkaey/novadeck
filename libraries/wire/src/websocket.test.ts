@@ -1,12 +1,11 @@
 import { once } from "node:events"
 import { createServer } from "node:http"
-import type { AddressInfo } from "node:net"
-import type { Duplex } from "node:stream"
+import type { AddressInfo, Socket } from "node:net"
 
-import { oc, type } from "@orpc/contract"
+import { eventIterator, oc, type } from "@orpc/contract"
 import { implement } from "@orpc/server"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { WebSocket, type ClientOptions } from "ws"
+import { WebSocket, type ClientOptions, type RawData } from "ws"
 
 import { socketChannel } from "./channel.js"
 import { connect } from "./connection.js"
@@ -24,12 +23,15 @@ import { createWireClient } from "./wire-client.js"
 const contract = {
   ...wireContract,
   echo: oc.input(type<string>()).output(type<string>()),
+  twice: oc.input(type<string>()).output(eventIterator(type<string>())),
 }
 
 const protocolVersion = 1
 const token = "wire-tests-only-not-a-production-credential"
 
-// Serves the test contract's sessions on a fresh HTTP server, at /rpc.
+// Serves the test contract's sessions on a fresh HTTP server, at /rpc, with the TCP
+// connections its clients made: their byte counts are what crossed the wire, and their data
+// tells when what a peer sent has arrived.
 const serve = async (
   options: Partial<WebSocketOptions> = {},
   sessionOptions: Partial<SessionsOptions> = {},
@@ -38,7 +40,14 @@ const serve = async (
   const api = implement(app).$context<SessionContext>()
   const sessions = createSessions({
     protocolVersion,
-    router: api.router({ echo: api.echo.handler(({ input }) => input) }),
+    router: api.router({
+      echo: api.echo.handler(({ input }) => input),
+      // Two messages sent back to back, with nothing between them to let zlib finish.
+      twice: api.twice.handler(async function* ({ input }) {
+        yield input
+        yield input
+      }),
+    }),
     ...sessionOptions,
   })
   const sockets = serveWebSocket(sessions, {
@@ -50,12 +59,9 @@ const serve = async (
     ...options,
   })
   const server = createServer()
+  const connections: Socket[] = []
+  server.on("connection", (connection) => connections.push(connection))
   server.on("upgrade", sockets.upgrade)
-  // The network socket under each connection, to tell when what a peer sent has arrived.
-  const links: Duplex[] = []
-  server.on("upgrade", (_request, link) => {
-    links.push(link)
-  })
   server.listen(0, "127.0.0.1")
   await once(server, "listening")
   onTestFinished(async () => {
@@ -63,7 +69,7 @@ const serve = async (
     server.close()
   })
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/rpc`
-  return { sessions, sockets, url, links }
+  return { sessions, sockets, url, connections }
 }
 
 // A raw socket's client, without the handshake.
@@ -73,6 +79,45 @@ const raw = async (url: string, options: ClientOptions = {}) => {
   await once(socket, "open", { signal: AbortSignal.timeout(5_000) })
   return { socket, client: createWireClient<typeof contract>(socketChannel(socket)) }
 }
+
+type Served = { readonly url: string; readonly connections: readonly Socket[] }
+
+// The server's end of the TCP connection its latest client made.
+const latest = (served: Served): Socket => {
+  const connection = served.connections.at(-1)
+  if (!connection) throw new Error("No client's connection reached the server")
+  return connection
+}
+
+// A raw client of `served` that has handshaked, beside the server's end of its TCP connection.
+const joined = async (served: Served, options: ClientOptions = {}) => {
+  const { socket, client } = await raw(served.url, options)
+  await client.wire.handshake({ protocolVersion, token })
+  return { socket, client, connection: latest(served) }
+}
+
+// The bytes the server wrote while `call` ran, beside the length of the message it answered with.
+const sent = async (
+  socket: WebSocket,
+  connection: Socket,
+  call: () => Promise<unknown>,
+): Promise<{ readonly wire: number; readonly message: number }> => {
+  let message = 0
+  const received = (data: RawData) => {
+    message = [data].flat().reduce((total, part) => total + part.byteLength, 0)
+  }
+  socket.on("message", received)
+  const before = connection.bytesWritten
+  await call()
+  socket.off("message", received)
+  return { wire: connection.bytesWritten - before, message }
+}
+
+// Terminal output as an agent colours it, where each escape takes six bytes in JSON.
+const coloured = Array.from(
+  { length: 2_000 },
+  (_, line) => `\u001b[38;5;${line % 256}m${line}: \u001b[1mbuilt\u001b[0m in ${line % 97} ms\r\n`,
+).join("")
 
 const refusal = async (url: string, options: ClientOptions = {}) => {
   const socket = new WebSocket(url, options)
@@ -237,12 +282,12 @@ describe("serveWebSocket", () => {
   it("keeps a quiet peer that answers its pings", async () => {
     onHeartbeatClock()
     const closed = vi.fn<(session: Session) => void>()
-    const { url, links } = await serve({ heartbeatMs }, { closed })
+    const { url, connections } = await serve({ heartbeatMs }, { closed })
     const { client } = await raw(url)
     await client.wire.handshake({ protocolVersion, token })
     // Each beat pings, and the pong is all the server reads before the next.
     const beat = async () => {
-      const pong = once(links[0]!, "data")
+      const pong = once(connections[0]!, "data")
       await vi.advanceTimersByTimeAsync(heartbeatMs)
       expect(closed).not.toHaveBeenCalled()
       await pong
@@ -258,13 +303,13 @@ describe("serveWebSocket", () => {
   it("keeps a peer whose message is still arriving though no pong comes, until it stops", async () => {
     onHeartbeatClock()
     const closed = vi.fn<(session: Session) => void>()
-    const { url, links } = await serve({ heartbeatMs }, { closed })
+    const { url, connections } = await serve({ heartbeatMs }, { closed })
     const { socket, client } = await raw(url, { autoPong: false })
     await client.wire.handshake({ protocolVersion, token })
     // One message on its way a part at a time, as a large one on a slow link: the server reads
     // its bytes, never a whole message, and no pong.
     const part = async () => {
-      const read = once(links[0]!, "data")
+      const read = once(connections[0]!, "data")
       socket.send("x".repeat(1024), { fin: false })
       await read
       await vi.advanceTimersByTimeAsync(heartbeatMs)
@@ -288,6 +333,85 @@ describe("serveWebSocket", () => {
     await client.wire.handshake({ protocolVersion, token })
     void client.echo("x".repeat(4096)).catch(() => {})
     await once(socket, "close")
+    expect(closed).toHaveBeenCalledOnce()
+  })
+
+  it("counts a message waiting to be compressed in full against its send budget", async () => {
+    const closed = vi.fn<(session: Session) => void>()
+    const { socket, client } = await joined(await serve({ sendBudgetBytes: 60 * 1024 }, { closed }))
+    // Compressed, it takes a few hundred bytes, but it waits for zlib at its full 40 KiB: one
+    // fits the budget, and a second sent while the first waits doesn't.
+    const text = "x".repeat(40 * 1024)
+    await expect(client.echo(text)).resolves.toBe(text)
+    const ended = once(socket, "close")
+    void client.twice(text).catch(() => {})
+    await ended
+    expect(closed).toHaveBeenCalledOnce()
+  })
+
+  it("compresses a large message for a client that offers to, which gets it whole", async () => {
+    const { socket, client, connection } = await joined(await serve())
+    expect(socket.extensions).toBe("permessage-deflate")
+    const { wire, message } = await sent(socket, connection, async () => {
+      await expect(client.echo(coloured)).resolves.toBe(coloured)
+    })
+    expect(wire).toBeLessThan(message / 4)
+  })
+
+  it("compresses for Node's own WebSocket, which the websocket transport opens", async () => {
+    const served = await serve()
+    const wire = await connect({
+      contract,
+      transport: websocket(served.url, { token }),
+      protocolVersion,
+      retryDelay: () => 0,
+    })
+    onTestFinished(() => wire.close())
+    const connection = latest(served)
+    const before = connection.bytesWritten
+    await expect(wire.session().client.echo(coloured)).resolves.toBe(coloured)
+    const written = connection.bytesWritten - before
+    expect(written).toBeGreaterThan(0)
+    expect(written).toBeLessThan(Buffer.byteLength(JSON.stringify(coloured)) / 4)
+  })
+
+  it("sends a message under 1 KiB as it is", async () => {
+    const { socket, client, connection } = await joined(await serve())
+    // Compressed, it would take a few bytes.
+    const short = "x".repeat(500)
+    const { wire, message } = await sent(socket, connection, async () => {
+      await expect(client.echo(short)).resolves.toBe(short)
+    })
+    expect(message).toBeLessThan(1024)
+    expect(wire).toBeGreaterThan(message)
+  })
+
+  it("serves a client that doesn't offer compression as before, every message as it is", async () => {
+    const { socket, client, connection } = await joined(await serve(), {
+      perMessageDeflate: false,
+    })
+    expect(socket.extensions).toBe("")
+    const { wire, message } = await sent(socket, connection, async () => {
+      await expect(client.echo(coloured)).resolves.toBe(coloured)
+    })
+    expect(wire).toBeGreaterThan(message)
+  })
+
+  it("refuses a message that inflates past maxPayloadBytes, however few bytes it took", async () => {
+    const maxPayloadBytes = 256 * 1024
+    const closed = vi.fn<(session: Session) => void>()
+    const { socket, client, connection } = await joined(
+      await serve({ maxPayloadBytes }, { closed }),
+    )
+    const fits = "x".repeat(maxPayloadBytes - 1024)
+    await expect(client.echo(fits)).resolves.toBe(fits)
+    const before = connection.bytesRead
+    const ended = once(socket, "close")
+    await expect(client.echo("x".repeat(maxPayloadBytes))).rejects.toMatchObject({
+      code: "DISCONNECTED",
+    })
+    await ended
+    expect(connection.bytesRead - before).toBeLessThan(maxPayloadBytes / 64)
     expect(closed).toHaveBeenCalledOnce()
   })
 
