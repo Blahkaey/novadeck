@@ -4,6 +4,7 @@ import { spawn as nodePtySpawn } from "node-pty"
 
 import { agentProcesses, endFollowed, type Listing } from "./descendants.js"
 import { terminalForeground } from "./foreground.js"
+import type { Priority } from "./priority.js"
 import type { ExitCause, Scopes } from "./scopes.js"
 import { anyRunning, relayMs, taskkillTree, type Member } from "./trees.js"
 
@@ -45,12 +46,17 @@ export type NativeSpawn = (
 
 /**
  * How ptys start: node-pty's `spawn` unless a test plays one, the platform their ending
- * follows, and where each program is kept apart from the app's, as `userScopes()` gives on Linux.
+ * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux,
+ * and how far its priority yields to the app's, as `terminalPriorities()` gives on macOS and
+ * Windows. `trees` reads a Windows shell's programs, which may have started before its
+ * priority could be lowered.
  */
 export type PtyOptions = {
   readonly native?: NativeSpawn
   readonly platform?: NodeJS.Platform
   readonly scopes?: Scopes
+  readonly priority?: Priority
+  readonly trees?: Pick<ProcessTrees, "read">
 }
 
 /** A process's tree on Windows, read and ended as `Trees` does. */
@@ -270,6 +276,33 @@ export const spawnPty = (
   })
   const scope = child.pid > 0 ? options.scopes?.contain(child.pid) : undefined
   let drawn = false
+  // macOS names the shell's pid at once, so it is lowered before it can start anything. On
+  // Windows node-pty's public `pid` stays 0 until its data pipe connects, by which time the
+  // shell may be running its startup command; the first output follows the pid. So there the
+  // shell is lowered then, and what it started by then once the relay has read its tree (a
+  // process to spawn, a snapshot, a call per pid: hundreds of ms, up to `relayMs` on a cold
+  // machine). Whatever those started meanwhile stays at normal, and with no relay only the
+  // shell is lowered. Between the snapshot and a call a member can exit and Windows reuse its
+  // pid, so the call may lower an unrelated process, as `setPriority` can't check which it
+  // hits, unlike a kill by pid and start. Accepted: the window is that short, a reused pid
+  // being likelier a recent one, and the harm one process running a little slower.
+  if (platform === "win32") {
+    let lowered = false
+    child.onData(() => {
+      if (lowered || !(child.pid > 0)) return
+      lowered = true
+      const shell = child.pid
+      options.priority?.lower(shell)
+      if (options.priority)
+        void options.trees
+          ?.read(shell)
+          .then((tree) => {
+            for (const member of tree ?? [])
+              if (member.pid !== shell) options.priority?.lower(member.pid)
+          })
+          .catch(() => {})
+    })
+  } else if (child.pid > 0) options.priority?.lower(child.pid)
   let exited = false
   let ending = false
   // node-pty's exit came, its fd closed, while the report may wait for its cause.
