@@ -5,10 +5,10 @@ name: Remote Mac App
 # It is packaged as Package packages a pull request's: unsigned, as version 0.0.0, which looks
 # for no updates, and without the voice and murmur engines, which a remote runner's machine
 # holds; but for Intel alone, on an Intel runner. The disk image is kept as an artifact of the
-# run. Runs when the branch moves, and by hand.
+# run. Runs when main moves, and by hand.
 on:
   push:
-    branches: [remote-runner]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
