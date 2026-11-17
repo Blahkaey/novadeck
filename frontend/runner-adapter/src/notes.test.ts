@@ -68,7 +68,9 @@ describe("The notes, as the runner reports them", () => {
   it("are the runner's own notes, field for field, within the runner's own limits", () => {
     expectTypeOf<RunnerNote>().toExtend<Note>()
     expectTypeOf<Note>().toExtend<RunnerNote>()
-    expect(noteLimits).toEqual(runnerLimits)
+    // The core keeps the limits the panel holds the person to; the runner's add how many an
+    // agent adds at once.
+    expect(runnerLimits).toMatchObject(noteLimits)
   })
 
   it("shows every project's once the first sequence is synced", async () => {
@@ -125,6 +127,20 @@ describe("A change the person makes to the notes", () => {
     first!.answer([note("new-1", { text: "first" }), note("a")])
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(texts()).toEqual(["second", "first", "a"])
+  })
+
+  it("stays over a note an agent adds meanwhile, which keeps the agent that added it", async () => {
+    const { notes, stream, listed, sent, state } = followed()
+    await listed(note("a"))
+    notes.change("a", { done: true })
+    const [update] = await sent(1)
+    const theirs = note("b", { by: { agent: "codex", handle: "pike" } })
+
+    stream.push({ type: "changed", projectId: "p", notes: [theirs, note("a")] })
+    await vi.waitFor(() => expect(state().notes).toEqual([theirs, note("a", { doneAt: 500 })]))
+    update!.answer([theirs, note("a", { doneAt: 500 })])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(state()).toEqual({ notes: [theirs, note("a", { doneAt: 500 })], failed: false })
   })
 
   context("when the runner refuses it", () => {

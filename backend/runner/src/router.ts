@@ -302,9 +302,10 @@ export const createRouter = (options: {
     notes: {
       list: api.notes.list.handler(({ input }) => notes.list(input.projectId)),
       watch: api.notes.watch.handler(({ signal }) => notes.watch(signal)),
-      add: api.notes.add.handler(({ input }) => {
-        projects.ensureNotRemoving(input.projectId)
-        return notes.add(input)
+      // The person's own note: never one an agent added.
+      add: api.notes.add.handler(({ input: { projectId, id, text, todo } }) => {
+        projects.ensureNotRemoving(projectId)
+        return notes.add({ projectId, notes: [{ id, text, todo }] })
       }),
       update: api.notes.update.handler(({ input }) => notes.update(input)),
       move: api.notes.move.handler(({ input }) => notes.move(input)),

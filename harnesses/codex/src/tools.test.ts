@@ -108,6 +108,11 @@ suite("what a Codex tool call was", () => {
     expect(run("mcp__novadeck__close_worktree", { path: "/w", force: true })).toMatchObject({
       title: "Closed a worktree (forced)",
     })
+    expect(run("mcp__novadeck__note", { notes: [{ text: "Ship it" }, { text: "B" }] })).toEqual({
+      kind: "agent",
+      title: "Added 2 todos",
+      detail: "Ship it",
+    })
     expect(run("mcp__novadeck__describe", { title: "Cart", summary: "Rounding." })).toEqual({
       kind: "agent",
       title: "Described this terminal",

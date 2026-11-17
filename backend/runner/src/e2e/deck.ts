@@ -173,6 +173,8 @@ export type Deck = {
   readonly sessionId: string
   /** The runner's tour, as `tour.prepare` and `tour.brief` answer. */
   readonly tour: ReturnType<typeof wire>["tour"]
+  /** The person's notes on each project, as the runner wired now keeps them. */
+  readonly notes: ReturnType<typeof wire>["notes"]
   /**
    * Makes a project at `cwd`, as a client's `projects.create` does, with a session, and opens
    * a terminal there that runs `command` at its shell's first prompt.
@@ -588,6 +590,7 @@ type Runner = {
   readonly items: ReturnType<typeof wire>["items"]
   readonly uploads: ReturnType<typeof wire>["uploads"]
   readonly tour: ReturnType<typeof wire>["tour"]
+  readonly notes: ReturnType<typeof wire>["notes"]
   /** Aborts as the runner closes, ending every watch of it. */
   readonly closing: AbortController
 }
@@ -600,6 +603,7 @@ const stop = async (runner: Runner, model?: DeckOptions["model"]): Promise<void>
     try {
       await runner.terminals.shutdown()
     } finally {
+      runner.notes.close()
       runner.store.close()
     }
   }
@@ -656,7 +660,7 @@ const now = async <T>(stream: (signal: AbortSignal) => AsyncGenerator<T>): Promi
 export const createDeck = async (options: DeckOptions): Promise<Deck> => {
   const shellFolder = join(options.data, "shell")
   const start = async (): Promise<Runner> => {
-    const { store, shellFiles, agents, terminals, items, uploads, tour } = wire({
+    const { store, shellFiles, agents, terminals, items, uploads, tour, notes } = wire({
       database: join(options.data, "workspace.sqlite"),
       uploads: join(options.data, "uploads"),
       shell: shellFolder,
@@ -686,7 +690,16 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
       store.close()
       throw new Error("Novadeck's shell files could not be written")
     }
-    return { store, agents, terminals, items, uploads, tour, closing: new AbortController() }
+    return {
+      store,
+      agents,
+      terminals,
+      items,
+      uploads,
+      tour,
+      notes,
+      closing: new AbortController(),
+    }
   }
 
   let runner = await start()
@@ -1001,6 +1014,9 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
     sessionId: session.id,
     get tour() {
       return runner.tour
+    },
+    get notes() {
+      return runner.notes
     },
     openAt: async (cwd, command) => {
       const made = await runner.store.createProject({ id: randomUUID(), name: "Tour", cwd })

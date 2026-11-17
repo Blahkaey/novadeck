@@ -128,14 +128,14 @@ flowchart LR
   R --> U[Runner API: messages, pause, release, stop]
 ```
 
-| Part         | Where                                                                                                                                                                                                                        | Owns                                                                                |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| MCP tools    | `shell/mcp.ts`, beside `show`, `showing`, `look`, `close`, `open_terminal`, `open_agent`, `close_terminal` (and, while the user has agent worktrees on, `open_worktree`, `take_worktree`, `close_worktree`, `give_worktree`) | `send`, `agents`, `describe` and `feedback`; the terminal's token on every call     |
-| Messages     | Runner, stored with the workspace (`WorkspaceStore`)                                                                                                                                                                         | Messages, threads, guards, pause, retention                                         |
-| Delivery     | Runner, one state machine per recipient terminal                                                                                                                                                                             | When and how a recipient notices: leases to hooks and the doorbell                  |
-| Hook answers | `shell/hook.ts` asks the runner; the runner returns stdout                                                                                                                                                                   | Each harness's output encoding, in its adapter beside its decoder                   |
-| Doorbell     | `messaging/doorbell.ts`, behind `DoorbellHost` (built in `terminals/doorbell-host.ts`); the manager owns every PTY and screen                                                                                                | The settle window, the calm check, the test paste, Enter, holding input and resizes |
-| Runner API   | Protocol and router                                                                                                                                                                                                          | Listing messages, pause and release, for the UI to come                             |
+| Part         | Where                                                                                                                                                                                                                        | Owns                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| MCP tools    | `shell/mcp.ts`, beside `show`, `showing`, `look`, `close`, `open_terminal`, `open_agent`, `close_terminal` (and, while the user has agent worktrees on, `open_worktree`, `take_worktree`, `close_worktree`, `give_worktree`) | `send`, `agents`, `describe`, `feedback` and `note`; the terminal's token on every call |
+| Messages     | Runner, stored with the workspace (`WorkspaceStore`)                                                                                                                                                                         | Messages, threads, guards, pause, retention                                             |
+| Delivery     | Runner, one state machine per recipient terminal                                                                                                                                                                             | When and how a recipient notices: leases to hooks and the doorbell                      |
+| Hook answers | `shell/hook.ts` asks the runner; the runner returns stdout                                                                                                                                                                   | Each harness's output encoding, in its adapter beside its decoder                       |
+| Doorbell     | `messaging/doorbell.ts`, behind `DoorbellHost` (built in `terminals/doorbell-host.ts`); the manager owns every PTY and screen                                                                                                | The settle window, the calm check, the test paste, Enter, holding input and resizes     |
+| Runner API   | Protocol and router                                                                                                                                                                                                          | Listing messages, pause and release, for the UI to come                                 |
 
 Messaging is an application operation like `show`, `open_terminal` and `open_agent`: the MCP
 server only forwards calls with the terminal's token, and the runner decides.
@@ -995,6 +995,52 @@ but the label a run shows (`novadeckTool` in the harness core).
   with a reason of its own (validation, a limit), the runner's generic words for its own
   shutdown or a race, and the feedback tool's own failures get none.
 
+### Notes the person asks for
+
+The `note` tool (`shell/mcp.ts`; answered by `NoteCalls` in `terminals/note-request.ts`) adds
+notes or todos to the person's Notes for the caller's project, and does nothing else with
+them: no agent reads, changes, checks off, moves or deletes a note, so the person's notes
+stay out of every agent's context and the list can't carry words from one agent to
+another. Its description asks for it only when the person, in their own message, asks to
+note something, and only for that: never the agent's plan, progress or follow-ups, nor at
+another agent's or a lead's request. It is always listed, in every harness, but the server's
+instructions and the nudges (`terminals/nudges.ts`) never name it, so nothing reminds an
+agent of it.
+
+- **The runner's check** is what holds when a model ignores the description. A call is
+  refused unless `Messaging.personTurn` says `person`: a root turn runs that the person's
+  own submission started, as delivery judges it (`byPerson`: their bare Enter just before
+  its prompt hook, or a prompt they queued), which is never a doorbell's, a harness's or a
+  prompt of an opened terminal's first session that is the opening agent's command line
+  (`promptIn` the opener's command, as `Reports.byCommand` tells of a first prompt; any
+  prompt of that session matching it, which errs toward refusing). It says `others`, and
+  the call is refused with its own reason, once a lease of that turn carried another
+  agent's message (`Live.othersIn`, set as `Leasing.lease` leases one, printed or not):
+  with the person's prompt, at a tool call (a lead's), or at a Stop Novadeck continued. A
+  prompt the person steers or queues into a running turn (Codex's steer, Claude Code's
+  queue: each fires its prompt hook while that turn runs on) makes it no more theirs: the
+  turn's word carries to the epoch that hook starts until the turn ends (`Live.inherited`),
+  so one a peer's message reached stays `others`, and one the doorbell or the harness
+  started stays no turn of theirs. Claude Code then runs that queued prompt as a turn of its
+  own, which no hook tells of (`queueRunning`): it is theirs by the hook it fired as it was
+  queued, unless a lease since carried another agent's message. The person's Inbox
+  replies and Novadeck's own notices are no agent's words. Each refusal tells the agent to
+  say in its reply what it would have noted.
+- **What it can't tell.** That the person started the turn, not that they asked for a note
+  in it: an agent asked to fix a bug could still add one then; the description and the
+  panel's mark cover that. Only leases count as another agent's words: what an agent reads
+  of others through its own tools in a turn of the person's (`agents`' and `team`'s
+  listings, with a teammate's latest prompts, tells and reports; files another agent
+  wrote; earlier turns in its context) leaves the turn theirs. A call carries only its terminal and token, so a subagent's call
+  can't be told from its root agent's, and Novadeck's tools run without the harness asking
+  the person, so no permission prompt stands behind the check.
+- **What it adds.** 1 to 20 notes a call, each a line (a todo unless `todo` is false) and an
+  optional Markdown `body`, first in the list in the order given, each with `by` naming the
+  agent and its handle, which the panel marks. A terminal's agents add 20 notes a minute at
+  most (a limit of its own, pruned by age); a list that would take the project past the 200
+  it keeps is refused whole. The answer says how many went in and to add no more unless the
+  person asks.
+
 ## Delivery
 
 ### What counts
@@ -1174,7 +1220,13 @@ but the label a run shows (`novadeckTool` in the harness core).
   continuation and its own notices as `SYSTEM_MESSAGE` steps, so they never count. A
   prompt Codex queued during a
   turn, which it submits as the turn ends, counts too, when the person typed nothing
-  after queuing it: the next root prompt after that Stop is theirs.
+  after queuing it: the next root prompt after that Stop is theirs. Codex and Antigravity
+  bind a session only at its first prompt (Codex's `SessionStart`, Antigravity's first
+  `PreInvocation`), just after the Enter that submitted it: a session bound from Drafting,
+  the person's Enter within the window, keeps that Enter, so its first prompt is theirs as
+  in a session bound before it (`bornOfEnter` in `messaging/delivery.ts`). An Enter in the
+  shell, before the agent's box showed, started the program and counts for no prompt, nor
+  does one before a session bound while a turn ran.
 - **The prompt is known empty** after one of these, with no input from the person
   since (apart from a bare Enter answering a request, and Escape outside a running turn:
   one during it may cancel the turn and put its prompt back, so it leaves a draft): the

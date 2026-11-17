@@ -477,8 +477,22 @@ so they stay after a reload, and the project opens the session you were in last.
 ## Notes
 
 **Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
-remember about it: one list per project, yours alone. Agents neither read it nor write to
-it. Where a backend keeps no notes, the panel isn't there.
+remember about it: one list per project, yours. Where a backend keeps no notes, the panel
+isn't there.
+
+Ask an agent to note something ("add a todo to revisit the retry logic") and it adds it with
+Novadeck's `note` tool, first in the open project's list, in the order it gave, at once. That
+is all an agent can do with the list: it can't read your notes, change, check off, move or
+delete one, and it adds one only in a turn your own message started. Once Novadeck has
+delivered another agent's message into that turn (with your prompt, at a tool call, or as it
+carried the turn on), or the turn is one Novadeck or the agent started, even if you then
+added a message to it while it ran, it is refused and the agent says what it would have
+noted in its reply; ask again once it's done, or add it yourself. A note
+an agent added carries a small mark, and hovering it names the agent and its handle ("Added
+by Claude Code · @wren"), so one you didn't ask for is plain to see and one click to delete.
+Novadeck can tell that you started the turn, not that you asked for a note in it: an agent
+told to fix a bug could still add one then, and what it reads of other agents on its own (their
+latest prompts in a listing, files they wrote) doesn't count as a message delivered.
 
 Type in the field at the top and press Enter to add a todo, first in the list; the field
 stays ready for the next. The button before the field switches it to plain notes, which

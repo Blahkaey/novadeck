@@ -1,4 +1,11 @@
-import { note, noteLimits, type Note, type NotesChange } from "@novadeck/protocol"
+import {
+  note,
+  noteAuthor,
+  noteLimits,
+  type Note,
+  type NoteAuthor,
+  type NotesChange,
+} from "@novadeck/protocol"
 import { KeyedChanges } from "@novadeck/wire/server"
 import { z } from "zod"
 
@@ -42,8 +49,23 @@ export const memoryNotes = (projects: readonly string[]): NoteRecords => {
 }
 
 // A project's notes as they are kept: in the person's order, each without its project's id,
-// which the row it is kept in names.
-const kept = z.array(note.omit({ projectId: true }))
+// which the row it is kept in names. A field this build doesn't know, as a later one writes,
+// is dropped rather than leave the row unreadable, so the person's notes stay; so is a `by`
+// it can't read, as one naming a harness it doesn't know, the note kept without its mark.
+const kept = z.array(
+  z.object({
+    ...note.omit({ projectId: true, by: true }).shape,
+    by: z.object(noteAuthor.shape).optional().catch(undefined),
+  }),
+)
+
+/** A note to add: its id, its line, whether it is a todo, and more under it (none if omitted). */
+export type NewNote = {
+  readonly id: string
+  readonly text: string
+  readonly todo: boolean
+  readonly body?: string | undefined
+}
 
 /** What a change gives of a note; what is left out stays as it is. */
 export type NoteUpdate = {
@@ -100,25 +122,41 @@ export class Notes {
   }
 
   /**
-   * Adds a note first in its project's list, open, with no body. An id the project already
-   * has, and one more note than a project keeps, is a CONFLICT.
+   * Adds notes first in their project's list, in the order given, open; a body keeps no
+   * white space at its end. `by` names the agent that added them, as the person asked it to;
+   * the person's own have none. An id the project already has, or gets twice, and more notes
+   * than a project keeps, is a CONFLICT, and adds none of them.
    */
   add(input: {
-    readonly id: string
     readonly projectId: string
-    readonly text: string
-    readonly todo: boolean
+    readonly notes: readonly NewNote[]
+    readonly by?: NoteAuthor | undefined
   }): Note[] {
-    const notes = this.list(input.projectId)
-    if (notes.some(({ id }) => id === input.id))
-      throw new DomainError("CONFLICT", "This project already has a note with that id.")
-    if (notes.length >= noteLimits.perProject)
+    const { projectId, by } = input
+    const notes = this.list(projectId)
+    const ids = new Set(notes.map(({ id }) => id))
+    for (const { id } of input.notes) {
+      if (ids.has(id))
+        throw new DomainError("CONFLICT", "This project already has a note with that id.")
+      ids.add(id)
+    }
+    if (notes.length + input.notes.length > noteLimits.perProject)
       throw new DomainError(
         "CONFLICT",
         `A project keeps at most ${noteLimits.perProject} notes. Delete some to add more.`,
       )
-    const added: Note = { ...input, body: "", doneAt: null, createdAt: this.now() }
-    return this.write(input.projectId, [added, ...notes])
+    const createdAt = this.now()
+    const added = input.notes.map(({ id, text, todo, body = "" }): Note => ({
+      id,
+      projectId,
+      text,
+      body: body.trimEnd(),
+      todo,
+      doneAt: null,
+      createdAt,
+      ...(by && { by }),
+    }))
+    return this.write(projectId, [...added, ...notes])
   }
 
   /**
@@ -214,7 +252,8 @@ export class Notes {
   }
 }
 
-// A note as it is kept, its fields always in this order, so the same notes are the same text.
+// A note as it is kept, its fields always in this order, so the same notes are the same text;
+// `by` only where an agent added it, so the person's own notes keep the text they had.
 const keptOf = ({
   id,
   text,
@@ -222,6 +261,7 @@ const keptOf = ({
   todo,
   doneAt,
   createdAt,
+  by,
 }: Note): z.infer<typeof kept>[number] => ({
   id,
   text,
@@ -229,6 +269,7 @@ const keptOf = ({
   todo,
   doneAt,
   createdAt,
+  ...(by && { by: { agent: by.agent, handle: by.handle } }),
 })
 
 const changeOf = (projectId: string, notes: Note[]): NotesChange => ({

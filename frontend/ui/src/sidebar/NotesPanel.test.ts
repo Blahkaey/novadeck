@@ -167,6 +167,31 @@ describe("The Notes panel", () => {
   })
 })
 
+describe("A note an agent added", () => {
+  const by = { agent: "codex", handle: "pike" } as const
+  // What a row's mark names, where it has one.
+  const markOf = (row: HTMLElement) =>
+    row.querySelector("[role=img]")?.getAttribute("aria-label") ?? null
+
+  it("is marked with its agent's icon, which names the agent and its handle", () => {
+    const { row } = show([note("a", { by }), note("b")])
+
+    expect(markOf(row("a"))).toBe("Added by Codex · @pike")
+    expect(row("a").querySelector("[role=img] svg")?.classList).toContain("lucide-codex")
+    expect(markOf(row("b"))).toBeNull()
+  })
+
+  it("keeps its mark once checked off", async () => {
+    const { checkbox, click, button, row } = show([note("a", { by })])
+
+    await click(checkbox("Note a"))
+    await click(button("Done1"))
+
+    expect(row("a").dataset.done).toBe("true")
+    expect(markOf(row("a"))).toBe("Added by Codex · @pike")
+  })
+})
+
 describe("Adding a note", () => {
   it("adds a todo first on Enter, and empties the field for the next", async () => {
     const { field, type, texts, calls } = show([note("a")])

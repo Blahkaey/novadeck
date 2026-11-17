@@ -1732,22 +1732,27 @@ one from an earlier runner.
   its `projectId`, `text` (one line, 1 to 500 characters, trimmed, `singleLine`), `body`
   (Markdown, up to 8,000 characters, empty for none), `todo` (whether it has a checkbox),
   `doneAt` (when it was checked off, in epoch milliseconds; null while it is open, and always
-  on a plain note) and `createdAt`. A project keeps at most 200 (`noteLimits`). Agents have no
-  tool for them. The runner keeps a project's notes whole, as one row of the `settings`
-  table under `notes.<project id>`, so they need no table and no schema change; each write
-  goes through the store's `forget` (so `secure_delete` and the scrub apply to what it
-  replaces), and removing a project deletes its row in the same transaction. A row that
-  can't be read is logged and reads as no notes. Every change answers with the project's
-  notes as it left them; a project the runner doesn't have is `NOT_FOUND`, and so is a note
-  its project doesn't.
+  on a plain note), `createdAt` and, on a note an agent added, `by`: `{ agent, handle }`, the
+  harness and its terminal's handle then, as a feedback draft names its author. A note the
+  person wrote has no `by`, and no change of theirs adds, alters or removes one. A project
+  keeps at most 200 (`noteLimits`). Agents only add, through the MCP `note` tool (below). The
+  runner keeps a project's notes whole, as one row of the `settings` table under
+  `notes.<project id>`, so they need no table and no schema change; each write goes through
+  the store's `forget` (so `secure_delete` and the scrub apply to what it replaces), and
+  removing a project deletes its row in the same transaction. A note is kept with `by` only
+  where it has one, so a row of the person's notes is the same text it was. A row that can't
+  be read is logged and reads as no notes; a field the build doesn't know, as a later build
+  writes, is dropped from what it reads rather than empty the row. Every change answers with
+  the project's notes as it left them; a project the runner doesn't have is `NOT_FOUND`, and
+  so is a note its project doesn't.
   - `notes.list({ projectId })` answers the project's notes, in the person's order.
   - `notes.watch()` streams a `changed` with the whole notes of each project that has any,
     `synced`, then a project's notes whole each time they change (none once its last note is
     removed, or the project is). The client's `notes.watch()` yields `reset` before each
     fresh sequence, as `history.watch()` does.
-  - `notes.add({ id, projectId, text, todo })` adds a note first in the project's list, open
-    and with no body. An id the project already has is a `CONFLICT`, as is one note more
-    than a project keeps.
+  - `notes.add({ id, projectId, text, todo })` adds the person's note first in the project's
+    list, open, with no body and no `by`. An id the project already has is a `CONFLICT`, as
+    is one note more than a project keeps.
   - `notes.update({ projectId, id, text?, body?, todo?, done? })` changes what is given. A
     todo checked off is done from then, and keeps that time if checked again; a plain note
     is never done, so `todo: false` opens it. A body keeps no white space at its end.
@@ -1759,6 +1764,18 @@ one from an earlier runner.
   - The UI's adapter shows each change at once, over what the runner last reported, and
     takes the runner's answer in its place; a change the runner refuses leaves the notes as
     the runner has them and sets the port's `notes.state.failed` until a change takes.
+  - The MCP `note` tool, the agents' only way in, adds 1 to 20 notes (`noteLimits.perCall`),
+    each `{ text, todo?, body? }` (a todo unless `todo` is false), first in the caller's
+    project's list in the order given, each with a runner-made id and `by` naming the
+    caller; watchers see them as any change. It can't read, change or remove a note. The
+    runner refuses it unless a root turn runs in the caller's terminal that the person's own
+    submission started (`Messaging.personTurn`: never one the doorbell, the harness or an
+    opening agent's command-line prompt started) and no other agent's message has been
+    leased into it since, at its prompt, a tool call or a Stop Novadeck continued; the
+    person's Inbox replies and Novadeck's notices don't count. A terminal's agents add 20
+    notes a minute at most, and a list that would take the project past 200 is refused
+    whole. Its answer is how many todos and plain notes went in. The server's instructions
+    and Novadeck's per-turn notices never mention it.
 
 - `companions.*` keeps what agents show and the person attaches beside terminals: items,
   each a pointer to a file, a page or a plan, never a copy of it, held by exactly one

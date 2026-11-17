@@ -328,10 +328,13 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     enabled: () => store.settings.runner().worktrees,
   })
   rootFolder.ensure()
+  // The person's notes on each project, kept in the store, which agents add to as they ask.
+  const notes = new Notes(store)
   const terminals = new Terminals({
     records: store,
     closed: store,
     projects: () => store.projects().map(({ id }) => id),
+    notes,
     worktrees: {
       service: worktrees,
       enabled: () => store.settings.runner().worktrees,
@@ -459,6 +462,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     rewriteShellFiles,
     agents,
     terminals,
+    notes,
     items,
     projects,
     works,
@@ -547,9 +551,8 @@ const startRunner = (options: RunnerOptions): Runner => {
     sealer,
     rootFolder,
     tour,
+    notes,
   } = wire(options)
-  // The person's notes on each project, kept in the store.
-  const notes = new Notes(store)
   let closing: Promise<void> | undefined
   return {
     sessions: createSessions({

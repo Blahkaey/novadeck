@@ -408,6 +408,10 @@ export class Messaging {
     return this.deliveries.personPrompt(terminalId)
   }
 
+  personTurn(terminalId: string): "person" | "others" | undefined {
+    return this.deliveries.personTurn(terminalId)
+  }
+
   settledSince(terminalId: string): number | undefined {
     return this.deliveries.settledSince(terminalId)
   }

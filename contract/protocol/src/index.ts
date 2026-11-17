@@ -97,6 +97,8 @@ export {
 export {
   type Note,
   note,
+  type NoteAuthor,
+  noteAuthor,
   noteBody,
   noteLimits,
   type NotesChange,

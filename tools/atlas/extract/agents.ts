@@ -17,6 +17,7 @@ const callsFile = "backend/runner/src/terminals/calls.ts"
 const leadsFile = "backend/runner/src/terminals/leads.ts"
 const worktreeCallsFile = "backend/runner/src/worktrees/calls.ts"
 const feedbackFile = "backend/runner/src/messaging/feedback.ts"
+const notesFile = "backend/runner/src/terminals/note-request.ts"
 const peersFile = "backend/runner/src/terminals/peers-host.ts"
 const contractFile = "harnesses/core/src/harness.ts"
 // The protocol's limits the tool literals name, by the file that exports each.
@@ -26,6 +27,7 @@ const limitFiles: Record<string, string> = {
   maxCommandLines: "contract/protocol/src/text.ts",
   maxFeedbackText: "contract/protocol/src/feedback.ts",
   maxStartupCommand: "contract/protocol/src/terminals.ts",
+  noteLimits: "contract/protocol/src/notes.ts",
 }
 
 // The method that performs each tool's call, and the runner file it is in.
@@ -52,6 +54,7 @@ const handlers: Record<string, { readonly file: string; readonly method: string 
   tell: { file: callsFile, method: "call" },
   done: { file: callsFile, method: "call" },
   feedback: { file: feedbackFile, method: "call" },
+  note: { file: notesFile, method: "call" },
 }
 
 const lineOf = (source: string | null, pattern: RegExp): number | null => {

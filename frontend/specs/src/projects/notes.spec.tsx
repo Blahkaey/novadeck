@@ -1,16 +1,18 @@
 import { page, userEvent } from "vitest/browser"
 
-import { openWorkspace, sidebarPanel } from "../support/workspace"
+import { openWorkspace, sidebarPanel, tooltipOf } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The agents demo keeps the person's notes: the storefront starts with four todos, one of them
-// with details, a plain note between them, and two todos checked off.
+// with details and one Codex added as @pike, a plain note between them, and two todos checked
+// off.
 const agents = "/?demo=agents"
 
 const notes = () => page.getByRole("list", { name: "Notes" })
 const done = () => page.getByRole("list", { name: "Done" })
 const adding = () => page.getByRole("textbox", { name: "Add a todo…" })
 const doneToggle = () => page.getByRole("button", { name: /^Done \d+$/ })
+const row = (text: string) => notes().getByRole("listitem").filter({ hasText: text })
 // The open notes' lines, top to bottom: each is the button that edits it.
 const lines = () =>
   notes()
@@ -53,6 +55,23 @@ describe("The Notes panel", () => {
         .element(page.getByText("Todos and notes you write here stay with this project."))
         .toBeVisible()
       await expect.element(page.getByRole("heading", { name: /^Notes$/ })).toBeVisible()
+    })
+  })
+
+  context("where an agent added a note", () => {
+    it("marks it with the agent's icon, which names the agent and its terminal's handle", async () => {
+      await openNotes()
+      const mark = row("Move the price formatter into the shared package").getByRole("img", {
+        name: "Added by Codex · @pike",
+      })
+      await expect.element(mark).toBeVisible()
+      expect(await tooltipOf(mark)).toBe("Added by Codex · @pike")
+      // A note the person wrote has none.
+      await expect
+        .element(
+          row("Ask @wren to cover expired coupon codes").getByRole("img", { name: /^Added by / }),
+        )
+        .not.toBeInTheDocument()
     })
   })
 

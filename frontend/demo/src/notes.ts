@@ -5,6 +5,7 @@ import {
   noteLine,
   removed,
   type Note,
+  type NoteAuthor,
   type Notes,
   type NotesState,
 } from "@novadeck/core/notes"
@@ -27,10 +28,13 @@ type Sample = {
   // How long ago it was written and, for one checked off, how long ago that was.
   readonly ago: number
   readonly doneAgo?: number
+  // The agent that added it, as the person asked it to.
+  readonly by?: NoteAuthor
 }
 
 // The storefront's notes, in the person's order: todos still to do, one with more under its
-// line, a plain note, and two checked off.
+// line and one that Codex added as @pike (History's Tax rounding, closed since), a plain note,
+// and two checked off.
 const storefront: readonly Sample[] = [
   { text: "Ask @wren to cover expired coupon codes", ago: 25 * minute },
   {
@@ -50,7 +54,11 @@ const storefront: readonly Sample[] = [
     todo: false,
     ago: 2 * day,
   },
-  { text: "Move the price formatter into the shared package", ago: 2 * day },
+  {
+    text: "Move the price formatter into the shared package",
+    ago: 2 * hour,
+    by: { agent: "codex", handle: "pike" },
+  },
   { text: "Rename the checkout route", ago: day, doneAgo: 2 * hour },
   { text: "Update the screenshots in the README", ago: 3 * day, doneAgo: day },
 ]
@@ -64,6 +72,7 @@ const notesOf = (projectId: string, samples: readonly Sample[], now: number): No
     todo: sample.todo ?? true,
     doneAt: sample.doneAgo === undefined ? null : now - sample.doneAgo,
     createdAt: now - sample.ago,
+    ...(sample.by && { by: sample.by }),
   }))
 
 /** The notes the storefront project starts with. */

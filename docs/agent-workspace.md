@@ -842,6 +842,12 @@ with every safety check again at that time:
   the summaries the terminals' agents gave through `describe`, and `team` follows the
   caller's own team's work since it last looked. See
   [Agent messaging](agent-messaging.md).
+- **Notes** the person asks for come from the same server's `note` tool, listed in every
+  Novadeck terminal: it adds notes or todos first in the caller's project's Notes, each
+  marked with the agent that added it, and can't read or change a note. The runner takes it
+  only in a turn the person's own message started that no other agent's message reached
+  (`terminals/note-request.ts`). See [Agent messaging](agent-messaging.md), "Notes the
+  person asks for".
 - **Pages** are any http(s) address; an address with a user name or password is
   refused. The desktop app loads them live in the pane, in Electron's `<webview>`,
   which lays out with the pane, keeps Novadeck's menus and cards above it, and lets a

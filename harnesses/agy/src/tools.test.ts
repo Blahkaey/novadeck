@@ -65,6 +65,13 @@ suite("what an Antigravity tool call was", () => {
     ["open_terminal", { command: "pnpm dev" }, "agent", "Opened a terminal", "pnpm dev"],
     ["close_terminal", { to: "owl" }, "agent", "Close owl", ""],
     ["open_worktree", { branch: "feat/x", repo: "." }, "agent", "Opened a worktree", "feat/x"],
+    [
+      "note",
+      { notes: [{ text: "Revisit the retry logic" }, { text: "Flag off", todo: false }] },
+      "agent",
+      "Added a todo and a note",
+      "Revisit the retry logic",
+    ],
     ["take_worktree", { path: "/a/b/c/d/wt" }, "agent", "Took a worktree", "…/c/d/wt"],
     ["close_worktree", { path: "/a/b/c/d/wt" }, "agent", "Closed a worktree", "…/c/d/wt"],
     [

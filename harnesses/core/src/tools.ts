@@ -33,6 +33,18 @@ const nested = (value: unknown): Fields | undefined => {
   return fieldsOf(value)
 }
 
+/** A list argument, as given or as the JSON text Antigravity may wrap it in. */
+const listed = (value: unknown): readonly unknown[] => {
+  if (typeof value === "string") {
+    try {
+      return listed(JSON.parse(value))
+    } catch {
+      return []
+    }
+  }
+  return Array.isArray(value) ? value : []
+}
+
 /** The first of `keys` the input holds as text. */
 export const textField = (fields: Fields | undefined, ...keys: string[]): string => {
   if (!fields) return ""
@@ -204,6 +216,21 @@ export const novadeckTool = (tool: string, fields: Fields | undefined): ToolRun 
       return { kind: "agent", title: "Drafted feedback", detail: text("kind") }
     case "describe":
       return { kind: "agent", title: "Described this terminal", detail: text("title") }
+    // The notes the person asked for: how many todos and plain notes, and the first's line.
+    case "note": {
+      const notes = listed(fields?.notes).map(nested)
+      const todos = notes.filter((each) => each?.todo !== false && each?.todo !== "false").length
+      const plain = notes.length - todos
+      const added = [
+        todos === 0 ? "" : todos === 1 ? "a todo" : `${todos} todos`,
+        plain === 0 ? "" : plain === 1 ? "a note" : `${plain} notes`,
+      ].filter(Boolean)
+      return {
+        kind: "agent",
+        title: `Added ${added.join(" and ") || "notes"}`,
+        detail: oneLine(textField(notes[0], "text")),
+      }
+    }
     // Its old name, for sessions recorded before `describe`: they keep their label.
     case "summarize":
       return { kind: "agent", title: "Summarized this terminal", detail: text("summary") }

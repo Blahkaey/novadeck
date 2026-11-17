@@ -1,4 +1,6 @@
-import { noteLimits } from "@novadeck/core/notes"
+import { noteLimits, type NoteAuthor } from "@novadeck/core/notes"
+
+import { agentName } from "./history-rows"
 
 // What the Notes panel says, apart from its markup.
 
@@ -20,6 +22,11 @@ export const doneCount = (count: number): string =>
 // come back.
 export const clearDoneWords = (count: number): string =>
   `${doneCount(count)} ${count === 1 ? "is" : "are"} deleted for good. You can’t bring ${count === 1 ? "it" : "them"} back.`
+
+// What the mark on a note an agent added says: the agent, and its terminal's handle when it
+// did.
+export const addedByWords = ({ agent, handle }: NoteAuthor): string =>
+  `Added by ${agentName(agent)} · @${handle}`
 
 // Where a note went among the open ones, for assistive technology.
 export const movedWords = (text: string, index: number, count: number): string =>

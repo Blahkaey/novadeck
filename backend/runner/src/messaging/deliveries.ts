@@ -34,6 +34,31 @@ const idle = (delivery: Delivery, inBackground: boolean): boolean =>
   waitsIn(delivery, inBackground) ||
   delivery.state === "ringing"
 
+/**
+ * Whose word the turn of the delivery's epoch is on (`Deliveries.personTurn`): `others`
+ * once another agent's message was leased into it, or into the turn a prompt hook came
+ * during (`Live.inherited`); `notTheirs` where the person's own submission didn't start it,
+ * nor the turn under it; else the `person`'s.
+ */
+const whoseEpoch = (live: Live, delivery: Delivery): "person" | "others" | "notTheirs" => {
+  const inherited = live.inherited?.epoch === delivery.epoch ? live.inherited.whose : undefined
+  if (live.othersIn === delivery.epoch || inherited === "others") return "others"
+  return !delivery.byPerson || inherited === "notTheirs" ? "notTheirs" : "person"
+}
+
+/**
+ * Carries the word of a root turn a prompt hook came during (Codex's steer, Claude Code's
+ * queue: each starts an epoch while the turn runs on) to that epoch, until the turn ends.
+ */
+const inherit = (live: Live, before: Delivery): void => {
+  const { delivery } = live
+  if (!running(delivery)) live.inherited = null
+  else if (running(before) && delivery.epoch !== before.epoch) {
+    const whose = whoseEpoch(live, before)
+    live.inherited = whose === "person" ? null : { epoch: delivery.epoch, whose }
+  }
+}
+
 /** How many of a terminal's latest unconfirmed rings it remembers (`Live.unconfirmed`). */
 export const maxUnconfirmed = 8
 
@@ -383,6 +408,22 @@ export class Deliveries {
   }
 
   /**
+   * Whose word the root turn running in the terminal is on: `person` while the person's own
+   * submission started it and no other agent's message has been leased into it since;
+   * `others` once one has, at its prompt, a tool call or a Stop Novadeck continued (the
+   * person's Inbox replies are theirs, and Novadeck's notices nobody's); undefined while no
+   * turn of theirs runs. What an agent may do only as the person asked waits for `person`.
+   */
+  personTurn(terminalId: string): "person" | "others" | undefined {
+    const live = this.host.sessions.get(terminalId)
+    // A prompt Claude Code queued runs after its turn's Stop as a turn no hook tells of
+    // (`queueRunning`): its hook's word, told as it was queued, holds until its own Stop.
+    if (!live || !(running(live.delivery) || live.queueRunning)) return undefined
+    const whose = whoseEpoch(live, live.delivery)
+    return whose === "notTheirs" ? undefined : whose
+  }
+
+  /**
    * When the terminal last became Settled, its turn ended, or Ready, its session bound; if
    * it is either.
    */
@@ -544,6 +585,7 @@ export class Deliveries {
       if (known) live.promptsQueued += 1
     }
     live.delivery = transition(before, event, this.host.slackMs)
+    inherit(live, before)
     // At the turn's Stop with a prompt queued, that prompt runs as a turn no prompt hook tells
     // of, the host idle and the person's keys free to say Drafting, until its own Stop. A Stop
     // that continued ended no turn, so nothing queued has run. Counted high, as where the harness

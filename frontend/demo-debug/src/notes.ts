@@ -1,13 +1,15 @@
-import { noteLimits, type Note } from "@novadeck/core/notes"
+import { isAgentName } from "@novadeck/core/harnesses"
+import { added, noteLimits, type Note, type NoteAuthor } from "@novadeck/core/notes"
 import type { Backend } from "@novadeck/core/port"
+import type { Workspace } from "@novadeck/core/types"
 import { demoNotes, isDemoNotes } from "@novadeck/demo/notes"
 
 import type { DemoActionGroup } from "./types"
 
 // The panel's group for the Notes panel's states that adding and checking off by hand reach
 // slowly or not at all: a change the backend doesn't save, a project that is full, one with
-// nothing left to do, and a note long enough to wrap and scroll. Each acts on the project on
-// screen and leaves the others' notes alone.
+// nothing left to do, a note long enough to wrap and scroll, and a todo an agent adds as the
+// person asked it to. Each acts on the project on screen and leaves the others' notes alone.
 
 const todo = (projectId: string, id: string, text: string, now: number): Note => ({
   id: `demo-note-${projectId}-${id}`,
@@ -69,6 +71,28 @@ export const longNotes = (projectId: string, now: number): Note[] => [
   todo(projectId, "short", "Ship it", now - 60_000),
 ]
 
+// Who adds the panel's agent todo where no agent runs on screen: Claude Code as @wren, the
+// storefront's Coupon codes agent in History.
+const historyAgent: NoteAuthor = { agent: "claude", handle: "wren" }
+
+/** The first agent running in the session on screen, by its terminal's handle; else @wren. */
+export const agentOnScreen = (workspace: Workspace | undefined): NoteAuthor => {
+  const project = workspace?.projects.find(({ id }) => id === workspace.activeProjectId)
+  const session = project?.history.find(({ id }) => id === project.activeSessionId)
+  const [running] = (session?.state.roster.terminals ?? []).flatMap((terminal) =>
+    terminal.state === "running" && terminal.handle && isAgentName(terminal.process)
+      ? [{ agent: terminal.process, handle: terminal.handle }]
+      : [],
+  )
+  return running ?? historyAgent
+}
+
+/** A todo `by` added, as the person asked it to. */
+export const agentTodo = (projectId: string, by: NoteAuthor, id: string, now: number): Note => ({
+  ...todo(projectId, id, "Revisit the retry logic before the release", now),
+  by,
+})
+
 // The project on screen; the storefront before a workspace is committed.
 const here = (workspace: () => { readonly activeProjectId: string } | undefined): string =>
   workspace()?.activeProjectId ?? "storefront"
@@ -81,6 +105,8 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
       ...notes.state.getSnapshot().notes.filter((note) => note.projectId !== projectId),
       ...mine,
     ])
+  // The agents' todos added so far, each under an id of its own.
+  let made = 0
   return [
     {
       section: "App",
@@ -93,7 +119,7 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
         },
         {
           label: "Sample notes",
-          hint: "The open project's Notes panel holds the storefront's samples: four todos, one with details, a plain note, and two under Done",
+          hint: "The open project's Notes panel holds the storefront's samples: four todos, one with details and one with Codex's mark (added by @pike), a plain note, and two under Done",
           run: ({ workspace }) => {
             const projectId = here(workspace)
             set(
@@ -125,6 +151,15 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
           label: "A long note",
           hint: "A todo whose line is as long as one can be wraps in its row; open its details for a heading, a list, code and a link that scroll with the panel",
           run: ({ workspace }) => set(here(workspace), longNotes(here(workspace), Date.now())),
+        },
+        {
+          label: "An agent adds a todo",
+          hint: "A todo stands first in the open project's Notes panel with its agent's icon at the end of its line, whose tooltip names the agent: the first running in the session on screen, or Claude Code's @wren where none runs",
+          run: ({ workspace }) => {
+            const by = agentOnScreen(workspace())
+            const theirs = agentTodo(here(workspace), by, `agent-${(made += 1)}`, Date.now())
+            notes.set(added(notes.state.getSnapshot().notes, theirs))
+          },
         },
       ],
     },

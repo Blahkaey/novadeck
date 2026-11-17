@@ -1,8 +1,8 @@
 import { doneNotes, noteLimits, openNotes, todosLeft } from "@novadeck/core/notes"
-import type { Workspace } from "@novadeck/core/types"
+import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoNotes } from "@novadeck/demo/notes"
 
-import { doneOnly, fullNotes, longNotes, notesGroups } from "./notes"
+import { agentTodo, doneOnly, fullNotes, longNotes, notesGroups } from "./notes"
 import { describe, expect, it } from "./test"
 import type { DemoActionContext } from "./types"
 
@@ -24,12 +24,28 @@ const context = (activeProjectId?: string): DemoActionContext => ({
   crash: () => undefined,
 })
 
+// A workspace on `projectId`, whose session on screen has these terminals.
+const onScreen = (projectId: string, terminals: Partial<TerminalMetadata>[]): Workspace =>
+  ({
+    activeProjectId: projectId,
+    projects: [
+      {
+        id: projectId,
+        activeSessionId: "initial",
+        history: [{ id: "initial", state: { roster: { terminals } } }],
+      },
+    ],
+  }) as unknown as Workspace
+
 const setup = () => {
   const notes = createDemoNotes(0)
   const [group] = notesGroups(notes)
-  const run = (label: string, projectId?: string) =>
-    void group!.actions.find((action) => action.label === label)!.run(context(projectId))
-  return { notes, group: group!, run, state: () => notes.state.getSnapshot() }
+  const action = (label: string) => group!.actions.find((each) => each.label === label)!
+  const run = (label: string, projectId?: string) => void action(label).run(context(projectId))
+  // Runs it with this workspace on screen.
+  const runOn = (label: string, workspace: Workspace) =>
+    void action(label).run({ ...context(), workspace: () => workspace })
+  return { notes, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
 }
 
 describe("the debug panel's Notes group", () => {
@@ -89,6 +105,40 @@ describe("the debug panel's Notes group", () => {
     expect(long!.text).toHaveLength(noteLimits.text)
     expect(long!.body).toContain("```ts")
   })
+
+  it("has the first agent running on screen add a todo, first in the project's list", () => {
+    const { runOn, state } = setup()
+    const samples = openNotes(state().notes, "storefront")
+    const storefront = onScreen("storefront", [
+      { id: "01", state: "running", process: "zsh", handle: "moth" },
+      { id: "02", state: "exited", exitCode: 0, signal: null, process: "claude", handle: "fox" },
+      { id: "04", state: "running", process: "codex", handle: "crow" },
+    ])
+
+    runOn("An agent adds a todo", storefront)
+    runOn("An agent adds a todo", storefront)
+
+    const [second, first, ...rest] = openNotes(state().notes, "storefront")
+    expect(rest).toEqual(samples)
+    expect(second).toMatchObject({ todo: true, by: { agent: "codex", handle: "crow" } })
+    expect(first).toMatchObject({ todo: true, by: { agent: "codex", handle: "crow" } })
+    expect(second!.id).not.toBe(first!.id)
+  })
+
+  it("has Claude Code's @wren add it where no agent runs on screen", () => {
+    const { runOn, state } = setup()
+    const storefront = state().notes
+
+    runOn(
+      "An agent adds a todo",
+      onScreen("infra", [{ id: "01", state: "running", process: "zsh" }]),
+    )
+
+    expect(openNotes(state().notes, "infra")).toEqual([
+      expect.objectContaining({ by: { agent: "claude", handle: "wren" } }),
+    ])
+    expect(state().notes.filter((note) => note.projectId === "storefront")).toEqual(storefront)
+  })
 })
 
 describe("the debug panel's notes", () => {
@@ -100,7 +150,13 @@ describe("the debug panel's notes", () => {
   })
 
   it("stay within a note's limits", () => {
-    for (const note of [...fullNotes("p", 0), ...doneOnly("p", 0), ...longNotes("p", 0)]) {
+    const agents = [agentTodo("p", { agent: "claude", handle: "wren" }, "agent-1", 0)]
+    for (const note of [
+      ...fullNotes("p", 0),
+      ...doneOnly("p", 0),
+      ...longNotes("p", 0),
+      ...agents,
+    ]) {
       expect(note.text.length).toBeLessThanOrEqual(noteLimits.text)
       expect(note.body.length).toBeLessThanOrEqual(noteLimits.body)
       expect(note.text).toBe(note.text.trim())

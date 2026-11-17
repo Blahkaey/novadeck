@@ -8,24 +8,38 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
+import type { AgentName } from "@novadeck/core/harnesses"
 import {
   doneNotes,
   noteLimits,
   openNotes,
   todosLeft,
   type Note,
+  type NoteAuthor,
   type NoteChange,
 } from "@novadeck/core/notes"
 import { Checkbox } from "@novadeck/toolkit/Checkbox"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
+import { AntigravityIcon } from "@novadeck/toolkit/icons/AntigravityIcon"
+import { ClaudeIcon } from "@novadeck/toolkit/icons/ClaudeIcon"
+import { CodexIcon } from "@novadeck/toolkit/icons/CodexIcon"
 import { Markdown } from "@novadeck/toolkit/Markdown"
 import { sidebarListClasses, sidebarRowClasses } from "@novadeck/toolkit/SidebarItem"
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { ChevronRight, ListTodo, ListX, SquareCheck, StickyNote, Trash2 } from "lucide-react"
+import {
+  ChevronRight,
+  ListTodo,
+  ListX,
+  SquareCheck,
+  StickyNote,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react"
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import {
+  addedByWords,
   addWords,
   clearDoneWords,
   doneCount,
@@ -199,9 +213,34 @@ const NoteBodyInput = ({
 // What is being changed of a note: its line, or its details.
 type Editing = { readonly id: string; readonly part: "line" | "body" }
 
+// Each agent's icon, as its terminal's tab shows it.
+const agentIcons: Readonly<Record<AgentName, LucideIcon>> = {
+  claude: ClaudeIcon,
+  codex: CodexIcon,
+  agy: AntigravityIcon,
+}
+
+// The mark at the end of a note an agent added: its agent's icon, which names the agent and
+// its terminal's handle.
+const AddedBy = ({ by }: { by: NoteAuthor }): React.JSX.Element => {
+  const Icon = agentIcons[by.agent]
+  const words = addedByWords(by)
+  return (
+    <Tooltip content={words}>
+      <span
+        className="notes-row-by mt-px flex size-4 shrink-0 items-center justify-center"
+        role="img"
+        aria-label={words}
+      >
+        <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
+      </span>
+    </Tooltip>
+  )
+}
+
 // A note still open: a todo's checkbox or a plain note's mark, its line, which a click
-// edits and a drag moves, and a button that shows what is under it: its details as Markdown,
-// and what else can be done with it.
+// edits and a drag moves, the agent's mark where an agent added it, and a button that shows
+// what is under it: its details as Markdown, and what else can be done with it.
 const OpenRow = ({
   note,
   index,
@@ -297,6 +336,7 @@ const OpenRow = ({
             {note.text}
           </button>
         )}
+        {note.by && <AddedBy by={note.by} />}
         <Tooltip content={expanded ? "Hide details" : note.body ? "Show details" : "Add details"}>
           <button
             type="button"
@@ -354,8 +394,8 @@ const OpenRow = ({
   )
 }
 
-// A todo that is checked off: unchecking it opens it again, and Delete removes it without
-// asking.
+// A todo that is checked off, still marked where an agent added it: unchecking it opens it
+// again, and Delete removes it without asking.
 const DoneRow = ({
   note,
   onReopen,
@@ -380,6 +420,7 @@ const DoneRow = ({
         data-part="check"
       />
       <span className="notes-row-text min-w-0 flex-1 text-body leading-[18px]">{note.text}</span>
+      {note.by && <AddedBy by={note.by} />}
       <Tooltip content="Delete · can’t be undone">
         <button
           type="button"
@@ -395,10 +436,11 @@ const DoneRow = ({
   </div>
 )
 
-// The Notes panel: the open project's todos and plain notes, the person's own. A field at
-// the top adds one, first in the list; the open ones follow in the person's order, each
-// checked off, edited, moved or opened for its details; the todos checked off wait under
-// Done, folded until asked for, until they are cleared.
+// The Notes panel: the open project's todos and plain notes, the person's own, and those an
+// agent added as they asked it to. A field at the top adds one, first in the list; the open
+// ones follow in the person's order, each checked off, edited, moved or opened for its
+// details; the todos checked off wait under Done, folded until asked for, until they are
+// cleared.
 export const NotesPanel = ({
   projectId,
   notes,

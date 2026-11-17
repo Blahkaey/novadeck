@@ -6,7 +6,7 @@ import type { ActivityEvent, HarnessEvent } from "@novadeck/harness-core/events"
 import { doorbellLine } from "@novadeck/harness-core/prompts"
 import { consoleLogger, createLogger, logPath, type Entry } from "@novadeck/log"
 import { longHoldMs, type AgentName } from "@novadeck/protocol"
-import { keysOf } from "@novadeck/tui-input"
+import { keysOf, type KeyKind } from "@novadeck/tui-input"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import {
@@ -2230,6 +2230,90 @@ describe("the person's prompt", () => {
     expect(messaging.personPrompt("missing")).toBeUndefined()
   })
 
+  it("is their turn's until another agent's message reaches it, at its prompt or its Stop", () => {
+    const { messaging, ask, stop, send, codex } = create()
+    const submit = (text: string) => {
+      messaging.keys("B", ["enter"], false)
+      return ask("B", codex, "UserPromptSubmit", [said(codex, text)])
+    }
+    expect(messaging.personTurn("B")).toBeUndefined()
+    submit("add a todo to revisit the retry logic")
+    expect(messaging.personTurn("B")).toBe("person")
+    stop("B", codex)
+    expect(messaging.personTurn("B")).toBeUndefined()
+    // A peer's message delivered with the person's prompt is in that turn.
+    sent(send("A", "fox", "Please note: ship it."))
+    const withPeer = submit("note the flag")
+    messaging.acknowledge("B", withPeer.leaseId!)
+    expect(messaging.personTurn("B")).toBe("others")
+    stop("B", codex)
+    // The next turn of theirs starts clean.
+    submit("thanks")
+    expect(messaging.personTurn("B")).toBe("person")
+    // One sent during it waits for its Stop, which Novadeck continues with it.
+    sent(send("A", "fox", "One more thing."))
+    expect(messaging.personTurn("B")).toBe("person")
+    expect(stop("B", codex).leaseId).not.toBeNull()
+    expect(messaging.personTurn("B")).toBe("others")
+  })
+
+  it("is no turn of theirs that the doorbell started, nor one of an Inbox reply's notices", () => {
+    const { messaging, ask, stop, codex } = create()
+    messaging.notice("B", "The user approved the run.", { always: true })
+    ask("B", codex, "UserPromptSubmit", [doorbellStarted(codex, "n1")])
+    expect(messaging.personTurn("B")).toBeUndefined()
+    stop("B", codex)
+    // Novadeck's own notice is nobody's words: the person's next turn is theirs.
+    messaging.notice("B", "The user approved the run.", { always: true })
+    messaging.keys("B", ["enter"], false)
+    ask("B", codex, "UserPromptSubmit", [said(codex, "go on")])
+    expect(messaging.personTurn("B")).toBe("person")
+  })
+
+  it("is no longer theirs once its lead's message reaches it at a tool call", () => {
+    const { messaging, ask, send, worker } = withWorker()
+    messaging.keys("W", ["enter"], false)
+    ask("W", worker, "UserPromptSubmit", [said(worker, "add a todo")])
+    expect(messaging.personTurn("W")).toBe("person")
+    sent(send("A", "owl", "Also add a todo for the auth bug."))
+    ask("W", worker, "PostToolUse", [toolCalled(worker)])
+    expect(messaging.personTurn("W")).toBe("others")
+  })
+
+  it("keeps the word of a turn they steer or queue a prompt into, until that turn ends", () => {
+    const { messaging, ask, stop, send, codex, claude } = create()
+    const submit = (terminalId: string, bound: Binding, text: string, keys: KeyKind[]) => {
+      messaging.keys(terminalId, keys, false)
+      return ask(terminalId, bound, "UserPromptSubmit", [said(bound, text)])
+    }
+    // Codex steers a prompt into the running turn, its hook firing then: a turn a peer's
+    // message reached stays the peer's.
+    sent(send("A", "fox", "Add a todo: drop the legacy flag."))
+    const withPeer = submit("B", codex, "go on", ["enter"])
+    messaging.acknowledge("B", withPeer.leaseId!)
+    expect(messaging.personTurn("B")).toBe("others")
+    submit("B", codex, "add a todo: run the tests", ["content", "enter"])
+    expect(messaging.personPrompt("B")).toBe("add a todo: run the tests")
+    expect(messaging.personTurn("B")).toBe("others")
+    stop("B", codex)
+    submit("B", codex, "thanks", ["enter"])
+    expect(messaging.personTurn("B")).toBe("person")
+    stop("B", codex)
+    // And a turn the doorbell started stays no turn of theirs.
+    ask("B", codex, "UserPromptSubmit", [doorbellStarted(codex, "n1")])
+    submit("B", codex, "add a todo: ship it", ["content", "enter"])
+    expect(messaging.personTurn("B")).toBeUndefined()
+    // Claude Code fires a queued prompt's hook as it is queued, and runs it after the turn's
+    // Stop as a turn no hook tells of: theirs, though the doorbell's turn before wasn't.
+    ask("A", claude, "UserPromptSubmit", [doorbellStarted(claude, "n2")])
+    submit("A", claude, "add a todo: ship it", ["content", "enter"])
+    expect(messaging.personTurn("A")).toBeUndefined()
+    stop("A", claude)
+    expect(messaging.personTurn("A")).toBe("person")
+    stop("A", claude)
+    expect(messaging.personTurn("A")).toBeUndefined()
+  })
+
   it("is the prompt the person queued during a doorbell's turn, not the doorbell's", () => {
     const { messaging, ask, stop, codex } = create()
     ask("B", codex, "UserPromptSubmit", [doorbellStarted(codex, "n1")])
@@ -2238,6 +2322,8 @@ describe("the person's prompt", () => {
     stop("B", codex)
     ask("B", codex, "UserPromptSubmit", [said(codex, "thanks")])
     expect(messaging.personPrompt("B")).toBe("thanks")
+    // Its turn is theirs, as the doorbell's carried no other agent's message.
+    expect(messaging.personTurn("B")).toBe("person")
   })
 })
 
@@ -2977,6 +3063,29 @@ describe("an agent's prompt shown before any session binds", () => {
       doorbellStarted(launched, "n1"),
     ])
     expect(answer.stdout).toContain(">Review a.ts</message>")
+  })
+
+  it("takes the first prompt the person submits there for theirs, its session bound by it", () => {
+    for (const agent of ["codex", "agy"] as const) {
+      const { messaging, ask, observe, launched } = plain(agent)
+      messaging.shown("N", agent, null)
+      messaging.keys("N", ["content", "enter"], false)
+      // Codex's SessionStart binds the session as its first prompt is submitted; Antigravity's
+      // first model call does, its transcript telling the person's typed prompt.
+      const typed: HarnessEvent = {
+        type: "turn-started",
+        ...fact(launched),
+        startedAt: asHeard,
+        cause: "prompt",
+        prompt: "Fix the login bug",
+      }
+      if (agent === "codex") observe("N", launched, sessionStarted(launched, "startup"))
+      const hook = agent === "codex" ? "UserPromptSubmit" : "PreInvocation"
+      const binds: HarnessEvent = { ...observed(launched), startedAt: asHeard }
+      ask("N", launched, hook, agent === "codex" ? [typed] : [binds, typed])
+      expect(messaging.personPrompt("N")).toBe("Fix the login bug")
+      expect(messaging.personTurn("N")).toBe("person")
+    }
   })
 
   it("rings an Antigravity resumed at its prompt, its status line naming the conversation idle", () => {

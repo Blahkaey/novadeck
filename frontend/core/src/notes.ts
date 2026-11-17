@@ -1,17 +1,25 @@
 import { asLine } from "@novadeck/protocol/text"
 
+import type { AgentName } from "./harnesses"
 import type { Store } from "./store"
 
 // Notes: a project's own list of what the person means to do and wants to remember, kept by
 // the backend with the project. Each is one line of text with an optional longer body in
 // Markdown. A todo has a checkbox, and is open until the person checks it off; a plain note
 // has none, and is never done. A backend that keeps them reports every project's (`state`)
-// and takes each change at once, so the list shows it before the backend has saved it.
+// and takes each change at once, so the list shows it before the backend has saved it. An
+// agent adds one only when the person asks it to, and the note then names it (`by`).
 
 // How long a note's line and body run at most, in UTF-16 code units, and how many notes a
 // project keeps: the runner's own limits (`noteLimits` in the protocol), which the fields
 // hold the person to.
 export const noteLimits = { text: 500, body: 8000, perProject: 200 } as const
+
+// The agent that added a note: its harness, and its terminal's handle when it did.
+export type NoteAuthor = {
+  readonly agent: AgentName
+  readonly handle: string
+}
 
 export type Note = {
   readonly id: string
@@ -26,6 +34,8 @@ export type Note = {
   // and always on a plain note.
   readonly doneAt: number | null
   readonly createdAt: number
+  // The agent that added it; none on a note the person wrote. No change of theirs alters it.
+  readonly by?: NoteAuthor | undefined
 }
 
 export type NotesState = {
@@ -99,7 +109,7 @@ export const added = (notes: readonly Note[], note: Note): readonly Note[] => {
 }
 
 // With the note `id` changed, checked off or opened at `now`. Words that would leave its line
-// empty are not taken: a note always says something.
+// empty are not taken: a note always says something. An agent's note still names its agent.
 export const changed = (
   notes: readonly Note[],
   id: string,

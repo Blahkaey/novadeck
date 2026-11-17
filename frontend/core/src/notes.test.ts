@@ -119,6 +119,16 @@ describe("Changing a note", () => {
     })
   })
 
+  it("keeps the agent that added it, whatever the person changes", () => {
+    const by = { agent: "codex", handle: "pike" } as const
+    const theirs = [note("a", { by })]
+
+    expect(changed(theirs, "a", { text: "Mine now", body: "More.", done: true }, 50)[0]).toEqual(
+      note("a", { text: "Mine now", body: "More.", doneAt: 50, by }),
+    )
+    expect(changed(theirs, "a", { todo: false }, 50)[0]!.by).toEqual(by)
+  })
+
   it("leaves the notes as they are for a change that changes nothing, or an unknown note", () => {
     expect(changed(notes, "a", { text: "Ship it", done: false }, 50)).toBe(notes)
     expect(changed(notes, "nope", { text: "x" }, 50)).toBe(notes)

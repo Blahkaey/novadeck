@@ -10,6 +10,7 @@ import type { MessageRecords } from "../messaging/records.js"
 import type { Describer } from "../murmur/describer.js"
 import type { InstalledShell } from "../shell/install.js"
 import type { ClosedRecords } from "../workspaces/closed.js"
+import type { Notes } from "../workspaces/notes.js"
 import type { WorktreesWiring } from "../worktrees/calls.js"
 import type { AnswersOptions } from "./answers.js"
 import type { MurmurTimes } from "./descriptions.js"
@@ -52,6 +53,8 @@ export type TerminalOptions = {
   records?: TerminalRecords
   /** The git worktrees agents open and own, and whether they are on; agents get none when omitted. */
   worktrees?: WorktreesWiring
+  /** The person's notes on each project, which agents add to as they ask; none when omitted. */
+  notes?: Pick<Notes, "add">
   /** Where closed terminals are kept for History; none is kept when omitted. */
   closed?: ClosedRecords
   /** Every project's id, for History's list of all closed terminals. */
