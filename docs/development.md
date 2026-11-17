@@ -490,6 +490,20 @@ Agents:
   "Files read normally again" or the demo boots again, as the Plan group's "Copying plan edits
   fails" does (`frontend/demo-debug/src/clipboard.ts`): a copy then puts a red-edged line above
   the tree saying it couldn't copy that path, with Dismiss, which hiding the panel clears too.
+  Hiding is reachable by normal use: a row's menu has Hide in This Project, which takes the row
+  (and its folder's insides) out of the tree, and Hidden files, the crossed-out eye beside
+  Refresh, opens the dialog with this project's patterns, editable, over those for every project
+  (Preferences → General → Files, which Edit in Preferences opens at); a pattern there that
+  hides everything at the top, as `*`, puts "Everything in this project's folder is hidden." in
+  the tree's place. The demo keeps each project's list in memory, from none, until it boots
+  again. "Next hide-list save fails" has the next save of one fail, once: Save or Edit in
+  Preferences with changes in the dialog keeps it open with a red line saying why, and Hide in
+  This Project puts the red-edged line above the tree saying it couldn't hide that path; "Files
+  read normally again" lifts it before then. "Hidden files can't be read" has every read of a
+  project's list fail until "Files read normally again": a panel that hasn't read its project's
+  yet, as after switching to another project, shows neither the Hidden files button nor Hide in
+  This Project, and one that has keeps them, its Hide in This Project then saying above the tree
+  that it couldn't hide the path.
   A strip of agent chips above the tree lists the agents with work in the project, in the
   session's roster order, each light-able by a click (any number, Escape lets them go; with
   none kept the selected terminal's agent is lit). The `messages` variant has a squad, as

@@ -48,6 +48,22 @@ export type FolderListing = {
   readonly truncated: boolean
 }
 
+// Patterns that hide files and folders from the Files panel, as VS Code's `files.exclude`
+// writes them: a glob matched against the path from the project's root (`*.log` only at the
+// top, `**/*.log` anywhere), on for `true` and switched off for `false`. A hidden folder hides
+// everything in it. The person keeps one list for every project, in Preferences, and a project
+// may keep its own over it, whose `false` lifts a pattern of theirs there.
+export type FilesExclude = Readonly<Record<string, boolean>>
+
+// How many patterns a project's own list holds at most, and how long each runs, in UTF-16 code
+// units: the runner's own limits (`filesExcludeLimits` in the protocol). A pattern of the
+// person's list for every project runs as long at most.
+export const filesExcludeLimits = { patterns: 200, pattern: 1024 } as const
+
+// What hides files everywhere until the person changes it: the folders' notes macOS and
+// Windows leave behind.
+export const defaultFilesExclude: FilesExclude = { "**/.DS_Store": true, "**/Thumbs.db": true }
+
 export type ProjectFiles = {
   readonly state: Store<FilesState>
   // A folder of the project's directory as it is now, by its path from the project's root
@@ -55,6 +71,13 @@ export type ProjectFiles = {
   // never listed. Rejects when the project or the folder has gone, or the path leads out
   // of the project's directory.
   readonly list: (projectId: string, folder: string) => Promise<FolderListing>
+  // A project's own patterns over the person's list for every project, where the backend keeps
+  // them: as last saved (none until then), and replaced whole. Both reject when the project has
+  // gone, and a save of more than `filesExcludeLimits.patterns` with the reason.
+  readonly exclude?: {
+    readonly read: (projectId: string) => Promise<FilesExclude>
+    readonly save: (projectId: string, patterns: FilesExclude) => Promise<void>
+  }
 }
 
 // A project's directory is written as the backend's machine writes it: a Windows one with

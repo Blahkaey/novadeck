@@ -200,6 +200,60 @@ describe("The Files panel", () => {
     })
   })
 
+  context("when the person hides files in a project", () => {
+    it("hides a row from its menu, and shows it again by switching its pattern off", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const readme = page.getByRole("treeitem", { name: /^README\.md/ })
+      await expect.element(readme).toBeVisible()
+
+      await readme.click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Hide in This Project" }).click()
+      await expect.element(readme).not.toBeInTheDocument()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      const dialog = page.getByRole("dialog", { name: "Hidden files" })
+      const mine = dialog.getByRole("list", { name: "This project's patterns" })
+      await mine.getByRole("checkbox", { name: "README.md" }).click()
+      await dialog.getByRole("button", { name: "Save" }).click()
+
+      await expect.element(dialog).not.toBeInTheDocument()
+      await expect.element(readme).toBeVisible()
+    })
+
+    it("hides what a pattern added in Hidden files matches, and opens Preferences at the patterns for every project, which hide it everywhere", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const test = page.getByRole("treeitem", { name: /^Checkout\.test\.tsx,/ })
+      const manifest = page.getByRole("treeitem", { name: /^package\.json/ })
+      await expect.element(test).toBeVisible()
+      await expect.element(manifest).toBeVisible()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      const dialog = page.getByRole("dialog", { name: "Hidden files" })
+      await dialog.getByRole("textbox", { name: "Pattern to hide" }).fill("**/*.test.tsx")
+      await dialog.getByRole("button", { name: "Add" }).click()
+      await dialog.getByRole("button", { name: "Save" }).click()
+      await expect.element(dialog).not.toBeInTheDocument()
+      await expect.element(test).not.toBeInTheDocument()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      await dialog.getByRole("button", { name: "Edit in Preferences" }).click()
+      const preferences = page.getByRole("dialog", { name: "Preferences" })
+      await expect
+        .element(preferences.getByRole("list", { name: "Patterns for every project" }))
+        .toBeVisible()
+      const field = preferences.getByRole("textbox", { name: "Pattern to hide" })
+      await expect.element(field).toHaveFocus()
+
+      await field.fill("package.json")
+      await preferences.getByRole("button", { name: "Add" }).click()
+      await userEvent.keyboard("{Escape}")
+      await expect.element(preferences).not.toBeInTheDocument()
+      await expect.element(manifest).not.toBeInTheDocument()
+    })
+  })
+
   context("when the demo has no files", () => {
     it("has no Files toggle", async () => {
       await openWorkspace()

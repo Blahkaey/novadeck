@@ -143,6 +143,8 @@ const vendors: Record<string, readonly string[]> = {
     "sidebar/NotesPanel.tsx",
   ],
   "react-router": ["app/", "shell/"],
+  // The Files panel's patterns for hiding files, matched as globs.
+  picomatch: ["sidebar/files-exclude.ts"],
   "react-dom": ["layouts/transition.ts", "entries/start.tsx"],
 }
 

@@ -116,6 +116,8 @@ export type WorkspaceCommands = ShellCommands &
     readonly revealTerminal: (terminalId: string, projectId: string) => void
     // Opens Preferences where the agents are connected.
     readonly openAgentSettings: (agent: AgentName) => void
+    // Opens Preferences at the patterns that hide files in every project.
+    readonly openFilesExcludeSettings: () => void
     // Closes the terminal, or asks first while closing would lose something: a program
     // running in it, or, where the backend keeps History, an agent mid-turn, one waiting on
     // background work, or one that couldn't be restored. A terminal that leads anyone always
@@ -656,6 +658,11 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     openAgentSettings: (agent) => {
       recent.setSwitcher(null)
       ui.update((state) => ({ ...state, agentFocus: agent }))
+      go({ dialog: "preferences", section: "general" })
+    },
+    openFilesExcludeSettings: () => {
+      recent.setSwitcher(null)
+      ui.update((state) => ({ ...state, filesExcludeFocus: true }))
       go({ dialog: "preferences", section: "general" })
     },
     reveal,

@@ -141,6 +141,9 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       remove: (input) =>
         note(`remove project ${input.projectId}`, () => runner.projects.remove(input)),
       folder: (input) => runner.projects.folder(input),
+      filesExclude: (input) => runner.projects.filesExclude(input),
+      setFilesExclude: (input) =>
+        note(`hide files in ${input.projectId}`, () => runner.projects.setFilesExclude(input)),
       browse: (input) => runner.projects.browse(input),
     },
     sessions: {

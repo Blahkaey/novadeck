@@ -321,3 +321,15 @@
   outline: 2px solid var(--color-strong);
   outline-offset: -2px;
 }
+
+/* The patterns for hiding files (FilesExcludeList.tsx), in Preferences and the panel's Hidden
+   files dialog (`.files-exclude-dialog`): a `.files-exclude` settings card, one row a pattern,
+   each a `.files-exclude-pattern` in the mono face, broken anywhere so a long one wraps in its
+   row, and the `.files-exclude-input` that adds one, typed in the same face. */
+.files-exclude-pattern,
+.files-exclude-input {
+  font-family: var(--font-mono);
+}
+.files-exclude-pattern {
+  overflow-wrap: anywhere;
+}

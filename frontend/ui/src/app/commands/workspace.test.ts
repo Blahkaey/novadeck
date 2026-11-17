@@ -517,6 +517,16 @@ describe("workspace commands", () => {
       expect(app.ui.getSnapshot().location.route.dialog).toBe("preferences")
     })
 
+    it("opens Preferences on General, remembering to show the patterns for hiding files", () => {
+      const app = asBackendSays({ state: "idle" })
+      app.commands.openFilesExcludeSettings()
+      expect(app.ui.getSnapshot().filesExcludeFocus).toBe(true)
+      expect(app.ui.getSnapshot().location.route).toMatchObject({
+        dialog: "preferences",
+        section: "general",
+      })
+    })
+
     it("does not take an agent that ran and left for one that runs", () => {
       const app = asBackendSays({ state: "idle", agentRan: true })
       app.commands.close("01")
@@ -1013,6 +1023,7 @@ describe("workspace commands", () => {
         ligatures: false,
         chatView: false,
         agentAvatars: false,
+        filesExclude: {},
       })
       expect(app.state().view).not.toBe("grid")
       expect(app.shell().revealCanvas).toBe(false)

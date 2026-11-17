@@ -61,6 +61,8 @@ export type UiState = {
   readonly moved: MoveNotice | null
   // The agent whose switch Preferences should bring into view when it opens, until it has.
   readonly agentFocus: AgentName | null
+  // Preferences should bring the patterns for hiding files in view when it opens, until it has.
+  readonly filesExcludeFocus: boolean
   // The person chose "Not now" for this crash loop; it asks again only after the next one.
   readonly crashLoopDismissed: boolean
   // Which addon's offer (voice input or murmur) came up in this run of the app: each run
@@ -176,6 +178,7 @@ export const initialUi = ({
   moveAsk: null,
   moved: null,
   agentFocus: null,
+  filesExcludeFocus: false,
   crashLoopDismissed: false,
   addonOffer: null,
   nameOffer: null,

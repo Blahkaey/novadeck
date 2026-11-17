@@ -111,6 +111,39 @@ describe("the Files panel's menu", () => {
     })
   })
 
+  context("where the backend keeps the project's own patterns for hiding files", () => {
+    const hiding = (row: FilesRow | undefined, hidden: FilesRow[]): ContextMenuItem[] =>
+      filesMenu({
+        row,
+        directory: "~/p",
+        platform: "other",
+        onCopy: ignore,
+        onRefresh: ignore,
+        onHide: (each) => void hidden.push(each),
+      })
+
+    it("offers to hide a row in the project, apart from the copies", () => {
+      const hidden: FilesRow[] = []
+      const row = rowAt("src/cart")
+      const items = hiding(row, hidden)
+
+      expect(labels(items)).toEqual(["Copy Path", "Copy Relative Path", "Hide in This Project"])
+      expect(action(items, "hide").separated).toBe(true)
+      action(items, "hide").onSelect()
+      expect(hidden).toEqual([row])
+    })
+
+    it("offers nothing to hide on the tree's empty space, the project's folder", () => {
+      expect(labels(hiding(undefined, []))).toEqual(["Copy Path", "Refresh"])
+    })
+  })
+
+  context("where the backend keeps no patterns of the project's", () => {
+    it("offers nothing to hide", () => {
+      expect(labels(menuOn(rowAt("package.json")))).not.toContain("Hide in This Project")
+    })
+  })
+
   context("in a Windows project", () => {
     it("copies both paths with backslashes", () => {
       expect(copied(rowAt("src/cart/useCart.ts"), "C:\\Users\\me\\shop")).toEqual({

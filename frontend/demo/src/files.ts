@@ -1,10 +1,12 @@
-import type {
-  ProjectFiles,
-  FolderEntry,
-  TouchedFile,
-  FolderListing,
-  FilesProject,
-  FilesState,
+import {
+  filesExcludeLimits,
+  type ProjectFiles,
+  type FilesExclude,
+  type FolderEntry,
+  type TouchedFile,
+  type FolderListing,
+  type FilesProject,
+  type FilesState,
 } from "@novadeck/core/files"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceSeed } from "@novadeck/core/seed"
@@ -22,7 +24,8 @@ import { terminalOf } from "./workspace"
 // Moth's changes are history, from the plan it waits on. An agent writes only while it
 // works: its terminal's agent status says it works and asks nothing of the person. Then it
 // writes while the page is in view, a file every few seconds, now and then resting between
-// turns; waiting on the person or at rest, it writes nothing and shows no cursor.
+// turns; waiting on the person or at rest, it writes nothing and shows no cursor. Each project's
+// own patterns for hiding files are kept in memory, as the runner keeps them, from none.
 
 const projectId = "storefront"
 const session = { projectId, workspaceSessionId: "initial" }
@@ -381,9 +384,15 @@ const between = (range: { min: number; max: number }, roll: number): number =>
   range.min + Math.floor(roll * (range.max - range.min + 1))
 
 export type DemoFiles = ProjectFiles & {
+  readonly exclude: NonNullable<ProjectFiles["exclude"]>
   // Has the next reads of `folder` go as `fault` says, or normally for none. The panel reads
   // a folder again when it is shown again or an agent's turn ends.
   readonly degrade: (folder: string, fault: FilesFault | undefined) => void
+  // Has the next save of a project's patterns for hiding files fail, or, with false, go through
+  // again.
+  readonly failNextExcludeSave: (fails?: boolean) => void
+  // Has every read of a project's patterns for hiding files fail, or, with false, answer again.
+  readonly failExcludeReads: (fails?: boolean) => void
   // Has `handle` write a file now, `path` or else the one it would next, as its turn goes on.
   readonly write: (handle: string, path?: string) => void
   // Has `handle` change `path` as `kind` without writing it now, or no longer change it.
@@ -445,6 +454,35 @@ export const createDemoFiles = (
     if (fault) faults.set(folder, fault)
     else faults.delete(folder)
   }
+  // Each project's own patterns, as the runner keeps them: a save of more than a project keeps is
+  // refused as the runner refuses it.
+  const excludes = new Map<string, FilesExclude>()
+  let excludeSaveFails = false
+  const failNextExcludeSave = (fails = true): void => {
+    excludeSaveFails = fails
+  }
+  let excludeReadsFail = false
+  const failExcludeReads = (fails = true): void => {
+    excludeReadsFail = fails
+  }
+  const exclude: DemoFiles["exclude"] = {
+    read: async (id) => {
+      if (excludeReadsFail) throw new Error("The demo was told to fail this read.")
+      return excludes.get(id) ?? {}
+    },
+    save: async (id, patterns) => {
+      if (excludeSaveFails) {
+        excludeSaveFails = false
+        throw new Error("The demo was told to fail this save.")
+      }
+      if (Object.keys(patterns).length > filesExcludeLimits.patterns)
+        throw new Error(
+          `A project keeps at most ${filesExcludeLimits.patterns} patterns for hiding files. Remove some to add more.`,
+        )
+      excludes.set(id, patterns)
+    },
+  }
+
   const list = async (id: string, folder: string): Promise<FolderListing> => {
     const fault = faults.get(folder)
     if (fault === "fail") throw new Error("This folder can't be read")
@@ -532,7 +570,20 @@ export const createDemoFiles = (
     }
   }
 
-  return { state, list, degrade, write, mark, endTurn, start, close, halt }
+  return {
+    state,
+    list,
+    exclude,
+    degrade,
+    failNextExcludeSave,
+    failExcludeReads,
+    write,
+    mark,
+    endTurn,
+    start,
+    close,
+    halt,
+  }
 }
 
 // A backend with the demo's files for the storefront project.

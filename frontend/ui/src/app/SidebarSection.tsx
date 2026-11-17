@@ -1,4 +1,5 @@
 import { allTeams, sameTeams } from "@novadeck/core/derivations"
+import type { FilesExclude } from "@novadeck/core/files"
 import type { ForgeConnection } from "@novadeck/core/forges"
 import type { ClosedTerminal, HistoryState } from "@novadeck/core/history"
 import { itemIdOf } from "@novadeck/core/items"
@@ -95,6 +96,18 @@ export const SidebarSection = memo((): React.JSX.Element => {
     (folder: string) => filesFeed!.list(projectId, folder),
     [filesFeed, projectId],
   )
+  // What hides files from it: the person's patterns for every project, and the project's own where
+  // the backend keeps them.
+  const exclude = useUiState((state) => state.preferences.filesExclude)
+  const excludeFeed = filesFeed?.exclude
+  const projectExclude = useMemo(
+    () =>
+      excludeFeed && {
+        read: () => excludeFeed.read(projectId),
+        save: (patterns: FilesExclude) => excludeFeed.save(projectId, patterns),
+      },
+    [excludeFeed, projectId],
+  )
   // Where the panel's paths are copied from.
   const directory = useWorkspaceState((workspace) => activeProject(workspace)!.directory)
   // Its folders are read again when an agent's turn ends in the project.
@@ -173,6 +186,9 @@ export const SidebarSection = memo((): React.JSX.Element => {
             project: filesProject ?? worksOverlay,
             directory,
             list,
+            exclude,
+            projectExclude,
+            onExcludeSettings: commands.openFilesExcludeSettings,
             turn,
             watch: watchWorks,
             onOpenFile,
@@ -188,6 +204,9 @@ export const SidebarSection = memo((): React.JSX.Element => {
       worksOverlay,
       directory,
       list,
+      exclude,
+      projectExclude,
+      commands,
       turn,
       watchWorks,
       onOpenFile,

@@ -9,6 +9,7 @@ import {
 import { handleText } from "@novadeck/core/terminals/handle"
 
 import { dimmedBy } from "./files-agents"
+import { hiddenUnder, type Hides } from "./files-exclude"
 
 // The Files panel's rules, apart from how it draws: the tree the project's folders and an
 // agent's work grow in, which agents a row names, which row a write lights up, and how long a
@@ -24,6 +25,8 @@ export type Listings = ReadonlyMap<string, FolderRead>
 type Overlay = Pick<FilesProject, "changes" | "writing">
 
 const noOverlay: Overlay = { changes: {}, writing: {} }
+
+const hidesNothing: Hides = () => false
 
 export type FilesNode = {
   // Slash-separated from the project root, with no trailing slash.
@@ -89,10 +92,12 @@ const childOf = (parent: string, name: string): string =>
 
 // The root's tree: each folder's listing, if read, with the paths agents changed joined in (a
 // changed file shows in its folder whether or not the listing has it). A folder not read yet
-// has only what agents changed inside it.
+// has only what agents changed inside it. What `hides` matches is left out, listed or changed,
+// and a hidden folder's insides with it: a folder whose entries are all hidden is empty.
 export const buildTree = (
   listings: Listings,
   { changes, writing: writingBy }: Overlay = noOverlay,
+  hides: Hides = hidesNothing,
 ): readonly FilesNode[] => {
   // The names agents changed under each folder: folders for paths with something below.
   const changed = new Map<string, Map<string, boolean>>()
@@ -158,12 +163,25 @@ export const buildTree = (
       })
     }
     return [...names]
+      .filter(([name]) => !hides(childOf(folder, name)))
       .map(([name, entry]) =>
         make(childOf(folder, name), name, entry.folder, hidden || entry.ignored),
       )
       .toSorted(byOrder)
   }
   return childrenOf("", false)
+}
+
+// What agents did in the paths the tree shows: their changes and writes in a hidden path, or
+// under a hidden folder, left out, so the agents strip, the agents kept and the lit ones go by
+// the work on screen. The same project where nothing of it is hidden.
+export const shownWork = (project: FilesProject, hides: Hides): FilesProject => {
+  const changes = Object.entries(project.changes).filter(([path]) => !hiddenUnder(hides, path))
+  const writing = Object.entries(project.writing).filter(([, path]) => !hiddenUnder(hides, path))
+  return changes.length === Object.keys(project.changes).length &&
+    writing.length === Object.keys(project.writing).length
+    ? project
+    : { changes: Object.fromEntries(changes), writing: Object.fromEntries(writing) }
 }
 
 // Whether two readings of a folder say the same, so reading it again changes nothing on screen.

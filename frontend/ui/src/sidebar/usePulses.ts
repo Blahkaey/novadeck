@@ -1,6 +1,7 @@
 import type { FilesProject } from "@novadeck/core/files"
 import { useEffect, useRef, useState } from "react"
 
+import { hiddenUnder, type Hides } from "./files-exclude"
 import { rowShowing, writtenPaths, type FilesRow } from "./files-tree"
 
 // How long a write's pulse plays; the panel clears it by this timer, not by the animation, which
@@ -8,14 +9,16 @@ import { rowShowing, writtenPaths, type FilesRow } from "./files-tree"
 export const pulseMs = 1400
 
 // Every write pulses the row showing its file, counted by path so the next one restarts the
-// animation. Only a shown panel pulses (a hidden one would replay them all on reopening), the
-// panel starts with none, and a timer forgets each pulse once it has played. `end` forgets them
-// all, as the panel hides.
+// animation; a write to a file the tree hides pulses nothing, not even a closed folder above it.
+// Only a shown panel pulses (a hidden one would replay them all on reopening), the panel starts
+// with none, and a timer forgets each pulse once it has played. `end` forgets them all, as the
+// panel hides.
 export const usePulses = (
   changes: FilesProject["changes"] | undefined,
   rows: readonly FilesRow[],
   open: ReadonlySet<string>,
   showing: boolean,
+  hides: Hides,
 ): { readonly pulses: Readonly<Record<string, number>>; readonly end: () => void } => {
   const [pulses, setPulses] = useState<Readonly<Record<string, number>>>({})
   const [seen, setSeen] = useState(changes)
@@ -25,6 +28,7 @@ export const usePulses = (
       const onScreen = new Set(rows.map((row) => row.node.path))
       const written = new Set(
         writtenPaths(seen, changes)
+          .filter((path) => !hiddenUnder(hides, path))
           .map((path) => rowShowing(path, open))
           .filter((path) => onScreen.has(path)),
       )

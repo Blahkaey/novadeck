@@ -1,4 +1,4 @@
-import type { FolderListing, FilesProject } from "@novadeck/core/files"
+import type { FilesExclude, FolderListing, FilesProject } from "@novadeck/core/files"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { Note, NoteChange } from "@novadeck/core/notes"
@@ -32,16 +32,26 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
   sidebarPanel: PanelId
   sidebarVisible: boolean
   // Where the backend reads the projects' files: what its agents changed in the project, if it
-  // says, the project's directory as the backend's machine writes it, how to read a folder, when
-  // an agent's turn last ended, how to follow the works the changes come from while the panel
-  // shows, if they do, how to open a file, the handle of the selected terminal, and the session's
-  // agents for the strip: every terminal's handle in roster order, and the teams as handles, each
-  // lead first. Left out, there is no Files panel.
+  // says, the project's directory as the backend's machine writes it, how to read a folder, the
+  // person's patterns for hiding files in every project, how to read and replace the project's
+  // own where the backend keeps them, how to open Preferences at the person's, when an agent's
+  // turn last ended, how to follow the works the changes come from while the panel shows, if
+  // they do, how to open a file, the handle of the selected terminal, and the session's agents
+  // for the strip: every terminal's handle in roster order, and the teams as handles, each lead
+  // first. Left out, there is no Files panel.
   files:
     | {
         project: FilesProject | undefined
         directory: string
         list: (folder: string) => Promise<FolderListing>
+        exclude: FilesExclude
+        projectExclude:
+          | {
+              read: () => Promise<FilesExclude>
+              save: (patterns: FilesExclude) => Promise<void>
+            }
+          | undefined
+        onExcludeSettings: () => void
         turn: number
         watch: (() => () => void) | undefined
         onOpenFile: (path: string) => Promise<void>
@@ -152,6 +162,9 @@ export const WorkspaceSidebar = ({
         project={files.project}
         directory={files.directory}
         list={files.list}
+        exclude={files.exclude}
+        projectExclude={files.projectExclude}
+        onExcludeSettings={files.onExcludeSettings}
         turn={files.turn}
         watch={files.watch}
         onOpenFile={files.onOpenFile}

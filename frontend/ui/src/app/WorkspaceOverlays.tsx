@@ -24,6 +24,7 @@ import type { UninstallValue } from "../preferences/UninstallApp"
 import type { VoiceAddon } from "../preferences/VoiceInput"
 import { WelcomeDialog } from "../preferences/WelcomeDialog"
 import { CrashLoopDialog } from "../shell/CrashLoopDialog"
+import { FilesExcludeList } from "../sidebar/FilesExcludeList"
 import {
   ApprovalDialog,
   approvalView,
@@ -50,6 +51,7 @@ import { Preferences, TerminalSearch } from "./deferred-views"
 import { dingOf } from "./ding"
 import { moveQuestionOf, sameMoveQuestion } from "./move-question"
 import { NameOffer } from "./NameOffer"
+import { filesShown } from "./routing"
 import {
   closeQuestion,
   crashLoopQuestion,
@@ -336,12 +338,13 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
     (workspace) => orderedTiles(currentState(workspace).roster),
     sameItems,
   )
-  const { dialog, section, preferences, switcher, agentFocus } = useUiState(
+  const { dialog, section, preferences, switcher, agentFocus, filesExcludeFocus } = useUiState(
     (state) => ({
       dialog: state.location.route.dialog,
       section: state.location.route.section,
       preferences: state.preferences,
       agentFocus: state.agentFocus,
+      filesExcludeFocus: state.filesExcludeFocus,
       switcher: visibleSwitcher(state.recent.switcher, context, state.location.route.dialog),
     }),
     shallowEqual,
@@ -509,6 +512,22 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           tab={section}
           focusAgent={agentFocus}
           onFocusedAgent={() => ui.update((state) => ({ ...state, agentFocus: null }))}
+          focusFilesExclude={filesExcludeFocus}
+          onFocusedFilesExclude={() =>
+            ui.update((state) => ({ ...state, filesExcludeFocus: false }))
+          }
+          {...(filesShown(backend) && {
+            renderFilesExclude: (field: string) => (
+              <FilesExcludeList
+                patterns={preferences.filesExclude}
+                label="Patterns for every project"
+                inputId={field}
+                onChange={(filesExclude) =>
+                  updatePreferences({ ...ui.getSnapshot().preferences, filesExclude })
+                }
+              />
+            ),
+          })}
           onTabChange={(next) => go({ section: next })}
           onChange={updatePreferences}
           onClose={closeDialog}

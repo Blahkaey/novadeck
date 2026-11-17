@@ -170,6 +170,8 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type FilesExclude,
+  filesExcludeLimits,
   type FolderBrowse,
   type FolderListing,
   maxClientStateLength,

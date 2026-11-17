@@ -486,6 +486,7 @@ Right-click a file or folder for its menu:
   runner's. `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or folder
   with the keyboard on it.
 - **Copy Relative Path** copies its path from the project's folder, as `src/cart/useCart.ts`.
+- **Hide in This Project** hides it from the tree in this project (see below).
 
 Both paths are written as that computer writes them, with backslashes for a project on
 Windows. A file that only an agent's work has, which the project's folder doesn't hold yet,
@@ -498,6 +499,43 @@ line above the tree saying so until you dismiss it or hide the panel.
 The tree reads its open folders again when the panel is shown and when an agent's turn ends
 in the project; it doesn't watch the folder for changes. **Refresh**, beside **Collapse
 folders** at the top of the panel, reads them again now, for a change made outside Novadeck.
+
+### Hiding files
+
+Files and folders that match a pattern leave the tree, with everything inside a hidden folder,
+and what agents did there leaves the agents strip too. When everything at the top of the
+project's folder is hidden, the panel says so in the tree's place. Patterns are written as VS
+Code's `files.exclude` writes them, and matched against the path from the project's folder:
+
+| Pattern         | Matches                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| `*`             | Any characters within one name: `*.log` hides `app.log`.         |
+| `?`             | One character within a name.                                     |
+| `**`            | Any number of folders, none included: `**/dist` hides every one. |
+| `{a,b}`, `[ab]` | Either of the words, and one of the characters.                  |
+
+A pattern without `**` matches from the top only: `*.log` hides the logs at the top of the
+project, and `**/*.log` every one. Names that start with a dot match as any other. `.git` is
+never listed. A leading `!`, `@(…)`-style groups and VS Code's `when` clauses aren't supported:
+`!` and the groups match themselves.
+
+There are two lists:
+
+- **Every project**, in Preferences → General → Files. It starts with `**/.DS_Store` and
+  `**/Thumbs.db`. Each pattern has a checkbox: unchecked, it stays in the list but hides nothing.
+- **This project**, where the runner keeps it: **Hidden files**, the crossed-out eye beside
+  **Refresh**, opens it, with the list for every project under it as it is and **Edit in
+  Preferences** to change that one. A project's own patterns hide more there; one of the patterns
+  for every project added here unchecked shows what it hides, in this project only. Changes
+  apply once you press **Save**, which adds a pattern typed and not added too; a save that fails
+  keeps the dialog open and says why. **Edit in Preferences** saves your changes the same way
+  before it opens Preferences, and stays if the save fails. **Hide in This Project** on a row's
+  menu adds that row's own path to the list as the runner holds it then, so a change made in
+  another window stays; its glob characters are escaped, so `src/app/[id]` hides that folder
+  alone. If the list can't be read or saved, a line above the tree says so. Until the panel has
+  read a project's list, neither **Hidden files** nor **Hide in This Project** is offered. A
+  project's list is read again when the panel is shown and on **Refresh**, so a change made in
+  another window shows then.
 
 ## Notes
 

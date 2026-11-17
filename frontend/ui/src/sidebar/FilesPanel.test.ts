@@ -1,9 +1,9 @@
-import type { FolderListing, FilesProject } from "@novadeck/core/files"
+import type { FilesExclude, FolderListing, FilesProject } from "@novadeck/core/files"
 import { nextFrame, render } from "@novadeck/test-kit/render"
 import { act, createElement, StrictMode } from "react"
 import { afterEach, beforeEach, vi } from "vitest"
 
-import { context, describe, expect, it } from "../test"
+import { context, describe, eventually, expect, it } from "../test"
 import { folderListings } from "../test/files"
 import { FilesPanel } from "./FilesPanel"
 import { readTimeoutMs } from "./useFolderReader"
@@ -62,6 +62,28 @@ const clipboard = (refuses = false): string[] => {
     },
   })
   return copied
+}
+
+// A browser lets go of focus held in what it hides, as the closing menu does; jsdom keeps it
+// there, and won't blur what is hidden, so the menu is shown again for the blur. For the tests
+// of a context whose menus give focus back.
+const blurWhatHides = (): void => {
+  const fixup = new MutationObserver(() => {
+    const active = document.activeElement
+    const hidden = active instanceof HTMLElement ? active.closest<HTMLElement>("[hidden]") : null
+    if (!hidden) return
+    hidden.hidden = false
+    ;(active as HTMLElement).blur()
+    hidden.hidden = true
+  })
+  beforeEach(() =>
+    fixup.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden"],
+    }),
+  )
+  afterEach(() => fixup.disconnect())
 }
 
 // A menu opens, closes and runs what was chosen over animation frames.
@@ -134,6 +156,69 @@ const backend = (
   }
 }
 
+// What hides files from the panel: the person's patterns for every project, and where the backend
+// keeps them, the project's own, with Preferences to open at the person's.
+type Hiding = {
+  readonly exclude: FilesExclude
+  readonly project?: {
+    readonly read: () => Promise<FilesExclude>
+    readonly save: (patterns: FilesExclude) => Promise<void>
+  }
+  readonly onSettings?: () => void
+}
+
+// A project's own patterns as a backend keeps them, from `initial`: how many reads were asked of
+// it, what was saved, and each save refused with `refusal` where it is given. A read answers with
+// them as they were when it was asked.
+const projectPatterns = (initial: FilesExclude = {}, refusal?: string) => {
+  let patterns = initial
+  let reads = 0
+  let readRefusal: string | undefined
+  // What the reads and the saves asked for wait on, open unless a test holds them.
+  let reading = Promise.resolve()
+  let saving = Promise.resolve()
+  const saved: FilesExclude[] = []
+  // Holds back what waits on the gate `shut` is given, until the release it returns.
+  const hold = (shut: (gate: Promise<void>) => void): (() => Promise<void>) => {
+    let open = (): void => {}
+    shut(new Promise<void>((resolve) => (open = resolve)))
+    return async () => {
+      open()
+      await settle()
+    }
+  }
+  return {
+    saved,
+    reads: () => reads,
+    // Changes them as another window would.
+    set: (next: FilesExclude): void => {
+      patterns = next
+    },
+    // Hold back the reads, or the saves, asked for from now on until the release they return.
+    holdReads: () => hold((gate) => (reading = gate)),
+    holdSaves: () => hold((gate) => (saving = gate)),
+    // Refuses every read from now on, with `why`.
+    refuseReads: (why: string): void => {
+      readRefusal = why
+    },
+    source: {
+      read: async (): Promise<FilesExclude> => {
+        reads += 1
+        const asked = patterns
+        await reading
+        if (readRefusal) throw new Error(readRefusal)
+        return asked
+      },
+      save: async (next: FilesExclude): Promise<void> => {
+        await saving
+        if (refusal) throw new Error(refusal)
+        saved.push(next)
+        patterns = next
+      },
+    },
+  }
+}
+
 // Lets reads that were asked for come back, and the reads they ask for in turn.
 const settle = async (): Promise<void> => {
   for (let round = 0; round < 6; round++)
@@ -150,6 +235,7 @@ const mount = async (
   reads: Reads = backend(),
   onOpenFile: (path: string) => Promise<void> = () => Promise.resolve(),
   watch?: () => () => void,
+  hiding: Hiding = { exclude: {} },
 ) => {
   let visible = true
   let turn = 0
@@ -157,6 +243,9 @@ const mount = async (
     project: next,
     directory,
     list: reads.list,
+    exclude: hiding.exclude,
+    projectExclude: hiding.project,
+    onExcludeSettings: hiding.onSettings ?? (() => {}),
     turn,
     watch,
     onOpenFile,
@@ -709,6 +798,28 @@ describe("The Files panel", () => {
       await nextFrame()
       panel.view.unmount()
     })
+
+    it("pulses nothing for a file the patterns hide, not even the closed folder above it", async () => {
+      const panel = await mount(work(), undefined, undefined, undefined, undefined, undefined, {
+        exclude: { "**/new.ts": true },
+      })
+      const written = (at: number) =>
+        work({
+          changes: {
+            ...work().changes,
+            "src/cart/new.ts": { kind: "added", touched: { moth: at } },
+          },
+        })
+
+      await panel.update(written(recent + 500))
+      expect(panel.view.container.querySelector("[data-pulse]")).toBeNull()
+      await panel.click("src")
+      await panel.update(written(recent + 900))
+
+      expect(panel.view.container.querySelector("[data-pulse]")).toBeNull()
+      await nextFrame()
+      panel.view.unmount()
+    })
   })
   context("when a write lands while the panel is hidden", () => {
     const written = (at: number) =>
@@ -912,6 +1023,8 @@ describe("The Files panel", () => {
           project: undefined,
           directory,
           list: reads.list,
+          exclude: {},
+          onExcludeSettings: () => {},
           turn: 0,
           onOpenFile: () => Promise.resolve(),
           selectedHandle: undefined,
@@ -1229,24 +1342,7 @@ describe("The Files panel", () => {
   })
 
   context("when the person asks for a row's menu", () => {
-    // A browser lets go of focus held in what it hides, as the closing menu does; jsdom keeps it
-    // there, and won't blur what is hidden, so the menu is shown again for the blur.
-    const fixup = new MutationObserver(() => {
-      const active = document.activeElement
-      const hidden = active instanceof HTMLElement ? active.closest<HTMLElement>("[hidden]") : null
-      if (!hidden) return
-      hidden.hidden = false
-      ;(active as HTMLElement).blur()
-      hidden.hidden = true
-    })
-    beforeEach(() =>
-      fixup.observe(document.body, {
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["hidden"],
-      }),
-    )
-    afterEach(() => fixup.disconnect())
+    blurWhatHides()
     const select = (panel: Awaited<ReturnType<typeof mount>>, name: string): HTMLElement =>
       panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
 
@@ -1547,6 +1643,462 @@ describe("The Files panel", () => {
     })
   })
 
+  context("when patterns hide files", () => {
+    it("leaves out what the person's patterns for every project match, listed or an agent's", async () => {
+      const panel = await mount(work(), undefined, undefined, undefined, undefined, undefined, {
+        exclude: { docs: true, "**/new.ts": true },
+      })
+
+      expect(panel.rows()).toEqual(["src", "cart", "Cart.tsx", "useCart.ts", "package.json"])
+      panel.view.unmount()
+    })
+
+    it("leaves out what the project's own match once read, and shows what they switch off", async () => {
+      const kept = projectPatterns({ "**/*.md": false, "package.json": true })
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { "**/*.md": true },
+        project: kept.source,
+      })
+      await panel.click("docs")
+
+      expect(panel.rows()).toEqual(["docs", "readme.md", "src"])
+      panel.view.unmount()
+    })
+
+    it("reads the project's patterns again whenever the panel is shown, and on Refresh", async () => {
+      const kept = projectPatterns()
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: {},
+        project: kept.source,
+      })
+      expect(kept.reads()).toBe(1)
+
+      kept.set({ docs: true })
+      await panel.show(false)
+      await panel.show(true)
+      expect(kept.reads()).toBe(2)
+      expect(panel.rows()).not.toContain("docs")
+
+      kept.set({})
+      act(() =>
+        panel.view.container.querySelector<HTMLElement>("button[aria-label=Refresh]")!.click(),
+      )
+      await panel.settle()
+      expect(kept.reads()).toBe(3)
+      expect(panel.rows()).toContain("docs")
+      panel.view.unmount()
+    })
+
+    it("doesn't read a folder left open inside one opened again once it is hidden", async () => {
+      const kept = projectPatterns()
+      const reads = backend()
+      const panel = await mount(undefined, undefined, undefined, reads, undefined, undefined, {
+        exclude: {},
+        project: kept.source,
+      })
+      await panel.click("src")
+      await panel.click("cart")
+      await panel.click("src")
+      kept.set({ "src/cart": true })
+      await panel.show(false)
+      await panel.show(true)
+      reads.folders.length = 0
+
+      await panel.click("src")
+
+      expect(reads.folders).toEqual(["src"])
+      expect(panel.rows()).toEqual(["docs", "src", "package.json"])
+      panel.view.unmount()
+    })
+
+    it("says everything is hidden where every entry at the top is, and draws no tree", async () => {
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { "*": true },
+      })
+
+      expect(panel.view.container.querySelector(".files-empty")?.textContent).toBe(
+        "Everything in this project's folder is hidden.",
+      )
+      expect(panel.view.container.querySelector("[role=tree]")).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("draws the agents' work at the top that no pattern hides, though all it lists is, kept or not", async () => {
+      const added = work({
+        changes: { "notes.md": { kind: "added", touched: { moth: recent } } },
+        writing: {},
+      })
+      const panel = await mount(added, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { docs: true, src: true, "package.json": true },
+      })
+      expect(panel.rows()).toEqual(["notes.md"])
+
+      act(() =>
+        panel.view.container.querySelector<HTMLElement>(".files-strip .files-agent")!.click(),
+      )
+
+      expect(panel.rows()).toEqual(["notes.md"])
+      expect(panel.view.container.querySelector(".files-empty")).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("offers neither Hidden files nor Hide in This Project until the project's patterns are read", async () => {
+      const kept = projectPatterns({ docs: true })
+      const release = kept.holdReads()
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: {},
+        project: kept.source,
+      })
+
+      expect(panel.view.container.querySelector("button[aria-label='Hidden files']")).toBeNull()
+      expect(panel.rows()).toContain("docs")
+      await rightClick(panel.row("package.json").querySelector("[role=treeitem]")!)
+      expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
+      act(() => {
+        document.activeElement!.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        )
+      })
+      await frames()
+
+      await release()
+      expect(panel.view.container.querySelector("button[aria-label='Hidden files']")).not.toBeNull()
+      expect(panel.rows()).not.toContain("docs")
+      panel.view.unmount()
+    })
+
+    it("hides by the person's patterns alone, and offers no changes, when the project's can't be read", async () => {
+      const kept = projectPatterns({ "package.json": true })
+      kept.refuseReads("The runner is out of reach.")
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { docs: true },
+        project: kept.source,
+      })
+
+      expect(panel.rows()).toEqual(["src", "package.json"])
+      expect(panel.view.container.querySelector("button[aria-label='Hidden files']")).toBeNull()
+      expect(panel.view.container.querySelector("[role=alert]")).toBeNull()
+      panel.view.unmount()
+    })
+
+    it("takes an agent whose work is all hidden out of the strip", async () => {
+      const agents = { roster: ["moth", "crow"], squads: [] }
+      const shown = await mount(work(), undefined, agents)
+      const hidden = await mount(work(), undefined, agents, undefined, undefined, undefined, {
+        exclude: { "src/cart": true },
+      })
+
+      expect(shown.view.container.querySelector(".files-strip")).not.toBeNull()
+      expect(hidden.view.container.querySelector(".files-strip")).toBeNull()
+      expect(hidden.rows()).toEqual(["docs", "src", "package.json"])
+      shown.view.unmount()
+      hidden.view.unmount()
+    })
+  })
+
+  context("when the person edits the project's hidden files", () => {
+    const hiddenFiles = (panel: Awaited<ReturnType<typeof mount>>): HTMLButtonElement | null =>
+      panel.view.container.querySelector("button[aria-label='Hidden files']")
+    const dialog = (): HTMLElement | null => document.querySelector("[role=dialog]")
+    const button = (label: string): HTMLButtonElement =>
+      [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find(
+        (each) => each.textContent === label || each.getAttribute("aria-label") === label,
+      )!
+    // The patterns of the dialog's list `name`, each with whether it is on and can change.
+    const listed = (name: string): [string, boolean, boolean][] =>
+      [...dialog()!.querySelectorAll(`ul[aria-label="${name}"] li`)].flatMap((row) => {
+        const box = row.querySelector<HTMLInputElement>("input[type=checkbox]")
+        return box ? [[row.textContent ?? "", box.checked, !box.disabled]] : []
+      })
+    const open = async (panel: Awaited<ReturnType<typeof mount>>): Promise<void> => {
+      act(() => hiddenFiles(panel)!.click())
+      await eventually(() => expect(dialog()).not.toBeNull())
+    }
+    const typePattern = (text: string): void =>
+      act(() => {
+        const field = dialog()!.querySelector<HTMLInputElement>(
+          "input[aria-label='Pattern to hide']",
+        )!
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, text)
+        field.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    const click = async (label: string): Promise<void> => {
+      act(() => button(label).click())
+      await settle()
+    }
+    const mounted = (kept: ReturnType<typeof projectPatterns>, onSettings = () => {}) =>
+      mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { "**/*.md": true },
+        project: kept.source,
+        onSettings,
+      })
+
+    it("lists this project's patterns to change, and those of every project as they are", async () => {
+      const panel = await mounted(projectPatterns({ docs: true }))
+      await open(panel)
+
+      expect(listed("This project's patterns")).toEqual([["docs", true, true]])
+      expect(listed("Patterns for every project")).toEqual([["**/*.md", true, false]])
+      panel.view.unmount()
+    })
+
+    it("saves what was added, switched off and removed, whole, and the tree follows", async () => {
+      const kept = projectPatterns({ docs: true, "package.json": true })
+      const panel = await mounted(kept)
+      await open(panel)
+
+      typePattern("  src  ")
+      await click("Add")
+      act(() =>
+        dialog()!
+          .querySelectorAll<HTMLInputElement>('ul[aria-label="This project\'s patterns"] input')[0]!
+          .click(),
+      )
+      await click("Remove package.json")
+      await click("Save")
+
+      expect(kept.saved).toEqual([{ docs: false, src: true }])
+      await eventually(() => expect(dialog()).toBeNull())
+      expect(panel.rows()).toEqual(["docs", "package.json"])
+      panel.view.unmount()
+    })
+
+    it("keeps the project's patterns as they were on Cancel", async () => {
+      const kept = projectPatterns({ docs: true })
+      const panel = await mounted(kept)
+      await open(panel)
+      typePattern("src")
+      await click("Add")
+
+      await click("Cancel")
+      await eventually(() => expect(dialog()).toBeNull())
+      await open(panel)
+
+      expect(kept.saved).toEqual([])
+      expect(listed("This project's patterns")).toEqual([["docs", true, true]])
+      panel.view.unmount()
+    })
+
+    it("stays open saying why when the save fails, with the changes still there", async () => {
+      const kept = projectPatterns({}, "The runner is out of reach.")
+      const panel = await mounted(kept)
+      await open(panel)
+      typePattern("docs")
+      await click("Add")
+
+      await click("Save")
+
+      await eventually(() =>
+        expect(dialog()?.querySelector("[role=alert]")?.textContent).toBe(
+          "Couldn't save this project's hidden files: The runner is out of reach.",
+        ),
+      )
+      expect(listed("This project's patterns")).toEqual([["docs", true, true]])
+      expect(button("Save").disabled).toBe(false)
+      expect(panel.rows()).toContain("docs")
+      panel.view.unmount()
+    })
+
+    it("saves a pattern typed and not added along with the rest", async () => {
+      const kept = projectPatterns({ docs: true })
+      const panel = await mounted(kept)
+      await open(panel)
+
+      typePattern(" src ")
+      await click("Save")
+
+      expect(kept.saved).toEqual([{ docs: true, src: true }])
+      await eventually(() => expect(dialog()).toBeNull())
+      panel.view.unmount()
+    })
+
+    it("opens Preferences at the patterns for every project, with nothing to save", async () => {
+      const kept = projectPatterns({ docs: true })
+      const opened = vi.fn<() => void>()
+      const panel = await mounted(kept, opened)
+      await open(panel)
+
+      await click("Edit in Preferences")
+
+      expect(opened).toHaveBeenCalledTimes(1)
+      expect(kept.saved).toEqual([])
+      await eventually(() => expect(dialog()).toBeNull())
+      panel.view.unmount()
+    })
+
+    it("saves what changed here before it opens Preferences, the typed pattern too", async () => {
+      const kept = projectPatterns({ docs: true })
+      const opened = vi.fn<() => void>()
+      const panel = await mounted(kept, opened)
+      await open(panel)
+      await click("Remove docs")
+      typePattern("src")
+      const release = kept.holdSaves()
+
+      await click("Edit in Preferences")
+      expect(opened).not.toHaveBeenCalled()
+      await release()
+
+      expect(kept.saved).toEqual([{ src: true }])
+      expect(opened).toHaveBeenCalledTimes(1)
+      await eventually(() => expect(dialog()).toBeNull())
+      panel.view.unmount()
+    })
+
+    it("stays open saying why, and doesn't open Preferences, when that save fails", async () => {
+      const kept = projectPatterns({}, "The runner is out of reach.")
+      const opened = vi.fn<() => void>()
+      const panel = await mounted(kept, opened)
+      await open(panel)
+      typePattern("docs")
+
+      await click("Edit in Preferences")
+
+      await eventually(() =>
+        expect(dialog()?.querySelector("[role=alert]")?.textContent).toBe(
+          "Couldn't save this project's hidden files: The runner is out of reach.",
+        ),
+      )
+      expect(opened).not.toHaveBeenCalled()
+      expect(listed("This project's patterns")).toEqual([["docs", true, true]])
+      panel.view.unmount()
+    })
+
+    it("keeps what was saved over a read of the project's patterns begun before it", async () => {
+      const kept = projectPatterns({ docs: true })
+      const panel = await mounted(kept)
+      expect(panel.rows()).not.toContain("docs")
+      const release = kept.holdReads()
+      act(() =>
+        panel.view.container.querySelector<HTMLElement>("button[aria-label=Refresh]")!.click(),
+      )
+      await open(panel)
+      await click("Remove docs")
+      await click("Save")
+      await eventually(() => expect(dialog()).toBeNull())
+
+      await release()
+
+      expect(kept.saved).toEqual([{}])
+      expect(panel.rows()).toContain("docs")
+      panel.view.unmount()
+    })
+  })
+
+  context("when the person hides a row in the project", () => {
+    blurWhatHides()
+    const select = (panel: Awaited<ReturnType<typeof mount>>, name: string): HTMLElement =>
+      panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
+    const mounted = (kept: ReturnType<typeof projectPatterns>, entries = files) =>
+      mount(undefined, undefined, undefined, backend(undefined, entries), undefined, undefined, {
+        exclude: {},
+        project: kept.source,
+      })
+
+    it("adds the row's exact path to the project's patterns, and the row leaves", async () => {
+      const kept = projectPatterns({ docs: true })
+      const panel = await mounted(kept, [...files, "src/app/[id]/page.tsx"])
+      await panel.click("src")
+      await panel.click("app")
+
+      await rightClick(select(panel, "[id]"))
+      expect(menuItems()).toContain("Hide in This Project")
+      await choose("Hide in This Project")
+      await panel.settle()
+
+      expect(kept.saved).toEqual([{ docs: true, "src/app/\\[id\\]": true }])
+      expect(panel.rows()).toEqual(["src", "app", "cart", "package.json"])
+      expect(panel.view.container.querySelector("[role=alert]")).toBeNull()
+      // The keyboard was on the row, and goes on to the next.
+      expect(document.activeElement).toBe(select(panel, "cart"))
+      panel.view.unmount()
+    })
+
+    it("adds to the patterns as the backend holds them, keeping what another window saved", async () => {
+      const kept = projectPatterns({ docs: true })
+      const panel = await mounted(kept)
+      kept.set({ docs: true, "*.log": true })
+
+      await rightClick(select(panel, "package.json"))
+      await choose("Hide in This Project")
+      await panel.settle()
+
+      expect(kept.saved).toEqual([{ docs: true, "*.log": true, "package.json": true }])
+      panel.view.unmount()
+    })
+
+    it("lands each of two hides asked for before the first was saved", async () => {
+      const kept = projectPatterns()
+      const panel = await mounted(kept)
+      const release = kept.holdSaves()
+
+      await rightClick(select(panel, "package.json"))
+      await choose("Hide in This Project")
+      await rightClick(select(panel, "docs"))
+      await choose("Hide in This Project")
+      await release()
+
+      expect(kept.saved).toEqual([{ "package.json": true }, { "package.json": true, docs: true }])
+      expect(panel.rows()).toEqual(["src"])
+      panel.view.unmount()
+    })
+
+    it("says above the tree when the patterns can't be read first, and keeps the row", async () => {
+      const kept = projectPatterns()
+      const panel = await mounted(kept)
+      kept.refuseReads("The runner is out of reach.")
+
+      await rightClick(select(panel, "package.json"))
+      await choose("Hide in This Project")
+      await panel.settle()
+
+      expect(kept.saved).toEqual([])
+      expect(panel.view.container.querySelector("[role=alert]")?.textContent).toBe(
+        "Couldn't hide package.json: The runner is out of reach.",
+      )
+      expect(panel.rows()).toContain("package.json")
+      panel.view.unmount()
+    })
+
+    it("says above the tree when the save fails, and keeps the row", async () => {
+      const kept = projectPatterns({}, "The runner is out of reach.")
+      const panel = await mounted(kept)
+
+      await rightClick(select(panel, "package.json"))
+      await choose("Hide in This Project")
+      await panel.settle()
+
+      expect(panel.view.container.querySelector("[role=alert]")?.textContent).toBe(
+        "Couldn't hide package.json: The runner is out of reach.",
+      )
+      expect(panel.rows()).toContain("package.json")
+      panel.view.unmount()
+    })
+
+    it("offers nothing to hide on the tree's empty space", async () => {
+      const panel = await mounted(projectPatterns())
+
+      await rightClick(panel.view.container.querySelector("[role=tree]")!)
+
+      expect(menuItems()).toEqual(["Copy Path", "Refresh"])
+      panel.view.unmount()
+    })
+  })
+
+  context("where the backend keeps no patterns of the project's", () => {
+    it("offers neither Hidden files nor Hide in This Project, and hides by the person's", async () => {
+      const panel = await mount(undefined, undefined, undefined, undefined, undefined, undefined, {
+        exclude: { docs: true },
+      })
+
+      expect(panel.view.container.querySelector("button[aria-label='Hidden files']")).toBeNull()
+      await rightClick(panel.row("package.json").querySelector("[role=treeitem]")!)
+      expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
+      expect(panel.rows()).not.toContain("docs")
+      panel.view.unmount()
+    })
+  })
+
   context("when the person uses the keyboard", () => {
     const press = (panel: Awaited<ReturnType<typeof mount>>, name: string, key: string): void => {
       const button = panel.row(name).querySelector<HTMLElement>("[role=treeitem]")!
@@ -1652,6 +2204,8 @@ describe("The Files panel", () => {
             project: undefined,
             directory,
             list: () => new Promise<FolderListing>(() => {}),
+            exclude: {},
+            onExcludeSettings: () => {},
             turn: 0,
             onOpenFile: () => Promise.resolve(),
             selectedHandle: undefined,

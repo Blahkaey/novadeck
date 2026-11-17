@@ -15,6 +15,7 @@ import {
   type ClosedTerminal,
   type CompanionWindow,
   type FeedbackDraft,
+  type FilesExclude,
   type FolderBrowse,
   type FolderListing,
   type ForgeIntegration,
@@ -148,6 +149,21 @@ export type Runner = {
      * outside the project's directory.
      */
     folder(input: { readonly projectId: string; readonly folder: string }): Promise<FolderListing>
+    /**
+     * The project's own patterns that hide files from its Files panel, as `setFilesExclude`
+     * last kept them; none before. Rejects with `NOT_FOUND` for a project the runner doesn't
+     * have.
+     */
+    filesExclude(input: { readonly projectId: string }): Promise<FilesExclude>
+    /**
+     * Replaces the project's patterns whole; none forgets them. Rejects with `CONFLICT`, saying
+     * so, for more than `filesExcludeLimits.patterns`, and with `NOT_FOUND` for a project the
+     * runner doesn't have.
+     */
+    setFilesExclude(input: {
+      readonly projectId: string
+      readonly patterns: FilesExclude
+    }): Promise<void>
     /**
      * A folder of the runner's machine by its absolute `path`, or the runner owner's home
      * folder without one: its real path, its parent's (null at the root), and the folders in
@@ -849,6 +865,8 @@ export const connectRunner = async (
           client.projects.arrange({ order: [...input.order], pinned: [...input.pinned] }),
         ),
       folder: (input) => call((client) => client.projects.folder(input)),
+      filesExclude: (input) => call((client) => client.projects.filesExclude(input)),
+      setFilesExclude: (input) => call((client) => client.projects.setFilesExclude(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
     },
     sessions: {

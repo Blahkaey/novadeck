@@ -246,6 +246,59 @@ describe("the file an agent writes next", () => {
   })
 })
 
+describe("each demo project's patterns for hiding files", () => {
+  it("are none until saved, then kept apart for each project", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+
+    await files.exclude.save("storefront", { "**/*.test.tsx": true, "*.md": false })
+
+    await expect(files.exclude.read("storefront")).resolves.toEqual({
+      "**/*.test.tsx": true,
+      "*.md": false,
+    })
+    await expect(files.exclude.read("infra")).resolves.toEqual({})
+  })
+
+  it("fail the next save when the debug panel says so, once, keeping what was there", async () => {
+    const files = createDemoFiles(now)
+    await files.exclude.save("storefront", { dist: true })
+    files.failNextExcludeSave()
+
+    await expect(files.exclude.save("storefront", {})).rejects.toThrow("told to fail")
+    await expect(files.exclude.read("storefront")).resolves.toEqual({ dist: true })
+    await files.exclude.save("storefront", {})
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
+  it("save again when the debug panel lifts the failure before it happens", async () => {
+    const files = createDemoFiles(now)
+    files.failNextExcludeSave()
+    files.failNextExcludeSave(false)
+
+    await files.exclude.save("storefront", { dist: true })
+    await expect(files.exclude.read("storefront")).resolves.toEqual({ dist: true })
+  })
+
+  it("can't be read when the debug panel says so, until it says otherwise", async () => {
+    const files = createDemoFiles(now)
+    await files.exclude.save("storefront", { dist: true })
+    files.failExcludeReads()
+
+    await expect(files.exclude.read("storefront")).rejects.toThrow("told to fail")
+    await expect(files.exclude.read("storefront")).rejects.toThrow("told to fail")
+    files.failExcludeReads(false)
+    await expect(files.exclude.read("storefront")).resolves.toEqual({ dist: true })
+  })
+
+  it("refuse more than a project keeps, as the runner does", async () => {
+    const files = createDemoFiles(now)
+    const many = Object.fromEntries(Array.from({ length: 201 }, (_, at) => [`${at}.log`, true]))
+
+    await expect(files.exclude.save("storefront", many)).rejects.toThrow("at most 200 patterns")
+  })
+})
+
 describe("the demo files", () => {
   afterEach(() => vi.unstubAllGlobals())
 

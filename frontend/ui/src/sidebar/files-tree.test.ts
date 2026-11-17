@@ -2,6 +2,7 @@ import type { FilesProject } from "@novadeck/core/files"
 
 import { context, describe, expect, it } from "../test"
 import { folderListings } from "../test/files"
+import { hidesOf } from "./files-exclude"
 import {
   buildTree,
   expandable,
@@ -17,6 +18,7 @@ import {
   initialOpen,
   isNote,
   rowShowing,
+  shownWork,
   trailGone,
   trailLifeMs,
   trailOpacity,
@@ -203,6 +205,61 @@ describe("The Files tree", () => {
     })
   })
 
+  context("when patterns hide entries", () => {
+    const hides = hidesOf({ "**/*.log": true, "src/gen": true }, {})
+
+    it("leaves out a listed name that matches", () => {
+      const tree = buildTree(folderListings(["app.log", "src/a.ts", "src/b.log"]), undefined, hides)
+
+      expect(tree.map((node) => node.path)).toEqual(["src"])
+      expect(tree[0]!.children.map((node) => node.path)).toEqual(["src/a.ts"])
+    })
+
+    it("leaves out a name only an agent's work has, and the folders that hold only it", () => {
+      const tree = buildTree(
+        new Map(),
+        project({
+          changes: {
+            "debug.log": { kind: "added", touched: { moth: 1 } },
+            "src/gen/api.ts": { kind: "added", touched: { moth: 1 } },
+            "src/a.ts": { kind: "modified", touched: { crow: 1 } },
+          },
+        }),
+        hides,
+      )
+
+      expect(tree.map((node) => node.path)).toEqual(["src"])
+      expect(tree[0]!.children.map((node) => node.path)).toEqual(["src/a.ts"])
+      expect(tree[0]!.touched).toEqual({ crow: 1 })
+    })
+
+    it("never builds what is inside a hidden folder, and drops its listing", () => {
+      const listings = folderListings(["src/gen/api.ts", "src/gen/deep/x.ts", "src/a.ts"])
+      const asked: string[] = []
+      const tree = buildTree(listings, undefined, (path) => {
+        asked.push(path)
+        return hides(path)
+      })
+
+      expect(asked.filter((path) => path.startsWith("src/gen/"))).toEqual([])
+      expect([...keepListings(listings, tree).keys()]).toEqual(["", "src"])
+    })
+
+    it("shows a folder whose entries are all hidden as empty", () => {
+      const tree = buildTree(
+        folderListings(["logs/a.log", "logs/b.log", "README.md"]),
+        undefined,
+        hides,
+      )
+
+      expect(visibleLines(tree, new Set(["logs"]))).toEqual([
+        { node: expect.objectContaining({ path: "logs" }), depth: 0, open: true },
+        { note: "empty", path: "logs", depth: 1 },
+        { node: expect.objectContaining({ path: "README.md" }), depth: 0, open: false },
+      ])
+    })
+  })
+
   context("when keeping the listings of the folders still there", () => {
     const listing = (names: string[]) => ({
       entries: names.map((name) => ({ name, folder: true, ignored: false })),
@@ -326,6 +383,31 @@ describe("Which row shows a write", () => {
 
     expect(writtenPaths(before, before)).toEqual([])
     expect(writtenPaths(before, after)).toEqual(["a.ts", "b.ts"])
+  })
+})
+
+describe("The agents' work the tree shows", () => {
+  const hides = hidesOf({ "**/node_modules": true }, {})
+
+  it("leaves out changes and writes in a hidden path or below one", () => {
+    const work = project({
+      changes: {
+        "web/node_modules/react/index.js": { kind: "modified", touched: { moth: 1 } },
+        "src/a.ts": { kind: "modified", touched: { crow: 1 } },
+      },
+      writing: { moth: "web/node_modules/react/index.js", crow: "src/a.ts" },
+    })
+
+    expect(shownWork(work, hides)).toEqual({
+      changes: { "src/a.ts": { kind: "modified", touched: { crow: 1 } } },
+      writing: { crow: "src/a.ts" },
+    })
+  })
+
+  it("is the same project where none of its work is hidden", () => {
+    const work = project({ changes: { "src/a.ts": { kind: "added", touched: { moth: 1 } } } })
+
+    expect(shownWork(work, hides)).toBe(work)
   })
 })
 

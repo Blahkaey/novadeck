@@ -59,6 +59,8 @@ type ProjectRow = Omit<Project, "pinned"> & { readonly pinned: number }
 
 // The settings row a project's notes are kept in.
 const noteKey = (projectId: string): string => `notes.${projectId}`
+// The settings row a project's own patterns for hiding files are kept in.
+const filesExcludeKey = (projectId: string): string => `filesExclude.${projectId}`
 
 const projectOf = ({ pinned, ...project }: ProjectRow): Project => ({
   ...project,
@@ -1797,10 +1799,35 @@ export class WorkspaceStore
     this.forget(() =>
       this.transaction(() => {
         void this.queries.run`DELETE FROM projects WHERE id = ${projectId}`
-        // Its notes are a settings row, which no foreign key takes with it.
+        // Its notes and its patterns for hiding files are settings rows, which no foreign key
+        // takes with it.
         void this.queries.run`DELETE FROM settings WHERE key = ${noteKey(projectId)}`
+        void this.queries.run`DELETE FROM settings WHERE key = ${filesExcludeKey(projectId)}`
       }),
     )
+  }
+
+  /** A project's patterns for hiding files as `saveFilesExclude` kept them; undefined for none. */
+  savedFilesExcludeOf(projectId: string): string | undefined {
+    const row = this.queries.get`
+      SELECT value FROM settings WHERE key = ${filesExcludeKey(projectId)}
+    ` as { value: string } | undefined
+    return row?.value
+  }
+
+  /**
+   * Keeps a project's patterns for hiding files, as the text `patterns`, or none for null. They
+   * are a row of the settings, one a project (`filesExclude.<project id>`), as its notes are. A
+   * project the store doesn't have is `NOT_FOUND`.
+   */
+  saveFilesExclude(projectId: string, patterns: string | null): void {
+    this.project(projectId)
+    if (patterns === null)
+      void this.queries.run`DELETE FROM settings WHERE key = ${filesExcludeKey(projectId)}`
+    else
+      void this.queries.run`
+        INSERT INTO settings (key, value) VALUES (${filesExcludeKey(projectId)}, ${patterns})
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value`
   }
 
   /** Each project's notes as `saveNotes` kept them, by project id. */

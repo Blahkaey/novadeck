@@ -257,6 +257,48 @@ describe("coming from a row that needs an agent connected", () => {
   })
 })
 
+describe("the patterns for hiding files, in Preferences", () => {
+  const files = () =>
+    document
+      .querySelector('[role="tabpanel"][aria-labelledby$="general"]')
+      ?.querySelector<HTMLElement>("section[aria-labelledby='preferences-files']")
+  // The app's editor as a stand-in: a field that takes the id it is given.
+  const filesExclude = (field: string) =>
+    createElement("input", { id: field, "aria-label": "Pattern" })
+  const frames = (count: number): Promise<void> =>
+    Array.from({ length: count }).reduce<Promise<void>>(
+      (done) => done.then(nextFrame),
+      Promise.resolve(),
+    )
+
+  it("sit under General's Files where the app gives their editor", async () => {
+    await show({ tab: "general", renderFilesExclude: filesExclude })
+
+    expect(files()?.querySelector("h3")?.textContent).toBe("Files")
+    expect(files()?.querySelector("input[aria-label=Pattern]")).not.toBeNull()
+  })
+
+  it("are absent where the backend reads no files", async () => {
+    await show({ tab: "general" })
+
+    expect(files()).toBeNull()
+  })
+
+  it("bring their field into view and focus once the dialog opens at them", async () => {
+    let done = 0
+    await show({
+      tab: "general",
+      renderFilesExclude: filesExclude,
+      focusFilesExclude: true,
+      onFocusedFilesExclude: () => done++,
+    })
+    await frames(8)
+
+    expect(document.activeElement).toBe(files()?.querySelector("input"))
+    expect(done).toBe(1)
+  })
+})
+
 describe("an agent that is not installed, in Preferences", () => {
   const command = "curl -fsSL https://claude.ai/install.sh | bash"
   const missing = {

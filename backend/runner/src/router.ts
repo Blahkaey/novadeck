@@ -28,6 +28,7 @@ import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
+import { filesExcludeOf, saveFilesExclude } from "./workspaces/files-exclude.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
 import type { Projects } from "./workspaces/projects.js"
@@ -172,6 +173,14 @@ export const createRouter = (options: {
       folder: api.projects.folder.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         return listFolder(store.project(input.projectId).cwd, input.folder)
+      }),
+      filesExclude: api.projects.filesExclude.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return filesExcludeOf(store, input.projectId)
+      }),
+      setFilesExclude: api.projects.setFilesExclude.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        saveFilesExclude(store, input.projectId, input.patterns)
       }),
       browse: api.projects.browse.handler(({ input }) => browseFolder(input.path)),
     },

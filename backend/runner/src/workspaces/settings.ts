@@ -127,12 +127,12 @@ export class Settings {
   }
 
   runner(): RunnerSettings {
-    // Not the projects' notes, which the table keeps beside the settings (`saveNotes`) and
-    // which can be long.
-    const rows = this.queries.all`SELECT key, value FROM settings WHERE key NOT LIKE 'notes.%'` as {
-      key: string
-      value: string
-    }[]
+    // Not the projects' notes and patterns for hiding files, which the table keeps beside the
+    // settings (`saveNotes`, `saveFilesExclude`) and which can be long.
+    const rows = this.queries.all`
+      SELECT key, value FROM settings
+      WHERE key NOT LIKE 'notes.%' AND key NOT LIKE 'filesExclude.%'
+    ` as { key: string; value: string }[]
     const saved = new Map(rows.map((row) => [row.key, row.value]))
     // Transcripts are kept unless turned off; the welcome dialog waits until seen; the Inbox
     // keeps its own order until the person drags its rows, and snoozes none until they do; idle

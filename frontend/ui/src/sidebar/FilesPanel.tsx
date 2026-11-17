@@ -1,7 +1,12 @@
-import { absolutePath, type FolderListing, type FilesProject } from "@novadeck/core/files"
+import {
+  absolutePath,
+  type FilesExclude,
+  type FolderListing,
+  type FilesProject,
+} from "@novadeck/core/files"
 import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { ChevronsDownUp, RefreshCw, X } from "lucide-react"
+import { ChevronsDownUp, EyeOff, RefreshCw, X } from "lucide-react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import { currentPlatform, filesShortcutBindings, matchesShortcut } from "../interaction/shortcuts"
@@ -14,6 +19,7 @@ import {
   stripSlots,
   type Squad,
 } from "./files-agents"
+import { exactPattern, hiddenUnder, hidesOf } from "./files-exclude"
 import { textWidth } from "./files-fonts"
 import { filesMenu } from "./files-menu"
 import {
@@ -27,21 +33,29 @@ import {
   isNote,
   keepListings,
   marksOf,
+  shownWork,
   visibleLines,
   type Chips as ChipSet,
   type Listings,
   type FilesRow,
 } from "./files-tree"
+import { FilesExcludeDialog } from "./FilesExcludeDialog"
 import { FilesStrip } from "./FilesStrip"
 import { NoteRow, TreeRow, type Pointed } from "./FilesTreeRows"
 import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 import { useFolderReader } from "./useFolderReader"
+import {
+  useProjectExclude,
+  type ExcludeEditing,
+  type ProjectExcludeSource,
+} from "./useProjectExclude"
 import { usePulses } from "./usePulses"
 import { useTreeMeasure } from "./useTreeMeasure"
 
 const noFolders: ReadonlySet<string> = new Set()
 const noListings: Listings = new Map()
+const noPatterns: FilesExclude = {}
 
 const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
 
@@ -60,11 +74,17 @@ const pathAt = (target: EventTarget): string | undefined =>
 // Lighting an agent otherwise, by selecting its terminal or pointing at a chip, only dims the rest.
 // A right-click on a row, or off one, on the tree's empty space or the line in the tree's place,
 // which stand for the project's folder, opens the menu `filesMenu` builds for it; what the panel
-// couldn't do shows above the tree while it shows.
+// couldn't do shows above the tree while it shows. What the person's patterns for every project
+// and the project's own over them match leaves the tree, and the agents' work there with it;
+// the project's are read when the panel is shown, and edited in the dialog the header's Hidden
+// files opens, or added to by a row's Hide in This Project.
 export const FilesPanel = ({
   project,
   directory,
   list,
+  exclude,
+  projectExclude,
+  onExcludeSettings,
   turn,
   watch,
   onOpenFile,
@@ -82,6 +102,13 @@ export const FilesPanel = ({
   directory: string
   // Reads a folder of the project, by its path from the project's root.
   list: (folder: string) => Promise<FolderListing>
+  // The person's patterns for hiding files in every project.
+  exclude: FilesExclude
+  // Where the backend keeps the project's own patterns over them: how to read and replace them.
+  // Left out, nothing is hidden in the project alone, and nothing offers to.
+  projectExclude?: ProjectExcludeSource | undefined
+  // Opens Preferences where the person's patterns for every project are edited.
+  onExcludeSettings: () => void
   // When an agent's turn last ended in the project, which has the folders read again.
   turn: number
   // Follows the works `project` comes from until the returned release is called, where it
@@ -107,7 +134,15 @@ export const FilesPanel = ({
   const showing = active && visible
   const platform = currentPlatform()
   const [listings, setListings] = useState<Listings>(noListings)
-  const tree = useMemo(() => buildTree(listings, project), [listings, project])
+  const { editing, reread: rereadExclude } = useProjectExclude(projectExclude, showing)
+  const projectPatterns = editing?.patterns
+  const hides = useMemo(
+    () => hidesOf(exclude, projectPatterns ?? noPatterns),
+    [exclude, projectPatterns],
+  )
+  // The agents' work the tree shows: none of it in what is hidden.
+  const shown = useMemo(() => project && shownWork(project, hides), [project, hides])
+  const tree = useMemo(() => buildTree(listings, shown, hides), [listings, shown, hides])
   // The listings of a folder that vanished are dropped, to be read anew if it comes back.
   const rootRead = listings.get("")
   const survivors = keepListings(listings, tree)
@@ -121,12 +156,19 @@ export const FilesPanel = ({
   // A root that lists nothing is empty, whatever an agent is said to have changed in it.
   const rootEmpty =
     typeof rootRead === "object" && rootRead.entries.length === 0 && !rootRead.truncated
+  // A root that lists entries, all of them hidden, with none of the agents' work showing either,
+  // says so rather than drawing nothing. One that lists only some ends with its "More not shown".
+  const rootHidden =
+    typeof rootRead === "object" &&
+    !rootRead.truncated &&
+    rootRead.entries.length > 0 &&
+    tree.length === 0
   const rootTruncated = typeof rootRead === "object" && rootRead.truncated
   // The agents the person keeps lit, any number; this panel remounts with the project, which
   // forgets them. Kept agents that no longer have work here are let go, as nothing in the strip
   // shows them. The tree holds only the work of the ones kept.
   const [kept, setKept] = useState<ReadonlySet<string>>(noAgents)
-  const stillKept = useMemo(() => keptWorking(project, kept), [project, kept])
+  const stillKept = useMemo(() => keptWorking(shown, kept), [shown, kept])
   if (stillKept.size !== kept.size) setKept(stillKept)
   const lines = useMemo(
     () => visibleLines(tree, open, rootTruncated, stillKept),
@@ -180,10 +222,7 @@ export const FilesPanel = ({
   const [treeNode, setTreeNode] = useState<HTMLDivElement | null>(null)
   const { width: treeWidth, fonts } = useTreeMeasure(treeNode)
   // Rows rank their chips by what is kept or selected only, so pointing never reorders them.
-  const ranked = useMemo(
-    () => litSet(project, kept, selectedHandle),
-    [project, kept, selectedHandle],
-  )
+  const ranked = useMemo(() => litSet(shown, kept, selectedHandle), [shown, kept, selectedHandle])
   // The chips each row shows, folded by its room; an open folder names nobody: its files do.
   const chipsByPath = useMemo(() => {
     const chipWidth = (text: string): number =>
@@ -216,8 +255,8 @@ export const FilesPanel = ({
       ? hovered.handle
       : undefined
   const slots = useMemo(
-    () => (project ? stripSlots(project, roster, squads) : []),
-    [project, roster, squads],
+    () => (shown ? stripSlots(shown, roster, squads) : []),
+    [shown, roster, squads],
   )
   // The strip chip under the pointer lights its agent, or a lead's whole squad. A squad can
   // dissolve or the strip go with no pointerleave to say so: the hover counts only while its
@@ -238,7 +277,7 @@ export const FilesPanel = ({
   const [stop, setStop] = useState<string | null>(null)
   const tabStop = rows.some((row) => row.node.path === stop) ? stop : (rows[0]?.node.path ?? null)
 
-  const { pulses, end: endPulses } = usePulses(project?.changes, rows, open, showing)
+  const { pulses, end: endPulses } = usePulses(project?.changes, rows, open, showing, hides)
   // Hiding the panel ends the pulses, and showing it again starts the trails over so each reads
   // its true age: a hidden panel's animations restart at full brightness when it shows.
   const [wasShowing, setWasShowing] = useState(showing)
@@ -259,9 +298,10 @@ export const FilesPanel = ({
     if (to ?? !next.has(path)) {
       next.add(path)
       // Opening shows the folder as it is now, whatever was read before, and so the folders
-      // left open inside it, which show again with it.
+      // left open inside it, which show again with it, but those hidden since.
       read(path)
-      for (const inner of open) if (inner.startsWith(`${path}/`)) read(inner)
+      for (const inner of open)
+        if (inner.startsWith(`${path}/`) && !hiddenUnder(hides, inner)) read(inner)
     } else next.delete(path)
     setOpenFolders(next)
   }
@@ -303,8 +343,39 @@ export const FilesPanel = ({
     }
     void write.catch(refused)
   }
-  // Reads the root and the open folders again, as showing the panel does.
-  const refresh = (): void => wanted.forEach((folder) => read(folder))
+  // Reads the root, the open folders and the project's patterns again, as showing the panel does.
+  const refresh = (): void => {
+    wanted.forEach((folder) => read(folder))
+    rereadExclude()
+  }
+  // Whether the dialog for the project's patterns is open.
+  const [excluding, setExcluding] = useState(false)
+  // Hides a row in the project by its exact path, which a right-click focused, added to the
+  // project's patterns as the backend holds them by then. Once it is hidden, the row after it
+  // takes focus, else the one before, unless the person has put focus somewhere else meanwhile; a
+  // read or a save that fails says why above the tree.
+  const hideIn =
+    ({ change }: ExcludeEditing) =>
+    (row: FilesRow): void => {
+      setFailure(null)
+      const { path } = row.node
+      const index = rows.findIndex((each) => each.node.path === path)
+      const stays = (each: FilesRow): boolean =>
+        each.node.path !== path && !each.node.path.startsWith(`${path}/`)
+      const next = rows.slice(index + 1).find(stays) ?? rows.slice(0, index).findLast(stays)
+      change((current) => ({ ...current, [exactPattern(path)]: true })).then(
+        () => {
+          // The row may have left already, and focus with it: then it is nowhere.
+          const focused = document.activeElement
+          if (focused === document.body || treeNode?.contains(focused)) focusRow(next)
+        },
+        (error: unknown) =>
+          setFailure({
+            text: `Couldn't hide ${path}: ${error instanceof Error ? error.message : "Novadeck could not save it."}`,
+            shown: shownTimes,
+          }),
+      )
+    }
   // Escape in the strip or the tree lets go of every kept agent, back to following the selected
   // terminal. With nothing kept it is left for whatever else listens.
   const onEscape = (event: React.KeyboardEvent): void => {
@@ -374,6 +445,19 @@ export const FilesPanel = ({
       onClose={onHide}
       actions={
         <>
+          {editing && (
+            <Tooltip content="Hidden files">
+              <button
+                className="icon-button dim quiet size-7"
+                type="button"
+                aria-label="Hidden files"
+                aria-haspopup="dialog"
+                onClick={() => setExcluding(true)}
+              >
+                <EyeOff size={14} strokeWidth={1.6} />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip content="Refresh">
             <button
               className="icon-button dim quiet size-7"
@@ -429,6 +513,7 @@ export const FilesPanel = ({
             platform,
             onCopy: copy,
             onRefresh: refresh,
+            ...(editing && { onHide: hideIn(editing) }),
           })}
           trigger={
             // The tree, or the line in its place: a right-click anywhere in it, off a row, is on
@@ -445,6 +530,10 @@ export const FilesPanel = ({
                 <p className="files-empty text-control">Can't read this project's files.</p>
               ) : rootEmpty ? (
                 <p className="files-empty text-control">This project's folder is empty.</p>
+              ) : rootHidden ? (
+                <p className="files-empty text-control">
+                  Everything in this project's folder is hidden.
+                </p>
               ) : (
                 <div
                   ref={setTreeNode}
@@ -490,6 +579,22 @@ export const FilesPanel = ({
               )}
             </div>
           }
+        />
+      )}
+      {editing && (
+        <FilesExcludeDialog
+          open={excluding}
+          patterns={editing.patterns}
+          everywhere={exclude}
+          onSave={async (patterns) => {
+            await editing.save(patterns)
+            setExcluding(false)
+          }}
+          onClose={() => setExcluding(false)}
+          onSettings={() => {
+            setExcluding(false)
+            onExcludeSettings()
+          }}
         />
       )}
     </SidebarPanel>

@@ -154,6 +154,30 @@ describe("the debug panel's Files group", () => {
     }
   })
 
+  it("has the next save of a project's hidden files fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next hide-list save fails")
+    await expect(files.exclude.save("storefront", { dist: true })).rejects.toThrow()
+    await files.exclude.save("storefront", { dist: true })
+
+    run(files, "Next hide-list save fails")
+    run(files, "Files read normally again")
+
+    await files.exclude.save("storefront", {})
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
+  it("has every read of a project's hidden files fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Hidden files can't be read")
+    await expect(files.exclude.read("storefront")).rejects.toThrow()
+    await expect(files.exclude.read("infra")).rejects.toThrow()
+
+    run(files, "Files read normally again")
+
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
   it("puts the copy failure before the way back to normal", () => {
     const labels = filesGroups(createDemoFiles(1))[0]!.actions.map((action) => action.label)
     expect(labels.indexOf("Copying a path fails")).toBe(

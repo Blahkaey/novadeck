@@ -48,7 +48,14 @@ import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
 import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
-import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
+import {
+  clientState,
+  filesExclude,
+  folderBrowse,
+  folderListing,
+  project,
+  workspaceSession,
+} from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
 import { sliceChange } from "./slices.js"
 import {
@@ -152,6 +159,15 @@ export const contract = {
     folder: procedure
       .input(z.strictObject({ projectId: id, folder: z.string().max(4096) }))
       .output(folderListing),
+    // The project's own patterns that hide files from its Files panel, as `setFilesExclude`
+    // last kept them: none before. A project the runner doesn't have is NOT_FOUND.
+    filesExclude: procedure.input(z.strictObject({ projectId: id })).output(filesExclude),
+    // Replaces the project's patterns whole; none forgets them. More than
+    // `filesExcludeLimits.patterns` is a CONFLICT that says so. A project the runner doesn't
+    // have is NOT_FOUND.
+    setFilesExclude: procedure
+      .input(z.strictObject({ projectId: id, patterns: filesExclude }))
+      .output(z.void()),
     // A folder of the runner's machine and the folders in it, for a client that picks a
     // project's folder there, as the desktop app of a runner on another machine does: `path`
     // absolute, or the runner owner's home folder when omitted. Only looks: it makes nothing.

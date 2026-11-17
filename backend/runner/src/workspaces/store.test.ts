@@ -3659,6 +3659,67 @@ describe("a project's notes", () => {
   })
 })
 
+describe("a project's patterns for hiding files", () => {
+  it("are none in a database that never kept any", async ({ directory, store }) => {
+    const cwd = directory()
+    const workspace = store(join(cwd, "workspace.sqlite"))
+    await workspace.createProject({ id: "p", name: "P", cwd })
+
+    expect(workspace.savedFilesExcludeOf("p")).toBeUndefined()
+  })
+
+  it("are kept by project across a reopen, replaced whole, and forgotten for null", async ({
+    directory,
+    store,
+  }) => {
+    const cwd = directory()
+    const path = join(cwd, "workspace.sqlite")
+    const workspace = store(path)
+    await workspace.createProject({ id: "p", name: "P", cwd })
+    await workspace.createProject({ id: "q", name: "Q", cwd })
+    workspace.saveFilesExclude("p", '{"dist":true}')
+    workspace.saveFilesExclude("q", '{"*.log":false}')
+    workspace.saveFilesExclude("p", '{"**/dist":true}')
+    workspace.close()
+
+    const reopened = store(path)
+    expect(reopened.savedFilesExcludeOf("p")).toBe('{"**/dist":true}')
+    expect(reopened.savedFilesExcludeOf("q")).toBe('{"*.log":false}')
+    reopened.saveFilesExclude("q", null)
+    expect(reopened.savedFilesExcludeOf("q")).toBeUndefined()
+  })
+
+  it("go with their project, and are refused for one the store doesn't have", async ({
+    directory,
+    store,
+  }) => {
+    const cwd = directory()
+    const workspace = store(join(cwd, "workspace.sqlite"))
+    await workspace.createProject({ id: "p", name: "P", cwd })
+    await workspace.createProject({ id: "q", name: "Q", cwd })
+    workspace.saveFilesExclude("p", '{"dist":true}')
+    workspace.saveFilesExclude("q", '{"dist":true}')
+    workspace.removeProject("p")
+
+    expect(workspace.savedFilesExcludeOf("p")).toBeUndefined()
+    expect(workspace.savedFilesExcludeOf("q")).toBe('{"dist":true}')
+    expect(() => workspace.saveFilesExclude("p", "{}")).toThrow(
+      expect.objectContaining({ code: "NOT_FOUND" }),
+    )
+  })
+
+  it("leave the runner's own settings as they were", async ({ directory, store }) => {
+    const cwd = directory()
+    const workspace = store(join(cwd, "workspace.sqlite"))
+    await workspace.createProject({ id: "p", name: "P", cwd })
+    const before = workspace.settings.runner()
+
+    workspace.saveFilesExclude("p", JSON.stringify({ [`inboxOrder ${"x".repeat(1000)}`]: true }))
+
+    expect(workspace.settings.runner()).toEqual(before)
+  })
+})
+
 describe("murmur's settings", () => {
   it("are off until chosen, and the choice is kept or forgotten", ({ directory, store }) => {
     const path = join(directory(), "workspace.sqlite")

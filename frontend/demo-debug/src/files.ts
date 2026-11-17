@@ -81,15 +81,27 @@ export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGr
               run: () => files.degrade("", "truncate"),
             },
             {
+              label: "Next hide-list save fails",
+              hint: "In Files, the next save of the open project's hidden files fails, once: Save in the Hidden files dialog (the crossed-out eye at the top of the panel) keeps the dialog open with a red line under the lists saying why, and Hide in This Project on a row's right-click puts a red-edged line above the tree saying it couldn't hide that path, with Dismiss; Files read normally again lifts it before then",
+              run: () => files.failNextExcludeSave(),
+            },
+            {
+              label: "Hidden files can't be read",
+              hint: "Every read of a project's hidden files fails until Files read normally again. Switch to another project and open Files: there is no Hidden files button (the crossed-out eye) at the top of the panel and no Hide in This Project on a row's right-click, and only the patterns for every project hide anything. A panel that read them already keeps them, and Hide in This Project there puts a red-edged line above the tree saying it couldn't hide that path",
+              run: () => files.failExcludeReads(),
+            },
+            {
               label: "Copying a path fails",
               hint: "Every copy in the page fails until Files read normally again or a reboot: in Files, Copy Path or Copy Relative Path on a row's right-click, Copy Path on the empty space's, or Shift+Alt+C on a focused row shows a red-edged line above the tree saying it couldn't copy that path, with a Dismiss button; hiding the panel clears it",
               run: refuseClipboard,
             },
             {
               label: "Files read normally again",
-              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and paths copy again at once",
+              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and hidden files read again; paths copy and hidden files save again at once",
               run: () => {
                 restoreClipboard()
+                files.failNextExcludeSave(false)
+                files.failExcludeReads(false)
                 for (const folder of ["", "src/cart", "src/components"])
                   files.degrade(folder, undefined)
               },

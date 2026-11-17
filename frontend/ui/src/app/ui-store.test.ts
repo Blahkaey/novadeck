@@ -62,6 +62,7 @@ const initial = (): UiState =>
       ligatures: false,
       chatView: false,
       agentAvatars: false,
+      filesExclude: {},
     },
   })
 

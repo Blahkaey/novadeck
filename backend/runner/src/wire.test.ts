@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite"
 
 import { createScreen } from "@novadeck/emulator/headless"
 import {
+  filesExcludeLimits,
   protocolVersion,
   type contract,
   type TerminalEvent,
@@ -380,6 +381,59 @@ describe("workspace metadata API", () => {
     await expect(
       client.projects.folder({ projectId: project.id, folder: "x".repeat(5000) }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("keeps a project's patterns for hiding files, within limits, for any connection", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const other = await app.connect()
+    const { project } = await app.setup(client)
+    const projectId = project.id
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual({})
+
+    await client.projects.setFilesExclude({
+      projectId,
+      patterns: { "**/dist": true, "src/app/\\[id\\]": true, "*.log": false },
+    })
+
+    await expect(other.client.projects.filesExclude({ projectId })).resolves.toEqual({
+      "**/dist": true,
+      "src/app/\\[id\\]": true,
+      "*.log": false,
+    })
+    const many = (count: number) =>
+      Object.fromEntries(Array.from({ length: count }, (_, at) => [`${at}.log`, true]))
+    await client.projects.setFilesExclude({
+      projectId,
+      patterns: many(filesExcludeLimits.patterns),
+    })
+    await expect(
+      client.projects.setFilesExclude({
+        projectId,
+        patterns: many(filesExcludeLimits.patterns + 1),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    await Promise.all(
+      [{ "": true }, { ["x".repeat(filesExcludeLimits.pattern + 1)]: true }, { dist: "yes" }].map(
+        (patterns) =>
+          expect(
+            client.projects.setFilesExclude({ projectId, patterns: patterns as never }),
+          ).rejects.toMatchObject({ code: "BAD_REQUEST" }),
+      ),
+    )
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual(
+      many(filesExcludeLimits.patterns),
+    )
+    await client.projects.setFilesExclude({ projectId, patterns: {} })
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual({})
+    await Promise.all(
+      [
+        client.projects.filesExclude({ projectId: randomUUID() }),
+        client.projects.setFilesExclude({ projectId: randomUUID(), patterns: {} }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "NOT_FOUND" })),
+    )
   })
 
   it("browses the runner's folders, from its owner's home, without making anything", async ({
