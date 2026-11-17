@@ -1,5 +1,6 @@
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoFiles, demoPaths } from "@novadeck/demo/files"
+import { vi } from "vitest"
 
 import { restoreClipboard } from "./clipboard"
 import { filesGroups } from "./files"
@@ -186,6 +187,54 @@ describe("the debug panel's Files group", () => {
     run(files, "Files read normally again")
 
     await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
+  it("has the next paste fail, once, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next paste fails")
+    await expect(files.copy("storefront", "README.md", "public")).rejects.toThrow()
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe("public/README.md")
+
+    run(files, "Next paste fails")
+    run(files, "Files read normally again")
+
+    await expect(files.copy("storefront", "README.md", "")).resolves.toBe("README copy.md")
+  })
+
+  it("has the next change made answer as lost, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next change's answer is lost")
+    await expect(files.move("storefront", "README.md", "README.txt")).rejects.toThrow(
+      "it may have been done",
+    )
+    await expect(files.move("storefront", "README.txt", "README.md")).resolves.toBe("README.md")
+
+    run(files, "Next change's answer is lost")
+    run(files, "Files read normally again")
+
+    await expect(files.remove("storefront", "README.md")).resolves.toBeUndefined()
+  })
+
+  it("has the next paste take 5 seconds, until the files read normally again", async () => {
+    vi.useFakeTimers()
+    try {
+      const files = createDemoFiles(1)
+      run(files, "Next paste takes 5 s")
+      let made: string | undefined
+      const copying = files.copy("storefront", "README.md", "public").then((path) => (made = path))
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(made).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      await copying
+      expect(made).toBe("public/README.md")
+
+      run(files, "Next paste takes 5 s")
+      run(files, "Files read normally again")
+
+      await expect(files.copy("storefront", "README.md", "")).resolves.toBe("README copy.md")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("has the next file made, renamed or deleted fail, until the files read normally again", async () => {

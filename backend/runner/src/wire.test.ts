@@ -433,6 +433,45 @@ describe("workspace metadata API", () => {
     expect(await readdir(app.directory)).not.toContain("escaped.md")
   })
 
+  it("copies a project's files under a name that is free, and refuses what isn't the project's to copy", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, ".git"), { recursive: true })
+    await mkdir(join(cwd, "src"))
+    await writeFile(join(cwd, "src", "cart.ts"), "export {}\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Copies", cwd })
+    const projectId = project.id
+
+    await expect(
+      client.projects.copyEntry({ projectId, from: "src/cart.ts", into: "src" }),
+    ).resolves.toEqual({ path: "src/cart copy.ts" })
+    await expect(client.projects.copyEntry({ projectId, from: "src", into: "" })).resolves.toEqual({
+      path: "src copy",
+    })
+    expect((await readdir(join(cwd, "src copy"))).toSorted()).toEqual(["cart copy.ts", "cart.ts"])
+
+    await Promise.all(
+      [
+        client.projects.copyEntry({ projectId, from: "src", into: "src" }),
+        client.projects.copyEntry({ projectId, from: "src/cart.ts", into: ".git" }),
+        client.projects.copyEntry({ projectId, from: "src/cart.ts", into: ".." }),
+        client.projects.copyEntry({ projectId, from: "", into: "src" }),
+        client.projects.copyEntry({ projectId, from: "missing.ts", into: "" }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })),
+    )
+    await expect(
+      client.projects.copyEntry({ projectId: randomUUID(), from: "src", into: "" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      client.projects.copyEntry({ projectId, from: "src", into: "x".repeat(5000) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "src", "src copy"])
+    expect(await readdir(join(cwd, ".git"))).toEqual([])
+  })
+
   it("says why the system refused a change to a project's files", async ({ resources, skip }) => {
     skip(
       process.platform === "win32" || process.getuid?.() === 0,

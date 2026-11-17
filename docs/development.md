@@ -480,29 +480,50 @@ Agents:
   folder is empty.") or two entries and a "More not shown" row; "Files read normally again"
   ends them all. Every sample project has a small tree of its own. `node_modules` is the demo's
   empty folder: it opens onto a muted "Empty" row.
-  A right-click on a row opens its menu, New File… and New Folder…, Copy Path
-  (`~/projects/storefront/…`, also Shift+Alt+C on a focused row) and Copy Relative Path, then
-  Rename… (F2) and Delete (Delete, ⌘⌫ on macOS); one on the tree's empty space, a muted note
-  row, or the line in the tree's place ("The project's folder is empty" and "The project's files
-  can't be read" above) the project folder's, New File…, New Folder…, Copy Path and Refresh,
-  which reads the root and the open folders again as the header's Refresh button does; a copy
-  that works shows nothing. A row only an agent's work has (`src/checkout/OrderSummary.tsx`) or
-  one an agent deleted (`LegacyCheckout.tsx`) offers no New, Rename… or Delete. Making,
-  renaming and deleting are reachable by normal use: each project's tree is the demo's copy in
-  memory, until it boots again, refused as the runner refuses (a taken name, `.git`), and the
-  agents' marks and cursors follow a rename and go with a delete. The naming field's red line
-  shows by typing a name already beside it, such as `src` at the top. A file the project window
-  shows (double-click `package.json`) opens there at its new name when renamed, and says
-  "package.json isn't there any more." once deleted (the demo's window follows the person's
-  deletes and moves, as the runner's watch does); a name a hiding pattern matches, as `debug.log`
-  with `**/*.log` added in Hidden files, is made with a line above the tree naming the pattern. A
-  field whose row leaves the tree, as one an agent's turn end reads away, goes with it. "Next file
-  operation fails" has the next New File…, New Folder…, Rename… or Delete fail, once, with a
-  red-edged line above the tree saying why, until "Files read normally again" lifts it. "File
-  operations not offered" boots the demo again with a backend that makes, renames and deletes
-  nothing, as a runner without them: the menus lose those items and F2 and Delete on a row do
-  nothing; "File operations offered" boots it with them again. On macOS only ⌘⌫ deletes; a
-  forward Delete on a row does nothing.
+  A right-click on a row opens its menu, New File… and New Folder…, Cut (Ctrl+X, ⌘X on macOS), Copy
+  (Ctrl+C) and Paste (Ctrl+V), Copy Path (`~/projects/storefront/…`, also Shift+Alt+C on a focused
+  row) and Copy Relative Path, then Rename… (F2) and Delete (Delete, ⌘⌫ on macOS); one on the tree's
+  empty space, a muted note row, or the line in the tree's place ("The project's folder is empty"
+  and "The project's files can't be read" above) the project folder's, New File…, New Folder…,
+  Paste, Copy Path and Refresh, which reads the root and the open folders again as the header's
+  Refresh button does; a copy of a path that works shows nothing. Paste is greyed until a row is cut
+  or copied. A row only an agent's work has (`src/checkout/OrderSummary.tsx`) or one an agent
+  deleted (`LegacyCheckout.tsx`) offers no New, Cut, Copy, Paste, Rename… or Delete. Making,
+  renaming, cutting, copying, pasting and deleting are reachable by normal use: each project's tree
+  is the demo's copy in memory, until it boots again, refused as the runner refuses (a taken name,
+  `.git`, a folder into itself), and the agents' marks and cursors follow a rename or a cut and go
+  with a delete; a copy is named as the runner names it (`README copy.md`, `README copy 2.md`,
+  `src copy`) and starts with none of their work. A cut row is dimmed with an italic name until it
+  is pasted or Escape in the tree lets it go; a cut pasted into another folder moves there, one
+  pasted back into its own folder just lets go, and a cut onto a name taken there (copy `README.md`
+  into `public`, then cut `README.md` and paste it on `public`'s `favicon.svg`) puts the red-edged
+  line above the tree. What was cut or copied follows a rename of it or of a folder it is in, and
+  goes with a delete of either. The naming field's red line shows by typing a name already beside
+  it, such as `src` at the top. A file the project window shows (double-click `package.json`) opens
+  there at its new name when renamed, and says "package.json isn't there any more." once deleted
+  (the demo's window follows the person's deletes and moves, as the runner's watch does); a name a
+  hiding pattern matches, as `debug.log` with `**/*.log` added in Hidden files, is made with a line
+  above the tree naming the pattern. A field whose row leaves the tree, as one an agent's turn end
+  reads away, goes with it. "Next file operation fails" has the next New File…, New Folder…, Rename…
+  or Delete fail, once, with a red-edged line above the tree saying why, until "Files read normally
+  again" lifts it. "Next paste fails" has the next Paste that copies or moves a row fail, once (a
+  cut pasted back into its own folder moves nothing), with the red-edged line saying it couldn't
+  move or copy that path into the folder, and why (a cut stays dimmed). "Next paste takes 5 s" has
+  the next Paste wait 5 seconds, during which the row pasted shows a spinner in its icon's place and
+  is busy (`aria-busy`) and a cut's Paste stays greyed; then the copy or the moved row takes the
+  selection, a file, unless another file was selected meanwhile, and the keyboard focus only where
+  it is still on the row pasted on (press Ctrl+V on `public`, then ArrowDown: the focus stays where
+  it went); a failure that comes once the panel was hidden and shown again shows, one that comes
+  while it is hidden never does. "Next change's answer is lost" has the next Paste, Rename… or
+  Delete made but answer as though the connection to the runner dropped first: a copy or a Delete
+  puts a red-edged line above the tree saying Novadeck lost its connection before it heard whether
+  it could do it, that it may have been done or may still be under way, and the tree, read again,
+  shows it done; a cut or a Rename shows done with no line, as the folders read say it moved. "Files
+  read normally again" lifts each of them before then. A rename is never a paste, so neither paste
+  fault touches it. "File operations not offered" boots the demo again with a backend that makes,
+  renames, moves, copies and deletes nothing, as a runner without them: the menus lose those items,
+  Paste included, and F2, Delete and Ctrl+X, C and V on a row do nothing; "File operations offered"
+  boots it with them again. On macOS only ⌘⌫ deletes; a forward Delete on a row does nothing.
   "Copying a path fails" has the browser refuse the clipboard, every copy in the page, until
   "Files read normally again" or the demo boots again, as the Plan group's "Copying plan edits
   fails" does (`frontend/demo-debug/src/clipboard.ts`): a copy then puts a red-edged line above
@@ -1081,7 +1102,7 @@ folder of `frontend/ui/src/`:
 | `frontend/core/src/messages.ts`                                 | The contract for agents' messages: threads, states, the pause, and a tab's count.                                              |
 | `frontend/core/src/conversation.ts`                             | The contract for an agent's conversation: transcript items, requests, the port.                                                |
 | `frontend/core/src/inbox.ts`                                    | The contract for the Inbox: rows by source, their type, how they ended, answers, the port.                                     |
-| `frontend/core/src/files.ts`                                    | The Files panel's contract: folders listed one at a time, agents' changes, hide patterns, making, renaming and deleting files. |
+| `frontend/core/src/files.ts`                                    | The Files panel's contract: folders listed one at a time, agents' changes, hide patterns, and the person's changes to files.   |
 | `frontend/core/src/conversation/picks.ts`                       | What the person has picked and written for a dialog's questions, and the answer it makes.                                      |
 | `frontend/core/src/conversation/turns.ts`                       | A conversation grouped into blocks, the turn's status.                                                                         |
 | `frontend/core/src/roster.ts`                                   | A session's terminals and undocked windows, laid out as tiles, their order and status.                                         |

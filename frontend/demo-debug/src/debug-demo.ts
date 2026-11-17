@@ -91,16 +91,21 @@ export type DemoLaunch = {
   readonly forges: boolean
   // Boots again with the backend offering forge integrations or not.
   readonly setForges: (offered: boolean) => void
-  // Whether the backend makes, renames and deletes a project's files; false for a runner
-  // without them.
+  // Whether the backend makes, renames, moves, copies and deletes a project's files; false for a
+  // runner without them.
   readonly fileOperations: boolean
-  // Boots again with the backend making, renaming and deleting files or not.
+  // Boots again with the backend making, renaming, moving, copying and deleting files or not.
   readonly setFileOperations: (offered: boolean) => void
 }
 
-// A backend's files with no file made, renamed or deleted, as a runner without them.
-const readOnly = ({ create: _create, move: _move, remove: _remove, ...files }: ProjectFiles) =>
-  files
+// A backend's files with no file made, renamed, moved, copied or deleted, as a runner without them.
+const readOnly = ({
+  create: _create,
+  move: _move,
+  copy: _copy,
+  remove: _remove,
+  ...files
+}: ProjectFiles) => files
 
 // What the panel's groups read and change of the shell around the demo.
 export type DemoShell = {

@@ -484,6 +484,9 @@ Right-click a file or folder for its menu:
 
 - **New File…** and **New Folder…** make an empty one inside a folder, or beside a file
   (see below).
+- **Cut** (`Ctrl+X`; `Cmd+X` on macOS) and **Copy** (`Ctrl+C`; `Cmd+C`) keep it to paste
+  elsewhere, and **Paste** (`Ctrl+V`; `Cmd+V`) moves or copies what you cut or copied inside a
+  folder, or beside a file (see below).
 - **Copy Path** copies its full path on the computer the project is on, which is the
   runner's. `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or folder
   with the keyboard on it.
@@ -493,13 +496,13 @@ Right-click a file or folder for its menu:
   once you confirm. It doesn't go to the trash, and can't be undone.
 - **Hide in This Project** hides it from the tree in this project (see below).
 
-Both paths are written as that computer writes them, with backslashes for a project on
-Windows. A file that only an agent's work has, which the project's folder doesn't hold yet,
-copies the path it will have there. Its menu, and that of a file an agent deleted, offers no
-new file or folder, rename or delete: they are the agent's to change. Right-click the tree's empty
-space, or the line in its place when the folder is empty, everything in it is hidden, or it
-can't be read, for the project's folder itself: **New File…** and **New Folder…** make one at
-its top, **Copy Path** copies the folder's own path, and **Refresh** reads the files again. A
+Both paths are written as that computer writes them, with backslashes for a project on Windows. A
+file that only an agent's work has, which the project's folder doesn't hold yet, copies the path it
+will have there. Its menu, and that of a file an agent deleted, offers no new file or folder, cut,
+copy, paste, rename or delete: they are the agent's to change. Right-click the tree's empty space,
+or the line in its place when the folder is empty, everything in it is hidden, or it can't be read,
+for the project's folder itself: **New File…** and **New Folder…** make one at its top, **Paste**
+pastes there, **Copy Path** copies the folder's own path, and **Refresh** reads the files again. A
 copy that works says nothing. One that can't, as where a browser doesn't let the page use the
 clipboard, puts a line above the tree saying so until you dismiss it or hide the panel.
 
@@ -522,6 +525,42 @@ folder, leaves the tree, as when an agent removes it, closes; switching to anoth
 it open with what you typed. Novadeck never changes the project's folder itself or Git's own
 `.git`, however a link or name leads to it. Where a backend doesn't make, rename or delete
 files, the menus don't offer it.
+
+### Cutting, copying and pasting
+
+**Cut** and **Copy** keep the file or folder in the panel to paste, as one item: what you cut or
+copy next takes its place. It is the panel's own, for this project, and never on your system's
+clipboard, so `Ctrl+C` on a row copies no text. A cut row is dimmed, with its name in italics, until
+you paste it or press `Escape` in the tree; `Escape` lets go of a cut before it lets go of the
+agents you keep lit. **Paste** stays greyed in the menus while there is nothing to paste. What you
+cut or copied follows a rename of it, or of a folder it is in, and is let go once it, or that
+folder, is deleted or found gone.
+
+Paste puts it inside the folder you pasted on, which opens, beside the file you pasted on, or at the
+top of the project from the tree's empty space. A copy takes its own name where that is free there,
+and otherwise the first free of `name copy.ext`, `name copy 2.ext`, `name copy 3.ext` and so on, as
+VS Code names copies (`.env copy`, and a folder's `src copy`); a folder is copied with everything in
+it, links as links, never what they lead to. What you copied stays to paste again. A cut moves
+there, and is done once it has: pasted back into its own folder it changes nothing and lets go. A
+move never replaces what is there: a taken name puts a line above the tree saying so, and the cut
+stays to paste elsewhere. A move onto another disk is made as a copy, then what was copied is
+deleted where it was: what was added or changed there while it was copied stays, as does what the
+computer won't delete, and the line says what is left.
+
+While a paste runs, the row you cut or copied shows a spinner in its icon's place; a long copy shows
+no progress, and is never cut short. Several pastes can run at once, though a cut can't be pasted
+again while its paste runs. Afterwards a file pasted is selected, unless you selected another
+meanwhile, and the row pasted takes the keyboard focus where it is still on the row you pasted on;
+the project window follows a file you moved, as it does a rename. A paste that fails, as one the
+computer refuses or one whose entry is gone (a cut then lets go), puts a line above the tree saying
+why, though you hid the panel and showed it again meanwhile, and the folders involved are read
+again.
+
+If the connection to the runner drops while a paste, a rename or a delete runs, the runner may still
+finish it. Once the runner is back, the folders involved are read again: a move or a rename they
+show made is taken as done; otherwise a line says Novadeck lost its connection before it heard
+whether it could make the change, and that it may have been done or may still be under way. A change
+asked for while the runner isn't connected is never sent, and the line says nothing was done.
 
 The tree reads its open folders again when the panel is shown and when an agent's turn ends
 in the project; it doesn't watch the folder for changes. **Refresh**, beside **Collapse
@@ -876,13 +915,16 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |
 | Navigate the workspace                            | `Shift+Esc`        | `Shift+Esc`                      |
 
-In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and
-previous of its tabs, and on a tab with focus the arrow keys, `Home` and `End` move along
-them and `Delete` closes it. In the Files panel, `Shift+Alt+C` (`Shift+Option+C` on macOS)
-copies the path of the file or folder with the keyboard on it, `F2` renames it and `Delete`
-(`Cmd+Backspace` on macOS) asks to delete it. On a Files row those keys are the panel's, and
-on macOS a forward `Delete` too, which does nothing there: they never rename or close the
-selected terminal, as they do while navigating.
+In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and previous of its
+tabs, and on a tab with focus the arrow keys, `Home` and `End` move along them and `Delete` closes
+it. In the Files panel, `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or
+folder with the keyboard on it, `F2` renames it and `Delete` (`Cmd+Backspace` on macOS) asks to
+delete it, and `Ctrl+X`, `Ctrl+C` and `Ctrl+V` (`Cmd` on macOS) cut it, copy it and paste on it,
+with the panel's own clipboard; held down, `Ctrl+V` pastes once. Their letters are the ones the keys
+type, or, on a layout that types no Latin letters, as a Russian one, the keys in their places. On a
+Files row those keys are the panel's, and on macOS a forward `Delete` too, which does nothing there:
+they never rename or close the selected terminal, as they do while navigating, nor reach the
+system's clipboard. In the field a name is typed in, they cut, copy and paste its text as usual.
 
 The keyboard's home is the selected terminal. A mouse click on the sidebar, a header or
 the view switch leaves typing there, and the shortcuts above work from terminal input.

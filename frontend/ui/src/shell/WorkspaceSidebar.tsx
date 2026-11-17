@@ -36,11 +36,11 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "terminals"> & {
   // says, the project's directory as the backend's machine writes it, how to read a folder, the
   // person's patterns for hiding files in every project, how to read and replace the project's
   // own where the backend keeps them, how to open Preferences at the person's, how the backend
-  // makes, moves and deletes the project's files where it can, what to tell when one moved, when
-  // an agent's turn last ended, how to follow the works the changes come from while the panel
-  // shows, if they do, how to open a file, the handle of the selected terminal, and the session's
-  // agents for the strip: every terminal's handle in roster order, and the teams as handles, each
-  // lead first. Left out, there is no Files panel.
+  // makes, moves, copies and deletes the project's files where it can, what to tell when one
+  // moved, when an agent's turn last ended, how to follow the works the changes come from while
+  // the panel shows, if they do, how to open a file, the handle of the selected terminal, and the
+  // session's agents for the strip: every terminal's handle in roster order, and the teams as
+  // handles, each lead first. Left out, there is no Files panel.
   files:
     | {
         project: FilesProject | undefined

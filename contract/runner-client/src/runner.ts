@@ -190,6 +190,18 @@ export type Runner = {
       readonly to: string
     }): Promise<EntryChanged>
     /**
+     * Copies the file, folder or link at `from` into the folder `into` (`""` for the project's
+     * own) and answers the copy's path: its own name where that is free in another folder, else
+     * `name copy.ext`, `name copy 2.ext`, … Nothing is overwritten; links copy as links. Rejects
+     * as `moveEntry` does, with `INVALID_DIRECTORY` for a folder copied into itself, and
+     * `CONFLICT` once 1000 names are taken. No time limit: it answers once the copy is made.
+     */
+    copyEntry(input: {
+      readonly projectId: string
+      readonly from: string
+      readonly into: string
+    }): Promise<EntryChanged>
+    /**
      * Deletes the file or folder at `path` for good, a folder with everything in it, a link as a
      * link. Rejects as `moveEntry` does.
      */
@@ -899,6 +911,7 @@ export const connectRunner = async (
       setFilesExclude: (input) => call((client) => client.projects.setFilesExclude(input)),
       createEntry: (input) => call((client) => client.projects.createEntry(input)),
       moveEntry: (input) => call((client) => client.projects.moveEntry(input)),
+      copyEntry: (input) => call((client) => client.projects.copyEntry(input)),
       removeEntry: (input) => call((client) => client.projects.removeEntry(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
     },

@@ -250,17 +250,32 @@ export const workspaceShortcutBindings = (): Record<WorkspaceShortcutName, Short
   },
 })
 
-export type FilesShortcutName = "copyPath" | "rename" | "delete"
+export type FilesShortcutName = "cut" | "copy" | "paste" | "copyPath" | "rename" | "delete"
 
 // Keys the Files panel's tree takes itself, on the row with focus, and stops there: the keymap
 // leaves them be, and Preferences' list, of the workspace's keys, doesn't name them. Copy Path's is
-// known by its letter or its place, as Option changes the letter a Mac types. Each is VS Code's.
-// While navigating, the keymap would take F2 to rename the active terminal and Delete to close it.
+// known by its letter or, where the key types no Latin letter, its place, as Option changes the
+// letter a Mac types (`matchesFilesShortcut`), and so are Cut, Copy and Paste's, as a layout of
+// other letters changes theirs. Each is VS Code's. While navigating, the keymap would take F2 to
+// rename the active terminal and Delete to close it.
 export const filesShortcutBindings = (
   platform: Platform = currentPlatform(),
 ): Record<FilesShortcutName, Shortcut> => {
   const mac = platform === "mac"
+  // ⌘ on a Mac, Ctrl elsewhere, with a letter, known by its place too.
+  const command = (label: string, letter: string): Shortcut => ({
+    label,
+    key: letter.toLowerCase(),
+    code: `Key${letter}`,
+    ctrl: !mac,
+    meta: mac,
+    shift: false,
+    display: [mac ? "⌘" : "Ctrl", letter],
+  })
   return {
+    cut: command("Cut", "X"),
+    copy: command("Copy", "C"),
+    paste: command("Paste", "V"),
     copyPath: {
       label: "Copy Path",
       key: "c",
@@ -315,6 +330,23 @@ export const matchesShortcut = (event: ShortcutInput, shortcut: Shortcut): boole
   event.metaKey === shortcut.meta &&
   event.shiftKey === shortcut.shift &&
   event.altKey === Boolean(shortcut.alt)
+
+// A Files panel's shortcut, as `matchesShortcut` matches one, but by the key's place only where
+// the key types no Latin letter, as a Russian layout's or a Mac's with Option: on a layout of
+// other Latin letters, as Dvorak, the letter it types is the key, and its place another
+// letter's, which may be the workspace's shortcut.
+export const matchesFilesShortcut = (event: ShortcutInput, shortcut: Shortcut): boolean =>
+  matchesShortcut(
+    {
+      key: event.key,
+      code: /^[a-z]$/i.test(event.key) ? "" : event.code,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+    },
+    shortcut,
+  )
 
 // The keys the person holds to dictate, when the shortcut list names them.
 export const dictationKeys = (): readonly string[] =>

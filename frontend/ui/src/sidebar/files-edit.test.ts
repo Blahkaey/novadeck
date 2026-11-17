@@ -5,16 +5,32 @@ import { folderListings } from "../test/files"
 import {
   changeable,
   checkName,
+  clipMoved,
+  clipRemoved,
+  foldersOnTheWay,
+  listedAway,
+  listedMoved,
+  listingsCopied,
   listingsMade,
   listingsMoved,
   listingsRemoved,
   moved,
   nameSelection,
   newEntryIn,
+  pasteOf,
+  pasteReady,
   rowAfterLeaving,
+  type Clip,
   type Naming,
 } from "./files-edit"
-import { buildTree, isRow, visibleLines, type FilesRow, type Listings } from "./files-tree"
+import {
+  buildTree,
+  isRow,
+  visibleLines,
+  type FilesRow,
+  type FolderRead,
+  type Listings,
+} from "./files-tree"
 
 // The storefront's folders as read: src, its cart, and docs, which is empty.
 const listings = folderListings([
@@ -182,6 +198,74 @@ describe("Where a new entry goes", () => {
   })
 })
 
+describe("What a paste does", () => {
+  const rows = visibleLines(buildTree(listings), new Set(["src", "src/cart"])).filter(isRow)
+  const row = (path: string): FilesRow => rows.find((each) => each.node.path === path)!
+  const cut: Clip = { mode: "cut", path: "src/App.tsx", folder: false }
+  const copied: Clip = { ...cut, mode: "copy" }
+
+  it("moves a cut inside a folder, beside a file, or into the root off a row", () => {
+    expect(pasteOf(cut, row("src/cart"))).toEqual({
+      kind: "move",
+      from: "src/App.tsx",
+      into: "src/cart",
+      to: "src/cart/App.tsx",
+    })
+    expect(pasteOf(cut, row("README.md"))).toEqual({
+      kind: "move",
+      from: "src/App.tsx",
+      into: "",
+      to: "App.tsx",
+    })
+    expect(pasteOf(cut, undefined)).toMatchObject({ kind: "move", to: "App.tsx" })
+  })
+
+  it("only lets a cut go that is pasted back into its own folder", () => {
+    expect(pasteOf(cut, row("src"))).toEqual({ kind: "let go" })
+    expect(pasteOf(cut, row("src/App.tsx"))).toEqual({ kind: "let go" })
+  })
+
+  it("copies a copy into the folder, its own too, leaving the name to the backend", () => {
+    expect(pasteOf(copied, row("src"))).toEqual({ kind: "copy", from: "src/App.tsx", into: "src" })
+  })
+
+  it("is ready with something cut or copied, but a cut whose paste is under way", () => {
+    expect(pasteReady(null, [])).toBe(false)
+    expect(pasteReady(cut, [])).toBe(true)
+    expect(pasteReady(cut, [cut])).toBe(false)
+    expect(pasteReady(copied, [copied])).toBe(true)
+  })
+})
+
+describe("What was cut or copied once the tree changes", () => {
+  const clip: Clip = { mode: "cut", path: "src/cart/useCart.ts", folder: false }
+
+  it("follows a move of it, or of a folder it is in", () => {
+    expect(clipMoved(clip, "src/cart", "src/basket")).toEqual({
+      ...clip,
+      path: "src/basket/useCart.ts",
+    })
+    expect(clipMoved(clip, "src/cart/useCart.ts", "useCart.ts")).toMatchObject({
+      path: "useCart.ts",
+    })
+    expect(clipMoved(clip, "src/car", "src/van")).toBe(clip)
+    expect(clipMoved(null, "src", "lib")).toBeNull()
+  })
+
+  it("goes with a delete of it, or of a folder it is in", () => {
+    expect(clipRemoved(clip, "src")).toBeNull()
+    expect(clipRemoved(clip, "src/cart/useCart.ts")).toBeNull()
+    expect(clipRemoved(clip, "src/car")).toBe(clip)
+  })
+})
+
+describe("The folders on the way to a path", () => {
+  it("are each folder from the root's first, the root left out", () => {
+    expect(foldersOnTheWay("a/b/c.ts")).toEqual(["a", "a/b"])
+    expect(foldersOnTheWay("c.ts")).toEqual([])
+  })
+})
+
 describe("Which rows the person may change", () => {
   const work: FilesProject = {
     changes: {
@@ -273,6 +357,59 @@ describe("What the panel knows of the folders after a change", () => {
       expect(names(removed)["src"]).toEqual(["App.tsx"])
       expect(removed.has("src/cart")).toBe(false)
     })
+  })
+
+  context("when an entry is copied", () => {
+    it("lists the copy in its folder, and leaves what a folder copied holds for its read", () => {
+      const copied = listingsCopied(listings, "docs/cart copy", true)
+      expect(names(copied)["docs"]).toEqual(["cart copy"])
+      expect(copied.get("docs")).toMatchObject({ entries: [{ folder: true }] })
+      expect(copied.has("docs/cart copy")).toBe(false)
+    })
+
+    it("leaves a folder not read for its read", () => {
+      const unread = new Map([...listings].filter(([folder]) => folder !== "docs"))
+      expect(listingsCopied(unread, "docs/App.tsx", false).has("docs")).toBe(false)
+    })
+  })
+})
+
+describe("Whether the folders read say an entry is gone", () => {
+  it("is so where its folder, read in full, doesn't list it", () => {
+    expect(listedAway(listings, "src/cart/useCart.ts")).toBe(false)
+    expect(listedAway(listings, "src/cart/gone.ts")).toBe(true)
+  })
+
+  it("is so where a folder on its way is gone, though its own was read before", () => {
+    expect(listedAway(listingsRemoved(listings, "src"), "src/cart/useCart.ts")).toBe(true)
+    expect(listedAway(listings, "lib/cart/useCart.ts")).toBe(true)
+  })
+
+  it("isn't so where a folder on its way isn't read, can't be, or lists only part", () => {
+    const unread: Map<string, FolderRead> = new Map(
+      [...listings].filter(([folder]) => folder !== "src/cart"),
+    )
+    expect(listedAway(unread, "src/cart/gone.ts")).toBe(false)
+    expect(listedAway(new Map(unread).set("src/cart", "failed"), "src/cart/gone.ts")).toBe(false)
+    expect(
+      listedAway(
+        new Map(unread).set("src/cart", { entries: [], truncated: true }),
+        "src/cart/gone.ts",
+      ),
+    ).toBe(false)
+  })
+})
+
+describe("Whether the folders read say an entry moved", () => {
+  it("is so where it is gone from its folder and listed in the one it went to", () => {
+    const after = listingsMoved(listings, "src/App.tsx", "docs/App.tsx")
+    expect(listedMoved(after, "src/App.tsx", "docs/App.tsx")).toBe(true)
+  })
+
+  it("isn't so where it is still where it was, or not where it went", () => {
+    expect(listedMoved(listings, "src/App.tsx", "docs/App.tsx")).toBe(false)
+    const gone = listingsRemoved(listings, "src/App.tsx")
+    expect(listedMoved(gone, "src/App.tsx", "docs/App.tsx")).toBe(false)
   })
 })
 

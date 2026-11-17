@@ -28,12 +28,12 @@ export const folderListing = z.strictObject({
 })
 
 // A file or folder of a project's directory by its path from the project's root, `/` between
-// names, as the Files panel makes, renames, moves and deletes them (`projects.createEntry`,
-// `moveEntry`, `removeEntry`). The runner refuses "" (the root itself) and anything that leads
-// out of the root.
+// names, as the Files panel makes, renames, moves, copies and deletes them
+// (`projects.createEntry`, `moveEntry`, `copyEntry`, `removeEntry`). The runner refuses "" (the
+// root itself), but as the folder a copy goes into, and anything that leads out of the root.
 export const entryPath = z.string().max(4096)
 
-// What a change to a project's entries made: the path of the entry it made or moved.
+// What a change to a project's entries made: the path of the entry it made, moved or copied.
 export const entryChanged = z.strictObject({ path: entryPath })
 
 /**

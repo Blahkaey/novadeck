@@ -97,6 +97,7 @@ export const pause = (ms: number): Promise<void> =>
 // The part of the runner client the adapter uses.
 export type RunnerApi = Pick<
   Runner,
+  | "status"
   | "watch"
   | "projects"
   | "sessions"
@@ -2038,7 +2039,7 @@ export const runnerBackend = (
           await untilAnswered(() => runner.projects.arrange(arrangement))
         }),
       ),
-    files: createRunnerFiles(runner.projects),
+    files: createRunnerFiles(runner, () => connected()),
     history: history.history,
     notes: notes.notes,
     // Once the session it goes to exists on the runner, as one the person just made does

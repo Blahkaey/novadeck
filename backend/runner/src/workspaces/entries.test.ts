@@ -7,15 +7,17 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
+import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
 import { describe, expect, it } from "../test.js"
-import { createEntry, moveEntry, removeEntry, windowsRefusal } from "./entries.js"
+import { copyEntry, createEntry, moveEntry, removeEntry, windowsRefusal } from "./entries.js"
 
 type Resources = { defer: (undo: () => void) => void }
 
@@ -56,6 +58,16 @@ const caseBlind = (root: string): boolean => {
 
 // Whether the system holds this process to a folder's permissions; root is never refused.
 const permissionsHold = process.platform !== "win32" && process.getuid?.() !== 0
+
+// The permission bits of what is at `path`, never followed.
+const modeOf = (path: string): number => lstatSync(path).mode & 0o777
+
+// A socket at `path`, as a program's lock or channel, which stays there until the test ends.
+const socketAt = async (resources: Resources, path: string): Promise<void> => {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(path, resolve))
+  resources.defer(() => new Promise<void>((resolve) => server.close(() => resolve())))
+}
 
 describe("making a file or folder in a project", () => {
   it("makes an empty file, and answers its path", async ({ resources }) => {
@@ -388,6 +400,282 @@ describe("renaming or moving a file or folder in a project", () => {
   })
 })
 
+describe("copying a file, folder or link in a project", () => {
+  it("copies a file into another folder under its own name, and answers its path", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+
+    await expect(copyEntry(root, "README.md", "docs")).resolves.toEqual({
+      path: "docs/README.md",
+    })
+
+    expect(readFileSync(join(root, "docs", "README.md"), "utf8")).toBe("# Shop\n")
+    expect(readFileSync(join(root, "README.md"), "utf8")).toBe("# Shop\n")
+  })
+
+  it("names a copy in its own folder name copy, then name copy 2, before the extension", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+
+    const made: string[] = []
+    for (let copy = 0; copy < 3; copy++)
+      // eslint-disable-next-line no-await-in-loop -- Each copy takes the next name.
+      made.push((await copyEntry(root, "src/cart/useCart.ts", "src/cart")).path)
+
+    expect(made).toEqual([
+      "src/cart/useCart copy.ts",
+      "src/cart/useCart copy 2.ts",
+      "src/cart/useCart copy 3.ts",
+    ])
+    expect(readFileSync(join(root, "src", "cart", "useCart copy 3.ts"), "utf8")).toBe("export {}\n")
+  })
+
+  it("takes the next name where its own is taken in another folder, overwriting nothing", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+    writeFileSync(join(root, "docs", "README.md"), "# Docs\n")
+
+    await expect(copyEntry(root, "README.md", "docs")).resolves.toEqual({
+      path: "docs/README copy.md",
+    })
+
+    expect(readFileSync(join(root, "docs", "README.md"), "utf8")).toBe("# Docs\n")
+  })
+
+  it("names a copy of a dotfile, and of a folder, at the end of the whole name", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+    writeFileSync(join(root, ".env"), "TOKEN=x\n")
+    mkdirSync(join(root, "v1.2"))
+
+    const made = [
+      await copyEntry(root, ".env", ""),
+      await copyEntry(root, "src", ""),
+      await copyEntry(root, "v1.2", ""),
+      await copyEntry(root, "src", ""),
+    ]
+
+    expect(made.map(({ path }) => path)).toEqual([
+      ".env copy",
+      "src copy",
+      "v1.2 copy",
+      "src copy 2",
+    ])
+  })
+
+  it("copies a folder with everything in it", async ({ resources }) => {
+    const { root } = project(resources)
+    mkdirSync(join(root, "src", "empty"))
+
+    await copyEntry(root, "src", "docs")
+
+    expect(tree(root)).toEqual([
+      "README.md",
+      "docs/",
+      "docs/src/",
+      "docs/src/cart/",
+      "docs/src/cart/useCart.ts",
+      "docs/src/empty/",
+      "src/",
+      "src/cart/",
+      "src/cart/useCart.ts",
+      "src/empty/",
+    ])
+    expect(readFileSync(join(root, "docs", "src", "cart", "useCart.ts"), "utf8")).toBe(
+      "export {}\n",
+    )
+  })
+
+  it("never takes a name something holds, a link that leads nowhere or an empty folder", async ({
+    resources,
+  }) => {
+    const { root, outside } = project(resources)
+    symlinkSync(join(outside, "planted.md"), join(root, "README copy.md"))
+    mkdirSync(join(root, "src copy"))
+
+    await expect(copyEntry(root, "README.md", "")).resolves.toEqual({ path: "README copy 2.md" })
+    await expect(copyEntry(root, "src", "")).resolves.toEqual({ path: "src copy 2" })
+
+    expect(readdirSync(outside)).toEqual(["secret.txt"])
+    expect(lstatSync(join(root, "README copy.md")).isSymbolicLink()).toBe(true)
+    expect(readdirSync(join(root, "src copy"))).toEqual([])
+  })
+
+  it("copies a link as a link, as written, inside a copied folder too, never reading what it leads to", async ({
+    resources,
+  }) => {
+    const { root, outside } = project(resources)
+    symlinkSync(outside, join(root, "out"))
+    symlinkSync(join(outside, "secret.txt"), join(root, "docs", "secret.txt"))
+    symlinkSync(join("..", "README.md"), join(root, "docs", "readme"))
+
+    await expect(copyEntry(root, "out", "src")).resolves.toEqual({ path: "src/out" })
+    await copyEntry(root, "docs", "src")
+
+    expect(readlinkSync(join(root, "src", "out"))).toBe(outside)
+    expect(lstatSync(join(root, "src", "docs", "secret.txt")).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(join(root, "src", "docs", "secret.txt"))).toBe(join(outside, "secret.txt"))
+    expect(readlinkSync(join(root, "src", "docs", "readme"))).toBe(join("..", "README.md"))
+    expect(readdirSync(outside)).toEqual(["secret.txt"])
+  })
+
+  it("makes a file of its own of each hard link it copies, leaving the links as they were", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+    mkdirSync(join(root, "same"))
+    writeFileSync(join(root, "same", "a.txt"), "one\n")
+    linkSync(join(root, "same", "a.txt"), join(root, "same", "b.txt"))
+
+    await copyEntry(root, "same", "")
+
+    const [a, b] = ["a.txt", "b.txt"].map((name) => lstatSync(join(root, "same copy", name)))
+    expect([a!.nlink, b!.nlink, a!.ino === b!.ino]).toEqual([1, 1, false])
+    expect(lstatSync(join(root, "same", "a.txt")).nlink).toBe(2)
+    expect(readFileSync(join(root, "same copy", "b.txt"), "utf8")).toBe("one\n")
+  })
+
+  it("keeps the modes of files and folders, and fills a folder that can only be read", async ({
+    resources,
+    skip,
+  }) => {
+    skip(process.platform === "win32", "Windows keeps no permission bits.")
+    const { root } = project(resources)
+    mkdirSync(join(root, "bin", "locked"), { recursive: true })
+    writeFileSync(join(root, "bin", "build.sh"), "#!/bin/sh\n")
+    writeFileSync(join(root, "bin", "locked", "key.pem"), "key\n")
+    chmodSync(join(root, "bin", "build.sh"), 0o751)
+    chmodSync(join(root, "bin", "locked", "key.pem"), 0o600)
+    chmodSync(join(root, "bin", "locked"), 0o555)
+    chmodSync(join(root, "bin"), 0o750)
+    for (const locked of [join(root, "bin", "locked"), join(root, "bin copy", "locked")])
+      resources.defer(() => {
+        if (existsSync(locked)) chmodSync(locked, 0o755)
+      })
+
+    await copyEntry(root, "bin", "")
+
+    expect(
+      ["bin copy", "bin copy/build.sh", "bin copy/locked", "bin copy/locked/key.pem"].map((path) =>
+        modeOf(join(root, path)).toString(8),
+      ),
+    ).toEqual(["750", "751", "555", "600"])
+    expect(readFileSync(join(root, "bin copy", "locked", "key.pem"), "utf8")).toBe("key\n")
+  })
+
+  it("refuses to copy a folder into itself or below it, by any way that leads there", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+    symlinkSync(join(root, "src"), join(root, "code"))
+
+    for (const into of ["src", "src/cart", "code/cart"])
+      // eslint-disable-next-line no-await-in-loop -- One refusal after another.
+      await expect(copyEntry(root, "src", into)).rejects.toMatchObject({
+        code: "INVALID_DIRECTORY",
+        message: "A folder can't be copied into itself.",
+      })
+
+    expect(tree(root).filter((path) => path.startsWith("src/"))).toEqual([
+      "src/",
+      "src/cart/",
+      "src/cart/useCart.ts",
+    ])
+  })
+
+  it("refuses what is missing: the entry, or the folder it would go into", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+
+    await expect(copyEntry(root, "src/gone.ts", "docs")).rejects.toMatchObject({
+      code: "INVALID_DIRECTORY",
+      message: "src/gone.ts isn't there any more.",
+    })
+    await expect(copyEntry(root, "README.md", "missing")).rejects.toMatchObject({
+      code: "INVALID_DIRECTORY",
+    })
+    await expect(copyEntry(root, "README.md", "README.md")).rejects.toMatchObject({
+      code: "INVALID_DIRECTORY",
+      message: "README.md isn't a folder.",
+    })
+  })
+
+  it("refuses to copy into, or out of, a folder a link leads outside the project", async ({
+    resources,
+  }) => {
+    const { root, outside } = project(resources)
+    symlinkSync(outside, join(root, "out"))
+
+    await expect(copyEntry(root, "README.md", "out")).rejects.toMatchObject({
+      code: "INVALID_DIRECTORY",
+    })
+    await expect(copyEntry(root, "out/secret.txt", "")).rejects.toMatchObject({
+      code: "INVALID_DIRECTORY",
+    })
+
+    expect(readdirSync(outside)).toEqual(["secret.txt"])
+    expect(existsSync(join(root, "secret.txt"))).toBe(false)
+  })
+
+  it("removes a copy that fails part way, and says why", async ({ resources, skip }) => {
+    skip(!permissionsHold, "Root, and Windows, are never refused by a folder's permissions.")
+    const { root } = project(resources)
+    mkdirSync(join(root, "src", "sealed"))
+    chmodSync(join(root, "src", "sealed"), 0o000)
+    resources.defer(() => chmodSync(join(root, "src", "sealed"), 0o755))
+
+    await expect(copyEntry(root, "src", "docs")).rejects.toMatchObject({
+      code: "WRITE_REFUSED",
+      message: "The system doesn't allow it: permission denied.",
+    })
+
+    expect(readdirSync(join(root, "docs"))).toEqual([])
+  })
+
+  it("refuses a socket, alone or in a folder, and removes what it copied before it", async ({
+    resources,
+    skip,
+  }) => {
+    skip(process.platform === "win32", "Windows keeps no sockets among a folder's files.")
+    const { root } = project(resources)
+    mkdirSync(join(root, "src", "run"))
+    await socketAt(resources, join(root, "src", "run", "app.sock"))
+
+    await expect(copyEntry(root, "src/run/app.sock", "src/run")).rejects.toMatchObject({
+      code: "WRITE_REFUSED",
+      message: "src/run/app.sock is a socket, which can't be copied.",
+    })
+    await expect(copyEntry(root, "src", "docs")).rejects.toMatchObject({
+      code: "WRITE_REFUSED",
+      message: "src/run/app.sock is a socket, which can't be copied.",
+    })
+
+    expect(readdirSync(join(root, "src", "run"))).toEqual(["app.sock"])
+    expect(readdirSync(join(root, "docs"))).toEqual([])
+  })
+
+  it("says so once a thousand names for a copy are taken", async ({ resources }) => {
+    const { root } = project(resources)
+    mkdirSync(join(root, "logs"))
+    writeFileSync(join(root, "logs", "a.log"), "")
+    writeFileSync(join(root, "logs", "a copy.log"), "")
+    for (let copy = 2; copy <= 1000; copy++)
+      writeFileSync(join(root, "logs", `a copy ${copy}.log`), "")
+
+    await expect(copyEntry(root, "logs/a.log", "logs")).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "There are too many copies of a.log in logs already.",
+    })
+
+    expect(readdirSync(join(root, "logs"))).toHaveLength(1001)
+  })
+})
+
 describe("deleting a file or folder in a project", () => {
   it("deletes a file", async ({ resources }) => {
     const { root } = project(resources)
@@ -439,14 +727,17 @@ describe("deleting a file or folder in a project", () => {
 })
 
 describe("paths a project's entries refuse", () => {
-  // Each of the three changes, at `path`, from it or to it, made when it is called.
+  // Each of the four changes, at `path`, from it or to it, made when it is called.
   const changes = (root: string, path: string): (() => Promise<unknown>)[] => [
     () => createEntry(root, path, false),
     () => createEntry(root, path, true),
     () => moveEntry(root, path, "moved"),
     () => moveEntry(root, "README.md", path),
+    () => copyEntry(root, path, "docs"),
     () => removeEntry(root, path),
   ]
+  // A copy into the folder `path`, which may be the project's own, "".
+  const copyInto = (root: string, path: string) => () => copyEntry(root, "README.md", path)
 
   it("refuses the project's folder itself", async ({ resources }) => {
     const { root } = project(resources)
@@ -475,7 +766,7 @@ describe("paths a project's entries refuse", () => {
       "src//cart",
       "src/",
     ])
-      for (const change of changes(root, path))
+      for (const change of [...changes(root, path), copyInto(root, path)])
         // eslint-disable-next-line no-await-in-loop -- One refusal after another.
         await expect(change()).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })
 
@@ -490,7 +781,7 @@ describe("paths a project's entries refuse", () => {
     mkdirSync(join(root, "vendor", ".GIT"), { recursive: true })
 
     for (const path of [".git", ".git/HEAD", ".git/hooks/pre-commit", "vendor/.GIT", ".Git/x"])
-      for (const change of changes(root, path))
+      for (const change of [...changes(root, path), copyInto(root, path)])
         // eslint-disable-next-line no-await-in-loop -- One refusal after another.
         await expect(change()).rejects.toMatchObject({
           code: "INVALID_DIRECTORY",
@@ -520,10 +811,42 @@ describe("paths a project's entries refuse", () => {
     await expect(moveEntry(root, "gitlink/HEAD", "HEAD")).rejects.toMatchObject(refusal)
     await expect(moveEntry(root, "README.md", "gitlink/README.md")).rejects.toMatchObject(refusal)
     await expect(removeEntry(root, "gitlink/HEAD")).rejects.toMatchObject(refusal)
+    await expect(copyEntry(root, "gitlink/HEAD", "")).rejects.toMatchObject(refusal)
+    await expect(copyEntry(root, "README.md", "gitlink")).rejects.toMatchObject(refusal)
 
     expect(readdirSync(join(root, ".git"))).toEqual(["HEAD"])
     expect(readFileSync(join(root, ".git", "HEAD"), "utf8")).toBe("ref: refs/heads/main\n")
     expect(existsSync(join(root, "README.md"))).toBe(true)
+  })
+
+  it("copies a link to .git as a link, leaving .git", async ({ resources }) => {
+    const { root } = project(resources)
+    mkdirSync(join(root, ".git"))
+    symlinkSync(join(root, ".git"), join(root, "gitlink"))
+
+    await expect(copyEntry(root, "gitlink", "docs")).resolves.toEqual({ path: "docs/gitlink" })
+
+    expect(readlinkSync(join(root, "docs", "gitlink"))).toBe(join(root, ".git"))
+    expect(readdirSync(join(root, ".git"))).toEqual([])
+  })
+
+  it("copies a folder holding another repository with its .git, as a new folder, leaving the first", async ({
+    resources,
+  }) => {
+    const { root } = project(resources)
+    mkdirSync(join(root, "vendor", "lib", ".git"), { recursive: true })
+    writeFileSync(join(root, "vendor", "lib", ".git", "HEAD"), "ref: refs/heads/main\n")
+
+    await expect(copyEntry(root, "vendor", "")).resolves.toEqual({ path: "vendor copy" })
+
+    expect(readFileSync(join(root, "vendor copy", "lib", ".git", "HEAD"), "utf8")).toBe(
+      "ref: refs/heads/main\n",
+    )
+    expect(tree(root, "vendor")).toEqual([
+      "vendor/lib/",
+      "vendor/lib/.git/",
+      "vendor/lib/.git/HEAD",
+    ])
   })
 
   it("deletes a link to .git as a link, leaving .git", async ({ resources }) => {
@@ -554,6 +877,8 @@ describe("paths a project's entries refuse", () => {
       await expect(createEntry(root, "GIT~1/index.lock", false)).rejects.toMatchObject(refusal)
       await expect(removeEntry(root, "GIT~1")).rejects.toMatchObject(refusal)
       await expect(moveEntry(root, "GIT~1", "git")).rejects.toMatchObject(refusal)
+      await expect(copyEntry(root, "GIT~1", "")).rejects.toMatchObject(refusal)
+      await expect(copyEntry(root, "README.md", "GIT~1")).rejects.toMatchObject(refusal)
 
       expect(readdirSync(join(root, ".git"))).toEqual(["HEAD"])
     },

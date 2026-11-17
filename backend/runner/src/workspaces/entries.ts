@@ -1,21 +1,33 @@
 import type { BigIntStats } from "node:fs"
-import { lstat, mkdir, open, readdir, realpath, rename, rm, rmdir, stat } from "node:fs/promises"
-import { join, relative, sep } from "node:path"
+import {
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  stat,
+  unlink,
+} from "node:fs/promises"
+import { dirname, join, relative, sep } from "node:path"
 
 import type { EntryChanged } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
+import { copyInto, copyName, copyTop, type Copied } from "./copy.js"
 import { invalid, segments, within } from "./project-paths.js"
 
 // The person's changes to a project's files from the Files panel: an empty file or folder
-// made, an entry renamed or moved, an entry deleted. Each works on a path from the project's
-// root and is confined to the project's directory: the folder an entry is in, resolved through
-// any links, must lie inside the project's, while the entry itself is never followed, so a link
-// is renamed or deleted as a link. Nothing found there is overwritten. The root and Git's own
-// `.git` are never changed, by any name that resolves into it. What is checked can change before
-// the change is made, as a folder on the way swapped for a link, or a file made at a move's
-// destination, which the rename then replaces: the confinement keeps a slip inside the project,
-// not a process that runs as the person, which can change any file anyway.
+// made, an entry renamed, moved or copied, an entry deleted. Each works on a path from the
+// project's root and is confined to the project's directory: the folder an entry is in, resolved
+// through any links, must lie inside the project's, while the entry itself is never followed, so
+// a link is renamed, copied or deleted as a link. Nothing found there is overwritten. The root and
+// Git's own `.git` are never changed, by any name that resolves into it. What is checked can
+// change before the change is made, as a folder on the way swapped for a link, or a file made at a
+// move's destination, which the rename then replaces: the confinement keeps a slip inside the
+// project, not a process that runs as the person, which can change any file anyway.
 
 const taken = (message: string): DomainError => new DomainError("CONFLICT", message)
 const refused = (message: string): DomainError => new DomainError("WRITE_REFUSED", message)
@@ -42,13 +54,19 @@ export const windowsRefusal = (name: string): string | undefined => {
 }
 
 /**
- * The names of an entry's path: never the root, nor anything of Git's own `.git`, whatever
+ * The names of a path in the project, none for the root: nothing of Git's own `.git`, whatever
  * its letters' case, as a case-blind filesystem would take `.GIT` for it.
  */
-const entryNames = (path: string): string[] => {
+const pathNames = (path: string): string[] => {
   const names = segments(path)
-  if (names.length === 0) throw invalid("Novadeck doesn't change the project's folder itself.")
   if (names.some((name) => name.toLowerCase() === ".git")) throw gitsOwn()
+  return names
+}
+
+/** The names of an entry's path, as `pathNames`, and never the root. */
+const entryNames = (path: string): string[] => {
+  const names = pathNames(path)
+  if (names.length === 0) throw invalid("Novadeck doesn't change the project's folder itself.")
   return names
 }
 
@@ -102,8 +120,6 @@ const failure = (error: unknown, path: string): unknown => {
     case "ENOSPC":
     case "EDQUOT":
       return refused("The disk is full.")
-    case "EXDEV":
-      return refused("It would move to another disk, which Novadeck can't do.")
     case "ENAMETOOLONG":
       return refused("The name is too long for the system.")
     case "ELOOP":
@@ -112,6 +128,18 @@ const failure = (error: unknown, path: string): unknown => {
       return refused(`The system refused it (${code}).`)
   }
 }
+
+/** What a failure says, as the person reads it. */
+const said = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/**
+ * What the system's refusal to delete `path` means, as `failure` says, but for something added
+ * inside a folder as it went, which the system answers as a folder that isn't empty.
+ */
+const removal = (error: unknown, path: string): unknown =>
+  errnoOf(error) === "ENOTEMPTY"
+    ? refused("Something was added inside it while it was being deleted; what is left stays.")
+    : failure(error, path)
 
 /** Runs one change of the filesystem, failing as `failure` says. */
 const act = <T>(change: Promise<T>, path: string): Promise<T> =>
@@ -241,10 +269,155 @@ const entryAt = async (real: string, path: string, shown: string): Promise<BigIn
 }
 
 /**
+ * Makes `target` a copy of the entry at `source`, `entry` its `lstat`, with everything in it, as
+ * `copyTop` and `copyInto` do, and answers what it copied, each folder after what it holds, the
+ * entry itself last; undefined, having made nothing, where something is at `target` already. A
+ * copy that fails part way is removed again and fails as `failure` says for `shown`, the source's
+ * path from the project's root; where it can't be removed, it is said to stay at `made`, the
+ * copy's path from the root.
+ */
+const copyAs = async (
+  source: string,
+  entry: BigIntStats,
+  target: string,
+  shown: string,
+  made: string,
+): Promise<readonly Copied[] | undefined> => {
+  const top = await copyTop(source, entry, target, shown).then(
+    () => true,
+    (error: unknown) => {
+      if (errnoOf(error) === "EEXIST") return false
+      throw failure(error, shown)
+    },
+  )
+  const itself = { path: source, entry }
+  if (!top) return undefined
+  if (!entry.isDirectory()) return [itself]
+  try {
+    return [...(await copyInto(source, target, Number(entry.mode), shown)), itself]
+  } catch (error) {
+    // Something the folder held went while it was copied, as a build or an agent deleted it.
+    const reason =
+      errnoOf(error) === "ENOENT"
+        ? invalid(`Something in ${shown} went while it was being copied.`)
+        : failure(error, shown)
+    await rm(target, { recursive: true, force: true, maxRetries: 2 }).catch(() => {
+      throw refused(`${said(reason)} What was copied of it stays at ${made}.`)
+    })
+    throw reason
+  }
+}
+
+/**
+ * Whether the folder at the real path `path`, inside the project's real directory `real`, is the
+ * folder `folder` or lies inside it: by the system's identity of each folder from it up to the
+ * project's, so no name, link or letters' case that leads to it can hide it.
+ */
+const holds = async (
+  folder: BigIntStats,
+  path: string,
+  real: string,
+  shown: string,
+): Promise<boolean> => {
+  const here = await act(stat(path, { bigint: true }), shown)
+  if (here.dev === folder.dev && here.ino === folder.ino) return true
+  const up = dirname(path)
+  return path !== real && up !== path && holds(folder, up, real, shown)
+}
+
+// How many names a copy tries before it gives up, the first included.
+const copyTries = 1000
+
+/**
+ * Copies the file, folder or link at `from` into the folder `into` (`""` for the project's own),
+ * both from the project's root `root`, and answers the copy's path. It takes its own name where
+ * `into` isn't its folder and nothing is there by that name, else the first of `name copy`, `name
+ * copy 2`, … that nothing holds (`copyName`): each name is taken by making it, so nothing is
+ * overwritten, whatever else writes there meanwhile. A folder copies with everything in it, links
+ * as links. INVALID_DIRECTORY for a folder copied into itself or below it; CONFLICT once
+ * `copyTries` names are taken.
+ */
+export const copyEntry = async (
+  root: string,
+  from: string,
+  into: string,
+): Promise<EntryChanged> => {
+  const source = entryNames(from)
+  const folder = pathNames(into)
+  const real = await projectFolder(root)
+  const sourceFolder = await folderIn(real, source.slice(0, -1))
+  const name = source.at(-1)!
+  const sourcePath = join(sourceFolder, name)
+  const entry = await entryAt(real, sourcePath, from)
+  const targetFolder = await folderIn(real, folder)
+  if (entry.isDirectory() && (await holds(entry, targetFolder, real, into)))
+    throw invalid("A folder can't be copied into itself.")
+  const pathOf = (each: string): string => [...folder, each].join("/")
+  const attempt = async (each: string, left: number): Promise<string> => {
+    if (left === 0)
+      throw taken(
+        `There are too many copies of ${name} in ${folder.length === 0 ? "the project's folder" : into} already.`,
+      )
+    const copied = await copyAs(sourcePath, entry, join(targetFolder, each), from, pathOf(each))
+    return copied ? pathOf(each) : attempt(copyName(each, entry.isDirectory()), left - 1)
+  }
+  const first = targetFolder === sourceFolder ? copyName(name, entry.isDirectory()) : name
+  return { path: await attempt(first, copyTries) }
+}
+
+/** Whether `now`, found where `entry` was, is that entry as it was: the same file, size and time. */
+const unchanged = (entry: BigIntStats, now: BigIntStats): boolean =>
+  now.dev === entry.dev &&
+  now.ino === entry.ino &&
+  now.size === entry.size &&
+  now.mtimeNs === entry.mtimeNs
+
+/**
+ * Deletes the entry at `path` that a copy copied, `entry` as it was then: a file or link only
+ * where it is as it was, and a folder only once it is empty. Answers whether it stays, as one a
+ * build or an agent changed, or added to, while the copy went; one gone already is gone. Rejects
+ * with the system's refusal, as `failure` says for `shown`.
+ */
+const removeCopy = async (path: string, entry: BigIntStats, shown: string): Promise<boolean> => {
+  const gone = (error: unknown): boolean => {
+    if (errnoOf(error) === "ENOENT") return false
+    throw failure(error, shown)
+  }
+  const now = await lstat(path, { bigint: true }).catch((error: unknown) => {
+    gone(error)
+    return undefined
+  })
+  if (now === undefined) return false
+  if (entry.isDirectory())
+    return rmdir(path).then(
+      () => false,
+      (error: unknown) => ["ENOTEMPTY", "EEXIST"].includes(errnoOf(error) ?? "") || gone(error),
+    )
+  if (!unchanged(entry, now)) return true
+  return unlink(path).then(() => false, gone)
+}
+
+/**
+ * Deletes what a copy copied, `copied` as `copyAs` answers it, each folder after what it holds,
+ * as `removeCopy` does, and answers whether anything stays. Rejects with the system's refusal, as
+ * `failure` says for `shown`, the entry's path from the project's root, leaving the rest.
+ */
+const removeCopied = async (copied: readonly Copied[], shown: string): Promise<boolean> => {
+  let stays = false
+  for (const { path, entry } of copied)
+    // eslint-disable-next-line no-await-in-loop -- Each folder goes after what it holds.
+    stays = (await removeCopy(path, entry, shown)) || stays
+  return stays
+}
+
+/**
  * Renames or moves the entry at `from` to `to`, both from the project's root `root`, into a
  * folder that is there already. CONFLICT for a name taken at `to`, unless it is `from` spelled in
  * other letters' case, in its own folder, on a filesystem that doesn't tell them apart;
- * INVALID_DIRECTORY for a folder moved into itself.
+ * INVALID_DIRECTORY for a folder moved into itself, by any way that leads there. Where `to` is on
+ * another filesystem, which a rename can't reach, the entry is copied there exactly, never
+ * overwriting, then what was copied is deleted where it was: what was added or changed there
+ * meanwhile stays, as does what the system won't delete, WRITE_REFUSED saying so.
  */
 export const moveEntry = async (root: string, from: string, to: string): Promise<EntryChanged> => {
   const source = entryNames(from)
@@ -255,7 +428,11 @@ export const moveEntry = async (root: string, from: string, to: string): Promise
   const entry = await entryAt(real, sourcePath, from)
   const targetFolder = await folderIn(real, destination.slice(0, -1))
   const intoItself = invalid("A folder can't move into itself.")
-  if (entry.isDirectory() && within(sourcePath, targetFolder)) throw intoItself
+  if (
+    entry.isDirectory() &&
+    (within(sourcePath, targetFolder) || (await holds(entry, targetFolder, real, to)))
+  )
+    throw intoItself
   const name = destination.at(-1)!
   const targetPath = join(targetFolder, name)
   const there = await lstat(targetPath, { bigint: true }).catch((error: unknown) => {
@@ -268,11 +445,25 @@ export const moveEntry = async (root: string, from: string, to: string): Promise
     targetFolder === sourceFolder &&
     (await sameEntry(entry, there, targetFolder, name))
   if (there && !itself) throw takenIn(destination.slice(0, -1), name)
-  await rename(sourcePath, targetPath).catch((error: unknown) => {
-    // Where a case-blind filesystem keeps a folder's real path in other letters' case than the
-    // way to it, the check above misses a folder moved into itself, which the system refuses.
-    throw entry.isDirectory() && errnoOf(error) === "EINVAL" ? intoItself : failure(error, to)
+  const across = await rename(sourcePath, targetPath).then(
+    () => false,
+    (error: unknown) => {
+      if (errnoOf(error) === "EXDEV") return true
+      // Where a case-blind filesystem keeps a folder's real path in other letters' case than the
+      // way to it, the check above misses a folder moved into itself, which the system refuses.
+      throw entry.isDirectory() && errnoOf(error) === "EINVAL" ? intoItself : failure(error, to)
+    },
+  )
+  if (!across) return { path: to }
+  const copied = await copyAs(sourcePath, entry, targetPath, from, to)
+  if (!copied) throw takenIn(destination.slice(0, -1), name)
+  const stays = await removeCopied(copied, from).catch((error: unknown) => {
+    throw refused(`It was copied to ${to}, but what is left of it stays at ${from}. ${said(error)}`)
   })
+  if (stays)
+    throw refused(
+      `It was copied to ${to}, but what was added to or changed in ${from} while it was being copied stays there.`,
+    )
   return { path: to }
 }
 
@@ -289,8 +480,6 @@ export const removeEntry = async (root: string, path: string): Promise<void> => 
   const target = join(folder, names.at(-1)!)
   await entryAt(real, target, path)
   await rm(target, { recursive: true, maxRetries: 2 }).catch((error: unknown) => {
-    throw errnoOf(error) === "ENOTEMPTY"
-      ? refused("Something was added inside it while it was being deleted; what is left stays.")
-      : failure(error, path)
+    throw removal(error, path)
   })
 }

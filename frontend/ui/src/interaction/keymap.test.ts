@@ -600,6 +600,16 @@ describe("keymap", () => {
           expect(keydown(platform, { key: "a", metaKey: true })).toEqual([])
         })
 
+        // The Files panel's tree takes them on a row, as Cut, Copy and Paste.
+        it("binds no Ctrl or ⌘ with X, C or V, navigating or not", () => {
+          for (const key of ["x", "c", "v"])
+            for (const held of [{ ctrlKey: true }, { metaKey: true }])
+              for (const situation of [undefined, navigating])
+                expect(
+                  keydown(platform, { key, code: `Key${key.toUpperCase()}`, ...held }, situation),
+                ).toEqual([])
+        })
+
         it("leaves typing to inputs, dialogs, overlays and the switcher", () => {
           expect(keydown(platform, { key: "a", target: terminalInput })).toEqual([])
           expect(keydown(platform, { key: "a", target: { editing: true } })).toEqual([])

@@ -15,15 +15,18 @@
 
    Hooks: on a row, data-kind="modified" | "added" | "deleted" (absent: untouched),
    data-folder, data-ignored, data-dim (an agent is lit and did not touch it), data-pulse="a" |
-   "b" (a write just landed; the two names restart the animation) and, being an item,
-   data-selected. On a chip, data-writing (it is writing that row now) and data-lit. On the
-   tree, data-lit="<handle>" while an agent is lit.
+   "b" (a write just landed; the two names restart the animation), data-cut (cut, to move where
+   the person pastes) and, being an item, data-selected. A row a paste copies or moves now has
+   aria-busy="true" on its `.files-row-select`, and a `.files-busy` spinner in its icon's place.
+   On a chip, data-writing (it is writing that row now) and data-lit. On the tree,
+   data-lit="<handle>" while an agent is lit.
 
    Tokens, each optional (its fallback in brackets):
    --files-modified-fg (warning-fg), --files-added-fg (success-fg): a changed file's icon
    and name; a deleted one's are muted. --files-guide-color (line): the guide under an
-   open folder. --files-ignored-opacity (0.5), --files-dim-opacity (0.3): ignored rows,
-   and the rows a lit agent did not touch. --files-pulse-bg (the strong colour at 14%): a
+   open folder. --files-ignored-opacity (0.5), --files-dim-opacity (0.3), --files-cut-opacity
+   (0.45): ignored rows, the rows a lit agent did not touch, and a cut row, whose name is italic
+   too. --files-pulse-bg (the strong colour at 14%): a
    row as a write lands. --files-cursor-bg (strong): the cursor, its glow
    --item-selected-indicator-shadow (none); the trail's edge follows it. --files-chip-fg
    (muted), --files-chip-writing-fg (ink): an agent's chip, and one writing the row.
@@ -55,6 +58,12 @@
 }
 .files-row[data-dim="true"] {
   opacity: var(--files-dim-opacity, 0.3);
+}
+.files-row[data-cut="true"] {
+  opacity: var(--files-cut-opacity, 0.45);
+}
+.files-row[data-cut="true"] .files-name {
+  font-style: italic;
 }
 .files-row-select {
   display: flex;
@@ -233,8 +242,28 @@
   }
 }
 
+/* A paste copies or moves the row now: a spinner in its icon's place, as the History panel's. */
+.files-busy {
+  display: block;
+  width: 14px;
+  height: 1lh;
+  overflow: hidden;
+  color: var(--color-strong);
+  font-family: var(--font-glyphs, var(--font-mono));
+  text-align: center;
+}
+.files-busy::before {
+  display: block;
+  white-space: pre;
+  content: "⠋\A⠙\A⠹\A⠸\A⠼\A⠴\A⠦\A⠧\A⠇\A⠏";
+  animation: terminal-spin 800ms steps(10) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .files-cursor {
+    animation: none;
+  }
+  .files-busy::before {
     animation: none;
   }
   .files-trail {

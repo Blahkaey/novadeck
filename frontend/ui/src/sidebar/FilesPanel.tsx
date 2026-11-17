@@ -1,5 +1,6 @@
 import {
   absolutePath,
+  ChangeUnanswered,
   type FilesExclude,
   type FolderListing,
   type FilesProject,
@@ -11,7 +12,11 @@ import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { ChevronsDownUp, EyeOff, File, Folder, RefreshCw, X } from "lucide-react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
-import { currentPlatform, filesShortcutBindings, matchesShortcut } from "../interaction/shortcuts"
+import {
+  currentPlatform,
+  filesShortcutBindings,
+  matchesFilesShortcut,
+} from "../interaction/shortcuts"
 import {
   keptWorking,
   litSet,
@@ -25,6 +30,9 @@ import {
   atOrBelow,
   changeable,
   checkName,
+  foldersOnTheWay,
+  listedMoved,
+  listingsCopied,
   listingsMade,
   listingsMoved,
   listingsRemoved,
@@ -64,6 +72,8 @@ import { FilesStrip } from "./FilesStrip"
 import { NoteRow, TreeRow, type Pointed } from "./FilesTreeRows"
 import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
+import { useFilesClipboard, type PasteChanges } from "./useFilesClipboard"
+import { useFocusOnceShown, focusMovable } from "./useFocusOnceShown"
 import { useFolderReader } from "./useFolderReader"
 import {
   useProjectExclude,
@@ -71,6 +81,7 @@ import {
   type ProjectExcludeSource,
 } from "./useProjectExclude"
 import { usePulses } from "./usePulses"
+import { useShowingNow } from "./useShowingNow"
 import { useTreeMeasure } from "./useTreeMeasure"
 
 const noFolders: ReadonlySet<string> = new Set()
@@ -92,23 +103,31 @@ const deleteBar = (row: FilesRow): React.JSX.Element => (
   </SubjectBar>
 )
 
-// Whether the panel may still move the page's focus, to a row it wants focused: focus is on
-// nothing, on a row of the tree `tree`, or left in the closing question whose answer deleted a
-// row (a dialog gives back no focus a page placed meanwhile). Never out of the field a name is
-// typed in, nor from anywhere else the person put it.
-const focusMovable = (tree: HTMLElement | null): boolean => {
-  const focused = document.activeElement
-  if (focused === null || focused === document.body) return true
-  if (focused.closest('[role="alertdialog"][data-state="closed"]')) return true
-  return tree?.contains(focused) === true && !focused.closest(".files-naming-row")
-}
-
 // The path of the row an event happened in, from anywhere in it, its chips too; none on the
 // tree's empty space or a note.
 const pathAt = (target: EventTarget): string | undefined =>
   target instanceof Element
     ? target.closest(".files-row")?.querySelector<HTMLElement>("[data-path]")?.dataset["path"]
     : undefined
+
+// Whether the focus is still where a paste asked on the row `asked` (null off a row) left it: on
+// that row of the tree `tree`, or on nothing, as where that row went. Anywhere else, the person
+// put it there since.
+const focusStays = (tree: HTMLElement | null, asked: string | null): boolean => {
+  const focused = document.activeElement
+  if (focused === null || focused === document.body) return true
+  return asked !== null && tree?.contains(focused) === true && pathAt(focused) === asked
+}
+
+// Where a change the person asked for leaves the tree once it is made: the focus on the entry
+// changed, or on the row `instead` where the patterns hide it, or left where it is; and the
+// selection and the tab stop as they were when it was asked (`was`), which move to the entry
+// only where they haven't moved since.
+type Landing = {
+  readonly focus: boolean
+  readonly instead: string | null
+  readonly was: { readonly selected: string | null; readonly stop: string | null }
+}
 
 // The project's files, a folder read when the person opens it, and read again when the panel is
 // shown again or an agent's turn ends. Where the backend tells what its agents changed (the
@@ -123,8 +142,9 @@ const pathAt = (target: EventTarget): string | undefined =>
 // the project's are read when the panel is shown, and edited in the dialog the header's Hidden
 // files opens, or added to by a row's Hide in This Project. Where the backend makes them, the
 // menu and the keys (F2, Delete) make a new file or folder, named in a field in the tree, rename
-// a row in its place, and delete one once the person confirms; then the folders involved are read
-// again and the row made or renamed takes the selection.
+// a row in its place, and delete one once the person confirms, and the menu and Ctrl or ⌘ with X,
+// C and V cut or copy a row and paste it elsewhere, with the panel's own clipboard; then the
+// folders involved are read again and the row made, renamed or pasted takes the selection.
 export const FilesPanel = ({
   project,
   directory,
@@ -158,8 +178,8 @@ export const FilesPanel = ({
   projectExclude?: ProjectExcludeSource | undefined
   // Opens Preferences where the person's patterns for every project are edited.
   onExcludeSettings: () => void
-  // How the backend makes, moves and deletes the project's files and folders, each where it can;
-  // left out, nothing is offered.
+  // How the backend makes, moves, copies and deletes the project's files and folders, each where
+  // it can; left out, nothing is offered.
   entries?: EntryChanges | undefined
   // Told an entry moved, by its paths from the root, so what shows it can follow it.
   onMoved?: ((from: string, to: string) => void) | undefined
@@ -346,17 +366,8 @@ export const FilesPanel = ({
   // The row that holds the tree's one Tab stop: the last one focused, or the first.
   const [stop, setStop] = useState<string | null>(null)
   const tabStop = rows.some((row) => row.node.path === stop) ? stop : (rows[0]?.node.path ?? null)
-  // The row that takes focus once it shows, as a row made or renamed with the keyboard, unless
-  // the panel may no longer move the focus by then (`focusMovable`). A change of the rows comes
-  // with every one.
-  const focusing = useRef<string | null>(null)
-  useLayoutEffect(() => {
-    const path = focusing.current
-    if (path === null || !rows.some((row) => row.node.path === path)) return
-    focusing.current = null
-    if (!focusMovable(treeNode)) return
-    treeNode?.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)?.focus()
-  }, [rows, treeNode])
+  // The row that takes focus once it shows, as a row made, renamed or pasted with the keyboard.
+  const focusOnceShown = useFocusOnceShown(rows, treeNode)
   // A field whose row, or the folder it adds to, left the tree, as when a reading or the agents
   // kept no longer show it, goes with it, and the tree's tab stop takes the focus it had. A field
   // is open from when it shows until a key or a blur ends it; one that ends otherwise was lost.
@@ -385,6 +396,10 @@ export const FilesPanel = ({
     }
   }
   const failed = showing && failure?.shown === shownTimes ? failure.text : undefined
+  // Says what the panel couldn't do above the tree, in the showing it settles in: none, once the
+  // panel was hidden, though it shows again before then.
+  const showingNow = useShowingNow(showing, shownTimes)
+  const say = (text: string): void => setFailure({ text, shown: showingNow() })
 
   const toggle = (path: string, to?: boolean): void => {
     const next = new Set(open)
@@ -427,8 +442,7 @@ export const FilesPanel = ({
   // the tree. A copy that works says nothing.
   const copy = (text: string): void => {
     setFailure(null)
-    const refused = (): void =>
-      setFailure({ text: `Couldn't copy ${text} to the clipboard.`, shown: shownTimes })
+    const refused = (): void => say(`Couldn't copy ${text} to the clipboard.`)
     const write = navigator.clipboard?.writeText(text)
     if (!write) {
       refused()
@@ -459,26 +473,24 @@ export const FilesPanel = ({
           if (focusMovable(treeNode)) focusRow(next)
         },
         (error: unknown) =>
-          setFailure({
-            text: `Couldn't hide ${path}: ${error instanceof Error ? error.message : "Novadeck could not save it."}`,
-            shown: shownTimes,
-          }),
+          say(
+            `Couldn't hide ${path}: ${error instanceof Error ? error.message : "Novadeck could not save it."}`,
+          ),
       )
     }
-  const focusOnceShown = (path: string | null): void => {
-    focusing.current = path
-  }
-  // What a change to the project's files couldn't do, with the backend's reason, above the tree;
-  // in the showing it was asked in only, as a copy's. The folders `involved` are read again, as
-  // a refusal may come once part of the change was made.
+  // What a change to the project's files, `action`, couldn't do, with the backend's reason,
+  // above the tree; or, where the connection dropped before the backend answered, that it may
+  // have been done. The folders `involved` are read again, as a refusal may come once part of the
+  // change was made.
   const failing =
-    (what: string, involved: readonly string[]) =>
+    (action: string, involved: readonly string[]) =>
     (error: unknown): void => {
       involved.forEach(read)
-      setFailure({
-        text: `${what}: ${error instanceof Error ? error.message : "Novadeck could not change it."}`,
-        shown: shownTimes,
-      })
+      say(
+        error instanceof ChangeUnanswered
+          ? `Novadeck lost its connection before it heard whether it could ${action}; it may have been done, or may still be under way.`
+          : `Couldn't ${action}: ${error instanceof Error ? error.message : "Novadeck could not change it."}`,
+      )
     }
   // Starts naming a new file or folder where the menu was asked: inside a folder, which opens,
   // beside a file, or in the root off a row.
@@ -498,30 +510,24 @@ export const FilesPanel = ({
     setNaming(null)
     if (keyboard) focusOnceShown(asked.kind === "rename" ? asked.path : (asked.from ?? tabStop))
   }
-  // Once an entry is made or renamed at `path` it is the row selected (a file) and the tree's tab
-  // stop, which a key also gives the focus, and the agents kept let go so it shows; one the
-  // patterns hide says so above the tree, naming the pattern, and a key gives the focus to the
-  // row `instead`, where it is one.
-  const changed = (
-    path: string,
-    folder: boolean,
-    keyboard: boolean,
-    done: string,
-    instead: string | null,
-  ): void => {
+  // Where the person's selection and tab stop are as they ask for a change.
+  const placeNow = (): Landing["was"] => ({ selected, stop })
+  // Once an entry is made, renamed or pasted at `path` it is the row selected (a file) and the
+  // tree's tab stop, each where it hasn't moved since, and takes the focus as `landing` says, and
+  // the agents kept are let go so it shows; one the patterns hide says so above the tree, naming
+  // the pattern, and the focus goes to the row `instead`, where it is one.
+  const changed = (path: string, folder: boolean, done: string, landing: Landing): void => {
+    const { focus, instead, was } = landing
     const pattern = hidingPattern(exclude, projectPatterns ?? noPatterns, path)
     if (pattern !== undefined) {
-      setFailure({
-        text: `${done} ${path}, which the pattern ${pattern} hides.`,
-        shown: shownTimes,
-      })
-      if (keyboard) focusOnceShown(instead)
+      say(`${done} ${path}, which the pattern ${pattern} hides.`)
+      if (focus) focusOnceShown(instead)
       return
     }
     setKept(noAgents)
-    if (!folder) setSelected(path)
-    setStop(path)
-    if (keyboard) focusOnceShown(path)
+    if (!folder) setSelected((current) => (current === was.selected ? path : current))
+    setStop((current) => (current === was.stop ? path : current))
+    if (focus) focusOnceShown(path)
   }
   // Makes the entry the person named in the folder `parent`, opening and reading again the
   // folders on the way to it; one the patterns hide leaves the focus on the row asked on.
@@ -532,21 +538,60 @@ export const FilesPanel = ({
     keyboard: boolean,
   ): void => {
     const { parent, folder } = asked
+    const was = placeNow()
     create(path, folder).then(
       (made) => {
-        const names = made.split("/")
-        const way = names.slice(0, -1).map((_, at) => names.slice(0, at + 1).join("/"))
+        const way = foldersOnTheWay(made)
         setListings((known) => listingsMade(known, made, folder))
         setOpenFolders((current) => current && new Set([...current, ...way]))
         ;["", ...way].forEach(read)
-        changed(made, folder, keyboard, "Made", asked.from ?? null)
+        changed(made, folder, "Made", { focus: keyboard, instead: asked.from ?? null, was })
       },
-      failing(`Couldn't make ${path}`, [parent]),
+      failing(`make ${path}`, [parent]),
     )
   }
-  // Renames the entry at `from` to `to`; an open folder keeps what it lists and what is open in
-  // it, and the selection and tab stop follow, as does what shows it outside the panel. Where the
-  // patterns hide its new name, the row `after` takes the focus in its place.
+  // Once the entry at `from` moved to `path`, renamed or pasted after a cut: an open folder keeps
+  // what it lists and what is open in it, the selection and tab stop follow, as do what was cut or
+  // copied and what shows it outside the panel, and the folders it left and went to are read
+  // again. Then it is the row `changed` makes it.
+  const settleMove = (
+    from: string,
+    path: string,
+    folder: boolean,
+    done: string,
+    landing: Landing,
+  ): void => {
+    setListings((known) => listingsMoved(known, from, path))
+    setOpenFolders(
+      (current) => current && new Set([...current].map((each) => moved(each, from, path))),
+    )
+    setSelected((current) => current && moved(current, from, path))
+    setStop((current) => current && moved(current, from, path))
+    clipboard.moved(from, path)
+    new Set([parentOf(from), parentOf(path)]).forEach(read)
+    onMoved?.(from, path)
+    changed(path, folder, done, landing)
+  }
+  // Moves the entry at `from` to `to`, a rename or a cut pasted, and answers where it is. A move
+  // the backend never answered (`ChangeUnanswered`) whose entry the folders, read again, show at
+  // `to` by then was made; one they don't rejects as it did.
+  const moveTo = (
+    move: NonNullable<EntryChanges["move"]>,
+    from: string,
+    to: string,
+  ): Promise<string> =>
+    move(from, to).catch(async (error: unknown) => {
+      if (!(error instanceof ChangeUnanswered)) throw error
+      const folders = [...new Set([parentOf(from), parentOf(to)])]
+      const listed = await Promise.all(folders.map(list)).catch(() => {
+        throw error
+      })
+      if (!listedMoved(new Map(folders.map((folder, at) => [folder, listed[at]!])), from, to))
+        throw error
+      return to
+    })
+  // Renames the entry at `from` to `to`; where the patterns hide its new name, the row `after`
+  // takes the focus in its place.
   const rename = (
     move: NonNullable<EntryChanges["move"]>,
     asked: Extract<Naming, { readonly kind: "rename" }>,
@@ -559,21 +604,53 @@ export const FilesPanel = ({
       ? (rowAfterLeaving(visibleLines(tree, open, rootTruncated, stillKept).filter(isRow), from)
           ?.node.path ?? null)
       : null
-    move(from, to).then(
-      (path) => {
-        setListings((known) => listingsMoved(known, from, path))
-        setOpenFolders(
-          (current) => current && new Set([...current].map((each) => moved(each, from, path))),
-        )
-        setSelected((current) => current && moved(current, from, path))
-        setStop((current) => current && moved(current, from, path))
-        new Set([parentOf(from), parentOf(path)]).forEach(read)
-        onMoved?.(from, path)
-        changed(path, folder, keyboard, "Renamed to", after)
-      },
-      failing(`Couldn't rename ${from} to ${nameOf(to)}`, []),
+    const was = placeNow()
+    moveTo(move, from, to).then(
+      (path) =>
+        settleMove(from, path, folder, "Renamed to", { focus: keyboard, instead: after, was }),
+      failing(`rename ${from} to ${nameOf(to)}`, [parentOf(from)]),
     )
   }
+  // How a paste is made where the backend moves and copies files: a cut moved as a rename is, a
+  // copy made under the name the backend chose. Afterwards the entry pasted takes the selection
+  // and the tab stop where they haven't moved since, and the focus where it is still on the row
+  // the paste was asked on; that row keeps it where the patterns hide the entry.
+  const moveFile = entries?.move
+  const copyFile = entries?.copy
+  const pasteChanges: PasteChanges | undefined =
+    moveFile && copyFile
+      ? {
+          move: (from, to, folder, asked) => {
+            const was = placeNow()
+            return moveTo(moveFile, from, to).then((path) => {
+              const focus = focusStays(treeNode, asked)
+              settleMove(from, path, folder, "Moved to", { focus, instead: asked, was })
+              return path
+            })
+          },
+          copy: (from, into, folder, asked) => {
+            const was = placeNow()
+            return copyFile(from, into).then((path) => {
+              setListings((known) => listingsCopied(known, path, folder))
+              read(into)
+              const focus = focusStays(treeNode, asked)
+              changed(path, folder, "Copied to", { focus, instead: asked, was })
+              return path
+            })
+          },
+        }
+      : undefined
+  const clipboard = useFilesClipboard({
+    changes: pasteChanges,
+    listings,
+    read,
+    opened: (folder) => {
+      if (folder !== "" && !open.has(folder)) toggle(folder, true)
+    },
+    began: () => setFailure(null),
+    failing,
+  })
+  const { actions: clipActions } = clipboard
   // Makes or renames what the person named, which the menu and the keys ask for only where the
   // backend makes that change. With a key, the row it was asked on holds the focus meanwhile,
   // and keeps it if the change is refused.
@@ -599,10 +676,11 @@ export const FilesPanel = ({
           (current) => current && new Set([...current].filter((each) => !atOrBelow(each, path))),
         )
         setSelected((current) => (current !== null && atOrBelow(current, path) ? null : current))
+        clipboard.removed(path)
         read(parentOf(path))
         focusOnceShown(next?.node.path ?? null)
       },
-      failing(`Couldn't delete ${path}`, [parentOf(path), ...(open.has(path) ? [path] : [])]),
+      failing(`delete ${path}`, [parentOf(path), ...(open.has(path) ? [path] : [])]),
     )
   }
   // Escape in the strip or the tree lets go of every kept agent, back to following the selected
@@ -613,8 +691,13 @@ export const FilesPanel = ({
     setKept(noAgents)
   }
   // The tree keyboard pattern; Space and a folder's Enter are the buttons' own click, a file's
-  // Enter opens it.
+  // Enter opens it. Escape lets go of what was cut first, and of the kept agents only then.
   const onKeyDown = (event: React.KeyboardEvent): void => {
+    const plain = !(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+    if (event.key === "Escape" && plain && clipboard.letGo()) {
+      event.stopPropagation()
+      return
+    }
     onEscape(event)
     const path = pathAt(event.target)
     const index = rows.findIndex((row) => row.node.path === path)
@@ -623,22 +706,37 @@ export const FilesPanel = ({
     const keys = filesShortcutBindings(platform)
     // Shift+Alt+C copies the focused row's path. It stops here, or the workspace would type its
     // character into the selected terminal.
-    if (matchesShortcut(event, keys.copyPath)) {
+    if (matchesFilesShortcut(event, keys.copyPath)) {
       event.preventDefault()
       event.stopPropagation()
       copy(absolutePath(directory, row.node.path))
+      return
+    }
+    // Ctrl or ⌘ with X, C and V cut, copy and paste the row with the panel's own clipboard, never
+    // the system's, where the backend may and the row is the project's. They stop here whatever
+    // they do. A paste held down pastes once.
+    const cutting = matchesFilesShortcut(event, keys.cut)
+    const copying = matchesFilesShortcut(event, keys.copy)
+    const pasting = matchesFilesShortcut(event, keys.paste)
+    if (cutting || copying || pasting) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!changeable(row.node) || !clipActions) return
+      if (cutting) clipActions.take(row, "cut")
+      if (copying) clipActions.take(row, "copy")
+      if (pasting && !event.repeat) clipActions.paste(row)
       return
     }
     // F2 renames the row and Delete deletes it, where the backend may and the row is the
     // project's. Both stop here whatever they do: while navigating, the keymap would rename or
     // close the active terminal. On macOS only ⌘⌫ deletes, as in Finder, and a plain forward
     // Delete stops here too, doing nothing.
-    const renaming = matchesShortcut(event, keys.rename)
+    const renaming = matchesFilesShortcut(event, keys.rename)
     const forwardDelete =
       platform === "mac" &&
       event.key === "Delete" &&
       !(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
-    if (renaming || forwardDelete || matchesShortcut(event, keys.delete)) {
+    if (renaming || forwardDelete || matchesFilesShortcut(event, keys.delete)) {
       event.preventDefault()
       event.stopPropagation()
       if (forwardDelete || !changeable(row.node)) return
@@ -762,6 +860,14 @@ export const FilesPanel = ({
             onRefresh: refresh,
             ...(editing && { onHide: hideIn(editing) }),
             ...(entries?.create && { onNew: startNew }),
+            ...(clipActions && {
+              clipboard: {
+                onCut: (row: FilesRow) => clipActions.take(row, "cut"),
+                onCopy: (row: FilesRow) => clipActions.take(row, "copy"),
+                ready: clipboard.ready,
+                onPaste: clipActions.paste,
+              },
+            }),
             ...(entries?.move && { onRename: startRename }),
             ...(entries?.remove && { onDelete: setDeleting }),
           })}
@@ -820,6 +926,10 @@ export const FilesPanel = ({
                         tabStop={tabStop === line.node.path}
                         pulse={pulses[line.node.path]}
                         shownTimes={shownTimes}
+                        cut={
+                          clipboard.clip?.mode === "cut" && clipboard.clip.path === line.node.path
+                        }
+                        busy={clipboard.busy(line.node.path)}
                         onActivate={activate}
                         onOpenFile={openFile}
                         onFocus={setStop}

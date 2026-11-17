@@ -108,15 +108,16 @@ export const SidebarSection = memo((): React.JSX.Element => {
       },
     [excludeFeed, projectId],
   )
-  // How the backend makes, moves and deletes the project's files, each where it can.
+  // How the backend makes, moves, copies and deletes the project's files, each where it can.
   const entries = useMemo(() => {
     if (!filesFeed) return undefined
-    const { create, move, remove } = filesFeed
+    const { create, move, copy, remove } = filesFeed
     return {
       ...(create && {
         create: (path: string, folder: boolean) => create(projectId, path, folder),
       }),
       ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),
+      ...(copy && { copy: (from: string, into: string) => copy(projectId, from, into) }),
       ...(remove && { remove: (path: string) => remove(projectId, path) }),
     }
   }, [filesFeed, projectId])

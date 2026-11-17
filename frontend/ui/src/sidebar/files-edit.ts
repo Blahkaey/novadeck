@@ -3,8 +3,9 @@ import type { FolderEntry } from "@novadeck/core/files"
 import type { FilesNode, FilesRow, FolderRead, Listings } from "./files-tree"
 
 // The Files panel's changes to the project's files, apart from how it draws them: what the person
-// is naming and whether the name will do, where a new entry goes, which rows they may change, and
-// what the panel knows of the folders once a change is made, until they are read again.
+// is naming and whether the name will do, where a new entry or a paste goes, what was cut or copied
+// to paste, which rows they may change, and what the panel knows of the folders once a change is
+// made, until they are read again.
 
 // What the person is naming: a new file or folder in the folder `parent` ("" for the root), asked
 // for on the row `from` (none off a row), or a new name for the entry at `path`.
@@ -17,25 +18,75 @@ export type Naming =
     }
   | { readonly kind: "rename"; readonly path: string; readonly folder: boolean }
 
-// How the backend makes, moves and deletes the project's files and folders, by their paths from
-// the root, each where it can (see `ProjectFiles`): `create` and `move` answer the path they made.
+// How the backend makes, moves, copies and deletes the project's files and folders, by their paths
+// from the root, each where it can (see `ProjectFiles`): `create`, `move` and `copy` answer the
+// path they made; `copy` takes the folder it copies into, "" for the root.
 export type EntryChanges = {
   readonly create?: ((path: string, folder: boolean) => Promise<string>) | undefined
   readonly move?: ((from: string, to: string) => Promise<string>) | undefined
+  readonly copy?: ((from: string, into: string) => Promise<string>) | undefined
   readonly remove?: ((path: string) => Promise<void>) | undefined
+}
+
+// What the person cut or copied in the panel, to paste: the entry at `path`, a folder or not, to be
+// moved (`cut`) or copied where they paste. The panel's own, never the system's clipboard.
+export type Clip = {
+  readonly mode: "cut" | "copy"
+  readonly path: string
+  readonly folder: boolean
 }
 
 export const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
 
 export const nameOf = (path: string): string => path.slice(path.lastIndexOf("/") + 1)
 
-const childOf = (parent: string, name: string): string =>
+export const childOf = (parent: string, name: string): string =>
   parent === "" ? name : `${parent}/${name}`
 
-// Where a new entry asked for on a row goes: inside a folder, beside a file, and in the root off
-// a row.
+// The folders on the way to `path`, outermost first, the root left out: `a` and `a/b` for
+// `a/b/c.ts`.
+export const foldersOnTheWay = (path: string): string[] => {
+  const names = path.split("/")
+  return names.slice(0, -1).map((_, at) => names.slice(0, at + 1).join("/"))
+}
+
+// Where a new entry, or a paste, asked for on a row goes: inside a folder, beside a file, and in
+// the root off a row.
 export const newEntryIn = (row: FilesRow | undefined): string =>
   row === undefined ? "" : row.node.folder ? row.node.path : parentOf(row.node.path)
+
+// What pasting what was cut or copied on a row does (none: off a row): nothing but let a cut go,
+// for one pasted back into its own folder; move a cut to `to`; or copy into the folder `into`,
+// under the name the backend chooses. A paste goes where a new entry would (`newEntryIn`).
+export type Paste =
+  | { readonly kind: "let go" }
+  | { readonly kind: "move"; readonly from: string; readonly into: string; readonly to: string }
+  | { readonly kind: "copy"; readonly from: string; readonly into: string }
+
+export const pasteOf = (clip: Clip, row: FilesRow | undefined): Paste => {
+  const into = newEntryIn(row)
+  if (clip.mode === "copy") return { kind: "copy", from: clip.path, into }
+  if (parentOf(clip.path) === into) return { kind: "let go" }
+  return { kind: "move", from: clip.path, into, to: childOf(into, nameOf(clip.path)) }
+}
+
+// Whether what was cut or copied can be pasted now: something is, and not a cut whose paste is
+// under way (`runs`, the pastes under way), whose entry may be gone by the time it ends.
+export const pasteReady = (clip: Clip | null, runs: readonly Clip[]): boolean =>
+  clip !== null && !runs.some((run) => run.mode === "cut" && run.path === clip.path)
+
+// What was cut or copied once the entry at `from` moved to `to`, which it follows where it is
+// that entry or lies in it.
+export const clipMoved = (clip: Clip | null, from: string, to: string): Clip | null => {
+  if (clip === null) return null
+  const path = moved(clip.path, from, to)
+  return path === clip.path ? clip : { ...clip, path }
+}
+
+// What was cut or copied once the entry at `path` is deleted: nothing, where it is that entry or
+// lies in it.
+export const clipRemoved = (clip: Clip | null, path: string): Clip | null =>
+  clip && atOrBelow(clip.path, path) ? null : clip
 
 // Whether the person may rename, delete or make entries in a row's entry: one its folder lists
 // and no agent deleted. A row only an agent's work has isn't in the project's folder.
@@ -149,6 +200,40 @@ export const listingsMoved = (listings: Listings, from: string, to: string): Lis
   withEntry(next, parentOf(from), nameOf(from), undefined)
   if (entry) withEntry(next, parentOf(to), nameOf(to), { ...entry, name: nameOf(to) })
   return next
+}
+
+// What the panel knows of the folders once a copy is made at `path`, a folder or not, until they
+// are read again: the copy in its folder, where that folder is read. What a folder copied holds is
+// left for its own read, as it opens.
+export const listingsCopied = (listings: Listings, path: string, folder: boolean): Listings => {
+  const next = new Map(listings)
+  withEntry(next, parentOf(path), nameOf(path), { name: nameOf(path), folder, ignored: false })
+  return next
+}
+
+// Whether the folders read so far say `path` is gone: a folder on its way, or its own, read in
+// full without the next name. What isn't read, or couldn't be, says nothing.
+export const listedAway = (listings: Listings, path: string): boolean => {
+  const names = path.split("/")
+  return names.some((name, at) => {
+    const listing = listings.get(names.slice(0, at).join("/"))
+    return (
+      typeof listing === "object" &&
+      !listing.truncated &&
+      !listing.entries.some((each) => each.name === name)
+    )
+  })
+}
+
+// Whether the folders read say the entry at `from` is at `to` now: gone from where it was, and
+// listed where it went.
+export const listedMoved = (listings: Listings, from: string, to: string): boolean => {
+  const there = listings.get(parentOf(to))
+  return (
+    listedAway(listings, from) &&
+    typeof there === "object" &&
+    there.entries.some((each) => each.name === nameOf(to))
+  )
 }
 
 // What the panel knows of the folders once `path` is deleted: neither it nor anything below it.

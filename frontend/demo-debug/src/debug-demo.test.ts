@@ -107,13 +107,16 @@ describe("the debug layer's demo", () => {
     expect(createDebugDemo({ ...launch(), worktrees: false }).worktrees).toBeUndefined()
   })
 
-  it("makes, renames and deletes a project's files unless the launch says the backend doesn't", () => {
+  it("makes, renames, copies and deletes a project's files unless the launch says the backend doesn't", () => {
     // The agents demo, whose storefront has files.
     const agents = { ...launch(), variant: "agents" as const }
     const offered = createDebugDemo(agents).files
     const reading = createDebugDemo({ ...agents, fileOperations: false }).files
-    expect([offered?.create, offered?.move, offered?.remove].every(Boolean)).toBe(true)
-    expect([reading?.create, reading?.move, reading?.remove]).toEqual([
+    expect([offered?.create, offered?.move, offered?.copy, offered?.remove].every(Boolean)).toBe(
+      true,
+    )
+    expect([reading?.create, reading?.move, reading?.copy, reading?.remove]).toEqual([
+      undefined,
       undefined,
       undefined,
       undefined,

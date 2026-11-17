@@ -19,14 +19,15 @@ const grouped = (groups: readonly (readonly ContextMenuAction[])[]): ContextMenu
 
 // The Files panel's menu, on a row or off one, on the tree's empty space or the line in its
 // place, which stand for the project's folder. Where the backend makes them, a row offers a new
-// file or folder (inside a folder, beside a file), and to rename or delete it, each with its
-// shortcut; then its path on the backend's machine, which its shortcut copies too, and its path
-// from the project's root. A row only an agent's work has, or one an agent deleted, isn't in the
-// project's folder to change: it offers the copies alone. Where the backend keeps the project's
-// own patterns for hiding files, a row also offers to hide itself in the project. Off a row it
-// offers a new file or folder in the root, the folder's own path, and Refresh, which reads the
-// root and the open folders again; the root's path from itself would be empty, and the root can't
-// be hidden.
+// file or folder (inside a folder, beside a file); where it moves and copies them, to cut it, copy
+// it, and paste what was cut or copied (inside a folder, beside a file), Paste shown but not
+// chosen while there is nothing to paste; and to rename or delete it, each with its shortcut. Then its path on the backend's
+// machine, which its shortcut copies too, and its path from the project's root. A row only an
+// agent's work has, or one an agent deleted, isn't in the project's folder to change: it offers
+// the copies of its paths alone. Where the backend keeps the project's own patterns for hiding
+// files, a row also offers to hide itself in the project. Off a row it offers a new file or folder
+// in the root, Paste into it, the folder's own path, and Refresh, which reads the root and the
+// open folders again; the root's path from itself would be empty, and the root can't be hidden.
 export const filesMenu = ({
   row,
   directory,
@@ -35,6 +36,7 @@ export const filesMenu = ({
   onRefresh,
   onHide,
   onNew,
+  clipboard,
   onRename,
   onDelete,
 }: {
@@ -51,6 +53,17 @@ export const filesMenu = ({
   // Starts naming a new file, or a folder, where the menu was asked; absent where the backend
   // makes none.
   onNew?: ((row: FilesRow | undefined, folder: boolean) => void) | undefined
+  // Cuts the row, to move it where the person pastes, copies it, to copy it there, and pastes
+  // what was cut or copied where the menu was asked, `ready` while there is something to paste;
+  // absent where the backend doesn't both move and copy files.
+  clipboard?:
+    | {
+        readonly onCut: (row: FilesRow) => void
+        readonly onCopy: (row: FilesRow) => void
+        readonly ready: boolean
+        readonly onPaste: (row: FilesRow | undefined) => void
+      }
+    | undefined
   // Starts naming the row anew; absent where the backend renames nothing.
   onRename?: ((row: FilesRow) => void) | undefined
   // Asks whether to delete the row; absent where the backend deletes nothing.
@@ -65,9 +78,22 @@ export const filesMenu = ({
           { value: "new-folder", label: "New Folder…", onSelect: () => onNew(row, true) },
         ]
       : []
+  const pasting =
+    clipboard && ours
+      ? [
+          {
+            value: "paste",
+            label: "Paste",
+            disabled: !clipboard.ready,
+            ...(row && { detail: keys(bindings.paste) }),
+            onSelect: () => clipboard.onPaste(row),
+          },
+        ]
+      : []
   if (!row)
     return grouped([
       making,
+      pasting,
       [
         { value: "copy-path", label: "Copy Path", onSelect: () => onCopy(directory) },
         { value: "refresh", label: "Refresh", onSelect: onRefresh },
@@ -75,6 +101,25 @@ export const filesMenu = ({
     ])
   return grouped([
     making,
+    [
+      ...(clipboard && ours
+        ? [
+            {
+              value: "cut",
+              label: "Cut",
+              detail: keys(bindings.cut),
+              onSelect: () => clipboard.onCut(row),
+            },
+            {
+              value: "copy",
+              label: "Copy",
+              detail: keys(bindings.copy),
+              onSelect: () => clipboard.onCopy(row),
+            },
+          ]
+        : []),
+      ...pasting,
+    ],
     [
       {
         value: "copy-path",

@@ -295,27 +295,49 @@ says so, and keeps what was there. Each project's are a row of the runner's sett
 read answers `{}`, and a pattern another build kept that isn't a switch is left out. A missing
 project, or one being removed, is `NOT_FOUND`. Nothing tells other clients of a change: the Files
 panel reads them again when it is shown.
-`projects.createEntry({ projectId, path, folder })` makes an empty file, or with `folder` an
-empty folder, at `path` from the project's root, and the folders on the way that are missing;
-`projects.moveEntry({ projectId, from, to })` renames an entry, or moves it into another folder
-that is there already; `projects.removeEntry({ projectId, path })` deletes one for good, a
-folder with everything in it. The first two answer `{ path }`, the path made. Paths are as
-`projects.folder` takes them, at most 4096 characters (else `BAD_REQUEST`). Nothing found
-there is overwritten: a name that is taken is a `CONFLICT` whose message names it, except a
-rename of an entry to its own name in other letters' case, in its folder, on a filesystem that
-doesn't tell them apart, which goes through. A file or an empty folder made at a move's
-destination between the runner's check and the move itself is replaced, as the system's rename
-does. The project's folder itself, Git's own `.git` and what is in it (a name `.git` in any
-case, or a folder or entry that resolves into it through a link or a Windows short name), a
-path that is badly formed, goes through a file or leads out of the project's directory (as
-through a link), an entry or a destination folder that is missing, and a folder moved into
-itself are `INVALID_DIRECTORY`. The system refusing (permission, a read-only or full disk, a
-file in use, a move to another disk, a name too long, something added inside a folder while it
-is deleted, or on Windows a name it keeps for a device or won't hold) is `WRITE_REFUSED`, whose
-message says why in plain words. A missing
-project, or one being removed, is `NOT_FOUND`. A link is renamed or deleted as a link; a folder
-the runner made on the way is removed again if the make fails. See
-[Project Files](../SECURITY.md#project-files) for what the confinement promises.
+`projects.createEntry({ projectId, path, folder })` makes an empty file, or with `folder` an empty
+folder, at `path` from the project's root, and the folders on the way that are missing;
+`projects.moveEntry({ projectId, from, to })` renames an entry, or moves it into another folder that
+is there already; `projects.copyEntry({ projectId, from, into })` copies an entry into the folder
+`into` (`""` for the project's own); `projects.removeEntry({ projectId, path })` deletes one for
+good, a folder with everything in it. The first three answer `{ path }`, the path made. Paths are as
+`projects.folder` takes them, at most 4096 characters (else `BAD_REQUEST`). Nothing found there is
+overwritten: a name that is taken is a `CONFLICT` whose message names it, except a rename of an
+entry to its own name in other letters' case, in its folder, on a filesystem that doesn't tell them
+apart, which goes through. A file or an empty folder made at a move's destination between the
+runner's check and the move itself is replaced, as the system's rename does. A copy keeps its own
+name where `into` isn't its folder and the name is free there, and otherwise takes the first free of
+`name copy.ext`, `name copy 2.ext`, `name copy 3.ext`, … as VS Code names copies (the extension from
+the last dot unless that dot leads the name, so `.env` copies as `.env copy`; a folder's whole name,
+as `src copy`; a copy of `name copy.ext` as `name copy 2.ext`); each name is taken by making it, so
+whatever else writes there meanwhile is never overwritten, and 1000 names taken is a `CONFLICT`. A
+folder copies with everything in it; links copy as links, their targets as written and never
+followed; a file is cloned where the filesystem can; files and folders keep their modes where the
+filesystem keeps them (a folder whose mode it refuses with EPERM keeps the one it was made with); a
+socket, pipe or device, or a link the system won't make (on Windows, without an administrator or
+Developer Mode; elsewhere, on a disk that holds none), is a `WRITE_REFUSED` that names it; and a
+copy that fails part way is removed again (a `WRITE_REFUSED` says what stays where it can't be). A
+move to another filesystem, which the system can't rename across, copies the entry to `to` as a copy
+does, never overwriting, then deletes at `from` what it copied: a file or link only where it is
+unchanged since (the same device, inode, size and modification time), a folder only once it is
+empty. What was added or changed there while it was copied, or what the system won't delete, stays,
+a `WRITE_REFUSED` that says what is left. A copy, or such a move, runs as long as it takes, and the
+call answers once it is done: neither the runner nor the wire puts a time limit on it. The project's
+folder itself (but as the folder a copy goes into), Git's own `.git` and what is in it (a name
+`.git` in any case, or a folder or entry that resolves into it through a link or a Windows short
+name), a path that is badly formed, goes through a file or leads out of the project's directory (as
+through a link), an entry or a destination folder that is missing, and a folder moved or copied into
+itself or below are `INVALID_DIRECTORY`. The system refusing (permission, a read-only or full disk,
+a file in use, a name too long, something added inside a folder while it is deleted, or on Windows a
+name it keeps for a device or won't hold) is `WRITE_REFUSED`, whose message says why in plain words.
+A missing project, or one being removed, is `NOT_FOUND`. A link is renamed, copied or deleted as a
+link; a folder the runner made on the way is removed again if the make fails. A client whose
+connection drops while a move, a copy or a delete runs gets `DISCONNECTED` though the runner may
+finish it; the app's adapter waits for the runner to be back before it fails such a call, as one
+that may have been done or may still be under way, and the Files panel reads the folders involved
+again, taking a move they show made as done. One asked while the client reconnects is never sent,
+and the adapter says nothing was done. See [Project Files](../SECURITY.md#project-files) for what
+the confinement promises.
 `sessions.save({ sessionId, state, visitedAt })` replaces a session's `state`, a string the
 runner stores with the session without reading it, such as a UI layout, and `visitedAt`,
 when the person last visited it (null: never). Sessions list both; the latest visit picks a
@@ -2024,7 +2046,7 @@ one from an earlier runner.
   sends it where a step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
-`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change a project's file; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
+`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change or copy a project's file, or a copy met a socket, pipe or device or a link it can't make, or a move across filesystems left something where it was; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
 `INVALID_CURSOR`, `UPLOAD_TOO_LARGE`, `RESOURCE_LIMIT` (too many calls in flight; retry later),
 `TERMINAL_LIMIT` (the runner's terminal cap is reached), and `SLOW_CONSUMER`. A
 `CONFLICT` about typing into an agent's terminal (`agents.prompt`, `agents.answer`,

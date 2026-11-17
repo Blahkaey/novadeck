@@ -1,4 +1,5 @@
 import {
+  ChangeUnanswered,
   filesExcludeLimits,
   type ProjectFiles,
   type FilesExclude,
@@ -27,8 +28,9 @@ import { terminalOf } from "./workspace"
 // writes while the page is in view, a file every few seconds, now and then resting between
 // turns; waiting on the person or at rest, it writes nothing and shows no cursor. Each project's
 // own patterns for hiding files are kept in memory, as the runner keeps them, from none. The
-// person makes, renames and deletes files in memory too, in a copy of the project's tree the
-// agents' work follows, and a window showing a file they deleted, or moved away, says it is gone.
+// person makes, renames, moves, copies and deletes files in memory too, in a copy of the project's
+// tree the agents' work follows (a copy starts with none of it), and a window showing a file they
+// deleted, or moved away, says it is gone.
 
 const projectId = "storefront"
 const session = { projectId, workspaceSessionId: "initial" }
@@ -349,9 +351,32 @@ const untouchable = (path: string): string | undefined =>
       ? "Novadeck doesn't change Git's own .git."
       : undefined
 
+// Throws as the runner would for `path`.
+const refuse = (path: string): void => {
+  const why = untouchable(path)
+  if (why) throw new Error(why)
+}
+
 // The runner's words for a name taken in `folder`.
 const takenIn = (folder: string, name: string): string =>
   `There's already something named ${name} in ${folder === "" ? "the project's folder" : folder}.`
+
+const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
+
+const childOf = (folder: string, name: string): string =>
+  folder === "" ? name : `${folder}/${name}`
+
+// The name to try after `name` for a copy of a file or, with `folder`, a folder, as the runner
+// names copies (`copyName` in backend/runner/src/workspaces/copy.ts), as VS Code does: `cart.ts`,
+// `cart copy.ts`, `cart copy 2.ts`; a folder's whole name, and a dotfile's, take it at their end.
+const copyName = (name: string, folder: boolean): string => {
+  const dot = folder ? -1 : name.lastIndexOf(".")
+  const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""]
+  const counted = /^(.+ copy)(?: (\d+))?$/.exec(stem)
+  return counted
+    ? `${counted[1]} ${Number(counted[2] ?? 1) + 1}${extension}`
+    : `${stem} copy${extension}`
+}
 
 // What `folder` of a tree lists: its files, and the folders that hold the paths below. Ignored
 // folders hold only ignored files, which the panel carries down.
@@ -454,6 +479,7 @@ export type DemoFiles = ProjectFiles & {
   readonly exclude: NonNullable<ProjectFiles["exclude"]>
   readonly create: NonNullable<ProjectFiles["create"]>
   readonly move: NonNullable<ProjectFiles["move"]>
+  readonly copy: NonNullable<ProjectFiles["copy"]>
   readonly remove: NonNullable<ProjectFiles["remove"]>
   // Has the next reads of `folder` go as `fault` says, or normally for none. The panel reads
   // a folder again when it is shown again or an agent's turn ends.
@@ -465,6 +491,14 @@ export type DemoFiles = ProjectFiles & {
   readonly failExcludeReads: (fails?: boolean) => void
   // Has the next file made, renamed or deleted fail, once, or, with false, go through again.
   readonly failNextChange: (fails?: boolean) => void
+  // Has the next paste, a copy or a move into another folder, fail, once, or, with false, go
+  // through again.
+  readonly failNextPaste: (fails?: boolean) => void
+  // Has the next paste take `ms` before it is made or fails, once, or, with none, take no time.
+  readonly slowNextPaste: (ms?: number) => void
+  // Has the next move, copy or delete made answer as one the connection dropped under before the
+  // answer came (`ChangeUnanswered`), once, or, with false, answer again.
+  readonly loseNextAnswer: (loses?: boolean) => void
   // Whether the person deleted the file at `path` of a project, or a folder it was in, or moved
   // it away, and it isn't there again.
   readonly gone: (projectId: string, path: string) => boolean
@@ -589,14 +623,39 @@ export const createDemoFiles = (
   const failNextChange = (fails = true): void => {
     changeFails = fails
   }
-  // Throws as the runner would for `path`, and once as the debug panel asked.
-  const refuse = (path: string): void => {
-    if (changeFails) {
-      changeFails = false
-      throw new Error("The demo was told to fail this change.")
+  // A paste, a copy or a move into another folder, as the debug panel has the next one go.
+  let pasteFails = false
+  const failNextPaste = (fails = true): void => {
+    pasteFails = fails
+  }
+  let pasteDelay = 0
+  const slowNextPaste = (ms = 0): void => {
+    pasteDelay = ms
+  }
+  // Throws as the debug panel asked for the next change, a paste or not, once; a paste after the
+  // time it was told to take.
+  const fault = async (pasting: boolean): Promise<void> => {
+    if (pasting) {
+      const delay = pasteDelay
+      pasteDelay = 0
+      if (delay > 0) await new Promise<void>((resolve) => void clock.after(delay, resolve))
+      if (!pasteFails) return
+      pasteFails = false
+      throw new Error("The demo was told to fail this paste.")
     }
-    const why = untouchable(path)
-    if (why) throw new Error(why)
+    if (!changeFails) return
+    changeFails = false
+    throw new Error("The demo was told to fail this change.")
+  }
+  // The next move, copy or delete, once made, answers as unanswered, as the debug panel asks.
+  let answerLost = false
+  const loseNextAnswer = (loses = true): void => {
+    answerLost = loses
+  }
+  const answered = <T>(made: T): T => {
+    if (!answerLost) return made
+    answerLost = false
+    throw new ChangeUnanswered()
   }
   // The project's tree is now `tree`; `left` went from it, `arrived` came.
   const settle = (id: string, tree: Tree, left: string | undefined, arrived: string): void => {
@@ -606,6 +665,7 @@ export const createDemoFiles = (
     goneWatchers.forEach((on) => on())
   }
   const create: DemoFiles["create"] = async (id, path, folder) => {
+    await fault(false)
     refuse(path)
     const tree = treeNow(id)
     const names = path.split("/")
@@ -621,7 +681,9 @@ export const createDemoFiles = (
     settle(id, { ...tree, entries: [...kept, folder ? `${path}/` : path] }, undefined, path)
     return path
   }
+  // A move into another folder is a paste after a cut; one in its own folder, a rename.
   const move: DemoFiles["move"] = async (id, from, to) => {
+    await fault(parentOf(from) !== parentOf(to))
     refuse(from)
     refuse(to)
     const tree = treeNow(id)
@@ -653,14 +715,52 @@ export const createDemoFiles = (
       to,
     )
     if (id === projectId) change((project) => movedIn(project, from, to))
-    return to
+    return answered(to)
+  }
+  // A copy into the folder `into` under the name the runner would give it, with no agent's work on
+  // it: the agents' work stays where it was.
+  const copy: DemoFiles["copy"] = async (id, from, into) => {
+    await fault(true)
+    refuse(from)
+    if (into !== "") refuse(into)
+    const tree = treeNow(id)
+    const kind = holds(tree, from)
+    if (!kind) throw new Error(`${from} isn't there any more.`)
+    const there = into === "" ? "folder" : holds(tree, into)
+    if (there !== "folder")
+      throw new Error(there ? `${into} isn't a folder.` : `${into} isn't there any more.`)
+    const folder = kind === "folder"
+    if (folder && atOrBelow(into, from)) throw new Error("A folder can't be copied into itself.")
+    const name = from.slice(from.lastIndexOf("/") + 1)
+    let made = parentOf(from) === into ? copyName(name, folder) : name
+    while (holds(tree, childOf(into, made))) made = copyName(made, folder)
+    const to = childOf(into, made)
+    const copied = (each: string): boolean => atOrBelow(trimmed(each), from)
+    settle(
+      id,
+      {
+        entries: [
+          ...tree.entries.filter((entry) => !(entry.endsWith("/") && to.startsWith(entry))),
+          ...tree.entries.filter(copied).map((entry) => movedTo(entry, from, to)),
+        ],
+        ignored: [
+          ...tree.ignored,
+          ...tree.ignored.filter(copied).map((each) => movedTo(each, from, to)),
+        ],
+      },
+      undefined,
+      to,
+    )
+    return answered(to)
   }
   const remove: DemoFiles["remove"] = async (id, path) => {
+    await fault(false)
     refuse(path)
     const tree = treeNow(id)
     if (!holds(tree, path)) throw new Error(`${path} isn't there any more.`)
     settle(id, without(tree, path), path, path)
     if (id === projectId) change((project) => removedIn(project, path))
+    answered(undefined)
   }
   const gone = (id: string, path: string): boolean =>
     (away.get(id) ?? []).some((each) => atOrBelow(path, each)) && !holds(treeNow(id), path)
@@ -750,8 +850,12 @@ export const createDemoFiles = (
     failExcludeReads,
     create,
     move,
+    copy,
     remove,
     failNextChange,
+    failNextPaste,
+    slowNextPaste,
+    loseNextAnswer,
     gone,
     watchGone,
     write,

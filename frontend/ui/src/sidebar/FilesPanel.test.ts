@@ -1,11 +1,16 @@
-import type { FilesExclude, FolderListing, FilesProject } from "@novadeck/core/files"
+import {
+  ChangeUnanswered,
+  type FilesExclude,
+  type FolderListing,
+  type FilesProject,
+} from "@novadeck/core/files"
 import { nextFrame, render } from "@novadeck/test-kit/render"
 import { act, createElement, StrictMode } from "react"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, eventually, expect, it } from "../test"
 import { folderListings } from "../test/files"
-import { atOrBelow, moved, parentOf, type EntryChanges } from "./files-edit"
+import { atOrBelow, moved, nameOf, parentOf, type EntryChanges } from "./files-edit"
 import { FilesPanel } from "./FilesPanel"
 import { readTimeoutMs } from "./useFolderReader"
 import { pulseMs } from "./usePulses"
@@ -2112,15 +2117,18 @@ describe("The Files panel", () => {
   context("when the person makes, renames and deletes files", () => {
     blurWhatHides()
 
-    // A backend whose files the panel changes: `initial` as `backend` takes them, made, moved and
-    // deleted as asked, with each change asked for noted, and each refused while `refuse` says why.
-    // After `hold`, the next change waits for `release`; `lose` takes a path away as another
-    // program would.
+    // A backend whose files the panel changes: `initial` as `backend` takes them, made, moved,
+    // copied and deleted as asked, with each change asked for noted, and each refused while
+    // `refuse` says why. A copy takes its own name where that is free, else `name copy.ext`. After
+    // `hold`, the next change waits for `release`; `lose` takes a path away as another program
+    // would.
     const changing = (initial: readonly string[] = files) => {
       let paths = [...initial]
       let refusal: string | undefined
       let holding = false
       let release = (): void => {}
+      // Whether the connection drops under the next change, before it is made or after.
+      let dropping: "before" | "after" | undefined
       const folders: string[] = []
       const changes: string[] = []
       const refuse = async (): Promise<void> => {
@@ -2128,7 +2136,16 @@ describe("The Files panel", () => {
           holding = false
           await new Promise<void>((resolve) => (release = resolve))
         }
+        if (dropping === "before") {
+          dropping = undefined
+          throw new ChangeUnanswered()
+        }
         if (refusal !== undefined) throw new Error(refusal)
+      }
+      const answer = <T>(made: T): T => {
+        if (dropping !== "after") return made
+        dropping = undefined
+        throw new ChangeUnanswered()
       }
       // A folder left with nothing in it stays, empty.
       const keepFolder = (folder: string): void => {
@@ -2143,6 +2160,10 @@ describe("The Files panel", () => {
         },
         hold: (): void => {
           holding = true
+        },
+        // The connection drops under the next change, which is `made` or not.
+        drop: (made: boolean): void => {
+          dropping = made ? "after" : "before"
         },
         release: (): void => release(),
         lose: (path: string): void => {
@@ -2171,13 +2192,32 @@ describe("The Files panel", () => {
               (each) => moved(each.replace(/\/$/, ""), from, to) + (each.endsWith("/") ? "/" : ""),
             )
             keepFolder(parentOf(from))
-            return to
+            return answer(to)
+          },
+          copy: async (from: string, into: string) => {
+            changes.push(`copy ${from} ${into}`)
+            await refuse()
+            const name = nameOf(from)
+            const own = into === "" ? name : `${into}/${name}`
+            const taken = paths.some((each) => atOrBelow(each.replace(/\/$/, ""), own))
+            const to = taken ? own.replace(/(\.[^./]+)?$/, " copy$1") : own
+            paths = [
+              ...paths.filter((each) => each !== `${into}/`),
+              ...paths
+                .filter((each) => atOrBelow(each.replace(/\/$/, ""), from))
+                .map(
+                  (each) =>
+                    moved(each.replace(/\/$/, ""), from, to) + (each.endsWith("/") ? "/" : ""),
+                ),
+            ]
+            return answer(to)
           },
           remove: async (path: string) => {
             changes.push(`remove ${path}`)
             await refuse()
             paths = paths.filter((each) => !atOrBelow(each.replace(/\/$/, ""), path))
             keepFolder(parentOf(path))
+            answer(undefined)
           },
         } satisfies EntryChanges,
       }
@@ -2236,7 +2276,7 @@ describe("The Files panel", () => {
     }
 
     context("in the menu", () => {
-      it("offers New File…, New Folder…, Rename… and Delete on a row, where the backend makes them", async () => {
+      it("offers New File…, New Folder…, Cut, Copy, Paste, Rename… and Delete on a row, where the backend makes them", async () => {
         const panel = await mountChanging(changing())
 
         await rightClick(item(panel, "package.json"))
@@ -2244,6 +2284,9 @@ describe("The Files panel", () => {
         expect(menuItems()).toEqual([
           "New File…",
           "New Folder…",
+          "Cut",
+          "Copy",
+          "Paste",
           "Copy Path",
           "Copy Relative Path",
           "Rename…",
@@ -2276,7 +2319,7 @@ describe("The Files panel", () => {
         const panel = await mountChanging(fake)
 
         await rightClick(panel.view.container.querySelector(".files-empty")!)
-        expect(menuItems()).toEqual(["New File…", "New Folder…", "Copy Path", "Refresh"])
+        expect(menuItems()).toEqual(["New File…", "New Folder…", "Paste", "Copy Path", "Refresh"])
         await choose("New Folder…")
         await settle()
         expect(panel.view.container.querySelector(".files-empty")).toBeNull()
@@ -2834,6 +2877,593 @@ describe("The Files panel", () => {
         expect(field()!.value).toBe("dra")
         expect(fake.changes).toEqual([])
         panel.view.unmount()
+      })
+    })
+
+    context("when cutting, copying and pasting", () => {
+      // The row of the entry at `path`, whatever its name, as a pasted copy shares its name.
+      const at = (panel: Panel, path: string): HTMLElement | null =>
+        panel.view.container.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)
+      const cutRows = (panel: Panel): string[] =>
+        Array.from(panel.view.container.querySelectorAll(".files-row[data-cut=true]")).map(
+          (row) => row.querySelector<HTMLElement>("[data-path]")!.dataset["path"]!,
+        )
+      const busyRows = (panel: Panel): string[] =>
+        Array.from(panel.view.container.querySelectorAll<HTMLElement>("[aria-busy=true]")).map(
+          (row) => row.dataset["path"]!,
+        )
+      // The menu's items shown but not chosen now.
+      const greyed = (): string[] =>
+        Array.from(openMenu()?.querySelectorAll("[data-part=item][data-disabled]") ?? []).map(
+          (each) => each.querySelector("[data-part=item-text]")?.textContent ?? "",
+        )
+      const closeMenu = async (): Promise<void> => {
+        act(() => {
+          openMenu()?.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+          )
+        })
+        await frames()
+      }
+      // Ctrl, or ⌘ on a Mac, with `key`, on a row's or a field's element.
+      const chord = (on: Element, key: string, init: KeyboardEventInit = {}) =>
+        press(on, key, { code: `Key${key.toUpperCase()}`, ctrlKey: true, ...init })
+      const kept = (panel: Panel): string[] =>
+        Array.from(panel.view.container.querySelectorAll(".files-agent[aria-pressed=true]")).map(
+          (each) => each.textContent ?? "",
+        )
+
+      context("in the menu", () => {
+        it("greys Paste until a row is cut or copied, then pastes it on a row or off one", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+
+          await rightClick(item(panel, "package.json"))
+          expect(greyed()).toEqual(["Paste"])
+          await choose("Copy")
+          await rightClick(panel.view.container.querySelector("[role=tree]")!)
+          expect(menuItems()).toEqual(["New File…", "New Folder…", "Paste", "Copy Path", "Refresh"])
+          expect(greyed()).toEqual([])
+          await choose("Paste")
+          await settle()
+
+          expect(fake.changes).toEqual(["copy package.json "])
+          expect(panel.rows()).toContain("package copy.json")
+          panel.view.unmount()
+        })
+
+        it("offers no Cut, Copy or Paste on a row only an agent's work has", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake, { work: work() })
+
+          await rightClick(item(panel, "new.ts"))
+
+          expect(menuItems()).toEqual(["Copy Path", "Copy Relative Path"])
+          panel.view.unmount()
+        })
+      })
+
+      context("with a copy", () => {
+        it("copies into a folder, which opens, then selects and focuses the copy, and keeps the copy to paste again", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+
+          await fromMenu(item(panel, "package.json"), "Copy")
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(fake.changes).toEqual(["copy package.json docs"])
+          expect(item(panel, "docs").getAttribute("aria-expanded")).toBe("true")
+          expect(at(panel, "docs/package.json")!.getAttribute("aria-selected")).toBe("true")
+          expect(document.activeElement).toBe(at(panel, "docs/package.json"))
+          await fromMenu(item(panel, "readme.md"), "Paste")
+          expect(fake.changes).toEqual(["copy package.json docs", "copy package.json docs"])
+          expect(document.activeElement).toBe(at(panel, "docs/package copy.json"))
+          panel.view.unmount()
+        })
+
+        it("pastes beside a file, into that file's folder, a folder with all it holds", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("src")
+
+          await fromMenu(item(panel, "docs"), "Copy")
+          await fromMenu(item(panel, "package.json"), "Paste")
+          await panel.click("docs copy")
+
+          expect(fake.changes).toEqual(["copy docs "])
+          expect(at(panel, "docs copy/readme.md")).not.toBeNull()
+          panel.view.unmount()
+        })
+      })
+
+      context("with a cut", () => {
+        it("dims the row cut, moves it where it is pasted, lets the cut go, and has what shows it follow", async () => {
+          const fake = changing()
+          const moves: string[] = []
+          const panel = await mountChanging(fake, {
+            onMoved: (from, to) => void moves.push(`${from} ${to}`),
+          })
+
+          await fromMenu(item(panel, "package.json"), "Cut")
+          expect(cutRows(panel)).toEqual(["package.json"])
+          expect(item(panel, "package.json").getAttribute("aria-label")).toBe("package.json, cut")
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(fake.changes).toEqual(["move package.json docs/package.json"])
+          expect(moves).toEqual(["package.json docs/package.json"])
+          expect(cutRows(panel)).toEqual([])
+          expect(document.activeElement).toBe(at(panel, "docs/package.json"))
+          await rightClick(item(panel, "src"))
+          expect(greyed()).toEqual(["Paste"])
+          await closeMenu()
+          panel.view.unmount()
+        })
+
+        it("does nothing for a cut pasted back into its own folder, and lets it go", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+
+          await fromMenu(item(panel, "readme.md"), "Cut")
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(fake.changes).toEqual([])
+          expect(cutRows(panel)).toEqual([])
+          panel.view.unmount()
+        })
+
+        it("says above the tree why a move was refused, reads both folders again, and keeps the cut", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          await fromMenu(item(panel, "package.json"), "Cut")
+          fake.refuse("There's already something named package.json in docs.")
+          fake.folders.length = 0
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(alert(panel)).toBe(
+            "Couldn't move package.json into docs: There's already something named package.json in docs.",
+          )
+          expect(fake.folders.toSorted()).toEqual(["", "docs"])
+          expect(cutRows(panel)).toEqual(["package.json"])
+          panel.view.unmount()
+        })
+
+        it("lets a cut go whose entry is gone, once the refusal has its folder read again", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Cut")
+          fake.lose("package.json")
+          fake.refuse("package.json isn't there any more.")
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(alert(panel)).toBe(
+            "Couldn't move package.json into docs: package.json isn't there any more.",
+          )
+          expect(panel.rows()).not.toContain("package.json")
+          await rightClick(item(panel, "docs"))
+          expect(greyed()).toEqual(["Paste"])
+          await closeMenu()
+          panel.view.unmount()
+        })
+      })
+
+      context("while a paste runs", () => {
+        it("shows the row pasted busy, and greys a cut's Paste until it ends", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Cut")
+          fake.hold()
+
+          await fromMenu(item(panel, "docs"), "Paste")
+          expect(busyRows(panel)).toEqual(["package.json"])
+          expect(item(panel, "package.json").querySelector(".files-busy")).not.toBeNull()
+          await rightClick(item(panel, "src"))
+          expect(greyed()).toEqual(["Paste"])
+          await closeMenu()
+          fake.release()
+          await settle()
+
+          expect(busyRows(panel)).toEqual([])
+          expect(fake.changes).toEqual(["move package.json docs/package.json"])
+          panel.view.unmount()
+        })
+
+        it("runs another paste of a copy meanwhile, the row busy until both end", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Copy")
+          fake.hold()
+
+          await fromMenu(item(panel, "docs"), "Paste")
+          await fromMenu(panel.view.container.querySelector("[role=tree]")!, "Paste")
+          expect(fake.changes).toEqual(["copy package.json docs", "copy package.json "])
+          expect(busyRows(panel)).toEqual(["package.json"])
+          fake.release()
+          await settle()
+
+          expect(busyRows(panel)).toEqual([])
+          expect(panel.rows()).toContain("package copy.json")
+          expect(at(panel, "docs/package.json")).not.toBeNull()
+          panel.view.unmount()
+        })
+      })
+
+      context("afterwards", () => {
+        it("says which pattern hides an entry pasted, leaving the focus on the row it was asked on", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake, { hiding: { exclude: { "docs/*.json": true } } })
+          act(() => item(panel, "package.json").focus())
+          await chord(item(panel, "package.json"), "c")
+          act(() => item(panel, "docs").focus())
+
+          await chord(item(panel, "docs"), "v")
+
+          expect(alert(panel)).toBe(
+            "Copied to docs/package.json, which the pattern docs/*.json hides.",
+          )
+          expect(document.activeElement).toBe(item(panel, "docs"))
+          panel.view.unmount()
+        })
+
+        it("reads the folders pasted into and from again when a paste fails", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          await fromMenu(item(panel, "package.json"), "Copy")
+          fake.refuse("The disk is full.")
+          fake.folders.length = 0
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(fake.folders.toSorted()).toEqual(["", "docs"])
+          expect(alert(panel)).toBe("Couldn't copy package.json into docs: The disk is full.")
+          panel.view.unmount()
+        })
+
+        it("leaves the focus and the selection where the person moved them while it ran", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          act(() => item(panel, "package.json").focus())
+          await chord(item(panel, "package.json"), "c")
+          fake.hold()
+
+          await chord(item(panel, "docs"), "v")
+          await press(item(panel, "docs"), "ArrowDown")
+          await press(item(panel, "readme.md"), "ArrowDown")
+          await panel.click("readme.md")
+          fake.release()
+          await settle()
+
+          expect(at(panel, "docs/package.json")).not.toBeNull()
+          expect(document.activeElement).toBe(item(panel, "src"))
+          expect(item(panel, "readme.md").getAttribute("aria-selected")).toBe("true")
+          panel.view.unmount()
+        })
+
+        it("says a paste that fails in a later showing, and none that fails while hidden", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Copy")
+          fake.refuse("The disk is full.")
+          fake.hold()
+          await fromMenu(item(panel, "docs"), "Paste")
+          await panel.show(false)
+          await panel.show(true)
+          fake.release()
+          await settle()
+          expect(alert(panel)).toBe("Couldn't copy package.json into docs: The disk is full.")
+
+          act(() =>
+            panel.view.container.querySelector<HTMLElement>("[aria-label=Dismiss]")!.click(),
+          )
+          fake.hold()
+          await fromMenu(item(panel, "docs"), "Paste")
+          await panel.show(false)
+          fake.release()
+          await settle()
+          await panel.show(true)
+
+          expect(alert(panel)).toBeNull()
+          panel.view.unmount()
+        })
+      })
+
+      context("when the connection drops before the backend answers", () => {
+        it("says a paste may have been done, and reads the folders, which show what was", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          await fromMenu(item(panel, "package.json"), "Copy")
+          fake.drop(true)
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(alert(panel)).toBe(
+            "Novadeck lost its connection before it heard whether it could copy package.json into docs; it may have been done, or may still be under way.",
+          )
+          expect(at(panel, "docs/package.json")).not.toBeNull()
+          panel.view.unmount()
+        })
+
+        it("takes a cut as moved where the folders show it moved, and has what shows it follow", async () => {
+          const fake = changing()
+          const moves: string[] = []
+          const panel = await mountChanging(fake, {
+            onMoved: (from, to) => void moves.push(`${from} ${to}`),
+          })
+          await fromMenu(item(panel, "package.json"), "Cut")
+          fake.drop(true)
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(alert(panel)).toBeNull()
+          expect(moves).toEqual(["package.json docs/package.json"])
+          expect(cutRows(panel)).toEqual([])
+          expect(at(panel, "docs/package.json")!.getAttribute("aria-selected")).toBe("true")
+          panel.view.unmount()
+        })
+
+        it("keeps a cut the folders show where it was, saying it may be under way", async () => {
+          const fake = changing()
+          const moves: string[] = []
+          const panel = await mountChanging(fake, {
+            onMoved: (from, to) => void moves.push(`${from} ${to}`),
+          })
+          await fromMenu(item(panel, "package.json"), "Cut")
+          fake.drop(false)
+
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(alert(panel)).toBe(
+            "Novadeck lost its connection before it heard whether it could move package.json into docs; it may have been done, or may still be under way.",
+          )
+          expect(moves).toEqual([])
+          expect(cutRows(panel)).toEqual(["package.json"])
+          panel.view.unmount()
+        })
+
+        it("takes a rename as made where the folders show it, and reads its folder where they don't", async () => {
+          const fake = changing()
+          const moves: string[] = []
+          const panel = await mountChanging(fake, {
+            onMoved: (from, to) => void moves.push(`${from} ${to}`),
+          })
+          await fromMenu(item(panel, "package.json"), "Rename…")
+          type("manifest.json")
+          fake.drop(true)
+          await press(field()!, "Enter")
+          expect(alert(panel)).toBeNull()
+          expect(moves).toEqual(["package.json manifest.json"])
+
+          await fromMenu(item(panel, "manifest.json"), "Rename…")
+          type("app.json")
+          fake.drop(false)
+          fake.folders.length = 0
+          await press(field()!, "Enter")
+
+          expect(alert(panel)).toBe(
+            "Novadeck lost its connection before it heard whether it could rename manifest.json to app.json; it may have been done, or may still be under way.",
+          )
+          expect(fake.folders).toContain("")
+          expect(panel.rows()).toContain("manifest.json")
+          panel.view.unmount()
+        })
+
+        it("says a delete may have been done, and reads its folder, which shows what was", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Delete")
+          fake.drop(true)
+
+          act(() => dialogButton("Delete").click())
+          await settle()
+
+          expect(alert(panel)).toBe(
+            "Novadeck lost its connection before it heard whether it could delete package.json; it may have been done, or may still be under way.",
+          )
+          expect(panel.rows()).not.toContain("package.json")
+          panel.view.unmount()
+        })
+      })
+
+      context("when what was cut or copied changes", () => {
+        it("lets a copy go once it is deleted", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Copy")
+
+          await fromMenu(item(panel, "package.json"), "Delete")
+          act(() => dialogButton("Delete").click())
+          await settle()
+
+          await rightClick(item(panel, "docs"))
+          expect(greyed()).toEqual(["Paste"])
+          await closeMenu()
+          panel.view.unmount()
+        })
+
+        it("follows a cut whose folder is renamed, and moves it from there", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          await fromMenu(item(panel, "readme.md"), "Cut")
+
+          await fromMenu(item(panel, "docs"), "Rename…")
+          type("guides")
+          await press(field()!, "Enter")
+          expect(cutRows(panel)).toEqual(["guides/readme.md"])
+          await fromMenu(panel.view.container.querySelector("[role=tree]")!, "Paste")
+
+          expect(fake.changes).toEqual(["move docs guides", "move guides/readme.md readme.md"])
+          panel.view.unmount()
+        })
+
+        it("follows a copy that is renamed, and copies it from there", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await fromMenu(item(panel, "package.json"), "Copy")
+
+          await fromMenu(item(panel, "package.json"), "Rename…")
+          type("manifest.json")
+          await press(field()!, "Enter")
+          await fromMenu(item(panel, "docs"), "Paste")
+
+          expect(fake.changes).toEqual([
+            "move package.json manifest.json",
+            "copy manifest.json docs",
+          ])
+          panel.view.unmount()
+        })
+
+        it("lets a cut go whose folder went, once the folder holding that is read again", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await panel.click("docs")
+          await fromMenu(item(panel, "readme.md"), "Cut")
+          fake.lose("docs")
+
+          await panel.endTurn()
+
+          expect(cutRows(panel)).toEqual([])
+          await rightClick(panel.view.container.querySelector("[role=tree]")!)
+          expect(greyed()).toEqual(["Paste"])
+          await closeMenu()
+          panel.view.unmount()
+        })
+      })
+
+      context("with the keyboard", () => {
+        it("cuts, copies and pastes the focused row with Ctrl and X, C and V, keeping them from the workspace and the system's clipboard", async () => {
+          const copied = clipboard()
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          const reached: KeyboardEvent[] = []
+          const listen = (event: KeyboardEvent): void => void reached.push(event)
+          window.addEventListener("keydown", listen)
+          act(() => item(panel, "package.json").focus())
+
+          const presses = [
+            await chord(item(panel, "package.json"), "c"),
+            await chord(item(panel, "docs"), "v"),
+            await chord(at(panel, "package.json")!, "x"),
+            await chord(item(panel, "src"), "v"),
+          ]
+          window.removeEventListener("keydown", listen)
+
+          expect(fake.changes).toEqual([
+            "copy package.json docs",
+            "move package.json src/package.json",
+          ])
+          expect(presses.map((event) => event.defaultPrevented)).toEqual([true, true, true, true])
+          expect(reached).toEqual([])
+          expect(copied).toEqual([])
+          panel.view.unmount()
+        })
+
+        it("on macOS cuts, copies and pastes with ⌘ alone, by the letter, or the key's place where it types none", async () => {
+          const platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel")
+          const fake = changing()
+          const panel = await mountChanging(fake)
+
+          await chord(item(panel, "package.json"), "x", { ctrlKey: false, metaKey: true })
+          await chord(item(panel, "docs"), "v")
+          expect(fake.changes).toEqual([])
+          // Dvorak types k where V is: ⌘K is the workspace's, not a paste.
+          const workspaces = await press(item(panel, "docs"), "k", { code: "KeyV", metaKey: true })
+          expect([workspaces.defaultPrevented, fake.changes]).toEqual([false, []])
+          // A Russian layout types м where V is.
+          await press(item(panel, "docs"), "м", { code: "KeyV", metaKey: true })
+
+          expect(fake.changes).toEqual(["move package.json docs/package.json"])
+          platform.mockRestore()
+          panel.view.unmount()
+        })
+
+        it("pastes once for a paste held down", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await chord(item(panel, "package.json"), "c")
+
+          await chord(item(panel, "docs"), "v")
+          await chord(item(panel, "docs"), "v", { repeat: true })
+
+          expect(fake.changes).toEqual(["copy package.json docs"])
+          panel.view.unmount()
+        })
+
+        it("keeps them from the workspace on a row only an agent's work has, doing nothing", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake, { work: work() })
+          const reached: string[] = []
+          const listen = (event: KeyboardEvent): void => void reached.push(event.key)
+          window.addEventListener("keydown", listen)
+
+          await chord(item(panel, "new.ts"), "x")
+          await chord(item(panel, "new.ts"), "c")
+          window.removeEventListener("keydown", listen)
+
+          expect(reached).toEqual([])
+          expect(cutRows(panel)).toEqual([])
+          panel.view.unmount()
+        })
+
+        it("keeps them from the workspace where the backend changes nothing, doing nothing", async () => {
+          const panel = await mount(undefined)
+          const reached: string[] = []
+          const listen = (event: KeyboardEvent): void => void reached.push(event.key)
+          window.addEventListener("keydown", listen)
+
+          const presses = [
+            await chord(item(panel, "package.json"), "x"),
+            await chord(item(panel, "package.json"), "c"),
+            await chord(item(panel, "docs"), "v"),
+          ]
+          window.removeEventListener("keydown", listen)
+
+          expect(presses.map((event) => event.defaultPrevented)).toEqual([true, true, true])
+          expect(reached).toEqual([])
+          expect(cutRows(panel)).toEqual([])
+          panel.view.unmount()
+        })
+
+        it("leaves them to the field a name is typed in", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake)
+          await chord(item(panel, "package.json"), "c")
+          await fromMenu(item(panel, "docs"), "New File…")
+
+          const pasted = await chord(field()!, "v")
+
+          expect(pasted.defaultPrevented).toBe(false)
+          expect(field()).not.toBeNull()
+          expect(fake.changes).toEqual([])
+          panel.view.unmount()
+        })
+
+        it("lets a cut go on Escape before the agents kept, and leaves the next Escape to them", async () => {
+          const fake = changing()
+          const panel = await mountChanging(fake, { work: work() })
+          act(() =>
+            Array.from(panel.view.container.querySelectorAll<HTMLElement>(".files-agent"))
+              .find((each) => each.textContent === "@moth")!
+              .click(),
+          )
+          await chord(item(panel, "useCart.ts"), "x")
+          expect(cutRows(panel)).toEqual(["src/cart/useCart.ts"])
+
+          const first = await press(item(panel, "useCart.ts"), "Escape")
+          expect(cutRows(panel)).toEqual([])
+          expect(kept(panel)).toEqual(["@moth"])
+          await press(item(panel, "useCart.ts"), "Escape")
+
+          expect(first.defaultPrevented).toBe(false)
+          expect(kept(panel)).toEqual([])
+          panel.view.unmount()
+        })
       })
     })
   })

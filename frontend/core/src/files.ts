@@ -81,14 +81,32 @@ export type ProjectFiles = {
   // The person's changes to the project's files, each by a path from the project's root with
   // `/` between names, where the backend can make them; each absent where it can't. `create`
   // makes an empty file, or with `folder` an empty folder, and the folders on the way that are
-  // missing; `move` renames an entry, or moves it into another folder; `remove` deletes one for
-  // good, a folder with everything in it. `create` and `move` answer the path of the entry they
-  // made or moved. Each rejects with the backend's reason: a name taken, which is never
-  // overwritten, the root or the VCS's own folder, a path gone or leading out of the project, or
-  // the system refusing, as for want of permission.
+  // missing; `move` renames an entry, or moves it into another folder, another disk too; `copy`
+  // copies one into the folder `into` ("" for the root), a folder with everything in it, under
+  // its own name where that is free, else `name copy.ext`, `name copy 2.ext`, …; `remove` deletes
+  // one for good, a folder with everything in it. `create`, `move` and `copy` answer the path of
+  // the entry they made, moved or copied. A copy, or a move to another disk, runs as long as it
+  // takes. Each rejects with the backend's reason: a name taken, which is never overwritten, the
+  // root or the VCS's own folder, a folder into itself, a path gone or leading out of the
+  // project, or the system refusing, as for want of permission. Where the link to the backend
+  // drops before it answers, a move, a copy or a delete rejects with `ChangeUnanswered` only once
+  // the link is back, or is given up on, as the backend may have finished it meanwhile.
   readonly create?: (projectId: string, path: string, folder: boolean) => Promise<string>
   readonly move?: (projectId: string, from: string, to: string) => Promise<string>
+  readonly copy?: (projectId: string, from: string, into: string) => Promise<string>
   readonly remove?: (projectId: string, path: string) => Promise<void>
+}
+
+// What a change of a project's files rejects with where the link to the backend dropped before it
+// answered: the backend may have made the change, or may still be making it.
+export class ChangeUnanswered extends Error {
+  constructor(options?: ErrorOptions) {
+    super(
+      "The connection dropped before an answer came, so it may have been done, or may still be under way.",
+      options,
+    )
+    this.name = "ChangeUnanswered"
+  }
 }
 
 // A project's directory is written as the backend's machine writes it: a Windows one with

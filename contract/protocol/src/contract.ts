@@ -92,10 +92,12 @@ export const errors = {
   CONFLICT: { status: 409, data: conflictReason.optional() },
   // A plan can't be written, and why (`planUnwritable`): saving it again won't help.
   PLAN_UNWRITABLE: { status: 409, data: planUnwritable },
-  // The system refused to make, move or delete a file or folder of a project, as for want of
-  // permission, a disk that is full or read-only, a file in use, a move to another disk or a
-  // name it won't keep; the message says which in plain words. Nothing changed but what the
-  // system had done before it refused, as the files a deleted folder lost first.
+  // The system refused to make, move, copy or delete a file or folder of a project, as for want
+  // of permission, a disk that is full or read-only, a file in use, a name it won't keep, or a
+  // socket, pipe or device to copy; the message says which in plain words. Nothing changed but
+  // what the system had done before it refused, as the files a deleted folder lost first, or
+  // what the message says stays, as a moved entry's copy, or a failed copy's part it couldn't
+  // remove.
   WRITE_REFUSED: { status: 409 },
   TERMINAL_LIMIT: { status: 429 },
   TERMINAL_NOT_FOUND: { status: 404 },
@@ -190,12 +192,27 @@ export const contract = {
     // `to`, and answers that path. A link moves as a link. A name taken at `to` is a CONFLICT,
     // unless it is `from` itself spelled in other letters' case in its own folder, on a
     // filesystem that doesn't tell them apart; a file or an empty folder made at `to` after that
-    // check is replaced, as the system's rename does. A folder into itself, an entry at `from`
-    // or a folder for `to` that is missing (a move makes none), and what `createEntry` refuses
-    // are INVALID_DIRECTORY; the system refusing, as for a move to another disk, is
-    // WRITE_REFUSED, saying why.
+    // check is replaced, as the system's rename does. A move to another filesystem, which the
+    // system can't rename across, copies the entry to `to` as `copyEntry` copies, never
+    // overwriting, then deletes it at `from`; one that can't be deleted then stays with its copy
+    // made, a WRITE_REFUSED that says so. A folder into itself, an entry at `from` or a folder
+    // for `to` that is missing (a move makes none), and what `createEntry` refuses are
+    // INVALID_DIRECTORY; the system refusing is WRITE_REFUSED, saying why.
     moveEntry: procedure
       .input(z.strictObject({ projectId: id, from: entryPath, to: entryPath }))
+      .output(entryChanged),
+    // Copies the file, folder or link at `from` into the folder `into` ("" for the project's
+    // own) and answers the copy's path: under its own name where `into` isn't its folder and the
+    // name is free there, else the first free of `name copy.ext`, `name copy 2.ext`, … as VS Code
+    // names copies. Each name is taken by making it, so nothing is overwritten. A folder copies
+    // with everything in it; a link copies as a link, never followed, inside a folder too; files
+    // and folders keep their modes. A copy that fails part way is removed again. A folder into
+    // itself or below, an entry at `from` or a folder `into` that is missing, and what
+    // `createEntry` refuses are INVALID_DIRECTORY; 1000 names taken is a CONFLICT; the system
+    // refusing, or a socket, pipe or device to copy, is WRITE_REFUSED, saying why. It runs as
+    // long as the copy takes.
+    copyEntry: procedure
+      .input(z.strictObject({ projectId: id, from: entryPath, into: entryPath }))
       .output(entryChanged),
     // Deletes the file or folder at `path` for good, a folder with everything in it; a link
     // goes, not what it leads to. An entry that is missing, and what `createEntry` refuses, are

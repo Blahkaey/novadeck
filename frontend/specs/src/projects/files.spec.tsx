@@ -312,6 +312,43 @@ describe("The Files panel", () => {
     })
   })
 
+  context("when the person cuts, copies and pastes files", () => {
+    // The tree's row of the entry at `path`, and the path of the file selected. A mouse leaves
+    // typing in the terminal, so the panel takes no focus from it.
+    const rowAt = (path: string): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`.files-tree [data-path="${CSS.escape(path)}"]`)
+    const selected = (): string | undefined =>
+      document.querySelector<HTMLElement>('.files-tree [aria-selected="true"]')?.dataset["path"]
+
+    it("copies a file into a folder, which opens on its copy, selected, then cuts another there, dimmed until it moves", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const publicFolder = page.getByRole("treeitem", { name: /^public$/ })
+
+      await page.getByRole("treeitem", { name: /^README\.md/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Copy(?!.*Path)/ }).click()
+      await publicFolder.click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Paste/ }).click()
+
+      await expect.poll(selected).toBe("public/README.md")
+      await expect.element(publicFolder).toHaveAttribute("aria-expanded", "true")
+      expect(rowAt("README.md")).not.toBeNull()
+
+      await page.getByRole("treeitem", { name: /^package\.json/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Cut/ }).click()
+      await expect
+        .element(page.getByRole("treeitem", { name: /^package\.json, .*cut/ }))
+        .toBeVisible()
+      expect(rowAt("package.json")?.closest(".files-row")?.getAttribute("data-cut")).toBe("true")
+      await publicFolder.click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Paste/ }).click()
+
+      await expect.poll(selected).toBe("public/package.json")
+      expect(rowAt("package.json")).toBeNull()
+      expect(document.querySelector(".files-row[data-cut=true]")).toBeNull()
+    })
+  })
+
   context("when the demo has no files", () => {
     it("has no Files toggle", async () => {
       await openWorkspace()

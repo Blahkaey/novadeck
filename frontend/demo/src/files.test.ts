@@ -1,3 +1,4 @@
+import { ChangeUnanswered } from "@novadeck/core/files"
 import type { ItemContent } from "@novadeck/core/items"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { workspaceReducer } from "@novadeck/core/state"
@@ -323,6 +324,152 @@ describe("the person's changes to a project's files", () => {
     files.failNextChange()
     files.failNextChange(false)
     await expect(files.remove("storefront", "a.ts")).resolves.toBeUndefined()
+  })
+
+  it("copies an entry beside itself as the runner names it: name copy.ext, then copy 2, a folder's and a dotfile's at the end", async () => {
+    const files = createDemoFiles(now)
+    const made = [
+      await files.copy("storefront", "src/App.tsx", "src"),
+      await files.copy("storefront", "src/App.tsx", "src"),
+      await files.copy("storefront", ".gitignore", ""),
+      await files.copy("storefront", "src/cart", "src"),
+    ]
+
+    expect(made).toEqual([
+      "src/App copy.tsx",
+      "src/App copy 2.tsx",
+      ".gitignore copy",
+      "src/cart copy",
+    ])
+    expect(await names(files, "src/cart copy")).toEqual([
+      "CartItem.tsx",
+      "CartSummary.tsx",
+      "useCart.ts",
+    ])
+  })
+
+  it("copies into another folder under its own name where that is free, a folder with all it holds", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.copy("storefront", "src/cart", "public")).resolves.toBe("public/cart")
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe("public/README.md")
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe(
+      "public/README copy.md",
+    )
+
+    expect(await names(files, "public")).toEqual([
+      "README copy.md",
+      "README.md",
+      "cart/",
+      "favicon.svg",
+    ])
+    expect(await names(files, "src/cart")).toEqual([
+      "CartItem.tsx",
+      "CartSummary.tsx",
+      "useCart.ts",
+    ])
+  })
+
+  it("keeps what a project ignores ignored in a copy, and leaves the agents' work where it was", async () => {
+    const files = createDemoFiles(now)
+    await files.copy("storefront", "node_modules", "src")
+    await files.copy("storefront", "src/cart", "")
+
+    expect((await files.list("storefront", "src")).entries).toContainEqual({
+      name: "node_modules",
+      folder: true,
+      ignored: true,
+    })
+    expect(project(files).changes["src/cart/useCart.ts"]).toBeDefined()
+    expect(project(files).changes["cart/useCart.ts"]).toBeUndefined()
+  })
+
+  it("refuses a folder into itself, what isn't there, a folder that is a file, and Git's .git, in the runner's words", async () => {
+    const files = createDemoFiles(now)
+    await expect(files.copy("storefront", "src", "src/cart")).rejects.toThrow(
+      "A folder can't be copied into itself.",
+    )
+    await expect(files.copy("storefront", "src/gone.ts", "")).rejects.toThrow(
+      "src/gone.ts isn't there any more.",
+    )
+    await expect(files.copy("storefront", "README.md", "package.json")).rejects.toThrow(
+      "package.json isn't a folder.",
+    )
+    await expect(files.copy("storefront", "README.md", "missing")).rejects.toThrow(
+      "missing isn't there any more.",
+    )
+    await expect(files.copy("storefront", "README.md", ".git")).rejects.toThrow(
+      "Novadeck doesn't change Git's own .git.",
+    )
+    await expect(files.copy("storefront", "", "src")).rejects.toThrow(
+      "Novadeck doesn't change the project's folder itself.",
+    )
+  })
+
+  it("fails the next paste once when the debug panel says so, a copy or a move into another folder, not a rename", async () => {
+    const files = createDemoFiles(now)
+    files.failNextPaste()
+    await expect(files.move("storefront", "README.md", "README.txt")).resolves.toBe("README.txt")
+    await expect(files.copy("storefront", "README.txt", "")).rejects.toThrow(
+      "The demo was told to fail this paste.",
+    )
+    await expect(files.copy("storefront", "README.txt", "")).resolves.toBe("README copy.txt")
+
+    files.failNextPaste()
+    await expect(files.move("storefront", "README.txt", "public/README.txt")).rejects.toThrow(
+      "The demo was told to fail this paste.",
+    )
+    files.failNextPaste()
+    files.failNextPaste(false)
+    await expect(files.move("storefront", "README.txt", "public/README.txt")).resolves.toBe(
+      "public/README.txt",
+    )
+  })
+
+  it("keeps the next change's failure from a paste, and the next paste's from a change", async () => {
+    const files = createDemoFiles(now)
+    files.failNextChange()
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe("public/README.md")
+    await expect(files.create("storefront", "a.ts", false)).rejects.toThrow(
+      "The demo was told to fail this change.",
+    )
+  })
+
+  it("answers the next move, copy or delete made as one whose answer was lost, once, when the debug panel says so", async () => {
+    const files = createDemoFiles(now)
+    files.loseNextAnswer()
+    await expect(files.copy("storefront", "README.md", "public")).rejects.toBeInstanceOf(
+      ChangeUnanswered,
+    )
+    expect(await names(files, "public")).toContain("README.md")
+    await expect(files.remove("storefront", "public/README.md")).resolves.toBeUndefined()
+
+    files.loseNextAnswer()
+    await expect(files.remove("storefront", "index.html")).rejects.toBeInstanceOf(ChangeUnanswered)
+    files.loseNextAnswer()
+    files.loseNextAnswer(false)
+    await expect(files.move("storefront", "README.md", "README.txt")).resolves.toBe("README.txt")
+  })
+
+  it("takes the time the debug panel says for the next paste, once, until it says otherwise", async () => {
+    const { clock, advance } = manual()
+    const files = createDemoFiles(now, clock)
+    files.slowNextPaste(5000)
+    let made: string | undefined
+    const copying = files.copy("storefront", "README.md", "public").then((path) => (made = path))
+
+    advance(4999)
+    await Promise.resolve()
+    expect(made).toBeUndefined()
+    advance(1)
+    await copying
+    expect(made).toBe("public/README.md")
+
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe(
+      "public/README copy.md",
+    )
+    files.slowNextPaste(5000)
+    files.slowNextPaste()
+    await expect(files.copy("storefront", "README.md", "")).resolves.toBe("README copy.md")
   })
 
   it("says a file the person deleted or moved away is gone, until it is there again, telling each time", async () => {

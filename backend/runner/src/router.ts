@@ -28,7 +28,7 @@ import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
-import { createEntry, moveEntry, removeEntry } from "./workspaces/entries.js"
+import { copyEntry, createEntry, moveEntry, removeEntry } from "./workspaces/entries.js"
 import { filesExcludeOf, saveFilesExclude } from "./workspaces/files-exclude.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
@@ -190,6 +190,10 @@ export const createRouter = (options: {
       moveEntry: api.projects.moveEntry.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         return moveEntry(store.project(input.projectId).cwd, input.from, input.to)
+      }),
+      copyEntry: api.projects.copyEntry.handler(({ input }) => {
+        projects.ensureNotRemoving(input.projectId)
+        return copyEntry(store.project(input.projectId).cwd, input.from, input.into)
       }),
       removeEntry: api.projects.removeEntry.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)

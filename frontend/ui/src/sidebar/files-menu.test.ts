@@ -233,6 +233,106 @@ describe("the Files panel's menu", () => {
     })
   })
 
+  context("where the backend moves and copies files", () => {
+    type Asked = { readonly what: string; readonly row: string | undefined }
+    // The menu with Cut, Copy and Paste offered, and New too, Paste `ready` or not, noting each
+    // one asked for.
+    const clipping = (
+      row: FilesRow | undefined,
+      {
+        asked = [],
+        ready = true,
+        platform = "other",
+      }: {
+        asked?: Asked[]
+        ready?: boolean
+        platform?: Platform
+      } = {},
+    ): ContextMenuItem[] =>
+      filesMenu({
+        row,
+        directory: "~/p",
+        platform,
+        onCopy: ignore,
+        onRefresh: ignore,
+        onNew: ignore,
+        clipboard: {
+          onCut: (at) => void asked.push({ what: "cut", row: at.node.path }),
+          onCopy: (at) => void asked.push({ what: "copy", row: at.node.path }),
+          ready,
+          onPaste: (at) => void asked.push({ what: "paste", row: at?.node.path }),
+        },
+      })
+    const grouped = (items: readonly ContextMenuItem[]): string[] =>
+      items.flatMap((item) =>
+        "separated" in item && item.separated ? ["|", item.label] : [item.label],
+      )
+
+    it("offers Cut, Copy and Paste on a row, between its new entries and its paths, with their keys", () => {
+      const row = rowAt("package.json")
+      expect(grouped(clipping(row))).toEqual([
+        "New File…",
+        "New Folder…",
+        "|",
+        "Cut",
+        "Copy",
+        "Paste",
+        "|",
+        "Copy Path",
+        "Copy Relative Path",
+      ])
+      expect(["cut", "copy", "paste"].map((value) => keysOf(action(clipping(row), value)))).toEqual(
+        [
+          ["Ctrl", "X"],
+          ["Ctrl", "C"],
+          ["Ctrl", "V"],
+        ],
+      )
+      expect(keysOf(action(clipping(row, { platform: "mac" }), "paste"))).toEqual(["⌘", "V"])
+    })
+
+    it("asks for each on the row it was asked on", () => {
+      const asked: Asked[] = []
+      const items = clipping(rowAt("src/cart"), { asked })
+      for (const value of ["cut", "copy", "paste"]) action(items, value).onSelect()
+      expect(asked).toEqual([
+        { what: "cut", row: "src/cart" },
+        { what: "copy", row: "src/cart" },
+        { what: "paste", row: "src/cart" },
+      ])
+    })
+
+    it("shows Paste but doesn't offer it while there is nothing to paste", () => {
+      const row = rowAt("package.json")
+      expect(action(clipping(row, { ready: false }), "paste").disabled).toBe(true)
+      expect(action(clipping(row), "paste").disabled).toBe(false)
+    })
+
+    it("offers Paste into the root on the tree's empty space, with no keys there", () => {
+      const asked: Asked[] = []
+      const items = clipping(undefined, { asked })
+      expect(grouped(items)).toEqual([
+        "New File…",
+        "New Folder…",
+        "|",
+        "Paste",
+        "|",
+        "Copy Path",
+        "Refresh",
+      ])
+      expect(action(items, "paste").detail).toBeUndefined()
+      action(items, "paste").onSelect()
+      expect(asked).toEqual([{ what: "paste", row: undefined }])
+    })
+
+    it("offers none of them on a row only an agent's work has", () => {
+      expect(labels(clipping(rowAt("src/cart/new.ts")))).toEqual([
+        "Copy Path",
+        "Copy Relative Path",
+      ])
+    })
+  })
+
   context("on a file an agent deleted", () => {
     it("offers only the copies, as the file is the agent's change to make", () => {
       const deleted = visibleLines(
@@ -252,6 +352,7 @@ describe("the Files panel's menu", () => {
             onCopy: ignore,
             onRefresh: ignore,
             onNew: ignore,
+            clipboard: { onCut: ignore, onCopy: ignore, ready: true, onPaste: ignore },
             onRename: ignore,
             onDelete: ignore,
           }),
