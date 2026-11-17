@@ -1,6 +1,12 @@
 import { ChangeSet, Text } from "@codemirror/state"
 
-import type { Range } from "./ranges.js"
+// How texts differ and merge, line by line: the changes that turn one into another, how far
+// apart two are, and the merge of two writers' changes to one. A plan's editor and a file's
+// apply an outside rewrite with them, and an app merges an agent's rewrite into the person's
+// edits.
+
+// Stretches of the text, by offset.
+export type Range = { readonly from: number; readonly to: number }
 
 // Lines with their line breaks, so joining them gives back the exact text.
 const linesOf = (text: string): string[] => text.match(/[^\n]*\n|[^\n]+$/g) ?? []
@@ -64,7 +70,7 @@ const walkBack = (steps: readonly Int32Array[], n: number, m: number): Int32Arra
 }
 
 // The changes that turn one text into another, line by line, so edits on lines the other
-// side didn't touch map through untouched.
+// side didn't touch map through untouched. Lines break at `\n` alone: a lone `\r` is text.
 export const lineChanges = (before: string, after: string): ChangeSet => {
   const a = linesOf(before)
   const b = linesOf(after)
@@ -92,6 +98,7 @@ export const lineChanges = (before: string, after: string): ChangeSet => {
         },
       ],
       before.length,
+      "\n",
     )
   const changes: { from: number; to: number; insert: string }[] = []
   let [i, j] = [0, 0]
@@ -111,7 +118,7 @@ export const lineChanges = (before: string, after: string): ChangeSet => {
       insert: b.slice(head + fromInsert, head + j).join(""),
     })
   }
-  return ChangeSet.of(changes, before.length)
+  return ChangeSet.of(changes, before.length, "\n")
 }
 
 const textOf = (value: string): Text => Text.of(value.split("\n"))

@@ -22,8 +22,8 @@ import {
   type Scroll,
   type ScrollRestore,
 } from "./markdown/scroll.js"
-import { lineChanges } from "./markdown/sync.js"
 import { theme } from "./markdown/theme.js"
+import { lineChanges } from "./sync/lines.js"
 
 export { rowAnnotations, type RowAnnotations } from "./markdown/annotations.js"
 export type { ClassedRange, Range } from "./markdown/ranges.js"

@@ -364,12 +364,16 @@ fails too, and fails when one is no longer needed.
   slider, whose position and width xterm sets inline.
 - `theme/accessibility.css` may name system colours (`Canvas`, `Highlight`) for forced
   colours; no other stylesheet may.
-- CodeMirror, the markdown viewer's editor, injects its own styles as CSS-in-JS at run
-  time, outside every layer, so no recipe can override them, and its base theme carries
-  colours of its own. `libraries/viewers/src/markdown/theme.ts` overrides the ones the
-  viewer shows (the gutter, selection and caret) in an editor theme, which CodeMirror
-  orders after its base theme, with `--md-*` `var()`s and their fallbacks; `prose.css`
-  maps the prose tokens onto them.
+- CodeMirror, the editor under the markdown viewer and the file editor
+  (`@novadeck/viewers/editor`), injects its own styles as CSS-in-JS at run time, outside
+  every layer, so no recipe can override them, and its base theme carries colours of its
+  own. `libraries/viewers/src/markdown/theme.ts` and `libraries/viewers/src/editor/theme.ts`
+  override the ones each shows (the gutter, selection and caret, and the file editor's
+  marked lines) in an editor theme, which CodeMirror orders after its base theme, with
+  `var()`s and their fallbacks. The markdown viewer reads `--md-*`, which `prose.css` maps
+  the prose tokens onto; the file editor reads the code viewer's `--code-*` (font, size,
+  line height, line numbers), so a file looks the same shown and edited, and its own
+  `--editor-selection-bg` and `--editor-marked-bg`, the lines another writer changed.
 
 ## Themes
 

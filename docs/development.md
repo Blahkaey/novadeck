@@ -982,7 +982,7 @@ atlas.
 | `libraries/emulator`      | The terminal emulator: xterm.js pinned and patched, the character-width rule, helpers.     |
 | `libraries/terminal`      | Hosting terminals: a pty, a headless screen, a resumable stream, the browser view.         |
 | `libraries/tui-input`     | Typing into a full-screen program and checking that the text landed.                       |
-| `libraries/viewers`       | Content viewers behind one contract: code, image, markdown and web pages.                  |
+| `libraries/viewers`       | Content viewers behind one contract: code, image, markdown, web pages and a text editor.   |
 | `libraries/wire`          | RPC calls and streams between processes over a WebSocket or a MessagePort.                 |
 | `libraries/sandbox`       | An isolated environment for tests and benchmarks that run real shells and programs.        |
 | `libraries/log`           | Structured, privacy-first log files: the line, the rotating file, the redactor.            |
