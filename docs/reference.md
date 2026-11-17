@@ -204,7 +204,9 @@ runs as a Node script. Profiles are presentation only: per-program behaviour goe
 Someone who updated past the welcome dialog is offered Agent Chat once, as a card over the
 footer's right end (`frontend/ui/src/shell/AgentChatOffer.tsx`) the first time an agent's terminal
 is selected with it off: Try Agent Chat, or No thanks. Either answers it for good, as does choosing the
-setting in Preferences or finishing the welcome dialog; the answer is kept in local storage
+setting in Preferences or finishing the welcome dialog with Agent Chat ticked. Finishing it with
+Agent Chat unticked is no answer: the offer only waits out that run (held in memory, so a restart,
+reload or the app booting again after a reconnect counts as a new run) and comes at a later launch. The answer is kept in local storage
 (`novadeck.agent-chat-offer-answered`, `frontend/core/src/agents/chat-offer.ts`), not in the
 preferences, so preferences saved earlier load as before.
 
@@ -578,15 +580,15 @@ agent.
   reduced motion), plus a choice of agents, with every installed one chosen, of Agent
   Chat, on, and of transcripts, on. A chosen agent's preview terminal shows it connected,
   and with Agent Chat chosen the agents' preview terminals show as their chat, while a
-  plain terminal stays as it is. “Let’s build something” applies those choices; skipping,
-  Escape, or clicking outside dismisses the dialog without connecting agents or changing
-  Agent Chat or transcripts. Its scheme picker (System, Light, Dark; left out for a theme
+  plain terminal stays as it is. “Let’s build something” applies those choices and is the only way out:
+  there is no skip, and Escape or clicking outside leaves the dialog open. If the app quits
+  with it open, it shows again at the next start. Its scheme picker (System, Light, Dark; left out for a theme
   drawn in one scheme) applies at once and stays however the dialog closes, as Preferences →
   Appearance's does. The preview is illustrative and starts no terminals. Preferences offers the same agents as immediate switches.
   An agent that is not installed offers Install instead, in both places, with the command
   it runs (in the welcome dialog, a dashed card to add it, whose command shows on asking and
   is read out with Install): its vendor's official installer, in a terminal of the workspace (Preferences
-  closes for it). Once the installer ends, Novadeck connects the agent and starts it in a
+  closes for it; the welcome dialog stays open, its card reading "Installing…" until the agent is found, then a ticked choice). Once the installer ends, Novadeck connects the agent and starts it in a
   terminal of its own, for you to sign in; while it runs, Preferences shows the agent as
   installing. Connecting installs a small Novadeck plugin into
   it with the agent's own plugin commands (`claude plugin`, `codex plugin`,
