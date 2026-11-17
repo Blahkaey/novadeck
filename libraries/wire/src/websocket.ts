@@ -21,7 +21,7 @@ export type WebSocketOptions = {
   readonly maxConnections?: number
   /** Calls one session may have in flight. An untrusted peer may not queue unbounded work. */
   readonly maxCalls?: number
-  /** How often a peer must answer a ping, or be dropped. */
+  /** How often each peer is pinged; one that sent nothing at all since the last ping is dropped. */
   readonly heartbeatMs?: number
   /** How long a socket has to complete its handshake. */
   readonly authMs?: number
@@ -69,7 +69,7 @@ export const serveWebSocket = (sessions: Sessions, options: WebSocketOptions) =>
   })
   let closing: Promise<void> | undefined
 
-  wss.on("connection", (socket) => {
+  wss.on("connection", (socket, request) => {
     const timer = setTimeout(() => socket.close(1008, "Authentication required"), authMs)
     timer.unref()
     let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -96,17 +96,20 @@ export const serveWebSocket = (sessions: Sessions, options: WebSocketOptions) =>
       cleanup()
       socket.terminate()
     })
-    let alive = true
-    socket.on("pong", () => {
-      alive = true
-    })
+    // Any byte from the peer since the last ping shows it alive, not only its pong: the pong
+    // waits behind whatever the peer sent before it, which on a slow link can take longer
+    // than a heartbeat to arrive while it goes on arriving. The network socket counts those
+    // bytes as they come, before a message's last one does. The first beat only pings.
+    const link = request.socket
+    let heard: number | undefined
     heartbeat = setInterval(() => {
-      if (!alive) {
+      const read = link.bytesRead
+      if (read === heard) {
         cleanup()
         socket.terminate()
         return
       }
-      alive = false
+      heard = read
       if (socket.readyState === WebSocket.OPEN) socket.ping()
     }, heartbeatMs)
     heartbeat.unref()

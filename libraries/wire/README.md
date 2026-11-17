@@ -147,10 +147,13 @@ beside the wire's own handshake.
     sendBudgetBytes, maxConnections, maxCalls, heartbeatMs, authMs })`, sockets for clients
     that authenticate in their handshake: its `upgrade` takes an HTTP server's upgrade
     requests. The token is compared as a SHA-256 digest in constant time; a socket has
-    `authMs` (10 s) to authenticate, answers a ping each `heartbeatMs` (30 s) or is dropped,
-    and is cut off once its unsent bytes outgrow `sendBudgetBytes`. Unknown paths are 404,
-    other origins 403, and sockets beyond `maxConnections` (32) 429. A peer's close frame
-    releases its session before the reply, so it can reconnect at once.
+    `authMs` (10 s) to authenticate, is pinged each `heartbeatMs` (30 s) and dropped when
+    nothing at all came from it since the last ping, and is cut off once its unsent bytes
+    outgrow `sendBudgetBytes`. Any byte the network socket read counts, a part of a message
+    still arriving included, not only the pong, which waits behind what the peer sent
+    before it. Unknown paths are 404, other origins 403, and sockets beyond
+    `maxConnections` (32) 429. A peer's close frame releases its session before the reply,
+    so it can reconnect at once.
   - `servePort(sessions, port, { maxCalls })`, one trusted client over a DOM `MessagePort`
     or Electron's `MessagePortMain`: holding the port is the credential, so no token. A
     message it can't read, or an answer it can't post, goes to `failed`, never to the host as

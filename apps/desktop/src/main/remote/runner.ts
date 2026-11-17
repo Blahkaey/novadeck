@@ -14,7 +14,15 @@ export type RunnerSocket = WebSocketLike & {
   ping(): void
   /** Drops the connection at once, with no closing handshake a dead link would never answer. */
   terminate(): void
-  on(type: "pong", listener: () => void): unknown
+  /**
+   * Hears the runner's answer to the handshake, just before `open`. Its `socket` is the
+   * network socket, whose `bytesRead` counts every byte the runner sent, those of a message
+   * whose last byte is still on its way included.
+   */
+  on(
+    type: "upgrade",
+    listener: (response: { readonly socket: { readonly bytesRead: number } }) => void,
+  ): unknown
 }
 
 /** A runner on another machine, which the app can tell to connect afresh. */
@@ -28,7 +36,10 @@ export type RemoteRunner = RunnerProcess & {
 
 export type RemoteState = "connecting" | "connected" | "disconnected"
 
-/** How often each connection pings the runner, and how long it waits for the answer. */
+/**
+ * How often each connection pings the runner, and how long it waits for anything from the
+ * runner after a ping.
+ */
 export const pingMs = 20_000
 export const answerMs = 10_000
 /** How long a connection may take to open. */
@@ -38,8 +49,11 @@ const openSocket = (url: string): RunnerSocket =>
   new WebSocket(url, { handshakeTimeout: connectMs })
 
 /**
- * Pings the runner once `socket` opens, every `pingMs`, and drops the socket when an answer
- * takes longer than `answerMs`, telling `stalled`; stops as the socket closes.
+ * Pings the runner once `socket` opens, every `pingMs`, and drops the socket when nothing at
+ * all arrives within `answerMs` of a ping, telling `stalled`; stops as the socket closes.
+ * Any byte from the runner answers a ping, not only its pong: the runner sends the pong
+ * behind everything it sent before, which on a slow link can take longer than `answerMs` to
+ * arrive while it goes on arriving, as a terminal's snapshot does.
  */
 const watch = (socket: RunnerSocket, stalled: () => void): void => {
   let waiting: ReturnType<typeof setTimeout> | undefined
@@ -47,25 +61,24 @@ const watch = (socket: RunnerSocket, stalled: () => void): void => {
   const stop = (): void => {
     clearInterval(pings)
     clearTimeout(waiting)
-    waiting = undefined
   }
-  socket.on("pong", () => {
-    clearTimeout(waiting)
-    waiting = undefined
-  })
-  socket.addEventListener("open", () => {
-    pings = setInterval(() => {
-      waiting ??= setTimeout(() => {
-        stop()
-        stalled()
-        socket.terminate()
-      }, answerMs)
-      try {
-        socket.ping()
-      } catch {
-        // A socket that can't send is one the wait above ends.
-      }
-    }, pingMs)
+  socket.on("upgrade", ({ socket: link }) => {
+    socket.addEventListener("open", () => {
+      pings = setInterval(() => {
+        const heard = link.bytesRead
+        waiting = setTimeout(() => {
+          if (link.bytesRead > heard) return
+          stop()
+          stalled()
+          socket.terminate()
+        }, answerMs)
+        try {
+          socket.ping()
+        } catch {
+          // A socket that can't send is one the wait above ends.
+        }
+      }, pingMs)
+    })
   })
   socket.addEventListener("close", stop)
 }
@@ -74,9 +87,10 @@ const watch = (socket: RunnerSocket, stalled: () => void): void => {
  * A runner on another machine, in the place of the one the app starts: each port the page
  * asks for is carried to the runner's WebSocket, with the runner's token added to its
  * handshake here, so the page never holds it. Each connection pings the runner and is
- * dropped when it stops answering, so the page asks for a fresh one rather than wait on a
- * dead link. The runner is not the app's to stop: closing only disconnects, and its shells
- * run on, for the next launch to find; nor is there anything of its to save as the system
+ * dropped when nothing at all comes back in time, so the page asks for a fresh one rather
+ * than wait on a dead link, while a link that is slow to deliver what the runner sent is
+ * kept. The runner is not the app's to stop: closing only disconnects, and its shells run
+ * on, for the next launch to find; nor is there anything of its to save as the system
  * session ends.
  */
 export const remoteRunner = (options: {

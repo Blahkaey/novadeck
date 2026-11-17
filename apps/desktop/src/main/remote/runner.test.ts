@@ -12,14 +12,20 @@ const settings = {
 
 type Kind = "open" | "close" | "error" | "message"
 
+/** The network socket under a WebSocket: the bytes it has read so far. */
+type Link = { bytesRead: number }
+
 /**
  * A socket as the runner's host opens one: what it was sent, and its events for the test to
- * raise. It answers each ping while `answering`, as a live runner does.
+ * raise. Its network socket counts what the runner sent (`receive`), and comes with the
+ * handshake's answer just before `open`, as `ws` gives it. It answers each ping with a
+ * pong's two bytes while `answering`, as a live runner does.
  */
 class FakeSocket implements RunnerSocket {
   readonly sent: unknown[] = []
   readonly listeners: { kind: Kind; listener: (event: { data: unknown }) => void }[] = []
-  readonly pongs: (() => void)[] = []
+  readonly upgrades: ((response: { readonly socket: Link }) => void)[] = []
+  readonly link: Link = { bytesRead: 0 }
   binaryType = "blob"
   readyState = 0
   closes = 0
@@ -35,21 +41,28 @@ class FakeSocket implements RunnerSocket {
   }
   ping(): void {
     this.pings += 1
-    if (this.answering) for (const pong of this.pongs) pong()
+    if (this.answering) this.receive(2)
   }
   terminate(): void {
     this.terminations += 1
     this.raise("close")
   }
-  on(_type: "pong", listener: () => void): this {
-    this.pongs.push(listener)
+  on(_type: "upgrade", listener: (response: { readonly socket: Link }) => void): this {
+    this.upgrades.push(listener)
     return this
   }
   addEventListener(kind: Kind, listener: (event: { data: unknown }) => void): void {
     this.listeners.push({ kind, listener })
   }
+  /** Bytes from the runner reaching the network socket, a message's last one or not. */
+  receive(bytes: number): void {
+    this.link.bytesRead += bytes
+  }
   raise(kind: Kind, data?: unknown): void {
-    if (kind === "open") this.readyState = 1
+    if (kind === "open") {
+      for (const upgrade of this.upgrades) upgrade({ socket: this.link })
+      this.readyState = 1
+    }
     if (kind === "close") this.readyState = 3
     for (const each of this.listeners) if (each.kind === kind) each.listener({ data })
   }
@@ -191,7 +204,27 @@ describe("remoteRunner", () => {
       expect(events()).toEqual(["remote.connected"])
     })
 
-    it("drops it, and closes the page's port, when a ping goes unanswered", () => {
+    it("keeps it while what the runner sent before its pongs is still arriving", () => {
+      const { runner, sockets, events } = start()
+      const { fake, port: delivered } = port()
+      runner.deliver(delivered)
+      const socket = sockets[0]!
+      socket.raise("open")
+      // A snapshot on a slow link, a few kilobytes a second, with every pong behind it.
+      socket.answering = false
+
+      for (let elapsed = 0; elapsed < pingMs * 3; elapsed += 1000) {
+        vi.advanceTimersByTime(1000)
+        socket.receive(4096)
+      }
+
+      expect(socket.pings).toBe(3)
+      expect(socket.terminations).toBe(0)
+      expect(fake.closes).toBe(0)
+      expect(events()).toEqual(["remote.connected"])
+    })
+
+    it("drops it, and closes the page's port, when nothing comes back within a ping's wait", () => {
       const { runner, sockets } = start()
       const { fake, port: delivered } = port()
       runner.deliver(delivered)
@@ -205,6 +238,40 @@ describe("remoteRunner", () => {
       vi.advanceTimersByTime(1)
       expect(sockets[0]!.terminations).toBe(1)
       expect(fake.closes).toBe(1)
+    })
+
+    it("counts only what arrives after a ping as its answer", () => {
+      const { runner, sockets } = start()
+      runner.deliver(port().port)
+      const socket = sockets[0]!
+      socket.raise("open")
+      socket.answering = false
+
+      vi.advanceTimersByTime(pingMs - 1)
+      socket.receive(64 * 1024)
+      vi.advanceTimersByTime(1 + answerMs)
+
+      expect(socket.terminations).toBe(1)
+    })
+
+    it("drops it on a later ping once what was arriving stops", () => {
+      const { runner, sockets, events } = start()
+      runner.deliver(port().port)
+      const socket = sockets[0]!
+      socket.raise("open")
+      socket.answering = false
+
+      vi.advanceTimersByTime(pingMs + answerMs / 2)
+      socket.receive(64 * 1024)
+      vi.advanceTimersByTime(answerMs / 2)
+      expect(socket.terminations).toBe(0)
+
+      // Nothing more arrives: the next ping's wait ends with nothing heard.
+      vi.advanceTimersByTime(pingMs - 1)
+      expect(socket.terminations).toBe(0)
+      vi.advanceTimersByTime(1)
+      expect(socket.terminations).toBe(1)
+      expect(events()).toEqual(["remote.connected", "remote.stalled"])
     })
 
     it("pings nothing before it opens or after it closes", () => {

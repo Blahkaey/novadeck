@@ -134,11 +134,14 @@ With a remote runner:
 
 - Shells, agents, projects and files are the runner's machine's. Quitting the app only
   disconnects: the runner and its shells run on, and the next launch finds them.
-- Each connection pings the runner every 20 seconds and is dropped when no answer comes
-  within 10, or when it takes more than 15 seconds to open; every connection is dropped as
-  the machine wakes from sleep. The page then reconnects, rather than wait on a link that
-  looks open while nothing reaches the runner. The log says so once (`remote.stalled`),
-  naming the runner by its origin alone.
+- Each connection pings the runner every 20 seconds and is dropped when nothing at all comes
+  from the runner within 10 seconds of a ping, or when it takes more than 15 seconds to
+  open; every connection is dropped as the machine wakes from sleep. The page then
+  reconnects, rather than wait on a link that looks open while nothing reaches the runner.
+  The log says so once (`remote.stalled`), naming the runner by its origin alone. Any byte
+  from the runner answers a ping, not only the ping's own answer, which the runner sends
+  behind everything it sent before: on a slow link a terminal's snapshot can take longer
+  than 10 seconds to arrive, and the connection is kept while it arrives.
 - Open folder browses the runner's machine in a small window that runs no script: it starts
   in the runner owner's home folder, its subfolders are links, with the folder above, the
   home folder and the projects' folders to start from, and its path field takes a typed
@@ -666,9 +669,12 @@ not command completion.
   reducing the screen contents outside that failed attachment or restarting the
   terminal. Snapshot chunking is not implemented in this version.
 - A viewer exceeding its budget receives `SLOW_CONSUMER` and must attach again.
-  The process keeps running. Dead connections are detected by 30-second ping/pong
-  heartbeats, normally within two intervals. Slow viewers do not block the runner
-  from draining output or accepting another connection's input.
+  The process keeps running. Dead connections are detected by 30-second heartbeats,
+  normally within two intervals: the runner pings each connection and drops one that sent
+  nothing at all since the last ping. Any byte counts, not only the pong, so a client
+  whose pong waits behind what it is still sending, such as a pasted file going up over a
+  slow link, is kept. Slow viewers do not block the runner from draining output or
+  accepting another connection's input.
 - Runner shutdown ends owned PTYs. Backend restarts preserve project and session
   metadata, including saved session state, and what restores each terminal (see
   [Shell integration and restoring terminals](#shell-integration-and-restoring-terminals)),

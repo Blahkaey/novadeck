@@ -1,6 +1,7 @@
 import { once } from "node:events"
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
+import type { Duplex } from "node:stream"
 
 import { oc, type } from "@orpc/contract"
 import { implement } from "@orpc/server"
@@ -50,6 +51,11 @@ const serve = async (
   })
   const server = createServer()
   server.on("upgrade", sockets.upgrade)
+  // The network socket under each connection, to tell when what a peer sent has arrived.
+  const links: Duplex[] = []
+  server.on("upgrade", (_request, link) => {
+    links.push(link)
+  })
   server.listen(0, "127.0.0.1")
   await once(server, "listening")
   onTestFinished(async () => {
@@ -57,7 +63,7 @@ const serve = async (
     server.close()
   })
   const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/rpc`
-  return { sessions, sockets, url }
+  return { sessions, sockets, url, links }
 }
 
 // A raw socket's client, without the handshake.
@@ -207,18 +213,70 @@ describe("serveWebSocket", () => {
     await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
   })
 
-  it("drops a peer that stops answering pings, releasing its session", async () => {
-    const closed = vi.fn<(session: Session) => void>()
-    // On a fake clock, so the handshake comes before the first ping however slow the machine.
+  // The heartbeat on a fake clock, so the handshake comes before the first ping however slow
+  // the machine: only the server's intervals are faked, and its sockets run as ever.
+  const heartbeatMs = 10_000
+  const onHeartbeatClock = () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
     onTestFinished(() => void vi.useRealTimers())
-    const heartbeatMs = 10_000
+  }
+
+  it("drops a peer that sends nothing at all from one ping to the next, releasing its session", async () => {
+    onHeartbeatClock()
+    const closed = vi.fn<(session: Session) => void>()
     const { url } = await serve({ heartbeatMs }, { closed })
     const { socket, client } = await raw(url, { autoPong: false })
     await client.wire.handshake({ protocolVersion, token })
     const ended = once(socket, "close")
-    // A ping unanswered by the next one drops the peer.
+    // Neither a pong nor anything else comes before the next ping.
     await vi.advanceTimersByTimeAsync(heartbeatMs * 2)
+    await ended
+    expect(closed).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a quiet peer that answers its pings", async () => {
+    onHeartbeatClock()
+    const closed = vi.fn<(session: Session) => void>()
+    const { url, links } = await serve({ heartbeatMs }, { closed })
+    const { client } = await raw(url)
+    await client.wire.handshake({ protocolVersion, token })
+    // Each beat pings, and the pong is all the server reads before the next.
+    const beat = async () => {
+      const pong = once(links[0]!, "data")
+      await vi.advanceTimersByTimeAsync(heartbeatMs)
+      expect(closed).not.toHaveBeenCalled()
+      await pong
+    }
+    await beat()
+    await beat()
+    await beat()
+    await vi.advanceTimersByTimeAsync(heartbeatMs)
+    expect(closed).not.toHaveBeenCalled()
+    await expect(client.echo("hi")).resolves.toBe("hi")
+  })
+
+  it("keeps a peer whose message is still arriving though no pong comes, until it stops", async () => {
+    onHeartbeatClock()
+    const closed = vi.fn<(session: Session) => void>()
+    const { url, links } = await serve({ heartbeatMs }, { closed })
+    const { socket, client } = await raw(url, { autoPong: false })
+    await client.wire.handshake({ protocolVersion, token })
+    // One message on its way a part at a time, as a large one on a slow link: the server reads
+    // its bytes, never a whole message, and no pong.
+    const part = async () => {
+      const read = once(links[0]!, "data")
+      socket.send("x".repeat(1024), { fin: false })
+      await read
+      await vi.advanceTimersByTimeAsync(heartbeatMs)
+      expect(closed).not.toHaveBeenCalled()
+    }
+    await part()
+    await part()
+    await part()
+
+    // Nothing more comes before the next beat.
+    const ended = once(socket, "close")
+    await vi.advanceTimersByTimeAsync(heartbeatMs)
     await ended
     expect(closed).toHaveBeenCalledOnce()
   })
