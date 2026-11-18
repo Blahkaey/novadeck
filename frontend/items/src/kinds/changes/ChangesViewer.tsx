@@ -1,13 +1,14 @@
 import type { PullRequest } from "@novadeck/core/forges"
 import { type ChangesContent, type Item } from "@novadeck/core/items"
 import { GitPullRequest } from "lucide-react"
-import { useCallback, useMemo, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
 
 import type { ArtifactBodyProps } from "../../ArtifactViewer"
 import { PaneTools, usePaneNote } from "../../pane-row"
 import { FileTree } from "./FileTree"
 import { FileView } from "./FileView"
 import { LayerList } from "./LayerList"
+import { originNote } from "./origin-note"
 import { usePullRequest } from "./pull-requests"
 import { alone, idsOf, pick, selectedOf, selectionName } from "./selection"
 import { filesOf, filesOfRange, rowsOf } from "./tree"
@@ -54,6 +55,16 @@ const sums = (
   reindented: content.files.reduce((sum, file) => sum + file.reindented, 0),
 })
 
+// The time, read again every minute, as the age of a fetch is said to the minute.
+const useMinute = (): number => {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
 export const ChangesViewer = ({
   item,
   content,
@@ -87,6 +98,8 @@ export const ChangesViewer = ({
     [rows],
   )
   const all = useMemo(() => sums(content), [content])
+  const minute = useMinute()
+  const note = originNote(content.origin, minute)
   const worktreePull = usePullRequest(content.root)
   // A compare is of the refs the agent named, not the checkout's work: its pull request isn't.
   const pull = content.head === undefined ? worktreePull : undefined
@@ -97,6 +110,8 @@ export const ChangesViewer = ({
     all.files === 0
       ? "no changes"
       : `${noun(all.files)}${content.truncated ? ", more than shown" : ""} · +${all.added} −${all.removed}${all.reindented > 0 ? ` ${all.reindented} re-indented` : ""}`,
+    // How current a compare's remote refs are, where that is in doubt, and why a fetch failed.
+    ...(note ? [note.title === undefined ? note.text : `${note.text}: ${note.title}`] : []),
   ])
 
   // A file opened is read: grayed at once, until the content comes again with the backend's word.
@@ -148,7 +163,29 @@ export const ChangesViewer = ({
 
   return (
     <>
-      <PaneTools chip={pull && <PullRequestLink pull={pull} />} tools={[]} />
+      <PaneTools
+        chip={
+          pull ? (
+            <PullRequestLink pull={pull} />
+          ) : (
+            note && (
+              // A compare has no pull request: where its remote refs may be old, the row says so.
+              <span
+                className="changes-origin"
+                data-stale={note.stale || undefined}
+                title={note.title}
+              >
+                {note.text}
+                {note.title !== undefined && (
+                  // The reason, for those who can't hover to read the title.
+                  <span className="changes-origin-why">: {note.title}</span>
+                )}
+              </span>
+            )
+          )
+        }
+        tools={[]}
+      />
       <div
         ref={host}
         className="changes-host"

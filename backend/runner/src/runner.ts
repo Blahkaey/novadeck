@@ -276,6 +276,12 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     // Where the person's tools keep their logins, as their login shell says.
     environment: () => agents.environment(),
     snapshots,
+    // Compares of remote refs make them current, and keep their repository fetched.
+    origin: {
+      // Fetched for a compare, not a worktree: the person's checkout is not moved by it.
+      fetchBriefly: (commonDir, ms) => worktrees.fetchBriefly(commonDir, ms, false),
+      status: (commonDir) => worktrees.originStatus(commonDir),
+    },
     // The files of a change the person read, kept with the works.
     reads: {
       marks: (root) => works.marks(root),
@@ -359,6 +365,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     exists: (terminalId) =>
       terminals.place(terminalId) !== undefined || store.terminalExists(terminalId),
     ...(options.worktreesRoot !== undefined && { root: options.worktreesRoot }),
+    repositories: () => items.remoteRepositories(),
     // Beside the database, owner-only: where a repository's hooks are pointed away to.
     ...(options.database !== undefined &&
       options.database !== ":memory:" && {
