@@ -3,6 +3,7 @@ import { createStore } from "@novadeck/core/store"
 import type { WorkspaceSession } from "@novadeck/core/types"
 import type { Work, WorksState } from "@novadeck/core/works"
 
+import { parentOf, type EntryChanges } from "../sidebar/files-edit"
 import { projectPath, type Owner } from "../sidebar/files-works"
 
 // What the Files panel and the file preview share of the backend's files and works.
@@ -90,3 +91,30 @@ export const copyOf = (
   )
   return copies.toSorted((a, b) => b.at - a.at)[0]?.path
 }
+
+// Why a move or a delete wasn't made: the person kept the project window's edits that can't be
+// saved, which it would lose. The Files panel says it after "Couldn't rename …:".
+export const keptEdits = "You kept the edits in the project window, which couldn't be saved."
+
+// The Files panel's moves and deletes, each made once the edits to the files project windows
+// show there are saved, or the person chose to go on without them (`saveBefore`, the
+// `saveBeforeChange` command): a move within its folder is a rename. One the person stayed for
+// isn't made, and rejects saying why.
+export const savingFirst = (
+  { move, remove }: Pick<EntryChanges, "move" | "remove">,
+  saveBefore: (path: string, action: "rename" | "move" | "delete") => Promise<boolean>,
+): Pick<EntryChanges, "move" | "remove"> => ({
+  ...(move && {
+    move: async (from: string, to: string) => {
+      const action = parentOf(from) === parentOf(to) ? "rename" : "move"
+      if (!(await saveBefore(from, action))) throw new Error(keptEdits)
+      return move(from, to)
+    },
+  }),
+  ...(remove && {
+    remove: async (path: string) => {
+      if (!(await saveBefore(path, "delete"))) throw new Error(keptEdits)
+      return remove(path)
+    },
+  }),
+})

@@ -11,6 +11,7 @@
     "./Checkbox": "./src/Checkbox.tsx",
     "./Chord": "./src/Chord.tsx",
     "./ConfirmDialog": "./src/ConfirmDialog.tsx",
+    "./CopyFirstDialog": "./src/CopyFirstDialog.tsx",
     "./ContextMenu": "./src/ContextMenu.tsx",
     "./Dialog": "./src/Dialog.tsx",
     "./drag-pull": "./src/drag-pull.ts",

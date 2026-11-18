@@ -90,6 +90,41 @@ describe("the markdown viewer", () => {
     expect(edits[0]!.ranges).toEqual([{ from: 9, to: 12, className: "marked" }])
   })
 
+  it("keeps a lone carriage return as text, and writes it back as it was", () => {
+    const text = "one\rtwo\r\nthree\n"
+    const { viewer, view, edits } = mount({ text })
+    expect(view.state.doc.lines).toBe(3)
+    type(view, "zero ")
+    expect(edits.map((edit) => edit.text)).toEqual([`zero ${text}`])
+    // An outside change bringing another lands as it is.
+    viewer.update({ text: `zero ${text}four\rfive\n` })
+    expect(view.state.doc.toString()).toBe(`zero ${text}four\rfive\n`)
+    expect(view.state.doc.lines).toBe(4)
+  })
+
+  it("keeps a lone carriage return in a change made from a line's own text", () => {
+    const { view, edits } = mount({ text: "one\rtwo\n" })
+    // As a table's edit rewrites a line from its own text.
+    const line = view.state.doc.line(1)
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: line.text.toUpperCase() },
+      userEvent: "input",
+    })
+    expect(view.state.doc.lines).toBe(2)
+    expect(edits.at(-1)?.text).toBe("ONE\rTWO\n")
+  })
+
+  it("breaks the lines of text pasted with CRLF as it breaks its own", () => {
+    const { view, edits } = mount({ text: "one\n" })
+    view.dispatch({ selection: { anchor: view.state.doc.length } })
+    const clipboard = new DataTransfer()
+    clipboard.setData("text/plain", "two\r\nthree\r\n")
+    view.contentDOM.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }),
+    )
+    expect(edits.at(-1)?.text).toBe("one\ntwo\nthree\n")
+  })
+
   it("is read-only until switched, without a remount", () => {
     const { viewer, pane, view, edits } = mount({ text: "one\n" }, { editable: false })
     const editor = pane.querySelector(".cm-editor")

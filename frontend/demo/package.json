@@ -15,6 +15,7 @@
     "./agents/screens": "./src/agents/screens.ts",
     "./agents/turns": "./src/agents/turns.ts",
     "./feedback": "./src/feedback.ts",
+    "./file-edits": "./src/file-edits.ts",
     "./files": "./src/files.ts",
     "./forges": "./src/forges.ts",
     "./history": "./src/history.ts",

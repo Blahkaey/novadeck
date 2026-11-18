@@ -34,9 +34,10 @@ policy, so it needs no library fences.
   instead). It fails
   too when the build holds nothing for these checks to read. With `budgets` it also fails a
   build that weighs too much: `first`, what the page loads first, its scripts and styles
-  gzipped and every woff2 font they declare, and `demo`, the module `demoModule` names with
-  what it loads and the first chunk does not. The visitor build sets them in
-  `apps/try/vite.config.ts`; the others have none.
+  gzipped and every woff2 font they declare, and `demo`, the chunk a dynamic import of the
+  module `demoModule` names loads (named for it, or, where it lends code to chunks it loads
+  later, the one holding it), with what it loads and the first chunk does not. The visitor
+  build sets them in `apps/try/vite.config.ts`; the others have none.
 - `unit()` (`/vitest`), the jsdom `unit` project of the UI's packages' tests and of each app
   with unit tests (its `vitest.config.ts` lists it), written as `.test.ts` or `.test.tsx`
   (`frontend/specs` runs projects of its own, and `frontend/test-kit` has no tests).

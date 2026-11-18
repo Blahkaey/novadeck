@@ -285,12 +285,12 @@ describe("the package graph", () => {
   })
 
   it("keeps CodeMirror in the items package's editors, where it loads lazily", () => {
-    // A Markdown document's editor and the plan's, around it, load through `lazy()`, and
-    // the plans' merge through `import()`; a static import of CodeMirror, of the markdown
-    // viewer, of a file's editor, of the merge or of either editor anywhere else would pull
-    // CodeMirror into the first chunk.
+    // A Markdown document's editor, the plan's around it and the project window's code
+    // editor load through `lazy()`, and the plans' merge through `import()`; a static import
+    // of CodeMirror, of the markdown viewer, of a file's editor, of the merge or of any of
+    // these editors anywhere else would pull CodeMirror into the first chunk.
     const src = join(root, "frontend", "items", "src")
-    const editors = ["document/editor/", "kinds/plan/plan-editor/"]
+    const editors = ["document/editor/", "kinds/plan/plan-editor/", "kinds/file/editor/"]
     const files = (readdirSync(src, { recursive: true }) as string[])
       .map((file) => file.split("\\").join("/"))
       .filter((file) => /\.tsx?$/.test(file) && !editors.some((folder) => file.startsWith(folder)))

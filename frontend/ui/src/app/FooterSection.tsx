@@ -85,6 +85,8 @@ export const FooterSection = memo((): React.JSX.Element => {
     (state) =>
       state.location.route.dialog !== null ||
       state.closing !== null ||
+      state.moveAsk !== null ||
+      state.leaving !== null ||
       state.recent.switcher !== null ||
       crashLoopQuestion(state) > 0,
   )

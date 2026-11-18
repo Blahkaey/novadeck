@@ -97,6 +97,9 @@ const keepIndentation = indentService.of((context, pos) => {
 const base: Extension = [
   // A lone `\r` is text, as the file has it, and an edit writes it back as it was.
   EditorState.lineSeparator.of("\n"),
+  // Text pasted from a system that breaks lines with `\r\n` breaks them as the editor does,
+  // so a `\r` of its line breaks never stays as text.
+  EditorView.clipboardInputFilter.of((text) => text.replaceAll("\r\n", "\n")),
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),

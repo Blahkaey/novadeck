@@ -16,10 +16,12 @@ import { createStore } from "@novadeck/core/store"
 import type { Workspace, WorkspaceTarget } from "@novadeck/core/types"
 
 import type { DemoTurns } from "./agents/turns"
+import type { DemoFileEdits } from "./file-edits"
 import { demoHandle } from "./handles"
 import { lessMotion, stillRequested } from "./motion"
+import { atOrBelow, holds, parentOf, trimmed, type Tree } from "./project-paths"
 import { demoTerminalId } from "./samples"
-import { terminalOf } from "./workspace"
+import { terminalOf, windowFileOf } from "./workspace"
 
 // The demo's Files panel: the storefront project's files, listed a folder at a time from
 // fixtures, as its agents change them. Each agent notionally works in its own worktree, so every write is its handle's.
@@ -29,8 +31,10 @@ import { terminalOf } from "./workspace"
 // turns; waiting on the person or at rest, it writes nothing and shows no cursor. Each project's
 // own patterns for hiding files are kept in memory, as the runner keeps them, from none. The
 // person makes, renames, moves, copies and deletes files in memory too, in a copy of the project's
-// tree the agents' work follows (a copy starts with none of it), and a window showing a file they
-// deleted, or moved away, says it is gone.
+// tree the agents' work follows (a copy starts with none of it; see ./files-changes.ts), and a
+// window showing a file they deleted, or moved away, says it is gone. The file a session's project
+// window shows is edited and saved in memory as well (see ./file-edits.ts), its text following
+// those changes. Both load with the first of them, out of the visitor build's demo load.
 
 const projectId = "storefront"
 const session = { projectId, workspaceSessionId: "initial" }
@@ -192,41 +196,6 @@ export const endTurnIn = (project: FilesProject, handle: string): FilesProject =
   return { ...project, writing }
 }
 
-const trimmed = (path: string): string => (path.endsWith("/") ? path.slice(0, -1) : path)
-
-// Whether `each` is `path` or lies below it.
-const atOrBelow = (each: string, path: string): boolean =>
-  each === path || each.startsWith(`${path}/`)
-
-// A path at or below `from` as it is once `from` moved to `to`; any other as it is.
-const movedTo = (each: string, from: string, to: string): string =>
-  atOrBelow(each, from) ? `${to}${each.slice(from.length)}` : each
-
-// The project's changes and cursors once the person moved `from` to `to`: the agents' work on
-// it, and on what is in it, follows it.
-const movedIn = (project: FilesProject, from: string, to: string): FilesProject => ({
-  changes: Object.fromEntries(
-    Object.entries(project.changes).map(([path, change]) => [movedTo(path, from, to), change]),
-  ),
-  writing: Object.fromEntries(
-    Object.entries(project.writing).map(([handle, path]) => [handle, movedTo(path, from, to)]),
-  ),
-})
-
-// The project's changes and cursors once the person deleted `path`: none at it or in it.
-const removedIn = (project: FilesProject, path: string): FilesProject => ({
-  changes: Object.fromEntries(
-    Object.entries(project.changes).filter(([each]) => !atOrBelow(each, path)),
-  ),
-  writing: Object.fromEntries(
-    Object.entries(project.writing).filter(([, each]) => !atOrBelow(each, path)),
-  ),
-})
-
-// A project's tree, as the fixtures hold it: an entry ending in `/` is a folder with nothing in
-// it, and `ignored` names what the project's VCS ignores.
-type Tree = { readonly entries: readonly string[]; readonly ignored: readonly string[] }
-
 const storefront: Tree = { entries, ignored }
 
 // The other sample projects' trees, small and generic to their names; a project the visitor adds
@@ -322,61 +291,6 @@ const plain: Tree = {
 }
 
 const treeOf = (id: string): Tree => (id === projectId ? storefront : (trees[id] ?? plain))
-
-// What a tree holds at `path`: a file, a folder (empty, or holding paths below), or nothing.
-const holds = (tree: Tree, path: string): "file" | "folder" | undefined => {
-  for (const entry of tree.entries) {
-    const each = trimmed(entry)
-    if (each === path) return entry.endsWith("/") ? "folder" : "file"
-    if (each.startsWith(`${path}/`)) return "folder"
-  }
-  return undefined
-}
-
-// A tree with `path` and what is below it gone, its folder kept, empty, where nothing else is in
-// it.
-const without = (tree: Tree, path: string): Tree => {
-  const left = tree.entries.filter((entry) => !atOrBelow(trimmed(entry), path))
-  const folder = path.slice(0, Math.max(0, path.lastIndexOf("/")))
-  const kept =
-    folder === "" || holds({ ...tree, entries: left }, folder) ? left : [...left, `${folder}/`]
-  return { entries: kept, ignored: tree.ignored.filter((each) => !atOrBelow(trimmed(each), path)) }
-}
-
-// Why the runner refuses to change `path`: the project's folder itself, and Git's own `.git`.
-const untouchable = (path: string): string | undefined =>
-  path === ""
-    ? "Novadeck doesn't change the project's folder itself."
-    : path.split("/").some((name) => name.toLowerCase() === ".git")
-      ? "Novadeck doesn't change Git's own .git."
-      : undefined
-
-// Throws as the runner would for `path`.
-const refuse = (path: string): void => {
-  const why = untouchable(path)
-  if (why) throw new Error(why)
-}
-
-// The runner's words for a name taken in `folder`.
-const takenIn = (folder: string, name: string): string =>
-  `There's already something named ${name} in ${folder === "" ? "the project's folder" : folder}.`
-
-const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")))
-
-const childOf = (folder: string, name: string): string =>
-  folder === "" ? name : `${folder}/${name}`
-
-// The name to try after `name` for a copy of a file or, with `folder`, a folder, as the runner
-// names copies (`copyName` in backend/runner/src/workspaces/copy.ts), as VS Code does: `cart.ts`,
-// `cart copy.ts`, `cart copy 2.ts`; a folder's whole name, and a dotfile's, take it at their end.
-const copyName = (name: string, folder: boolean): string => {
-  const dot = folder ? -1 : name.lastIndexOf(".")
-  const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""]
-  const counted = /^(.+ copy)(?: (\d+))?$/.exec(stem)
-  return counted
-    ? `${counted[1]} ${Number(counted[2] ?? 1) + 1}${extension}`
-    : `${stem} copy${extension}`
-}
 
 // What `folder` of a tree lists: its files, and the folders that hold the paths below. Ignored
 // folders hold only ignored files, which the panel carries down.
@@ -477,6 +391,11 @@ const between = (range: { min: number; max: number }, roll: number): number =>
 
 export type DemoFiles = ProjectFiles & {
   readonly exclude: NonNullable<ProjectFiles["exclude"]>
+  // The files the person edits in a project window, which the debug panel puts in faults: none
+  // until the window reads one whole or the person makes one, which loads them.
+  readonly edits: () => DemoFileEdits | undefined
+  // Loads them now where they aren't yet, as `&fileFault=` asks before the window reads a file.
+  readonly editing: () => Promise<DemoFileEdits>
   readonly create: NonNullable<ProjectFiles["create"]>
   readonly move: NonNullable<ProjectFiles["move"]>
   readonly copy: NonNullable<ProjectFiles["copy"]>
@@ -529,6 +448,9 @@ export type DemoFiles = ProjectFiles & {
 export const isDemoFiles = (files: ProjectFiles | undefined): files is DemoFiles =>
   files !== undefined && "write" in files && "endTurn" in files
 
+// How the person changes a project's tree, loaded with their first change.
+const changes = () => import("./files-changes")
+
 export const createDemoFiles = (
   now: number = Date.now(),
   clock: FilesClock = realClock,
@@ -550,6 +472,15 @@ export const createDemoFiles = (
   // Each project's tree as the person changed it; the fixtures' until they do.
   const changed = new Map<string, Tree>()
   const treeNow = (id: string): Tree => changed.get(id) ?? treeOf(id)
+  // The files the person edits in a project window, made as the window first reads one whole, the
+  // person makes one or `&fileFault=` asks: none before, when a change in Files has no text to
+  // carry along.
+  let edits: DemoFileEdits | undefined
+  const editing = async (): Promise<DemoFileEdits> => {
+    const { createFileEdits } = await import("./file-edits")
+    edits ??= createFileEdits(({ projectId: id, path }) => holds(treeNow(id), path) === "file")
+    return edits
+  }
   const write = (handle: string, path?: string): void =>
     change((project) =>
       writeTo(
@@ -666,54 +597,17 @@ export const createDemoFiles = (
   }
   const create: DemoFiles["create"] = async (id, path, folder) => {
     await fault(false)
-    refuse(path)
-    const tree = treeNow(id)
-    const names = path.split("/")
-    for (const at of names.keys()) {
-      const way = names.slice(0, at + 1).join("/")
-      const there = holds(tree, way)
-      if (at === names.length - 1 && there)
-        throw new Error(takenIn(names.slice(0, -1).join("/"), names.at(-1)!))
-      if (there === "file") throw new Error(`${way} isn't a folder.`)
-    }
-    // A folder that held nothing holds it now.
-    const kept = tree.entries.filter((entry) => !(entry.endsWith("/") && path.startsWith(entry)))
-    settle(id, { ...tree, entries: [...kept, folder ? `${path}/` : path] }, undefined, path)
+    const [{ made }, edited] = await Promise.all([changes(), editing()])
+    settle(id, made(treeNow(id), path, folder), undefined, path)
+    if (!folder) edited.made(id, path)
     return path
   }
   // A move into another folder is a paste after a cut; one in its own folder, a rename.
   const move: DemoFiles["move"] = async (id, from, to) => {
     await fault(parentOf(from) !== parentOf(to))
-    refuse(from)
-    refuse(to)
-    const tree = treeNow(id)
-    if (!holds(tree, from)) throw new Error(`${from} isn't there any more.`)
-    const folder = to.slice(0, Math.max(0, to.lastIndexOf("/")))
-    if (folder !== "" && holds(tree, folder) !== "folder")
-      throw new Error(`${folder} isn't there any more.`)
-    if (holds(tree, from) === "folder" && atOrBelow(to, from))
-      throw new Error("A folder can't move into itself.")
-    if (holds(tree, to)) throw new Error(takenIn(folder, to.slice(to.lastIndexOf("/") + 1)))
-    const left = without(tree, from)
-    settle(
-      id,
-      {
-        entries: [
-          ...left.entries.filter((entry) => !(entry.endsWith("/") && to.startsWith(entry))),
-          ...tree.entries
-            .filter((entry) => atOrBelow(trimmed(entry), from))
-            .map((entry) => movedTo(entry, from, to)),
-        ],
-        ignored: [
-          ...left.ignored,
-          ...tree.ignored
-            .filter((each) => atOrBelow(trimmed(each), from))
-            .map((each) => movedTo(each, from, to)),
-        ],
-      },
-      from,
-      to,
-    )
+    const { moved, movedIn } = await changes()
+    settle(id, moved(treeNow(id), from, to), from, to)
+    edits?.moved(id, from, to)
     if (id === projectId) change((project) => movedIn(project, from, to))
     return answered(to)
   }
@@ -721,44 +615,17 @@ export const createDemoFiles = (
   // it: the agents' work stays where it was.
   const copy: DemoFiles["copy"] = async (id, from, into) => {
     await fault(true)
-    refuse(from)
-    if (into !== "") refuse(into)
-    const tree = treeNow(id)
-    const kind = holds(tree, from)
-    if (!kind) throw new Error(`${from} isn't there any more.`)
-    const there = into === "" ? "folder" : holds(tree, into)
-    if (there !== "folder")
-      throw new Error(there ? `${into} isn't a folder.` : `${into} isn't there any more.`)
-    const folder = kind === "folder"
-    if (folder && atOrBelow(into, from)) throw new Error("A folder can't be copied into itself.")
-    const name = from.slice(from.lastIndexOf("/") + 1)
-    let made = parentOf(from) === into ? copyName(name, folder) : name
-    while (holds(tree, childOf(into, made))) made = copyName(made, folder)
-    const to = childOf(into, made)
-    const copied = (each: string): boolean => atOrBelow(trimmed(each), from)
-    settle(
-      id,
-      {
-        entries: [
-          ...tree.entries.filter((entry) => !(entry.endsWith("/") && to.startsWith(entry))),
-          ...tree.entries.filter(copied).map((entry) => movedTo(entry, from, to)),
-        ],
-        ignored: [
-          ...tree.ignored,
-          ...tree.ignored.filter(copied).map((each) => movedTo(each, from, to)),
-        ],
-      },
-      undefined,
-      to,
-    )
+    const { copied } = await changes()
+    const { tree, to } = copied(treeNow(id), from, into)
+    settle(id, tree, undefined, to)
+    edits?.copied(id, from, to)
     return answered(to)
   }
   const remove: DemoFiles["remove"] = async (id, path) => {
     await fault(false)
-    refuse(path)
-    const tree = treeNow(id)
-    if (!holds(tree, path)) throw new Error(`${path} isn't there any more.`)
-    settle(id, without(tree, path), path, path)
+    const { removed, removedIn } = await changes()
+    settle(id, removed(treeNow(id), path), path, path)
+    edits?.removed(id, path)
     if (id === projectId) change((project) => removedIn(project, path))
     answered(undefined)
   }
@@ -845,6 +712,8 @@ export const createDemoFiles = (
     state,
     list,
     exclude,
+    edits: () => edits,
+    editing,
     degrade,
     failNextExcludeSave,
     failExcludeReads,
@@ -869,6 +738,20 @@ export const createDemoFiles = (
 
 // What a window shows of a file the person deleted, or moved away, as the runner's watch reports it.
 const missing: ItemContent = { state: "unavailable", reason: "missing", size: null }
+
+// Follows as `follow` does with what `loading` loads, once it has, unless stopped before.
+// Returns the stop.
+const once = <T>(loading: Promise<T>, follow: (loaded: T) => () => void): (() => void) => {
+  let stop: (() => void) | undefined
+  let stopped = false
+  void loading.then((loaded) => {
+    if (!stopped) stop = follow(loaded)
+  })
+  return () => {
+    stopped = true
+    stop?.()
+  }
+}
 
 // A backend with the demo's files for the storefront project.
 export const withFiles = (
@@ -903,7 +786,8 @@ export const withFiles = (
       companions: {
         ...companions,
         // A window that shows a file the person deleted, or moved away, says it is gone, until
-        // it shows another file or the file is there again.
+        // it shows another file or the file is there again. The project window's file, read
+        // whole to edit, is the one the person edits here; anything else is as the demo shows it.
         follow: (target, itemId, options, on) => {
           let last: ItemContent | undefined
           let wasGone = false
@@ -913,15 +797,34 @@ export const withFiles = (
             wasGone = isGone
             on(isGone ? missing : last)
           }
-          const unwatch = files.watchGone(() => tell(false))
-          const stop = companions.follow(target, itemId, options, (content) => {
+          const told = (content: ItemContent): void => {
             last = content
             tell(true)
-          })
+          }
+          const unwatch = files.watchGone(() => tell(false))
+          const shown = options.edit ? windowFileOf(latest, target) : undefined
+          const stop =
+            shown?.itemId === itemId
+              ? once(files.editing(), (edits) =>
+                  edits.follow(
+                    shown,
+                    (stand) => companions.follow(target, itemId, options, stand),
+                    told,
+                  ),
+                )
+              : companions.follow(target, itemId, options, told)
           return () => {
             stop()
             unwatch()
           }
+        },
+        // The project window's file is saved as the runner saves it; anything else, a plan, as
+        // the demo saves it.
+        save: async (target, itemId, text, basedOn, path) => {
+          const shown = windowFileOf(latest, target)
+          return shown?.itemId === itemId
+            ? (await files.editing()).save(shown, text, basedOn, path)
+            : companions.save(target, itemId, text, basedOn, path)
         },
       },
     }),

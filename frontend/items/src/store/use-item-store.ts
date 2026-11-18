@@ -2,6 +2,7 @@ import { kindRules, type Item, type ItemContent, type ItemId } from "@novadeck/c
 import type { WorkspaceTarget } from "@novadeck/core/types"
 import { useEffect, useRef, useSyncExternalStore } from "react"
 
+import type { FileDoc } from "../kinds/file/file-doc"
 import type { PlanDoc } from "../kinds/plan/plan-doc"
 import type { ItemStore } from "./item-store"
 
@@ -34,11 +35,13 @@ export const usePlans = (
 }
 
 // What an item holds, followed while the component shows it. Undefined until it first
-// reports. A plan is followed whether shown or not.
+// reports. A plan is followed whether shown or not. With `edit`, a file that can be edited is
+// followed whole (see `ItemStore["watch"]`).
 export const useContent = (
   itemStore: ItemStore,
   target: WorkspaceTarget,
   item: Pick<Item, "id" | "kind">,
+  { edit = false }: { readonly edit?: boolean } = {},
 ): ItemContent | undefined => {
   const { projectId, workspaceSessionId } = target
   const { id, kind } = item
@@ -46,14 +49,18 @@ export const useContent = (
     () =>
       kindRules[kind].follow === "always"
         ? undefined
-        : itemStore.watch({ projectId, workspaceSessionId }, id),
-    [itemStore, projectId, workspaceSessionId, id, kind],
+        : itemStore.watch({ projectId, workspaceSessionId }, id, { edit }),
+    [itemStore, projectId, workspaceSessionId, id, kind, edit],
   )
   return useSyncExternalStore(
     itemStore.store.subscribe,
     () => itemStore.store.getSnapshot().content[id],
   )
 }
+
+// The file the store holds by `key` (`fileKey`) as the person edits it, once its text came.
+export const useFileDoc = (itemStore: ItemStore, key: string): FileDoc | undefined =>
+  useSyncExternalStore(itemStore.store.subscribe, () => itemStore.store.getSnapshot().files[key])
 
 // The shell a shells item has unfolded, by its id, if any.
 export const useUnfolded = (itemStore: ItemStore, itemId: ItemId): string | undefined =>

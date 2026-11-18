@@ -465,6 +465,10 @@ export type Companions = {
     shown: number,
     troubles: readonly PageTrouble[],
   ) => void
+  // Where the app lets the person's edits reach their files before its window closes or the
+  // app quits: it waits for what `save` returns, as long as it waits for the page's other
+  // saves. Returns the undo. Absent where nothing waits for a quit, as in a browser.
+  readonly beforeQuit?: (save: () => Promise<void>) => () => void
   // Opens a file in the session's project window, by a path from the project's folder or
   // absolute: the item the window holds is pointed at it, or, when the session has none,
   // the window is made under `windowId`. Resolves with the item and its window as they now

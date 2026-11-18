@@ -839,16 +839,20 @@ export const runnerBackend = (
   // right after, and a close it hasn't heard of by then leaves the terminal saved, to
   // come back with the next listing.
   const closes = new Set<Promise<void>>()
+  // What the item store sends of the person's edits before a quit (`companions.beforeQuit`).
+  const editSaves = new Set<() => Promise<void>>()
   // What a quit waits for: the last saves, and the removals and closes under way,
-  // including those the person starts while it waits.
+  // including those the person starts while it waits; and alongside, the person's edits.
   const beforeQuit = async (): Promise<void> => {
+    const edits = Promise.allSettled([...editSaves].map((save) => save()))
     for (;;) {
       // eslint-disable-next-line no-await-in-loop -- Settled work may start more.
       await saves.settle()
-      if (removals.size === 0 && closes.size === 0) return
+      if (removals.size === 0 && closes.size === 0) break
       // eslint-disable-next-line no-await-in-loop -- Settled work may start more.
       await Promise.allSettled([...removals, ...closes])
     }
+    await edits
   }
 
   // Terminals closed here that the runner has yet to confirm gone, by answering the close
@@ -1981,12 +1985,21 @@ export const runnerBackend = (
     murmur: murmur.murmur,
     typeInto: screens.typeInto,
     start,
-    companions: createRunnerCompanions(runner.companions, {
-      livePages: options.livePages === true,
-      ...(options.pagePicture ? { picture: options.pagePicture } : {}),
-      ...(options.pagePhone ? { phone: options.pagePhone } : {}),
-      inOrder: items.inOrder,
-    }),
+    companions: {
+      ...createRunnerCompanions(runner.companions, {
+        livePages: options.livePages === true,
+        ...(options.pagePicture ? { picture: options.pagePicture } : {}),
+        ...(options.pagePhone ? { phone: options.pagePhone } : {}),
+        inOrder: items.inOrder,
+      }),
+      // Only where the app waits for the page before it quits.
+      ...(options.beforeQuit && {
+        beforeQuit: (save: () => Promise<void>) => {
+          editSaves.add(save)
+          return () => void editSaves.delete(save)
+        },
+      }),
+    },
     messages,
     conversations: answeringChat,
     inbox: snoozable(

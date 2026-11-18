@@ -1,6 +1,6 @@
 // The browser's clipboard, refused for the page as where the browser denies it the clipboard:
-// every copy rejects, the Plan group's and the Files group's alike, until it is given back. Each
-// boot of the demo gives it back, as a variant without those groups has no way to.
+// every copy rejects, as the Plan, Files and File editing groups ask, until it is given back.
+// Each boot of the demo gives it back, as a variant without those groups has no way to.
 
 // Undoes the refusal, while there is one.
 let restore: (() => void) | undefined

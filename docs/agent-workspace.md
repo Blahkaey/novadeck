@@ -408,6 +408,67 @@ current text without it, for a client to merge the edit into. A save that names 
 than the file its item points at now, or a file's that names none, is refused as `moved` and
 writes nothing.
 
+### The project window edits its file
+
+The project window is where the person edits a file of the project; a file on a terminal's bar
+or in an undocked window reads as before. It follows its item with `edit`, and a file it has
+whole opens editable where it is read (`ProjectFile` in `frontend/items/src/kinds/file/`): a
+Markdown file in its document, as a plan, and any other in a code editor, CodeMirror loaded
+lazily with it. A file a save would be refused for (`writable: false`) opens in the same editor
+read-only, a line saying why (not one of the project's own files, as an agent's copy, a file in
+`.git` or a link leading outside the project's folder; a file or folder Novadeck can't write); one
+the backend lists instead (`uneditable`: too large, or not UTF-8) shows its lines read-only,
+saying why. A document with unsaved edits stays in the editor over a listing (or a binary file)
+that came in meanwhile, the block taken from what came in (its `uneditable` reason, or `not-text`
+for a binary file), except for a file gated as a secret, whose edits the window doesn't show.
+What the person edits is a document of the item and the path it was read at, the plans' saving
+made general over both (`frontend/items/src/store/saving.ts`), so the window re-pointed at another
+file holds another document, and each save names the `path` its edit was made on.
+
+A file saves as a plan does: once typing pauses, at once when focus leaves the window, and on
+Ctrl+S (Cmd+S on macOS), with the stamp the edit was made on, tried again, stalled after 5 tries
+and retried the same way. A change made outside the window (an agent, another editor) comes in
+as it is when nothing is unsaved; over unsaved edits it merges into them line by line, as a
+plan's rewrite does, the lines it changed marked, and the merge is saved. A save refused for
+good (the file deleted, its folder unwritable, too large, moved, no longer text) stops, and the
+window says why for a file, with Copy my edits and, where the file is still writable, Try saving
+again; a file deleted waits, and the edits save once it is back. The edits outlive the window's
+watch, the workspace's reconcile and the window re-pointed while they are unsaved or can't be
+saved, and go with the item, or once saved while nothing shows them: a document that settles with
+its item no longer followed, or pointed at another path, is let go then (`letGoUnseen`); one the
+window shows again before that keeps its edits, and its moved marks. A file with CRLF throughout
+is edited in LF and saved with CRLF; any other, a lone CR or mixed breaks too, is edited and saved
+as its text is, so a break the person didn't touch is written back as it was (unlike a plan,
+which saves a mixed file as LF); text pasted with CRLF is broken as the editor breaks its own. A
+version that breaks its lines otherwise than the document did, as a writer that normalises them,
+merges in the version's form: the document's texts are taken into it first, so no line differs
+by its break alone.
+
+Before the window shows another file or closes, before the person removes its session or project,
+and before the Files panel renames, moves or deletes its file or a folder holding it, the UI saves
+the edits and waits for that save to settle, a save's own 20 seconds at most (`saveFile`, and
+`file-edits.ts` among the app's commands); across sessions, one at a time, stopping at the first the
+person stays for. A save that failed and is tried again is waited out, not asked about. A save that
+takes more than 2 seconds (`quietMs`) puts the question up in its waiting form (`LeaveAsk.waiting`):
+"Saving your edits to" the file, with Cancel alone, which stays; it goes on by itself once the save
+lands, and turns in place into the question below once the edits can't reach the file. A save that
+lands within the 2 seconds shows nothing; once the person stayed, the save's outcome neither goes
+on nor asks. Where the edits can't reach the file (refused, stalled, not writable, the file gone,
+unreadable or no longer whole, no answer in time) the person is asked first (`LeaveEditsDialog`, the
+question carrying the item and the path the edits were made on): Copy my edits and switch, close,
+rename, move or delete copies them to the clipboard, lets them go and goes on; a copy that fails
+does nothing, says so and offers Switch (close, …) without my edits, which lets them go; Cancel
+stays, the Files panel's change isn't made, its line saying why, and a session or project isn't
+removed. A plan's close asks the same way (`CopyFirstDialog` in the toolkit serves both). An answer
+counts only for the question still up.
+
+As the app goes, on a quit (`Companions.beforeQuit`, which the desktop app's quit waits on,
+1.5 s at most, `saveBeforeQuitMs`) and on the page's `pagehide`, the item store sends every edit
+not yet in its file, plans' and files', without asking; what can't be saved then is lost.
+
+An Escape that a plan's or a file's editor takes, as collapsing a selection, goes no further: it
+doesn't hide the pane.
+
 ### The runner's items
 
 The runner keeps items in its database and reads their content from disk as it loads,

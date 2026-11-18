@@ -160,6 +160,11 @@ const whenCut =
     return () => element.removeEventListener("animationcancel", cut)
   }
 
+// Escape hides the pane, unless what it was pressed in took it, as an editor collapsing its
+// selection does.
+const hidesPane = (event: React.KeyboardEvent): boolean =>
+  event.key === "Escape" && !event.defaultPrevented
+
 // How soon after the person acts in the pane what it shows must change for the pane to
 // take focus: the change follows at once, so anything later wasn't theirs.
 const handOffMs = 1000
@@ -194,7 +199,7 @@ const BehindStack = ({
     style={{ "--_count": behind.length } as React.CSSProperties}
     data-workspace-companion
     onKeyDown={(event) => {
-      if (event.key === "Escape") {
+      if (hidesPane(event)) {
         event.stopPropagation()
         onHide()
       }
@@ -646,7 +651,7 @@ export const CompanionPane = ({
         data-tour="side-pane"
         aria-label={messages ? "Messages" : `What ${agent} showed you`}
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
+          if (hidesPane(event)) {
             event.stopPropagation()
             onHide()
           }

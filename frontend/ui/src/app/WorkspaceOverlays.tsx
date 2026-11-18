@@ -33,6 +33,7 @@ import {
 } from "../terminals/ApprovalDialog"
 import { closeTeamTree, sameCloseTeamTree, type CloseTeamRow } from "../terminals/close-team"
 import { CloseTerminalDialog } from "../terminals/CloseTerminalDialog"
+import { LeaveEditsDialog } from "../terminals/LeaveEditsDialog"
 import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
@@ -295,7 +296,7 @@ const useUninstall = (
 
 // Dialogs and the terminal switcher, above the workspace.
 export const WorkspaceOverlays = memo((): React.JSX.Element => {
-  const { backend, commands, navigation, ui } = useWorkspaceServices()
+  const { backend, commands, navigation, ui, itemStore } = useWorkspaceServices()
   const transcripts = useTranscripts(backend.transcripts)
   const hibernation = useHibernation(backend.hibernation)
   const worktrees = useWorktrees(backend.worktrees)
@@ -311,7 +312,8 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const { go, closeDialog } = navigation
   const { chooseRecent, updatePreferences, openSearchResult, closeSwitcher } = commands
   const { confirmClose, cancelClose, retryAfterCrashLoop, dismissCrashLoop } = commands
-  const { confirmMove, cancelMove } = commands
+  const { confirmMove, cancelMove, answerLeave } = commands
+  const leaving = useUiState((state) => state.leaving)
   const moveAsk = useUiState((state) => state.moveAsk)
   const moveQuestion = useWorkspaceState(
     (workspace) => moveQuestionOf(workspace, moveAsk),
@@ -470,6 +472,11 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         onConfirm={confirmMove}
         onCancel={cancelMove}
         returnFocus={(id) => terminalElement(id)?.querySelector<HTMLElement>("button") ?? null}
+      />
+      <LeaveEditsDialog
+        question={leaving}
+        edits={(ask) => itemStore?.fileEdits(ask.itemId, ask.path)}
+        onAnswer={answerLeave}
       />
       {backend.approvals && (
         <ApprovalDialog approval={approval} onAnswer={backend.approvals.answer} />

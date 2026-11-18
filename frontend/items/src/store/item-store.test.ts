@@ -857,3 +857,34 @@ describe("following items", () => {
     expect(itemStore.store.getSnapshot().plans).toEqual({})
   })
 })
+
+describe("a plan as the app goes", () => {
+  it("sends its edits at once as the app quits, and waits for the answer", async () => {
+    const { companions, saves } = backend()
+    const quits: (() => Promise<void>)[] = []
+    const { actions } = connected({
+      ...companions,
+      beforeQuit: (save) => {
+        quits.push(save)
+        return () => {}
+      },
+    })
+    actions.edit(`${first}delta\n`, [])
+    let quit = false
+    const quitting = quits[0]!().then(() => (quit = true))
+    expect(saves.map(({ text }) => text)).toEqual([`${first}delta\n`])
+    await settle()
+    expect(quit).toBe(false)
+    saves[0]!.answer({ saved: true, stamp: "2" })
+    await quitting
+    expect(quit).toBe(true)
+  })
+
+  it("sends its edits at once as the page goes", () => {
+    const { companions, saves } = backend()
+    const { actions } = connected(companions)
+    actions.edit(`${first}delta\n`, [])
+    window.dispatchEvent(new Event("pagehide"))
+    expect(saves.map(({ text }) => text)).toEqual([`${first}delta\n`])
+  })
+})

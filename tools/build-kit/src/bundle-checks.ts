@@ -141,8 +141,9 @@ export const missingUtilities = (
 // What a build may weigh: what the page loads first (its scripts and styles gzipped, and
 // every woff2 font those styles declare, in bytes as they are, though a browser fetches only
 // the faces the page draws with), and the demo, which loads with its connection, the terminal
-// emulator among it (scripts and styles gzipped), found by the module its chunk is named for.
-// An app with budgets sets them in its own vite.config.ts (the visitor build's, today).
+// emulator among it (scripts and styles gzipped): the chunk a dynamic import of `demoModule`
+// loads (see `loadsAs`), and what it loads that the page didn't first. An app with budgets sets
+// them in its own vite.config.ts (the visitor build's, today).
 export type Budgets = { readonly first: number; readonly demo: number; readonly demoModule: string }
 
 // A built chunk's code, the module it stands for and the styles it brings, or an asset's
@@ -151,8 +152,18 @@ export type WeighedChunk = BuiltChunk & {
   readonly code?: string
   readonly source?: unknown
   readonly facadeModuleId?: string | null
+  readonly isDynamicEntry?: boolean
   readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> }
 }
+
+// Whether `chunk` is the one a dynamic import of the module `name` loads: the chunk named for it,
+// or, where that chunk also lends code to chunks it loads later, so Rollup names it for no
+// module, the dynamic entry that holds it.
+const loadsAs = (chunk: WeighedChunk, name: string): boolean =>
+  chunk.facadeModuleId != null
+    ? slashed(chunk.facadeModuleId).endsWith(name)
+    : chunk.isDynamicEntry === true &&
+      Object.keys(chunk.modules ?? {}).some((id) => slashed(id).endsWith(name))
 
 // What a part's weight says of its budget.
 const over = (budgets: Budgets, part: "first" | "demo", size: number): string[] =>
@@ -166,10 +177,7 @@ export const budgetViolations = (
 ): string[] => {
   const first = reached(bundle, entries(bundle))
   const demoChunks = Object.entries(bundle)
-    .filter(
-      ([, chunk]) =>
-        chunk.facadeModuleId != null && slashed(chunk.facadeModuleId).endsWith(budgets.demoModule),
-    )
+    .filter(([, chunk]) => loadsAs(chunk, budgets.demoModule))
     .map(([fileName]) => fileName)
   if (demoChunks.length === 0) return [`no demo chunk found for ${budgets.demoModule}`]
   const demo = [...reached(bundle, demoChunks)].filter((fileName) => !first.has(fileName))

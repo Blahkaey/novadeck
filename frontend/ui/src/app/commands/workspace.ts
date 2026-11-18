@@ -28,13 +28,16 @@ import {
   currentContext,
   currentState,
   currentTarget,
+  projectWindowFile,
   sameTarget,
+  stateAt,
   windowedDestination,
 } from "../selectors"
 import { chatViewOn, notePortableCardShown, type UiState } from "../ui-store"
 import { createChatCommands, type ChatCommands } from "./chat"
 import { createCompanionCommands, type CompanionCommands } from "./companion"
 import type { CommandContext } from "./context"
+import { createEditCommands, type EditCommands } from "./file-edits"
 import { createFileCommands, type FileCommands } from "./files"
 import { createLayoutCommands, type LayoutCommands } from "./layout"
 import { createMoveCommands, type MoveCommands } from "./moves"
@@ -53,6 +56,7 @@ export type WorkspaceCommands = ShellCommands &
   CompanionCommands &
   MoveCommands &
   FileCommands &
+  EditCommands &
   ChatCommands &
   RenameCommands &
   RecentCommands &
@@ -121,7 +125,8 @@ export type WorkspaceCommands = ShellCommands &
     // Closes the terminal, or asks first while closing would lose something: a program
     // running in it, or, where the backend keeps History, an agent mid-turn, one waiting on
     // background work, or one that couldn't be restored. A terminal that leads anyone always
-    // asks.
+    // asks. The project window saves the edits to its file first, and asks first where they
+    // can't be saved (see `Leave`).
     readonly close: (terminalId: string) => void
     // Answers the pending close confirmation: closes the terminal alone, or, with "team", also
     // everyone it leads, at any depth.
@@ -159,6 +164,10 @@ const holding = (
   return undefined
 }
 
+// Where each session of a project is addressed.
+const sessionsOf = (project: WorkspaceProject): WorkspaceTarget[] =>
+  project.history.map((session) => ({ projectId: project.id, workspaceSessionId: session.id }))
+
 export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands => {
   const { workspace, ui, chat, navigation, newTerminal, pickDirectory, crashLoop, effects } = ctx
   const { history } = ctx
@@ -168,6 +177,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
   const shell = createShellCommands(ctx)
   const rename = createRenameCommands(ctx)
   const recent = createRecentCommands(ctx)
+  const { leave, leaveAll, ...edits } = createEditCommands(ctx)
   // Rearranges the switcher's projects from the latest of both stores.
   const arrange = (
     change: (projects: Workspace["projects"], current: ProjectArrangement) => ProjectArrangement,
@@ -240,6 +250,15 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       true,
     )
     if (selected === terminalId && view !== "canvas") pulse()
+  }
+  // Closes the window once the edits to its file are saved, or let go: where it is now, if it
+  // still is, in the session it was asked to close in.
+  const closeLeft = (target: WorkspaceTarget, windowId: string): void => {
+    const snapshot = workspace.getSnapshot()
+    const window = stateAt(snapshot, target)?.roster.windows.find((each) => each.id === windowId)
+    if (!window) return
+    if (sameTarget(currentTarget(snapshot), target)) closeNow(windowId)
+    else workspace.transact([{ type: "item/close", target, itemId: window.itemId }])
   }
 
   const switchProject = (next: Project): void => {
@@ -321,7 +340,8 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     ...recent,
     ...createLayoutCommands(ctx),
     ...createChatCommands(ctx),
-    ...createFileCommands(ctx, { markCreated, pulse }),
+    ...createFileCommands(ctx, { markCreated, pulse, leave, leaveAll }),
+    ...edits,
     ...createMoveCommands(ctx, {
       peek: shell.peek,
       showTerminals: shell.showTerminals,
@@ -369,17 +389,24 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       })
     },
     removeSession: (id) => {
-      const project = activeProject(workspace.getSnapshot())!
-      if (project.history.length < 2) return
-      navigateWorkspace([
-        {
-          type: "session/remove",
-          projectId: project.id,
-          workspaceSessionId: id,
-          now: effects.now(),
-          enabledViews: preferences().enabledViews,
-        },
-      ])
+      const { id: projectId, history: sessions } = activeProject(workspace.getSnapshot())!
+      if (sessions.length < 2) return
+      const remove = (): void =>
+        navigateWorkspace([
+          {
+            type: "session/remove",
+            projectId,
+            workspaceSessionId: id,
+            now: effects.now(),
+            enabledViews: preferences().enabledViews,
+          },
+        ])
+      // The edits to its project window's file reach it first.
+      const leaving = leaveAll([{ projectId, workspaceSessionId: id }], "close")
+      if (!leaving) return remove()
+      void leaving.then((goes) => {
+        if (goes) remove()
+      })
     },
     startFresh: () => {
       const snapshot = workspace.getSnapshot()
@@ -449,15 +476,24 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       ])
     },
     removeProject: (id) => {
-      if (workspace.getSnapshot().projects.length < 2) return
-      navigateWorkspace([
-        {
-          type: "project/remove",
-          projectId: id,
-          now: effects.now(),
-          enabledViews: preferences().enabledViews,
-        },
-      ])
+      const { projects } = workspace.getSnapshot()
+      if (projects.length < 2) return
+      const remove = (): void =>
+        navigateWorkspace([
+          {
+            type: "project/remove",
+            projectId: id,
+            now: effects.now(),
+            enabledViews: preferences().enabledViews,
+          },
+        ])
+      // The edits to its sessions' project windows' files reach them first.
+      const going = projects.filter((project) => project.id === id)
+      const leaving = leaveAll(going.flatMap(sessionsOf), "close")
+      if (!leaving) return remove()
+      void leaving.then((goes) => {
+        if (goes) remove()
+      })
     },
     moveProject: (id, index) =>
       arrange((projects, current) => arrangeMove(projects, current, id, index)),
@@ -668,6 +704,14 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     reveal,
     close: (terminalId) => {
       const snapshot = workspace.getSnapshot()
+      const target = currentTarget(snapshot)
+      const shown = projectWindowFile(currentState(snapshot))
+      const window = currentState(snapshot).roster.windows.find((each) => each.id === terminalId)
+      const leaving = shown && window?.itemId === shown.id && leave(target, shown, "close")
+      if (leaving)
+        return void leaving.then((left) => {
+          if (left) closeLeft(target, terminalId)
+        })
       const closing = currentState(snapshot).roster.terminals.find(
         (terminal) => terminal.id === terminalId,
       )

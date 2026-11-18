@@ -1,7 +1,8 @@
 import { ChangeUnanswered } from "@novadeck/core/files"
-import type { ItemContent } from "@novadeck/core/items"
+import { PlanUnwritableError, type ItemContent, type ItemId } from "@novadeck/core/items"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { workspaceReducer } from "@novadeck/core/state"
+import { createWorkspaceStore } from "@novadeck/core/store"
 import { itemFixture } from "@novadeck/core/testing"
 import type { TerminalStatus } from "@novadeck/core/types"
 import { afterEach, vi } from "vitest"
@@ -1022,5 +1023,148 @@ describe("a backend with the demo's files", () => {
     advance(8000)
     expect(project(files).writing.crow).toBeDefined()
     stop()
+  })
+})
+
+describe("the file the project window edits, in the agents demo", () => {
+  const target = { projectId: "storefront", workspaceSessionId: "initial" }
+  const stops: (() => void)[] = []
+  afterEach(() => stops.splice(0).forEach((stop) => stop()))
+
+  // The agents demo, started over a workspace store as the app keeps one, with its files and
+  // ways to open a file in the project window, follow an item and save the window's file.
+  const started = () => {
+    const backend = plainDemo("agents")
+    const files = backend.files
+    if (!isDemoFiles(files)) throw new Error("The agents demo has files")
+    const store = createWorkspaceStore(
+      workspaceFromSeed(backend.seed, { view: "focus", windowedView: "grid", now }),
+      backend.commit,
+    )
+    backend.commit(store.getSnapshot(), [])
+    stops.push(
+      backend.start!({
+        dispatch: (actions) => void store.transact(actions as never),
+        open: () => {},
+      }),
+    )
+    const companions = backend.companions!
+    const open = async (path: string): Promise<{ readonly id: ItemId; readonly at: string }> => {
+      const { item } = await companions.openInProject!(target, path, "project-window")
+      return { id: item.id, at: item.path! }
+    }
+    // What a window that follows the item hears, the last of it, once it has heard anything:
+    // the demo reads the window's file whole once what keeps the edits has loaded.
+    const follow = async (id: ItemId, edit = true, reveal?: string) => {
+      const heard: ItemContent[] = []
+      await new Promise<void>((resolve) => {
+        companions.follow(target, id, { reveal, ...(edit && { edit }) }, (content) => {
+          heard.push(content)
+          resolve()
+        })
+      })
+      return () => heard.at(-1)!
+    }
+    const save = async (opened: { readonly id: ItemId; readonly at: string }, text: string) => {
+      const last = (await follow(opened.id))()
+      return companions.save(
+        target,
+        opened.id,
+        text,
+        last.state === "ready" ? last.stamp : "",
+        opened.at,
+      )
+    }
+    // What the window hears of the file at `path`, opened in it.
+    const read = async (path: string) => (await follow((await open(path)).id))()
+    return { files, companions, open, follow, save, read }
+  }
+
+  const textOf = (content: ItemContent): string | undefined =>
+    content.state === "ready" && content.content.kind === "text" ? content.content.text : undefined
+
+  it("reads it whole to edit, writable, and saves the person's edit, which it reads after", async () => {
+    const { open, follow, save } = started()
+    const opened = await open("package.json")
+    expect((await follow(opened.id))()).toMatchObject({
+      content: { kind: "text", text: '{\n  "name": "package"\n}\n', writable: true },
+    })
+    expect(await save(opened, '{ "name": "storefront" }\n')).toMatchObject({ saved: true })
+    expect(textOf((await follow(opened.id))())).toBe('{ "name": "storefront" }\n')
+  })
+
+  it("keeps no edits until the window first reads a file whole, which loads them", async () => {
+    const { files, open, follow } = started()
+    const opened = await open("package.json")
+    expect(files.edits()).toBeUndefined()
+    await follow(opened.id)
+    expect(files.edits()).toBeDefined()
+  })
+
+  it("tells a window that stopped following before the edits loaded nothing", async () => {
+    const { files, companions, open } = started()
+    const opened = await open("package.json")
+    const heard: ItemContent[] = []
+    companions.follow(target, opened.id, { reveal: undefined, edit: true }, (content) =>
+      heard.push(content),
+    )()
+    await files.editing()
+    await Promise.resolve()
+    expect(heard).toEqual([])
+  })
+
+  it("reads a file only an agent's work has read-only, as the agent's copy it is", async () => {
+    const { open, follow } = started()
+    const opened = await open("src/checkout/OrderSummary.tsx")
+    expect((await follow(opened.id))()).toMatchObject({
+      content: { kind: "text", writable: false, reason: "outside" },
+    })
+  })
+
+  it("holds a file that may hold secrets behind its gate until it is revealed, then reads it whole", async () => {
+    const { open, follow } = started()
+    const opened = await open(".env.local")
+    expect((await follow(opened.id))()).toMatchObject({ state: "unavailable", reason: "secret" })
+    expect((await follow(opened.id, true, opened.at))()).toMatchObject({
+      content: { kind: "text", text: "API_URL=http://localhost:3000\n", writable: true },
+    })
+  })
+
+  it("leaves a follow without edit, as the pane beside a terminal follows, the listing it was", async () => {
+    const { open, follow } = started()
+    const opened = await open("package.json")
+    expect((await follow(opened.id, false))()).toMatchObject({ content: { kind: "file" } })
+  })
+
+  it("keeps its edits through a rename and into a copy, and makes a file empty", async () => {
+    const { files, open, save, read } = started()
+    await save(await open("README.md"), "# Storefront\n")
+    await files.move("storefront", "README.md", "NOTES.md")
+    expect(textOf(await read("NOTES.md"))).toBe("# Storefront\n")
+    await files.copy("storefront", "NOTES.md", "")
+    expect(textOf(await read("NOTES copy.md"))).toBe("# Storefront\n")
+    await files.remove("storefront", "NOTES.md")
+    await files.create("storefront", "NOTES.md", false)
+    expect(textOf(await read("NOTES.md"))).toBe("")
+  })
+
+  it("refuses an edit to a file the window no longer shows as moved", async () => {
+    const { open, follow, companions } = started()
+    const first = await open("package.json")
+    const last = (await follow(first.id))()
+    await open("index.html")
+    const saving = companions.save(
+      target,
+      first.id,
+      "x",
+      last.state === "ready" ? last.stamp : "",
+      first.at,
+    )
+    await expect(saving).rejects.toEqual(new PlanUnwritableError("moved"))
+  })
+
+  it("saves anything else, as a plan, as the demo does", async () => {
+    const { companions } = started()
+    await expect(companions.save(target, "plan-1" as ItemId, "x", "1")).rejects.toThrow("No plan")
   })
 })

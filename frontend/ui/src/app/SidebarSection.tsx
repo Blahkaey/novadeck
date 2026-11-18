@@ -27,6 +27,7 @@ import {
   previewFiles,
   sameOwners,
   sameWorks,
+  savingFirst,
 } from "./files-feed"
 import { useMoving, useTabsAway } from "./move-to"
 import { historyShown, filesShown, notesShown } from "./routing"
@@ -108,7 +109,9 @@ export const SidebarSection = memo((): React.JSX.Element => {
       },
     [excludeFeed, projectId],
   )
-  // How the backend makes, moves, copies and deletes the project's files, each where it can.
+  // How the backend makes, moves, copies and deletes the project's files, each where it can. A
+  // move or a delete of the file a project window shows, or of a folder holding it, saves the
+  // edits to it first (`savingFirst`).
   const entries = useMemo(() => {
     if (!filesFeed) return undefined
     const { create, move, copy, remove } = filesFeed
@@ -116,11 +119,16 @@ export const SidebarSection = memo((): React.JSX.Element => {
       ...(create && {
         create: (path: string, folder: boolean) => create(projectId, path, folder),
       }),
-      ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),
       ...(copy && { copy: (from: string, into: string) => copy(projectId, from, into) }),
-      ...(remove && { remove: (path: string) => remove(projectId, path) }),
+      ...savingFirst(
+        {
+          ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),
+          ...(remove && { remove: (path: string) => remove(projectId, path) }),
+        },
+        (path, action) => commands.saveBeforeChange(projectId, path, action),
+      ),
     }
-  }, [filesFeed, projectId])
+  }, [filesFeed, projectId, commands])
   // What the project's windows do once the person moved one of its files.
   const onMoved = useCallback(
     (from: string, to: string) => void commands.followMovedFile(projectId, from, to),

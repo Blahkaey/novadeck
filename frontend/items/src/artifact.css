@@ -2,7 +2,9 @@
    (`.artifact-viewer`), each under a header (`.artifact-meta`): an image on a checker
    (`.artifact-image`, holding the image viewer, @novadeck/viewers/image.css, its zoom a
    chip over it); a file's lines (`.artifact-code`, holding the code viewer,
-   @novadeck/viewers/code.css); a page in a browser frame
+   @novadeck/viewers/code.css), or a file the project window edits there
+   (`.artifact-code.artifact-editor`, holding the file editor, @novadeck/viewers/editor);
+   a page in a browser frame
    (`.artifact-browser`, its bar `.artifact-browser-bar` with `.icon-button`s, its
    address `.artifact-url` and a link to open it, `.artifact-open`, and the page in
    `.artifact-page-frame`, holding the browser viewer, with `.artifact-page-failed`
@@ -29,6 +31,10 @@
    --artifact-code-number-fg (muted), --artifact-code-pointed-bg (soft): a file's line
    numbers, and the lines the agent pointed at, as the code viewer's --code-number-fg and
    --code-emphasis-bg.
+   --artifact-code-selection-bg (selection), --artifact-code-changed-bg (warning at 45%):
+   in a file being edited, the selection, and the lines another writer changed while the
+   person's edits were unsaved, as the editor's --editor-selection-bg and
+   --editor-marked-bg.
    --artifact-browser-bg (shell), --artifact-browser-border-color (line): a page's bar.
    --artifact-url-bg (paper), --artifact-url-border-color (line), --artifact-url-fg
    (ink): its address.
@@ -177,6 +183,13 @@
   --code-font-size: var(--text-code);
   --code-number-fg: var(--artifact-code-number-fg, var(--color-muted));
   --code-emphasis-bg: var(--artifact-code-pointed-bg, var(--color-soft));
+}
+.artifact-editor {
+  --editor-selection-bg: var(--artifact-code-selection-bg, var(--color-selection));
+  --editor-marked-bg: var(
+    --artifact-code-changed-bg,
+    color-mix(in srgb, var(--color-warning) 45%, transparent)
+  );
 }
 
 .artifact-browser {

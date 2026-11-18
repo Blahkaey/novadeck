@@ -92,6 +92,10 @@ type Followers = {
 const followersOf = new WeakMap<EditorView, Followers>()
 
 const base: Extension = [
+  // Lines break at `\n` alone, so a lone `\r` in a file is text and an edit writes it back
+  // as it was; text pasted with `\r\n` breaks its lines as the editor does.
+  EditorState.lineSeparator.of("\n"),
+  EditorView.clipboardInputFilter.of((text) => text.replaceAll("\r\n", "\n")),
   history(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
   markdown,

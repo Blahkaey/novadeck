@@ -20,6 +20,7 @@ import {
 } from "../projects/project-arrangement-storage"
 import { initialShell, resetPresentation, type ShellState } from "../shell/shell-state"
 import { writeSidebarCollapsed, writeWindowedView } from "../shell/shell-storage"
+import type { LeaveAsk } from "../terminals/leave-edits"
 import type { MoveAsk, MoveNotice, MovePick } from "../terminals/move-state"
 import { nextRecent, visibleSwitcher, type RecentSwitcher } from "../terminals/recent"
 import type { RenameSession } from "../terminals/rename-state"
@@ -57,6 +58,9 @@ export type UiState = {
   readonly moving: MovePick | null
   // A teammate's move waiting for the person to say whether it goes alone or with its team.
   readonly moveAsk: MoveAsk | null
+  // What leaves the project window's file with edits to it that can't be saved, waiting for
+  // the person to go on, the edits copied or let go, or stay; never persisted.
+  readonly leaving: LeaveAsk | null
   // The last move, for its toast; never persisted.
   readonly moved: MoveNotice | null
   // The agent whose switch Preferences should bring into view when it opens, until it has.
@@ -176,6 +180,7 @@ export const initialUi = ({
   closing: null,
   moving: null,
   moveAsk: null,
+  leaving: null,
   moved: null,
   agentFocus: null,
   filesExcludeFocus: false,

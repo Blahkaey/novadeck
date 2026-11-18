@@ -138,7 +138,8 @@ you've peeked, what was new is seen, without opening it. Click an icon or a card
 it on top; a stack's icon brings all of it forward, as tabs. Click the showing icon again,
 or the pane's minimize button, to minimize it with the rest of its icon, uncovering what's
 behind; press Escape to hide the whole pane, which keeps what's open in
-it for when the pane comes back. Close from the pane's header, a tab's ×, a card's corner button or the icon's
+it for when the pane comes back. An Escape a plan's editor takes, as collapsing a selection,
+hides nothing. Close from the pane's header, a tab's ×, a card's corner button or the icon's
 right-click, which uncovers what's behind too. The pane's header × closes all of its tabs;
 a tab's own × closes only that tab. Closing a plan or Messages on its own terminal's bar hides it: the
 plan comes back with the agent's next version of it, Messages with the next message,
@@ -439,7 +440,8 @@ Agents:
   (about 30 s), Retry; "Copying plan edits fails" has the browser refuse the clipboard,
   every copy in the page until "Plan back to normal" or the demo boots again, so with one of
   those faults Copy my edits says Couldn't copy, and closing the plan with Copy my
-  edits and close keeps it open, saying its edits couldn't be copied; "Plan back to normal" lets
+  edits and close keeps it open, saying its edits couldn't be copied and offering Close
+  without my edits; "Plan back to normal" lets
   saves and copies work again. Specs open the showcase
   with `&planFault=` `transcript`, `gone`, `folder`, `too-large` or `failing`.
 - **Changes:** only in the `showcase` variant, no action needed: the dev server's terminal
@@ -501,9 +503,11 @@ Agents:
   into `public`, then cut `README.md` and paste it on `public`'s `favicon.svg`) puts the red-edged
   line above the tree. What was cut or copied follows a rename of it or of a folder it is in, and
   goes with a delete of either. The naming field's red line shows by typing a name already beside
-  it, such as `src` at the top. A file the project window shows (double-click `package.json`) opens
-  there at its new name when renamed, and says "package.json isn't there any more." once deleted
-  (the demo's window follows the person's deletes and moves, as the runner's watch does); a name a
+  it, such as `src` at the top. A file the project window shows (double-click `package.json`), and
+  edits (see File editing below), opens there at its new name, with its edits, when renamed, and says
+  "package.json isn't there any more." once deleted (the demo's window follows the person's deletes
+  and moves, as the runner's watch does); a file New File… makes opens empty, and a copy holds the
+  text the window last read or saved of its file; a name a
   hiding pattern matches, as `debug.log` with `**/*.log` added in Hidden files, is made with a line
   above the tree naming the pattern. A field whose row leaves the tree, as one an agent's turn end
   reads away, goes with it. "Next file operation fails" has the next New File…, New Folder…, Rename…
@@ -551,6 +555,50 @@ Agents:
   stands only while its lead has work too (else its workers are solo chips), and an agent in
   two teams sits in the first squad that names it. The `agents`, `inbox` and try demos have no
   team, so their strips are solo chips.
+- **File editing:** in the `agents`, `messages` and `inbox` variants (and the try demo), a file
+  opened from Files is edited in the project window and saved in the demo's memory
+  (`frontend/demo/src/file-edits.ts`), as the runner saves it: its text starts as the demo's
+  stand-in for the file and follows the person's changes in Files (see Files above), and a save
+  made on an earlier version answers the text as it now stands, to merge into. Typing, a pause,
+  `Ctrl+S` (`Cmd+S` on macOS) or a click away saves; the file opened again shows what was saved.
+  The group acts on the file the project window of the session on screen shows, and asks for one
+  first (double-click a file in Files). "Too large to edit" and "Not UTF-8 text" show it as
+  read-only lines, the header saying why; "Binary file" says it isn't text; "An agent's copy",
+  "Folder can't be written" and "Can't be edited here" turn the editor read-only, a line in the
+  header saying why; "File deleted" says it isn't there any more, as when something other than
+  Files deletes it (Files' Delete saves the edits first, or asks), and "File can't be read" that
+  Novadeck can't read it. Each refuses or fails the file's saves too, so edits waiting to be saved
+  when it comes stay in the editor over the file, with a notice saying why they can't be saved,
+  Copy my edits and Try saving again (or Retry): to see edits kept over a file that can't be edited,
+  type after "Saves keep failing", then pick one of these. "Next save refused: can't write", "…
+  too large", "… not text" and "… file moved" refuse the file's next save, once, with that
+  notice, Try saving again then saving; "Saves keep failing" fails every
+  save: "Not saved yet. Trying again." in the header, then, after 5 failures in a row (about 30 s),
+  a notice that Novadeck couldn't save the edits after 5 tries, with Retry. Edits that can't be
+  saved reach the question before leaving them: opening another file ("Open another file?"), the
+  window's Close ("Close package.json?"), and Rename…, a cut's Paste into another folder or Delete
+  on the file or a folder holding it in Files ("Rename anyway?", "Move anyway?", "Delete
+  anyway?"), each with Copy my edits and switch (close, rename, move, delete), which copies them
+  and goes on, and Cancel; a rename, move or delete cancelled puts the red-edged line above the
+  tree, saying it couldn't, as you kept the edits in the project window, which couldn't be saved.
+  After a refusal it asks at once. With saves failing (type after "Saves keep failing", then open
+  another file, close the window or rename, move or delete the file in Files) the question shows
+  after 2 s in its waiting form, "Saving your edits to package.json…" with Cancel alone, which
+  stays with the file; it turns into the question above once the saves have been tried for 20 s,
+  and goes on by itself where a save lands meanwhile, as the next one tried after "File editing
+  back to normal" does.
+  "Copying edits fails" has the browser refuse the clipboard, every copy in the page, as Files'
+  "Copying a path fails" does, until "File editing back to normal" or the demo boots again: Copy my
+  edits says Couldn't copy, and the question stays up, saying the edits couldn't be copied and
+  nothing was done, and offering Switch (Close, Rename, Move, Delete) without my edits. "An agent
+  rewrites the open file" writes two lines into the middle of the file: with nothing waiting to be
+  saved the editor shows them; over edits waiting to be saved (type after "Saves keep failing"
+  first) they merge into the edits, marked, the header saying "The marked lines changed while you
+  edited.", and the result is saved once saves go through. "File editing back to normal" lifts
+  every fault and lets copies work again. Specs open the agents demo with `&fileFault=`
+  `too-large`, `not-text`, `binary`, `outside`, `folder`, `not-a-plan`, `gone`, `unreadable`,
+  `failing`, `refuse-folder`, `refuse-too-large`, `refuse-not-text` or `refuse-moved`, which puts
+  the first file the project window opens in it.
 - **File preview:** in the `agents`, `messages` and `inbox` variants, double-click
   `src/checkout/Checkout.tsx` in the Files panel (or click it under a selected row of the Worktrees
   panel) to open the project window as the file would be once the agents' work merges onto main:
@@ -879,7 +927,9 @@ the median is above 8 seconds from the address to Claude Code's terminal drawn (
 now, as main's; the website gives up at 15). The build fails over its budgets
 (`tools/build-kit/src/bundle-checks.ts`, with the numbers in `apps/try/vite.config.ts`): what the page loads first, its scripts and styles gzipped and
 every woff2 font they declare, 1,300 kB, and the demo with its terminal emulator, which
-loads with the connection, 195 kB.
+loads with the connection, 210 kB: the chunk the connection's dynamic import loads, found by
+the module it holds even where Rollup names it for none, and what it loads that the page
+didn't first; code the demo loads later, such as file editing's, is not in it.
 
 The hero's terminals are real terminal cells, as the desktop app draws them: the theme's
 ANSI palette, boxes in box-drawing characters, text wrapped at the column count. Where xterm
@@ -1215,8 +1265,10 @@ project arrangement (the switcher's order and pins, `novadeck.project-arrangemen
 which store subscriptions persist. Another subscription saves the active session's
 windowed view from the workspace store, and a new App seeds sessions with it. The
 item store in `frontend/items/src/store/item-store.ts` holds what it loads for the items,
-by item: each plan as the person edits it, what each item last loaded, and the secret
-files the person chose to see; it follows the backend's companions from an effect, and
+by item: each plan as the person edits it, each file the project window edits (by item and
+path, kept while its edits aren't saved; `saving.ts` saves both), what each item last loaded,
+and the secret files the person chose to see; it follows the backend's companions from an
+effect, and
 `followMessages` (`frontend/items/src/homes/terminal/messages/messages.ts`) puts messages on their
 terminal's bar from another. What an item loaded stays 30 seconds after nothing shows it, then goes, so a
 large image doesn't stay in memory. What a taskbar shows is derived from it and the workspace in

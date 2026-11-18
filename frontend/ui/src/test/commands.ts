@@ -2,7 +2,7 @@ import { createChat } from "@novadeck/chat/state"
 import type { Rect } from "@novadeck/core/layout/spatial"
 import type { Backend } from "@novadeck/core/port"
 import { activeSession } from "@novadeck/core/state"
-import { createWorkspaceStore } from "@novadeck/core/store"
+import { createWorkspaceStore, type WorkspaceStore } from "@novadeck/core/store"
 import { appearance, workspaceFixture } from "@novadeck/core/testing"
 import type { PreferencesValue, Workspace } from "@novadeck/core/types"
 
@@ -35,8 +35,8 @@ export type CommandsOptions = {
   readonly crashLoop?: Backend["crashLoop"]
   // The backend's way to hand a name back, when it has one.
   readonly resetTitle?: Backend["resetTitle"]
-  // The item store, when the backend has companions.
-  readonly itemStore?: CommandContext["itemStore"]
+  // The item store, when the backend has companions, made over the harness's workspace.
+  readonly itemStore?: (workspace: WorkspaceStore) => NonNullable<CommandContext["itemStore"]>
   // The backend's companions, when it has them.
   readonly companions?: CommandContext["companions"]
   // The agents' conversations, when the backend reads them.
@@ -180,7 +180,7 @@ export const openCommands = ({
     pickDirectory,
     crashLoop,
     resetTitle,
-    itemStore,
+    itemStore: itemStore?.(store),
     companions,
     conversations,
     murmur,

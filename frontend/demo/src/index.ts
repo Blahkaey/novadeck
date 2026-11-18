@@ -31,7 +31,7 @@ import { withShellItems } from "./agents/shell-items"
 import { agentTranscripts, type DemoTranscript } from "./agents/transcripts"
 import { demoTurns, type DemoTurns } from "./agents/turns"
 import { withFeedback } from "./feedback"
-import { withFiles } from "./files"
+import { isDemoFiles, withFiles } from "./files"
 import { createDemoForges } from "./forges"
 import { demoHandle } from "./handles"
 import { withHistory } from "./history"
@@ -853,5 +853,10 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
     if (answer === "failed") backend.inbox.failNext()
     if (answer === "stale") backend.inbox.failNext("That ask is no longer available.")
   }
+  // `&fileFault=` one of the debug panel's file faults (see `FileFault`) puts the first file
+  // the project window opens in it, where the demo has files.
+  const fileFault = params.get("fileFault")
+  if (fileFault && isDemoFiles(backend.files))
+    void backend.files.editing().then((edits) => edits.faultFirst(fileFault))
   return backend
 }

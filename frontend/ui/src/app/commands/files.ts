@@ -1,9 +1,9 @@
 import { absolutePath } from "@novadeck/core/files"
 import { activeProject } from "@novadeck/core/state"
-import type { Workspace, WorkspaceState, WorkspaceTarget } from "@novadeck/core/types"
 
-import { currentContext, currentTarget } from "../selectors"
+import { currentContext, currentTarget, projectWindowFile, stateAt } from "../selectors"
 import type { CommandContext } from "./context"
+import type { Leave, LeaveAll } from "./file-edits"
 
 export type FileCommands = {
   // Opens a file of the active project, by its path from the project's root, in the
@@ -18,6 +18,16 @@ export type FileCommands = {
     path: string,
     options?: { readonly preview?: boolean; readonly copy?: string | undefined },
   ) => Promise<void>
+  // The person is about to rename, move or delete a file or folder of the project, by its path
+  // from the project's root: the edits to each file a project window of the project's sessions
+  // shows there, or inside that folder, are saved first (see `Leave`). Answers whether to go on:
+  // once they're saved, or the person chose to copy those that can't be and go on; not where
+  // they chose to stay.
+  readonly saveBeforeChange: (
+    projectId: string,
+    path: string,
+    action: "rename" | "move" | "delete",
+  ) => Promise<boolean>
   // The person renamed or moved a file or folder of the project, by its paths from the project's
   // root: each of its sessions' project window that shows that file, or a file inside that
   // folder, is pointed at it where it is now, without being selected, and shows main's copy of
@@ -30,12 +40,14 @@ export type FileCommands = {
 type SourceDependencies = {
   readonly markCreated: (created: { readonly context: string; readonly id: string }) => void
   readonly pulse: () => void
+  readonly leave: Leave
+  readonly leaveAll: LeaveAll
 }
 
-const sessionState = (workspace: Workspace, target: WorkspaceTarget): WorkspaceState | undefined =>
-  workspace.projects
-    .find((project) => project.id === target.projectId)
-    ?.history.find((session) => session.id === target.workspaceSessionId)?.state
+// Whether the file at `path`, absolute on the backend's machine in the separator `directory` is
+// written in, is the entry at `entry`, from the project's root, or inside it.
+const atOrBelow = (directory: string, path: string, entry: string): boolean =>
+  path === absolutePath(directory, entry) || path.startsWith(absolutePath(directory, `${entry}/`))
 
 // Where a path at or below `from` is once `from` moved to `to`, each absolute on the backend's
 // machine in the separator `directory` is written in; undefined for a path elsewhere.
@@ -54,29 +66,31 @@ const movedPath = (
 
 export const createFileCommands = (
   { workspace, navigation, effects, companions, ui }: CommandContext,
-  { markCreated, pulse }: SourceDependencies,
+  { markCreated, pulse, leave, leaveAll }: SourceDependencies,
 ): FileCommands => ({
   openProjectFile: async (path, options) => {
     const open = companions?.openInProject
     if (!open) return
+    const asking = workspace.getSnapshot()
+    const target = currentTarget(asking)
+    const wanted = absolutePath(activeProject(asking)!.directory, path)
+    // The edits to the file it shows reach that file before it shows another.
+    const shown = projectWindowFile(stateAt(asking, target))
+    const leaving = shown && shown.path !== wanted ? leave(target, shown, "switch") : undefined
+    if (leaving && !(await leaving)) return
     const before = workspace.getSnapshot()
-    const target = currentTarget(before)
-    const known = sessionState(before, target)?.roster.windows
+    const known = stateAt(before, target)?.roster.windows
     const had = known?.find((each) => each.home === "project")
     const asked = effects.newId()
     let backed = false
-    const { item, window } = await open(
-      target,
-      absolutePath(activeProject(before)!.directory, path),
-      asked,
-    ).catch((error: unknown) => {
+    const { item, window } = await open(target, wanted, asked).catch((error: unknown) => {
       // Main has no such file: an agent's copy of it stands behind the window.
       if (options?.copy === undefined) throw error
       backed = true
       return open(target, options.copy, asked)
     })
     const snapshot = workspace.getSnapshot()
-    const state = sessionState(snapshot, target)
+    const state = stateAt(snapshot, target)
     // The person closed the window meanwhile, and the backend's close, queued behind this
     // open, removes it again: it isn't brought back to be selected and removed. A window the
     // backend made anew, as when another client closed that one, is a different window.
@@ -136,6 +150,18 @@ export const createFileCommands = (
       },
     ])
     pulse()
+  },
+  saveBeforeChange: async (projectId, path, action) => {
+    // The Files panel asks it of the project it shows as the person makes the change.
+    const project = workspace.getSnapshot().projects.find((each) => each.id === projectId)!
+    const targets = project.history.map((session) => ({
+      projectId,
+      workspaceSessionId: session.id,
+    }))
+    return (
+      (await leaveAll(targets, action, (shown) => atOrBelow(project.directory, shown, path))) ??
+      true
+    )
   },
   followMovedFile: async (projectId, from, to) => {
     const open = companions?.openInProject

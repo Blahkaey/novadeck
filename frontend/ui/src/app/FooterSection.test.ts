@@ -1,5 +1,6 @@
 import { createTelemetryStore } from "@novadeck/core/agents/telemetry"
 import type { UpdateOffer } from "@novadeck/core/desktop/update"
+import { itemIdOf } from "@novadeck/core/items"
 import type { Backend } from "@novadeck/core/port"
 import { workspaceFixture } from "@novadeck/core/testing"
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
@@ -104,6 +105,32 @@ describe("the footer's restart to update chip", () => {
     ).toBeUndefined()
     expect(chipOf(withOffer(restart, { kind: "available", version: "0.0.81" }))).toBeUndefined()
     expect(chipOf(withOffer(restart, null))).toBeUndefined()
+  })
+
+  it.each([
+    [
+      "about leaving edits that can't be saved",
+      {
+        leaving: {
+          itemId: itemIdOf("shown"),
+          path: "~/project/a.ts",
+          name: "a.ts",
+          action: "close",
+          waiting: false,
+        },
+      },
+    ],
+    [
+      "about moving a teammate",
+      { moveAsk: { context: "project/initial", terminalId: "01", to: { fresh: true } } },
+    ],
+  ] as const)("folds its card while a question %s is up", (_question, asking) => {
+    const { page, ui } = shown({ updates: updates(() => {}) })
+    act(() => ui.update((state) => ({ ...state, update: ready, portable: null })))
+    act(() => chipOf(page)!.click())
+    expect(chipOf(page)!.getAttribute("aria-expanded")).toBe("true")
+    act(() => ui.update((state) => ({ ...state, ...asking })))
+    expect(chipOf(page)!.getAttribute("aria-expanded")).toBe("false")
   })
 
   it("is not there on a portable copy, which has its own chip, nor while that is unknown", () => {

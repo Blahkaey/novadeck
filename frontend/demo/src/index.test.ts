@@ -1,4 +1,5 @@
 import { sessionItems } from "@novadeck/core/inbox/plan"
+import type { ItemContent } from "@novadeck/core/items"
 import type { BackendAction } from "@novadeck/core/port"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { activeProject, activeSession, workspaceReducer } from "@novadeck/core/state"
@@ -382,6 +383,60 @@ describe("demo backend", () => {
       await vi.advanceTimersByTimeAsync(10_000)
       expect(terminalOf(store.getSnapshot(), found.key)).toMatchObject({
         agent: { working: true },
+      })
+      stop()
+    })
+  })
+
+  context("when the address asks for a file fault", () => {
+    afterEach(() => window.history.replaceState(null, "", "#/"))
+
+    // The agents demo the address opens, and what its project window hears of a file opened
+    // there, read whole to edit; as the app does, it stops following one file before the next.
+    const opening = (address: string) => {
+      window.history.replaceState(null, "", address)
+      const backend = createDemoBackend()
+      const store = createWorkspaceStore(
+        workspaceFromSeed(backend.seed, { view: "grid", windowedView: "grid", now: 1 }),
+        backend.commit,
+      )
+      backend.commit(store.getSnapshot(), [])
+      const stop = backend.start!({
+        dispatch: (actions) => void store.transact(actions as never),
+        open: () => {},
+      })
+      const target = { projectId: "storefront", workspaceSessionId: "initial" }
+      const open = async (path: string): Promise<ItemContent> => {
+        const { item } = await backend.companions!.openInProject!(target, path, "project-window")
+        let unfollow = (): void => {}
+        const heard = new Promise<ItemContent>((resolve) => {
+          unfollow = backend.companions!.follow(
+            target,
+            item.id,
+            { reveal: undefined, edit: true },
+            resolve,
+          )
+        })
+        const content = await heard
+        unfollow()
+        return content
+      }
+      return { open, stop }
+    }
+
+    it("puts the first file the project window opens in it, and none after", async () => {
+      const { open, stop } = opening("#/?demo=agents&fileFault=too-large")
+      expect(await open("package.json")).toMatchObject({
+        content: { kind: "file", uneditable: "too-large" },
+      })
+      expect(await open("index.html")).toMatchObject({ content: { kind: "text", writable: true } })
+      stop()
+    })
+
+    it("leaves the file as it is for a fault it doesn't know", async () => {
+      const { open, stop } = opening("#/?demo=agents&fileFault=sideways")
+      expect(await open("package.json")).toMatchObject({
+        content: { kind: "text", writable: true },
       })
       stop()
     })

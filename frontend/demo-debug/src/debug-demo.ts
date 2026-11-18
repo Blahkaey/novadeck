@@ -36,6 +36,7 @@ import { createDemoUninstall, type DemoUninstall } from "./desktop/uninstall"
 import { updatesGroup, type DemoUpdates } from "./desktop/updates"
 import { doorbellGroups } from "./doorbell"
 import { feedbackGroups } from "./feedback"
+import { fileEditingGroups } from "./file-editing"
 import { filesGroups } from "./files"
 import { forgesGroups } from "./forges"
 import { historyGroups } from "./history"
@@ -320,6 +321,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...historyGroups(inner.history),
           ...notesGroups(inner.notes),
           ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined, launch),
+          ...fileEditingGroups(isDemoFiles(inner.files) ? inner.files : undefined),
           ...worksGroups(inner.works),
           ...forgesGroups(launch, inner),
         ],

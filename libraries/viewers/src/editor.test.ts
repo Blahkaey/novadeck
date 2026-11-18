@@ -165,6 +165,17 @@ describe("the editor", () => {
     expect(edits.at(-1)).toBe(`a\rbzero\r\n${text}!`)
   })
 
+  it("breaks the lines of text pasted with CRLF as it breaks its own", () => {
+    const { view, edits } = mount({ text: "one\n", path: "notes.txt" })
+    view.dispatch({ selection: { anchor: view.state.doc.length } })
+    const clipboard = new DataTransfer()
+    clipboard.setData("text/plain", "two\r\nthree\r\n")
+    view.contentDOM.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }),
+    )
+    expect(edits.at(-1)).toBe("one\ntwo\nthree\n")
+  })
+
   it("undoes and redoes the person's edits", async () => {
     const { view, edits } = mount({ text: "one", path: "notes.txt" })
     atEnd(view)

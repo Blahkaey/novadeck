@@ -506,6 +506,47 @@ pastes there, **Copy Path** copies the folder's own path, and **Refresh** reads 
 copy that works says nothing. One that can't, as where a browser doesn't let the page use the
 clipboard, puts a line above the tree saying so until you dismiss it or hide the panel.
 
+### Editing a file
+
+Double-click a file, or press `Enter` on it, to open it in the session's project window, where you
+edit it in place: a Markdown file in its document, any other in a code editor. Your edits are saved
+to the file once you pause typing, when you click away from the window, and at once with `Ctrl+S`
+(`Cmd+S` on macOS). A save that fails is tried again, the window saying it isn't saved yet; after 5
+failed tries it stops, with **Retry**. Only the project window edits: a file on a terminal's bar or
+in a window of its own reads as before.
+
+Some files open read-only, with a line saying why: one that isn't one of the project's own files,
+as an agent's copy in its worktree, a file in Git's own folder or a link that leads outside the
+project's folder; a file, or one in a folder, the computer won't let Novadeck write; and a file too
+large to edit here (past 256 KiB) or that isn't UTF-8 text, which shows its lines. A binary file
+says only that it isn't text, as before. A file that turns too large or stops being text while
+edits to it aren't saved keeps your edits in the editor, saying why they can't be saved.
+
+When the file changes while you edit it, as when an agent writes it, the window shows the new text
+if nothing of yours is unsaved; otherwise the change is merged into your edits line by line, the
+lines it changed are marked, and the result is saved. A file whose lines all end in CRLF keeps
+CRLF; any other keeps its line breaks as they are.
+
+If your edits can't be saved (the file was deleted, its folder can't be written, it is too large,
+or it is no longer text), the window says why and keeps them, with **Copy my edits** and, where the
+file can still be written, **Try saving again**; a deleted file that comes back is saved to. While
+Novadeck can't read the file for the moment, it says so and keeps them too, with **Retry**.
+Opening another file in the window, closing it, removing its session or project, or renaming,
+moving or deleting the file or a folder holding it saves your edits first, and waits for the save,
+up to 20 seconds; a save that failed once and is being tried again is waited for. A save that takes
+more than 2 seconds shows **Saving your edits to** the file, with **Cancel**, which stays with the
+file; once the save lands, what you asked for goes on by itself. Where the edits can't be saved, or
+no save answered in that time, Novadeck asks first: **Copy my edits and switch** (or close,
+rename, move, delete) copies them to the clipboard and goes on, and **Cancel** stays. If the copy fails, nothing is done and the question says so, offering **Switch without my
+edits** (or close, rename, move, delete), which lets your edits go. A rename, move or delete you
+cancel isn't made, and the line above the tree says why; a session or project you stay for isn't
+removed. Closing a plan whose edits can't be saved asks the same, offering **Close without my
+edits** once a copy failed.
+
+When Novadeck quits, or the page reloads or closes in a browser, every edit not yet saved, to a
+file or a plan, is sent at once, without asking. Edits that can't be saved then are lost: the
+desktop app waits a moment for the saves before it quits, not for an answer from you.
+
 ### Making, renaming and deleting
 
 A new file or folder is named in a field first in the folder it goes in, which opens; a rename
@@ -917,7 +958,8 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 
 In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and previous of its
 tabs, and on a tab with focus the arrow keys, `Home` and `End` move along them and `Delete` closes
-it. In the Files panel, `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or
+it. In the project window, `Ctrl+S` (`Cmd+S` on macOS) saves the file you edit at once. In the Files
+panel, `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or
 folder with the keyboard on it, `F2` renames it and `Delete` (`Cmd+Backspace` on macOS) asks to
 delete it, and `Ctrl+X`, `Ctrl+C` and `Ctrl+V` (`Cmd` on macOS) cut it, copy it and paste on it,
 with the panel's own clipboard; held down, `Ctrl+V` pastes once. Their letters are the ones the keys

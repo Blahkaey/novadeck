@@ -37,7 +37,8 @@ hand back as `saved` to the next viewer of the same thing.
   of it is deleted. Its state keeps the text, selection, undo history, place (one not put
   back yet, as for an editor let go before it had a size, included) and marks, and opens
   only for the same `path`. The text breaks its lines with `\n` alone: a lone `\r` stays
-  text, shown as a mark, and is written back as it was. It fills its element and scrolls
+  text, shown as a mark, and is written back as it was, and text pasted with `\r\n` takes
+  `\n`. It fills its element and scrolls
   itself, themed through the code viewer's `--code-*` tokens, `--editor-selection-bg` and
   `--editor-marked-bg`. Built on CodeMirror, with the same peer dependencies as
   `./markdown`; nothing else in the package imports it, so an app loads it where it's
@@ -60,8 +61,10 @@ hand back as `saved` to the next viewer of the same thing.
 - `./markdown`: `mountMarkdown`, a text formatted as a document and edited in place:
   formatting marks show on the lines being edited, tables edit cell by cell, task lists tick.
   Outside changes apply as a minimal line diff, outside undo history, with the cursor kept;
-  the person's edits alone reach `onEdit`. The text breaks its lines with `\n`: an app whose
-  file uses `\r\n` converts on the way in and out, as offsets count `\n` as one character.
+  the person's edits alone reach `onEdit`. The text breaks its lines with `\n` alone: an app
+  whose file uses `\r\n` converts on the way in and out, as offsets count `\n` as one
+  character; a lone `\r` stays text, written back as it was; text pasted with `\r\n` takes
+  `\n`.
   `editable()` switches editing on the live viewer,
   `ranges` set a class on lines, `extensions` add editor behaviour, and `rowAnnotations` lets
   an app write a short text into table rows. It scrolls in its nearest scrolling ancestor.

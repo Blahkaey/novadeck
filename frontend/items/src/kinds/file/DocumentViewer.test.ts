@@ -59,6 +59,20 @@ describe("a Markdown file's document", () => {
     )
   })
 
+  it("says why, where the project window couldn't have it whole to edit", () => {
+    const { container, unmount } = render(
+      createElement(DocumentViewer, {
+        id: "voice",
+        name: "brand-voice.md",
+        content: { ...content, uneditable: "not-text" },
+      }),
+    )
+    unmounts.push(unmount)
+    expect(container.querySelector(".artifact-meta")?.textContent).toContain(
+      "read-onlyIt isn't UTF-8 text, so it can't be edited here.",
+    )
+  })
+
   context("when its item is shown another file, as the project window's is", () => {
     const changelog: FileContent = {
       ...content,

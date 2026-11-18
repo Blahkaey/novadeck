@@ -48,7 +48,7 @@ const faults: readonly {
 
 const copyFails: DemoAction = {
   label: "Copying plan edits fails",
-  hint: "Every copy in the page fails until Plan back to normal or a reboot; with a plan fault above, Copy my edits says Couldn't copy, and closing the plan with Copy my edits and close keeps it open, saying the edits couldn't be copied",
+  hint: "Every copy in the page fails until Plan back to normal or a reboot; with a plan fault above, Copy my edits says Couldn't copy, and closing the plan with Copy my edits and close keeps it open, saying the edits couldn't be copied and offering Close without my edits",
   run: refuseClipboard,
 }
 
