@@ -1,6 +1,12 @@
 import { basename, isAbsolute, relative } from "node:path"
 
-import type { AgentActivity, AgentName, CompanionItem, StartupScreen } from "@novadeck/protocol"
+import type {
+  AgentActivity,
+  AgentName,
+  CompanionItem,
+  PullRequest,
+  StartupScreen,
+} from "@novadeck/protocol"
 import { redact } from "@novadeck/secrets"
 
 import { isLoopback } from "../config.js"
@@ -42,6 +48,8 @@ export type Whereabouts = {
   readonly shown: readonly Shown[]
   /** The git worktrees it owns, oldest first (see `OwnedWorktree`); empty for none. */
   readonly worktrees: readonly OwnedWorktree[]
+  /** The folders its work wrote in most, inside its project, busiest first; for a lookup. */
+  readonly folders?: readonly string[]
 }
 
 /**
@@ -53,6 +61,8 @@ export type OwnedWorktree = {
   readonly branch: string
   readonly state: GitState | null
   readonly gone: boolean
+  /** Its branch's pull request, where a forge the person switched on found one. */
+  readonly pullRequest?: PullRequest | undefined
 }
 
 /**
@@ -114,7 +124,15 @@ export type Happening =
       /** The pull request link it gave, found as it was written (see `pullRequestIn`). */
       readonly pr: string | null
     }
-  | { readonly kind: "asked"; readonly at: number; readonly subject: string }
+  | {
+      readonly kind: "asked"
+      readonly at: number
+      readonly subject: string
+      /** Its Inbox entry's id, where the log knows it. */
+      readonly id?: string
+      /** Whether it is still open in the Inbox, waiting for the person's answer. */
+      readonly open?: boolean
+    }
   | {
       readonly kind: "turn"
       readonly at: number
@@ -192,6 +210,8 @@ export type Peer = {
   readonly git: Git | null
   /** The worktrees it owns; empty for none, and for a plain shell. */
   readonly worktrees: readonly OwnedWorktree[]
+  /** The folders its work wrote in most, inside its project; empty for none or a plain shell. */
+  readonly folders: readonly string[]
   /** The latest pull request link its agent gave in a `tell` or `done`; null without one. */
   readonly pr: string | null
   /** What runs in a terminal with no agent there or expected; null for an agent's. */
@@ -303,6 +323,7 @@ export const peerOf = (input: {
     lead: input.lead,
     git: where?.git ?? null,
     worktrees: agent ? (where?.worktrees ?? []) : [],
+    folders: agent ? (where?.folders ?? []) : [],
     pr: reportedPullRequest(happenings),
     shell: agent || expecting || untrusted ? null : (where?.shell ?? null),
     happenings,
@@ -416,10 +437,13 @@ export const unboundNote =
   "Novadeck hasn't seen this terminal's own agent session, so replies can't reach you " +
   "until Novadeck's hooks run here (in Codex, trust them with /hooks)."
 
+/** What `agents` says once of every agent asleep there, where `team` says it on each line. */
+export const asleepNote = "(Asleep: no process runs there; a message wakes it.)"
+
 /**
  * What runs there and what it is doing: an agent busy or idle and since when, waiting on
  * the user, for how long and for what (whole in `team`), waiting on its own job or wake-up,
- * or asleep, with when its last turn ended;
+ * or asleep since its last turn ended (what that means whole in `team`, once in `agents`);
  * an agent expected there; why no agent there takes messages; or a plain shell's program.
  */
 const statusOf = (peer: Peer, now: number, full: boolean): string => {
@@ -428,7 +452,9 @@ const statusOf = (peer: Peer, now: number, full: boolean): string => {
       peer.startup === "sign-in"
         ? "waiting on the user to sign in there: its prompt says it isn't signed in"
         : peer.state === "asleep"
-          ? `asleep${peer.since !== null ? ` (last turn ended ${ago(peer.since, now)})` : ""}, no process running; a message wakes it`
+          ? full
+            ? `asleep${peer.since !== null ? ` (last turn ended ${ago(peer.since, now)})` : ""}, no process running; a message wakes it`
+            : `asleep${peer.since !== null ? ` ${lasted(peer.since, now)}` : ""}`
           : peer.waiting
             ? waitingNote(peer.waiting, now, full)
             : peer.waitsOn
@@ -485,24 +511,66 @@ const gitText = (peer: Peer): string | null => {
   return all.length > 0 ? all.join(", ") : null
 }
 
-/** How many worktrees an agent's listing names, and how long a path shows. */
+/** How many worktrees an agent's listing names (a lookup more), and how long a path shows. */
 const shownWorktrees = 4
+const lookedWorktrees = 12
 const worktreePathChars = 160
+
+/**
+ * A branch's pull request as a lookup names it: its number, how it stands, and its checks
+ * while open, as a forge the person switched on found them.
+ */
+const requestText = ({ number, state, ci }: PullRequest): string =>
+  `PR #${number} ${state}${ci && ci !== "none" ? `, checks ${ci}` : ""}`
 
 /**
  * The git worktrees a terminal owns, in one line: each with its path, branch and state
  * (commits ahead, uncommitted changes, or that its folder is gone), so agents find each
- * other's work. Null without any.
+ * other's work; a lookup (`full`) names more, each with its pull request. Null without any.
  */
-export const worktreesLine = (peer: Peer): string | null => {
+export const worktreesLine = (peer: Peer, full = false): string | null => {
   if (peer.worktrees.length === 0) return null
-  const named = peer.worktrees.slice(0, shownWorktrees).map(({ path, branch, state, gone }) => {
+  const shown = peer.worktrees.slice(0, full ? lookedWorktrees : shownWorktrees)
+  const named = shown.map(({ path, branch, state, gone, pullRequest: found }) => {
     const notes = gone ? ["folder gone"] : stateParts(branch, state)
-    const detail = [flat(branch, titleChars), ...notes].filter((part) => Boolean(part))
+    const request = full && found ? requestText(found) : null
+    const detail = [flat(branch, titleChars), ...notes, request].filter((part) => Boolean(part))
     return `${flat(path, worktreePathChars)} (${detail.join(", ")})`
   })
   const more = peer.worktrees.length - named.length
   return `  worktrees: ${[...named, ...(more > 0 ? [`and ${more} more`] : [])].join(" · ")}`
+}
+
+/** How many folders a lookup names, and how long each shows. */
+const shownFolders = 5
+const folderChars = 120
+
+/**
+ * The folders an agent's work wrote in most, inside its project, as a lookup names them,
+ * so another agent can tell whether their work would meet. Null without any.
+ */
+export const foldersLine = (peer: Peer): string | null => {
+  if (!peer.agent || peer.folders.length === 0) return null
+  const named = peer.folders.slice(0, shownFolders).map((folder) => flat(folder, folderChars))
+  return `  works in: ${named.join(" · ")}`
+}
+
+/** How long an open ask's subject shows in a lookup. */
+const askChars = 160
+
+/**
+ * The asks an agent has open in the person's Inbox, waiting for their answer, as a lookup
+ * names them: each when and its subject quoted. Null without any.
+ */
+export const asksLine = (peer: Peer, now: number): string | null => {
+  const open = peer.happenings.flatMap((happening) =>
+    happening.kind === "asked" && happening.open === true ? [happening] : [],
+  )
+  if (!peer.agent || open.length === 0) return null
+  const named = open.map(
+    ({ at, subject }) => `${ago(at, now)} "${flat(redact(subject), askChars)}"`,
+  )
+  return `  open in the user's Inbox: ${named.join(" · ")}`
 }
 
 /** How long a summary shows, in characters. */
@@ -524,19 +592,21 @@ const doneChars = 100
 /**
  * An agent's `done` reports as `agents` lists them: the latest few, newest first, each when
  * and its subject quoted, the latest marked while it still stands, then how many came
- * before. Subjects only; a report at length is for `team`. Null before one.
+ * before. An asleep agent's latest only: what it did before that is history. Subjects only;
+ * a report at length is for `team`. Null before one.
  */
-export const doneLine = (peer: Peer, now: number): string | null => {
+export const doneLine = (peer: Peer, now: number, full = false): string | null => {
   const dones = peer.happenings.flatMap((happening) =>
     happening.kind === "done" ? [happening] : [],
   )
   if (!peer.agent || dones.length === 0) return null
-  const shown = dones.slice(-shownDones).toReversed()
+  const asleep = peer.state === "asleep" && !full
+  const shown = dones.slice(asleep ? -1 : -shownDones).toReversed()
   const parts = shown.map(
     (done, index) =>
       `${ago(done.at, now)} "${flat(redact(done.subject), doneChars)}"${index === 0 && peer.standing ? " (still current)" : ""}`,
   )
-  const earlier = dones.length - shown.length
+  const earlier = asleep ? 0 : dones.length - shown.length
   return `  done: ${[...parts, ...(earlier > 0 ? [`and ${earlier} earlier`] : [])].join(" · ")}`
 }
 
@@ -558,14 +628,16 @@ const shownTells = 3
 const tellChars = 100
 
 /**
- * An agent's `tell` reports as `agents` lists them, whether or not a newer `done` came: the
- * latest few, newest first, each when and its subject quoted, then how many came before.
- * Subjects only. Null before one.
+ * An agent's `tell` reports as `agents` lists them, only those since its latest `done`, as
+ * that done says how the work they were about ended: the latest few, newest first, each when
+ * and its subject quoted, then how many came before. Subjects only. Null without one.
  */
 export const toldLine = (peer: Peer, now: number): string | null => {
-  const tells = peer.happenings.flatMap((happening) =>
-    happening.kind === "update" ? [happening] : [],
-  )
+  // By place, not time: happenings are oldest first, and a tell may share its done's moment.
+  const done = peer.happenings.findLastIndex((happening) => happening.kind === "done")
+  const tells = peer.happenings
+    .slice(done + 1)
+    .flatMap((happening) => (happening.kind === "update" ? [happening] : []))
   if (!peer.agent || tells.length === 0) return null
   const shown = tells.slice(-shownTells).toReversed()
   const parts = shown.map(
@@ -725,14 +797,65 @@ export const rosterLines = (
   return lines.toSorted((a, b) => Number(b.mine) - Number(a.mine)).map(({ line }) => line)
 }
 
+/**
+ * Whether a checkout is known to hold no work of its own: none, or one read as clean and
+ * pushed (or a detached head). A branch with no upstream, or one not read yet, may hold
+ * commits nowhere else, so it doesn't count.
+ */
+const settled = (git: Git | null): boolean =>
+  git === null ||
+  (git.state !== null && !git.state.dirty && (git.state.detached || git.state.ahead === 0))
+
+/**
+ * Whether an asleep agent has nothing but its handle to tell it apart: no title but its
+ * session's default, no summary, no report, no failed last turn, no worktree, no checkout
+ * that may hold its work, and no team, leading or led. `agents` names such terminals
+ * together on one line.
+ */
+export const blank = (peer: Peer, leads: ReadonlySet<string | null>): boolean =>
+  peer.agent !== null &&
+  peer.state === "asleep" &&
+  peer.startup === null &&
+  !peer.title &&
+  !peer.summary &&
+  peer.pr === null &&
+  peer.worktrees.length === 0 &&
+  settled(peer.git) &&
+  !peer.happenings.some(
+    (happening) =>
+      happening.kind === "update" ||
+      happening.kind === "done" ||
+      (happening.kind === "turn" && happening.outcome === "failed"),
+  ) &&
+  peer.lead === null &&
+  !leads.has(peer.handle)
+
+/** Blank asleep agents (see `blank`) on one line, by agent: their handles are all there is. */
+const blankLine = (peers: readonly Peer[]): string | null => {
+  if (peers.length === 0) return null
+  const byAgent = new Map<AgentName | null, string[]>()
+  for (const peer of peers)
+    byAgent.set(peer.agent, [...(byAgent.get(peer.agent) ?? []), mention(peer.handle)])
+  const groups = [...byAgent].map(
+    ([agent, handles]) => `${listed(handles)}${agent ? ` (${agentLabel(agent)})` : ""}`,
+  )
+  return `- asleep, never described and nothing reported: ${groups.join(" · ")}`
+}
+
 /** The other terminals in the project and session, as agents read them. */
 const renderPeers = (peers: readonly Peer[], now: number, viewer: Viewer): string => {
   if (peers.length === 0) return "There are no other terminals in this project and session."
   const teams = rosterLines(viewer, peers)
+  const leads = new Set([viewer.lead, ...peers.map((peer) => peer.lead)])
+  const quiet = peers.filter((peer) => blank(peer, leads))
+  const asleep = peers.some((peer) => peer.agent && peer.state === "asleep")
+  const blanks = blankLine(quiet)
   return [
     ...(teams.length > 0 ? ["Teams in this project and session:", ...teams] : []),
     "Other terminals in this project and session:",
-    ...peers.flatMap((peer) => renderPeer(peer, now, viewer)),
+    ...(asleep ? [asleepNote] : []),
+    ...peers.flatMap((peer) => (quiet.includes(peer) ? [] : renderPeer(peer, now, viewer))),
+    ...(blanks ? [blanks] : []),
   ].join("\n")
 }
 
@@ -796,11 +919,12 @@ export const unknownHandle = (
   peers: readonly Peer[],
   now: number,
   lead: string | null,
+  verb = "Send to",
 ): string =>
   [
     to === self
       ? `${mention(self)} is this terminal.`
-      : `"${cut(to, 64)}" is no terminal's handle here. Send to one of these by its exact ` +
+      : `"${cut(to, 64)}" is no terminal's handle here. ${verb} one of these by its exact ` +
         "handle, picking by its title, summary and branch; if more than one could be meant, " +
         "ask the user rather than guess.",
     renderPeers(peers, now, { handle: self, lead }),
