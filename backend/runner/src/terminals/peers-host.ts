@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { basename, isAbsolute, relative } from "node:path"
 
-import type { CompanionItem, TerminalMessages } from "@novadeck/protocol"
+import type { CompanionItem, PullRequest, TerminalMessages } from "@novadeck/protocol"
 
 import { planTitle } from "../companions/content.js"
 import { secrets } from "../companions/secrets.js"
@@ -19,6 +19,8 @@ import {
   type Whereabouts,
 } from "../messaging/peers.js"
 import {
+  lookedHandles,
+  lookedMost,
   namedHandles,
   type AgentsAnswer,
   type PeerAnswer,
@@ -84,6 +86,38 @@ export const peerOf = (record: PeerRecord): PeerTerminal => ({
   },
 })
 
+/** How many folders a terminal's work wrote in a lookup names. */
+const workedMost = 5
+
+/** A path inside a folder, relative to it ("." for the folder itself); undefined outside. */
+const pathIn = (folder: string, path: string): string | undefined => {
+  const within = relative(folder, path)
+  return within.startsWith("..") || isAbsolute(within) ? undefined : within || "."
+}
+
+/**
+ * The folders a terminal's work wrote in most, busiest first: inside one of its own
+ * worktrees, named by its branch and the path in it, else inside its project, by the path
+ * there; any other folder (a home folder, a scratchpad) left out before the most are taken.
+ */
+export const workedFolders = (
+  folders: { readonly [folder: string]: number },
+  project: string,
+  worktrees: readonly Pick<OwnedWorktree, "path" | "branch">[],
+): readonly string[] =>
+  busiestFolders(folders, Number.POSITIVE_INFINITY)
+    .flatMap(({ folder }) => {
+      for (const { path, branch } of worktrees) {
+        const within = pathIn(path, folder)
+        if (within !== undefined) return [`${branch}: ${within}`]
+      }
+      const within = pathIn(project, folder)
+      return within === undefined ? [] : [within]
+    })
+    .slice(0, workedMost)
+
+const tooMany = { ok: false, reason: `Look up at most ${lookedMost} terminals at once.` } as const
+
 export type PeersOptions = {
   readonly messaging: Messaging
   /** The running terminal whose shell's own token this is; undefined for any other. */
@@ -103,8 +137,12 @@ export type PeersOptions = {
   readonly bar: (
     terminalId: string,
   ) => readonly Pick<CompanionItem, "kind" | "name" | "path" | "url" | "secret" | "shownAt">[]
-  /** The git worktrees a terminal owns, oldest first. */
-  readonly worktrees: (terminalId: string) => readonly { path: string; branch: string }[]
+  /** The git worktrees a terminal owns, oldest first, each with its branch's pull request. */
+  readonly worktrees: (terminalId: string) => readonly {
+    readonly path: string
+    readonly branch: string
+    readonly pullRequest?: PullRequest | undefined
+  }[]
   /** Whether the runner is stopping. */
   readonly stopping: () => boolean
   /** Keeps a caller's reports, which now hold what its session was shown (`Introductions`). */
@@ -263,14 +301,27 @@ export class TerminalPeers {
 
   /**
    * The other terminals in the caller's project and session, each described by what
-   * Novadeck knows of it, and the caller's messages yet to arrive.
+   * Novadeck knows of it, and the caller's messages yet to arrive; or the terminals it
+   * names by handle, each looked up whole, a handle checked as `send` checks it.
    */
   async agents(call: Call): Promise<AgentsAnswer> {
     const caller = this.options.caller(call.terminalId, call.token)
     if (!caller) return unansweredCalls.agents
-    const about = await this.whereabouts(caller.summary.sessionId)
-    this.listed(caller)
-    return this.options.messaging.agents(call.terminalId, (id) => about.get(id))
+    const handles = lookedHandles(call.request)
+    if (handles.length > lookedMost) return tooMany
+    const stranger = this.strangers(caller, handles)
+    if (stranger) return { ok: false, reason: stranger }
+    // A lookup quotes reports at length, as `team` does.
+    const about = await this.whereabouts(caller.summary.sessionId, handles.length > 0)
+    const answer = this.options.messaging.agents(
+      call.terminalId,
+      (id) => about.get(id),
+      call.request,
+    )
+    // A lookup shows only the terminals it names, which `strangers` introduced; its
+    // refusal of a handle shows them all, as the listing does.
+    if (handles.length === 0 || !answer.ok) this.listed(caller)
+    return answer
   }
 
   /**
@@ -354,9 +405,11 @@ export class TerminalPeers {
           // Where its agent works now, when that is another checkout than its terminal's.
           const now = terminal.activity ? await this.current(terminal.work, cwd) : null
           const happenings = this.options.happenings(terminal.summary.id, bodies)
+          const owned = await this.owned(terminal.summary.id)
           const done = happenings.findLast((each) => each.kind === "done")
           const where: Whereabouts = {
-            title: terminal.summary.title,
+            // Its session's default title ("Terminal") says nothing of it, so no listing names it.
+            title: terminal.summary.titleSource.kind === "default" ? null : terminal.summary.title,
             summary: terminal.naming.summary,
             git: await this.git(now ?? cwd),
             working: activity?.state === "working" || terminal.summary.shellCommand != null,
@@ -383,7 +436,12 @@ export class TerminalPeers {
               secret: item.secret,
               at: item.shownAt,
             })),
-            worktrees: await this.owned(terminal.summary.id),
+            worktrees: owned,
+            folders: workedFolders(
+              terminal.work?.folders ?? {},
+              this.options.projectFolder(sessionId) ?? cwd,
+              owned,
+            ),
             shell: {
               running: terminal.summary.busy,
               command: terminal.summary.busy ? shownCommand(terminal.summary.process?.argv) : null,
@@ -398,9 +456,10 @@ export class TerminalPeers {
   /** The worktrees a terminal owns with their states, as last read (see `GitStates`). */
   private owned(terminalId: string): Promise<OwnedWorktree[]> {
     return Promise.all(
-      this.options.worktrees(terminalId).map(async ({ path, branch }) => {
+      this.options.worktrees(terminalId).map(async ({ path, branch, pullRequest }) => {
         const gone = !existsSync(path)
-        return { path, branch, gone, state: gone ? null : await this.states.of(path) }
+        const state = gone ? null : await this.states.of(path)
+        return { path, branch, gone, state, ...(pullRequest && { pullRequest }) }
       }),
     )
   }

@@ -40,7 +40,7 @@ import type { AgentsAnswer, SendAnswer, TeamAnswer } from "../messaging/sending.
 import { stripInherited } from "../shell/inherited.js"
 import { type Ack, type Call } from "../shell/reports.js"
 import type { HintFacts } from "../voice/hint.js"
-import { worktreeHost, type WorktreesWiring } from "../worktrees/calls.js"
+import { ownedWorktrees, worktreeHost, type WorktreesWiring } from "../worktrees/calls.js"
 import { Approvals } from "./approvals.js"
 import { Bindings } from "./binding/facts.js"
 import { Reports } from "./binding/reports.js"
@@ -80,6 +80,7 @@ import {
   Claims,
   endExpecting,
   restartedTask,
+  resumeFolder,
   resumeNote,
   sessionHeldElsewhere,
 } from "./resumes.js"
@@ -660,7 +661,7 @@ export class Terminals {
       projectFolder: (sessionId) => this.projectFolder(sessionId),
       happenings: (id, full) => this.inbox.happenings(id, savedSession(this.records.get(id)), full),
       bar: (id) => this.options.items?.bar(id) ?? [],
-      worktrees: (id) => this.options.worktrees?.service.ownedRows(id) ?? [],
+      worktrees: (id) => ownedWorktrees(this.options.worktrees, id),
       stopping: () => this.stopping,
       save: (record) => this.saves.save(record as Record, false),
       former: (sessionId, handle, before) =>
@@ -697,6 +698,7 @@ export class Terminals {
       claims: () => this.claims,
       sleepers: () => this.sleepers,
       rows: () => [...this.records.values(), ...this.saves.terminals()],
+      closedRows: () => this.history.all(),
       close: (terminalId, closedBy) => this.close({ terminalId }, closedBy),
       install: (agent) => this.options.install(agent),
       models: (agent) => this.options.models(agent),
@@ -741,10 +743,10 @@ export class Terminals {
 
   /**
    * Starts a terminal. With `restore`, it continues the saved terminal of that id: in its
-   * last directory, with its saved agent sessions, and its transcript shown first unless
-   * the shell resumes the session `resume` last reported there (see `claim`). With
-   * `command`, the shell runs it at its first prompt; a shell that can't, as without the
-   * integration, does not start.
+   * last directory (resuming, its session's: `resumeFolder`), with its saved agent sessions,
+   * and its transcript shown first unless the shell resumes the session `resume` last
+   * reported there (see `claim`). With `command`, the shell runs it at its first prompt; a
+   * shell that can't, as without the integration, does not start.
    */
   async create(input: Create, ownerId: string, plan?: Plan): Promise<TerminalSummary> {
     // A closed terminal is brought back from its History row (see `ClosedTerminals.restore`).
@@ -782,8 +784,11 @@ export class Terminals {
       // Read beside the waits below, which it outlasts on Windows; see `Launcher.environment`.
       const environment = this.launcher.environment()
       const origin = await this.launcher.directory(input.cwd)
-      // A saved directory that is gone falls back to the one asked for.
-      const cwd = saved ? await this.launcher.directory(saved.cwd).catch(() => origin) : origin
+      // A saved directory that is gone falls back to the one asked for; one resuming its
+      // agent starts where that session bound, while it is there (`resumeFolder`).
+      const own = resumeFolder(saved, input, this.options.worktrees?.service.root)
+      const last = () => (saved ? this.launcher.directory(saved.cwd).catch(() => origin) : origin)
+      const cwd = own ? await this.launcher.directory(own).catch(last) : await last()
       const shell = await this.launcher.executable(cwd, environment)
       const integration = await this.launcher.shellIntegration()
       const connected = await this.launcher.connected(input.resume)
@@ -1159,9 +1164,9 @@ export class Terminals {
   }
 
   /**
-   * Starts a fresh shell in an exited terminal, keeping its id, session and directory.
-   * The caller gains control, and needs it unless nobody holds it.
-   * Viewers attach again for the new screen. A failed start leaves the terminal exited.
+   * Starts a fresh shell in an exited terminal, keeping its id, session and directory
+   * (resuming, its session's: `resumeFolder`). The caller gains control, and needs it unless
+   * nobody holds it. Viewers attach again for the new screen. A failed start leaves it exited.
    */
   async restart(
     input: { terminalId: string; resume?: AgentName | undefined } & Size,
@@ -1185,10 +1190,14 @@ export class Terminals {
         check,
         prepare: async () => {
           const environment = this.launcher.environment()
-          // The last directory, or where the terminal started once that is gone.
-          const cwd = await this.launcher
-            .directory(record.summary.cwd)
-            .catch(() => this.launcher.directory(record.origin))
+          // The last directory, or where the terminal started once that is gone; one resuming
+          // its agent starts where that session bound, while it is there (`resumeFolder`).
+          const own = resumeFolder(record, input, this.options.worktrees?.service.root)
+          const last = () =>
+            this.launcher
+              .directory(record.summary.cwd)
+              .catch(() => this.launcher.directory(record.origin))
+          const cwd = own ? await this.launcher.directory(own).catch(last) : await last()
           const shell = await this.launcher.executable(cwd, environment)
           const integration = await this.launcher.shellIntegration()
           const connected = await this.launcher.connected(input.resume)

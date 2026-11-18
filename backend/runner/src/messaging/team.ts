@@ -1,3 +1,5 @@
+import { redact } from "@novadeck/secrets"
+
 import { mention } from "../terminals/handles.js"
 import { senderTerminal, isNotice, type Message } from "./messages.js"
 import {
@@ -84,15 +86,23 @@ export const happened = (happenings: readonly Happening[]): Entry[] => {
       ]
     }
     if (happening.kind === "asked")
-      return [{ at, text: `asked the user: ${flat(happening.subject, subjectChars)}` }]
+      return [
+        {
+          at,
+          // Its answer changes only the mark, which shows no ask again as new.
+          key: `${at}|asked|${happening.subject}`,
+          text: `asked the user: ${flat(redact(happening.subject), subjectChars)}${happening.open ? " (still open)" : ""}`,
+        },
+      ]
     return [
       {
         at,
         key: `${at}|${happening.kind}|${happening.subject}`,
         get text() {
-          const said = (happening.body ?? happening.read?.() ?? "").trim()
+          // Redacted as the listing redacts subjects: anyone there may look a terminal up.
+          const said = redact((happening.body ?? happening.read?.() ?? "").trim())
           const body = said ? ` — ${flat(said, bodyChars)}` : ""
-          return `${happening.kind}: ${flat(happening.subject, subjectChars)}${body}`
+          return `${happening.kind}: ${flat(redact(happening.subject), subjectChars)}${body}`
         },
       },
     ]

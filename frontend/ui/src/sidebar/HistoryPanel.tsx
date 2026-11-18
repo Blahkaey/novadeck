@@ -12,7 +12,7 @@ import {
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { History as HistoryIcon, ListX, Plug, RotateCcw, Search, Trash2 } from "lucide-react"
-import { Fragment, useEffect, useId, useState, type ReactNode } from "react"
+import { Fragment, useEffect, useId, useState, type ReactNode, memo } from "react"
 
 import {
   agentName,
@@ -207,7 +207,7 @@ const HistoryRow = ({
 // search while there are any. The count beside the title is the matches over the total
 // while searching. Clear, beside Hide while any row can be removed, deletes them all once
 // its question is confirmed, whatever the search shows; a row's own Remove deletes just it.
-export const HistoryPanel = ({
+const HistoryPanelView = ({
   rows,
   list,
   connections,
@@ -386,3 +386,6 @@ export const HistoryPanel = ({
     </SidebarPanel>
   )
 }
+
+// Drawn again only as its own props change: the sidebar keeps every panel mounted.
+export const HistoryPanel = memo(HistoryPanelView)

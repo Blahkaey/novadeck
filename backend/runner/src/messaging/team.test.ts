@@ -232,6 +232,53 @@ describe("what team says", () => {
     ])
   })
 
+  it("says on an asleep member's own line that a message wakes it", () => {
+    const asleep = peerOf({
+      terminalId: "FOX",
+      handle: "fox",
+      agent: "claude",
+      expecting: null,
+      asleep: true,
+      busy: false,
+      where: whereabouts({ since: now - minutes(180) }),
+      lead: "moth",
+    })
+    expect(team({ peers: [asleep] }).text).toContain(
+      "- @fox: Claude Code, asleep (last turn ended 3 h ago), no process running; a message wakes it, led by you",
+    )
+  })
+
+  it("marks an ask still open, and shows it no more as new once it is answered", () => {
+    const asking = (open: boolean) =>
+      member("fox", "moth", {
+        happenings: [{ kind: "asked", at: now - minutes(2), subject: "Merge it?", id: "a", open }],
+      })
+    const first = team({ peers: [asking(true)] })
+    expect(first.text).toContain("2 min ago, asked the user: Merge it? (still open)")
+    expect(team({ peers: [asking(false)], look: first.look }).text).toContain(
+      "nothing new since you last looked",
+    )
+    expect(team({ peers: [asking(false)], all: true }).text).toMatch(
+      /2 min ago, asked the user: Merge it\?$/m,
+    )
+  })
+
+  it("redacts a secret in a report's subject and body, and in an ask's subject", () => {
+    const token = `ghp_${"a".repeat(36)}`
+    const { text } = team({
+      peers: [
+        member("fox", "moth", {
+          happenings: [
+            { kind: "done", at: now - 1, subject: `Key ${token}`, body: `Use ${token}`, pr: null },
+            { kind: "asked", at: now, subject: `Rotate ${token}?` },
+          ],
+        }),
+      ],
+    })
+    expect(text).not.toContain(token)
+    expect(text.match(/\[redacted\]/g)).toHaveLength(3)
+  })
+
   it("leaves out peers, and says when the caller is on no team", () => {
     const { text } = team({ peers: [member("fox", null), member("owl", "crow")] })
     expect(text).toBe(

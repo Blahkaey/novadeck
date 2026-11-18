@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { ActivityEvent } from "@novadeck/harness-core/events"
-import type { AgentName, TerminalSummary } from "@novadeck/protocol"
+import type { AgentName, PullRequest, TerminalSummary } from "@novadeck/protocol"
 
 import { apply, started, summary as activitySummary, type Request } from "../harnesses/activity.js"
 import type { Messaging } from "../messaging/messaging.js"
@@ -10,7 +10,13 @@ import { peerOf as listed, renderPeer, type Whereabouts } from "../messaging/pee
 import { describe, expect, it } from "../test.js"
 import { folder } from "../testing/engines.js"
 import { GitStates } from "./git-state.js"
-import { TerminalPeers, waitingOf, type PeerRecord, type PeerTerminal } from "./peers-host.js"
+import {
+  TerminalPeers,
+  waitingOf,
+  workedFolders,
+  type PeerRecord,
+  type PeerTerminal,
+} from "./peers-host.js"
 import { freshWork } from "./work.js"
 
 const request = (fields: Partial<Request>): Request => ({
@@ -156,6 +162,7 @@ describe("what peers read of a terminal", () => {
         cwd: "/nowhere",
         sessionId: "s",
         title: "t",
+        titleSource: { kind: "person" },
         activity: null,
         ...summary,
       },
@@ -287,7 +294,14 @@ describe("a tell and a shown page of each harness's agent, as agents lists them"
     it(`reach agents() from ${agent}'s session, without a query, a secret or a home folder`, async () => {
       const now = Date.now()
       const record = {
-        summary: { id: "t1", cwd: "/nowhere", sessionId: "s", title: "t", activity: null },
+        summary: {
+          id: "t1",
+          cwd: "/nowhere",
+          sessionId: "s",
+          title: "t",
+          titleSource: { kind: "person" },
+          activity: null,
+        },
         naming: { person: null, opener: null, murmur: null, own: null, summary: null },
         work: null,
         openedBy: null,
@@ -374,7 +388,14 @@ describe("the worktrees a terminal owns, as agents lists them", () => {
   }) => {
     const here = await folder(resources)
     const record = {
-      summary: { id: "t1", cwd: "/nowhere", sessionId: "s", title: "t", activity: null },
+      summary: {
+        id: "t1",
+        cwd: "/nowhere",
+        sessionId: "s",
+        title: "t",
+        titleSource: { kind: "person" },
+        activity: null,
+      },
       naming: { person: null, opener: null, murmur: null, own: null, summary: null },
       work: null,
       openedBy: null,
@@ -428,7 +449,14 @@ describe("the worktrees a terminal owns, as agents lists them", () => {
 
 describe("what peers read of a terminal's reports and rest", () => {
   const read = async (
-    over: { summary?: object; work?: object | null; delivered?: number; happenings?: unknown[] },
+    over: {
+      summary?: object
+      work?: object | null
+      delivered?: number
+      happenings?: unknown[]
+      request?: { readonly [key: string]: unknown }
+      worktrees?: { path: string; branch: string; pullRequest?: PullRequest }[]
+    },
     bodies: boolean[] = [],
     via: "agents" | "team" = "agents",
   ) => {
@@ -438,6 +466,7 @@ describe("what peers read of a terminal's reports and rest", () => {
         cwd: "/nowhere",
         sessionId: "s",
         title: "t",
+        titleSource: { kind: "person" },
         activity: null,
         ...over.summary,
       },
@@ -469,15 +498,24 @@ describe("what peers read of a terminal's reports and rest", () => {
           return (over.happenings ?? []) as never
         },
         bar: () => [],
-        worktrees: () => [],
+        worktrees: () => over.worktrees ?? [],
         stopping: () => false,
       },
       new GitStates(async () => null),
     )
-    await peers[via]({ type: via, terminalId: "t1", token: "k", request: {} })
+    await peers[via]({ type: via, terminalId: "t1", token: "k", request: over.request ?? {} })
     return where
   }
   const done = { kind: "done", at: 100, subject: "Fixed", body: null, pr: null }
+
+  it("leaves out a title its session gave by default, and keeps any other", async () => {
+    const titled = async (titleSource: object) =>
+      (await read({ summary: { title: "Terminal", titleSource } }))?.title
+    expect(await titled({ kind: "default" })).toBeNull()
+    expect(await titled({ kind: "person" })).toBe("Terminal")
+    expect(await titled({ kind: "agent", by: "fox" })).toBe("Terminal")
+    expect(await titled({ kind: "murmur" })).toBe("Terminal")
+  })
 
   it("is whether its latest done still stands: no prompt of the person's or delivery came after it", async () => {
     expect((await read({ happenings: [done] }))?.standing).toBe(true)
@@ -494,11 +532,60 @@ describe("what peers read of a terminal's reports and rest", () => {
     expect((await read({ summary: { lastTurnAt: null } }))?.since).toBeNull()
   })
 
-  it("reads report bodies only for team, which quotes them", async () => {
+  it("reads report bodies only for team and a lookup, which quote them", async () => {
     const asked: boolean[] = []
     await read({}, asked)
     await read({}, asked, "team")
-    expect(asked).toEqual([false, true])
+    await read({ request: { handles: ["fox"] } }, asked)
+    await read({ request: { handles: 5 } }, asked)
+    expect(asked).toEqual([false, true, true, false])
+  })
+
+  it("is the folders its work wrote in most, in its worktrees or its project, busiest first", async () => {
+    const work = {
+      folders: {
+        "/nowhere/src/api": 9,
+        "/elsewhere/notes": 8,
+        "/missing/a/src": 8,
+        "/nowhere": 7,
+        "/home/me/.claude": 6,
+        "/nowhere/web": 2,
+      },
+    }
+    const worktrees = [{ path: "/missing/a", branch: "feat/a" }]
+    // Each path as its platform writes it.
+    expect((await read({ work, worktrees }))?.folders).toEqual([
+      join("src", "api"),
+      "feat/a: src",
+      ".",
+      "web",
+    ])
+  })
+
+  it("names at most five folders, after leaving out those elsewhere", () => {
+    const folders = Object.fromEntries([
+      ...Array.from({ length: 6 }, (_, index) => [`/elsewhere/${index}`, 100 - index]),
+      ...Array.from({ length: 7 }, (_, index) => [`/p/${index}`, 50 - index]),
+    ])
+    expect(workedFolders(folders, "/p", [])).toEqual(["0", "1", "2", "3", "4"])
+  })
+
+  it("is each owned worktree's pull request, where a forge found one", async () => {
+    const pullRequest: PullRequest = {
+      number: 7,
+      url: "https://github.com/o/r/pull/7",
+      title: "Paging",
+      state: "open",
+      ci: "passed",
+    }
+    const worktrees = [
+      { path: "/missing/a", branch: "feat/a", pullRequest },
+      { path: "/missing/b", branch: "feat/b" },
+    ]
+    expect((await read({ worktrees }))?.worktrees).toEqual([
+      { path: "/missing/a", branch: "feat/a", gone: true, state: null, pullRequest },
+      { path: "/missing/b", branch: "feat/b", gone: true, state: null },
+    ])
   })
 })
 
@@ -539,6 +626,7 @@ describe("where a peer's agent works now", () => {
         cwd: join(root, "tasks", "a", "repo"),
         sessionId: "s",
         title: "t",
+        titleSource: { kind: "person" },
         activity: null,
         shellCommand,
       },
