@@ -1,7 +1,7 @@
 import type { Work, WorkFile } from "@novadeck/core/works"
 
-import { describe, expect, it } from "../test"
-import { copyOf, previewFiles } from "./files-feed"
+import { context, describe, expect, it } from "../test"
+import { copyOf, keptEdits, previewFiles, savingFirst } from "./files-feed"
 
 const file = (path: string, extra: Partial<WorkFile> = {}): WorkFile => ({
   path,
@@ -59,5 +59,61 @@ describe("where a file main lacks opens", () => {
     const second = work("second", [file("n.ts", { status: "added", changedAt: 9 })])
     expect(copyOf([first, second], "p", "n.ts")).toBe("/w/second/n.ts")
     expect(copyOf([first, second], "p", "x.ts")).toBeUndefined()
+  })
+})
+
+describe("the Files panel's moves and deletes", () => {
+  // The panel's changes over a backend that records them, saving first as `go` answers, with
+  // what each asked to save before.
+  const changes = (go: boolean) => {
+    const made: string[] = []
+    const asked: string[] = []
+    const { move, remove } = savingFirst(
+      {
+        move: async (from, to) => {
+          made.push(`move ${from} ${to}`)
+          return to
+        },
+        remove: async (path) => void made.push(`delete ${path}`),
+      },
+      async (path, action) => {
+        asked.push(`${action} ${path}`)
+        return go
+      },
+    )
+    return { move: move!, remove: remove!, made, asked }
+  }
+
+  it("saves first what a rename in its folder leaves, then renames", async () => {
+    const { move, made, asked } = changes(true)
+    await expect(move("src/cart.ts", "src/basket.ts")).resolves.toBe("src/basket.ts")
+    expect(asked).toEqual(["rename src/cart.ts"])
+    expect(made).toEqual(["move src/cart.ts src/basket.ts"])
+  })
+
+  it("saves first what a move to another folder leaves, as a move", async () => {
+    const { move, asked } = changes(true)
+    await move("src/cart.ts", "lib/cart.ts")
+    expect(asked).toEqual(["move src/cart.ts"])
+  })
+
+  it("saves first what a delete leaves, then deletes", async () => {
+    const { remove, made, asked } = changes(true)
+    await remove("src")
+    expect(asked).toEqual(["delete src"])
+    expect(made).toEqual(["delete src"])
+  })
+
+  context("when the person stays with edits that can't be saved", () => {
+    it("makes neither, saying why", async () => {
+      const { move, remove, made } = changes(false)
+      await expect(move("src/cart.ts", "src/basket.ts")).rejects.toThrow(keptEdits)
+      await expect(remove("src/cart.ts")).rejects.toThrow(keptEdits)
+      expect(made).toEqual([])
+    })
+  })
+
+  it("offers neither where the backend can't make it", () => {
+    expect(savingFirst({}, async () => true)).toEqual({})
   })
 })

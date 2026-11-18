@@ -4,6 +4,8 @@ import type { Workspace } from "@novadeck/core/types"
 import { demoPaths, filesThird, type DemoFiles } from "@novadeck/demo/files"
 import { terminalOf } from "@novadeck/demo/workspace"
 
+import { refuseClipboard, restoreClipboard } from "./clipboard"
+import type { DemoLaunch } from "./debug-demo"
 import type { DemoActionGroup } from "./types"
 
 // Files exist for the storefront project only.
@@ -20,8 +22,12 @@ const handleOf = (key: TerminalKey | undefined, workspace: Workspace | undefined
 }
 
 // The panel's group for the Files panel's states, which need the demo's files: the
-// storefront project's tree, where the agents change files by themselves too.
-export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGroup[] =>
+// storefront project's tree, where the agents change files by themselves too, and the person
+// makes, renames, cuts, copies, pastes and deletes them where the launch offers it.
+export const filesGroups = (
+  files: DemoFiles | undefined,
+  launch: Pick<DemoLaunch, "setFileOperations">,
+): readonly DemoActionGroup[] =>
   files
     ? [
         {
@@ -80,12 +86,66 @@ export const filesGroups = (files: DemoFiles | undefined): readonly DemoActionGr
               run: () => files.degrade("", "truncate"),
             },
             {
+              label: "Next hide-list save fails",
+              hint: "In Files, the next save of the open project's hidden files fails, once: Save in the Hidden files dialog (the crossed-out eye at the top of the panel) keeps the dialog open with a red line under the lists saying why, and Hide in This Project on a row's right-click puts a red-edged line above the tree saying it couldn't hide that path, with Dismiss; Files read normally again lifts it before then",
+              run: () => files.failNextExcludeSave(),
+            },
+            {
+              label: "Hidden files can't be read",
+              hint: "Every read of a project's hidden files fails until Files read normally again. Switch to another project and open Files: there is no Hidden files button (the crossed-out eye) at the top of the panel and no Hide in This Project on a row's right-click, and only the patterns for every project hide anything. A panel that read them already keeps them, and Hide in This Project there puts a red-edged line above the tree saying it couldn't hide that path",
+              run: () => files.failExcludeReads(),
+            },
+            {
+              label: "Next file operation fails",
+              hint: "In Files, the next New File…, New Folder…, Rename… or Delete fails, once: a red-edged line above the tree says it couldn't make, rename or delete that path, and why, with Dismiss, and the tree is as it was; Files read normally again lifts it before then",
+              run: () => files.failNextChange(),
+            },
+            {
+              label: "Next paste fails",
+              hint: "In Files, the next Paste (from a row's or the empty space's right-click, or Ctrl+V, ⌘V on macOS) that copies or moves a row fails, once (a cut pasted back into its own folder moves nothing): a red-edged line above the tree says it couldn't move or copy that path into the folder, and why, with Dismiss; a cut stays dimmed to paste again. Files read normally again lifts it before then",
+              run: () => files.failNextPaste(),
+            },
+            {
+              label: "Next paste takes 5 s",
+              hint: "In Files, the next Paste of a row cut or copied takes 5 seconds: meanwhile the row pasted shows a spinner in its icon's place and is busy, and a cut's Paste stays greyed in the menus; then the copy or the moved row shows, a file selected unless the selection moved meanwhile, with the keyboard focus where it was still on the row pasted on. Files read normally again lifts it before then",
+              run: () => files.slowNextPaste(5000),
+            },
+            {
+              label: "Next change's answer is lost",
+              hint: "In Files, the next Paste, Rename… or Delete is made, but answers as though the connection to the runner dropped first: after a copy or a Delete a red-edged line above the tree says Novadeck lost its connection before it heard whether it could do it, that it may have been done or may still be under way, and the tree, read again, shows it done; a cut or a Rename shows done with no line, as the folders read say it moved. Files read normally again lifts it before then",
+              run: () => files.loseNextAnswer(),
+            },
+            {
+              label: "File operations not offered",
+              hint: "Files' right-click menus have no New File…, New Folder…, Cut, Copy, Paste, Rename… or Delete, and F2, Delete and Ctrl+X, C and V (⌘ on macOS) on a row do nothing, as on a runner without them; the path copies, Refresh and Hide in This Project stay",
+              reboots: true,
+              run: () => launch.setFileOperations(false),
+            },
+            {
+              label: "File operations offered",
+              hint: "Files' right-click menus offer New File…, New Folder… and Paste, and Cut, Copy, Rename… and Delete on a row of the project's folder, with F2, Delete and Ctrl+X, C and V (⌘ on macOS) on a focused row, as the demo starts",
+              reboots: true,
+              run: () => launch.setFileOperations(true),
+            },
+            {
+              label: "Copying a path fails",
+              hint: "Every copy in the page fails until Files read normally again or a reboot: in Files, Copy Path or Copy Relative Path on a row's right-click, Copy Path on the empty space's, or Shift+Alt+C on a focused row shows a red-edged line above the tree saying it couldn't copy that path, with a Dismiss button; hiding the panel clears it",
+              run: refuseClipboard,
+            },
+            {
               label: "Files read normally again",
-              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again",
-              run: () =>
-                (["", "src/cart", "src/components"] as const).forEach((folder) =>
-                  files.degrade(folder, undefined),
-                ),
+              hint: "Open Files, then show the panel again or end an agent's turn: every folder lists in full again, and hidden files read again; paths copy, hidden files save, and files are made, renamed, pasted and deleted again at once",
+              run: () => {
+                restoreClipboard()
+                files.failNextChange(false)
+                files.failNextPaste(false)
+                files.slowNextPaste()
+                files.loseNextAnswer(false)
+                files.failNextExcludeSave(false)
+                files.failExcludeReads(false)
+                for (const folder of ["", "src/cart", "src/components"])
+                  files.degrade(folder, undefined)
+              },
             },
             {
               label: "Agent creates a file in a folder",

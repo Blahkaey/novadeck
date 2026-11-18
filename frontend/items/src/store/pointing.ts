@@ -1,5 +1,5 @@
 import { kindRules, type Item, type ItemId } from "@novadeck/core/items"
-import type { Workspace } from "@novadeck/core/types"
+import type { Workspace, WorkspaceTarget } from "@novadeck/core/types"
 
 // What the workspace says about items, apart from what they hold: which file one points at,
 // where it is, and each session's items.
@@ -16,6 +16,15 @@ export const itemIn = (workspace: Workspace, id: ItemId): Item | undefined => {
       const item = each.state.items.find((candidate) => candidate.id === id)
       if (item) return item
     }
+  return undefined
+}
+
+// The session an item is in, while it's there.
+export const targetOf = (workspace: Workspace, id: ItemId): WorkspaceTarget | undefined => {
+  for (const project of workspace.projects)
+    for (const each of project.history)
+      if (each.state.items.some((candidate) => candidate.id === id))
+        return { projectId: project.id, workspaceSessionId: each.id }
   return undefined
 }
 

@@ -1,4 +1,5 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
+import type { Item } from "@novadeck/core/items"
 import { activeProject, activeSession } from "@novadeck/core/state"
 import type {
   TerminalMetadata,
@@ -45,6 +46,28 @@ export const windowedDestination = (
 export const sameTarget = (a: WorkspaceTarget, b: WorkspaceTarget): boolean =>
   a.projectId === b.projectId && a.workspaceSessionId === b.workspaceSessionId
 
+// The state of the session `target` names, while it's there.
+export const stateAt = (
+  workspace: Workspace,
+  target: WorkspaceTarget,
+): WorkspaceState | undefined =>
+  workspace.projects
+    .find((project) => project.id === target.projectId)
+    ?.history.find((session) => session.id === target.workspaceSessionId)?.state
+
+// A file a project window shows, by the path it points at.
+export type ProjectFile = Item & { readonly path: string }
+
+const isProjectFile = (item: Item | undefined): item is ProjectFile =>
+  item !== undefined && item.path !== null
+
+// The file the session's project window shows, while it has one.
+export const projectWindowFile = (state: WorkspaceState | undefined): ProjectFile | undefined => {
+  const window = state?.roster.windows.find((each) => each.home === "project")
+  const item = window && state?.items.find((each) => each.id === window.itemId)
+  return isProjectFile(item) ? item : undefined
+}
+
 // Equal when both hold the identical items in the same order.
 export const sameItems = <T>(a: readonly T[], b: readonly T[]): boolean =>
   a.length === b.length && a.every((item, index) => Object.is(item, b[index]))
@@ -87,11 +110,12 @@ export const crashLoopQuestion = (ui: Pick<UiState, "crashLoop" | "crashLoopDism
 
 // Whether an alert dialog is on screen, which holds every shortcut back.
 export const alertOpen = (ui: UiState, workspace: Workspace): boolean =>
-  closeQuestion(ui, workspace) !== undefined || crashLoopQuestion(ui) > 0
+  closeQuestion(ui, workspace) !== undefined || crashLoopQuestion(ui) > 0 || ui.leaving !== null
 
 // Whether a modal dialog covers the page, which a doorbell waits out: Search or Preferences
-// (the route's), the close confirmation, the crash-loop question, or the terminal switcher
-// opened by click (the held one, from Ctrl+Tab, takes no pointer and blocks nothing).
+// (the route's), the close confirmation, the crash-loop question, the question about leaving
+// edits that can't be saved, or the terminal switcher opened by click (the held one, from
+// Ctrl+Tab, takes no pointer and blocks nothing).
 //
 // The welcome dialog is the backend's own state, not the UI store's, and the name offer is a
 // chip that blocks nothing, so neither counts. Nor can the project-removal confirmation (the
@@ -101,6 +125,7 @@ export const modalOpen = (ui: UiState): boolean =>
   ui.location.route.dialog !== null ||
   ui.closing !== null ||
   crashLoopQuestion(ui) > 0 ||
+  ui.leaving !== null ||
   ui.recent.switcher?.mode === "click"
 
 // Whether the sidebar shows the Inbox's panel.

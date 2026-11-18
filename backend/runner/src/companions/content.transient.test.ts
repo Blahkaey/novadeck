@@ -125,17 +125,19 @@ describe("saving a plan when the disk fails", () => {
     })
 
   for (const code of ["EACCES", "EPERM"])
-    it(`leaves ${code} on a rename that never gets through unclassified: the plan is held, not the folder`, async ({
+    it(`names ${code} on a rename that never gets through, after its tries, a plan it may not write`, async ({
       directory,
     }) => {
       const { path, stamp } = await setup(directory)
       failure.rename = code
       failure.renames = 99
-      const error = await settle(path, stamp)
-      expect(error).toMatchObject({ code })
-      expect(error).not.toBeInstanceOf(DomainError)
+      await expect(settle(path, stamp)).resolves.toMatchObject({
+        code: "PLAN_UNWRITABLE",
+        data: { reason: "folder" },
+      })
       expect(failure.renamed).toBe(3)
       expect(readdirSync(directory)).toEqual(["p.md"])
+      expect(readFileSync(path, "utf8")).toBe("# Plan\n")
     })
 
   it("names EROFS as a folder it can't write, without trying again", async ({ directory }) => {

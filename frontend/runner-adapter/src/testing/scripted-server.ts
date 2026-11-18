@@ -161,6 +161,12 @@ export const scriptedRunner = ({
       arrange: api.projects.arrange.handler(() => {}),
       remove: api.projects.remove.handler(unplayed("projects.remove")),
       folder: api.projects.folder.handler(unplayed("projects.folder")),
+      filesExclude: api.projects.filesExclude.handler(unplayed("projects.filesExclude")),
+      setFilesExclude: api.projects.setFilesExclude.handler(unplayed("projects.setFilesExclude")),
+      createEntry: api.projects.createEntry.handler(unplayed("projects.createEntry")),
+      moveEntry: api.projects.moveEntry.handler(unplayed("projects.moveEntry")),
+      copyEntry: api.projects.copyEntry.handler(unplayed("projects.copyEntry")),
+      removeEntry: api.projects.removeEntry.handler(unplayed("projects.removeEntry")),
       browse: api.projects.browse.handler(unplayed("projects.browse")),
     },
     sessions: {

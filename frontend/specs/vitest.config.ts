@@ -55,6 +55,7 @@ export const eachPlatform = [
   "src/interaction/dictation.spec.tsx",
   "src/interaction/keyboard.spec.tsx",
   "src/interaction/search.spec.tsx",
+  "src/projects/editing.spec.tsx",
   "src/projects/pins.spec.tsx",
   "src/projects/sessions.spec.tsx",
   "src/terminals/clipboard.spec.tsx",

@@ -1,8 +1,9 @@
 import { StateEffect, StateField, type EditorState } from "@codemirror/state"
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view"
 
-// Stretches of the text, by offset.
-export type Range = { readonly from: number; readonly to: number }
+import type { Range } from "../sync/lines.js"
+
+export type { Range } from "../sync/lines.js"
 
 // A stretch the app has set a class on: every line it touches carries the class, and
 // the viewer moves it along with the person's edits.

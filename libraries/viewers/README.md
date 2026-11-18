@@ -1,7 +1,8 @@
 # @novadeck/viewers
 
-Content viewers behind one contract: code, image, markdown and web pages, each mounted into
-an element, keeping its scroll and place across remounts through state its app stores.
+Content viewers behind one contract: code, image, markdown and web pages, and a text editor,
+each mounted into an element, keeping its scroll and place across remounts through state its
+app stores.
 
 A viewer doesn't know what it's shown for. Its app chooses which viewer shows what, gives
 it an element and content, and stores what `state()` returns when it lets the viewer go, to
@@ -16,6 +17,32 @@ hand back as `saved` to the next viewer of the same thing.
   parser the first time it's needed; `highlightLines` for code highlighted elsewhere.
 - `./code.css`: the code viewer's looks and the `.tok-*` highlighting classes. Its header
   lists the tokens an app sets to theme it (`--code-*`, `--syntax-*`).
+- `./editor`: `mountEditor`, a file's text edited in place: numbered lines, undo and redo,
+  brackets matched, and highlighting in `./code.css`'s `.tok-*` classes once the language
+  its `path` names has loaded its parser, the code viewer's own parsers. It indents in the
+  file's own unit: a tab where tab-indented lines outnumber space-indented ones, else the
+  step of spaces the file goes in by most (two in a file that shows none), and always a tab
+  in a Makefile (`Makefile`, `makefile`, `GNUmakefile`, `*.mk`), read as the file opens. Tab
+  adds that unit to the line (Escape, then Tab, leaves the editor), and Enter keeps the
+  line's indentation, written in it. The parser alone: no indentation, folding or comment
+  rules by syntax, which a language's own CodeMirror package would add. The person's edits
+  alone reach `onEdit`, and Ctrl/⌘+S calls `onSave`, read-only too, instead of the browser's
+  save. `update()` takes an outside change as a minimal line diff, outside the undo history,
+  with the cursor and place kept; another `path` is another file, opened at its top with no
+  history, so a file renamed while open starts afresh at its new path, its undo history and
+  place left behind: an app saves the person's edits before the rename. `readOnly` comes
+  with the content, so a live editor turns writable or not; `marks` are lines another writer
+  changed, drawn with `markedClass` and moved along with the person's edits, a mark staying
+  on its line when the person breaks the line at its start and going with the line when all
+  of it is deleted. Its state keeps the text, selection, undo history, place (one not put
+  back yet, as for an editor let go before it had a size, included) and marks, and opens
+  only for the same `path`. The text breaks its lines with `\n` alone: a lone `\r` stays
+  text, shown as a mark, and is written back as it was, and text pasted with `\r\n` takes
+  `\n`. It fills its element and scrolls
+  itself, themed through the code viewer's `--code-*` tokens, `--editor-selection-bg` and
+  `--editor-marked-bg`. Built on CodeMirror, with the same peer dependencies as
+  `./markdown`; nothing else in the package imports it, so an app loads it where it's
+  needed.
 - `./facts`: what a change to a file can be said to be, from facts alone: `factsOf` reads the
   two sides' text with the highlighters' own parsers (JavaScript and TypeScript, and Markdown)
   and says where each hunk sits (the declaration around it, the imports it touches, a test, the
@@ -34,8 +61,10 @@ hand back as `saved` to the next viewer of the same thing.
 - `./markdown`: `mountMarkdown`, a text formatted as a document and edited in place:
   formatting marks show on the lines being edited, tables edit cell by cell, task lists tick.
   Outside changes apply as a minimal line diff, outside undo history, with the cursor kept;
-  the person's edits alone reach `onEdit`. The text breaks its lines with `\n`: an app whose
-  file uses `\r\n` converts on the way in and out, as offsets count `\n` as one character.
+  the person's edits alone reach `onEdit`. The text breaks its lines with `\n` alone: an app
+  whose file uses `\r\n` converts on the way in and out, as offsets count `\n` as one
+  character; a lone `\r` stays text, written back as it was; text pasted with `\r\n` takes
+  `\n`.
   `editable()` switches editing on the live viewer,
   `ranges` set a class on lines, `extensions` add editor behaviour, and `rowAnnotations` lets
   an app write a short text into table rows. It scrolls in its nearest scrolling ancestor.
@@ -49,7 +78,9 @@ hand back as `saved` to the next viewer of the same thing.
   language a fence's info string asks for, to give `highlightLines`. It imports nothing
   and doesn't edit: `./markdown` is the editor.
 - `./text`: `outline`, the headings of a Markdown text, with no editor behind it.
-- `./sync`: `distance` and `merge`, how far apart Markdown texts are and how they merge.
+- `./sync`: `distance` and `merge`, how far apart two texts are, line by line, and how two
+  writers' changes to one merge, as an agent's rewrite into the person's edits to a plan or a
+  file. The markdown viewer and the editor apply an outside change with the same line diff.
   Built on CodeMirror's state, so kept apart from `./text`.
 - `./browser`: `mountBrowser`, a web page: live in Electron's `<webview>`, reporting where it
   is, how its load went and what goes wrong on it, going back, forward or reloading, quiet

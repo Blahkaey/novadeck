@@ -84,7 +84,8 @@ export const companionChange = z.discriminatedUnion("type", [
 ])
 
 // `companions.save`: the plan's new stamp, or, when it changed since the stamp the edit was
-// made on, the plan as it now stands.
+// made on, the plan as it now stands. A file's save answers alike: its text as it now stands,
+// its byte-order mark left out, never `truncated`, and `skill` false.
 export const planSaveResult = z.discriminatedUnion("saved", [
   z.strictObject({ saved: z.literal(true), stamp: z.string().max(128) }),
   z.strictObject({
@@ -252,6 +253,61 @@ export const changeFileDiff = z.strictObject({
     .nullable(),
 })
 
+/**
+ * Why `companions.save` can't write a plan, or a file the person opened in the session's
+ * project window, in `PLAN_UNWRITABLE`'s data, which retrying won't change until the item,
+ * the file or its folder does:
+ * - `gone`: the file is no longer there.
+ * - `folder`: Novadeck may not write in the file's folder, or the file itself refuses it (a
+ *   file the person opened that may not be written, or a rename still refused after its tries).
+ * - `transcript`: the plan lives in an agent's messages, not a file.
+ * - `too-large`: the text or the file is past what Novadeck writes (256 KiB).
+ * - `not-a-plan`: the item is neither a plan nor the file the person opened in the session's
+ *   project window.
+ * - `outside`: a plan's file is in neither its project's folder nor its agent's own plans
+ *   folder, or a file the person opened is outside the project's folder, in Git's own `.git`
+ *   there, or in agents' worktrees (an agent's copy, even one the project's folder holds,
+ *   unless the project is itself one of them), so Novadeck does not write it.
+ * - `moved`: the item points at another file than the `path` the edit was made on, or a file's
+ *   edit names no `path`.
+ * - `not-text`: the file on disk is no longer text Novadeck edits (binary, or not UTF-8).
+ */
+const unwritableReason = z.enum([
+  "gone",
+  "folder",
+  "transcript",
+  "too-large",
+  "not-a-plan",
+  "outside",
+  "moved",
+  "not-text",
+])
+export const planUnwritable = z.strictObject({ reason: unwritableReason })
+export type PlanUnwritable = z.infer<typeof planUnwritable>
+
+// A file followed with `edit` that can be edited whole, which `companions.save` takes back:
+// all of its text, decoded as UTF-8 without its byte-order mark, its line breaks as they are,
+// no line cut. `path` is the path the item points at, which a save names as its `path`.
+// `writable` where a save writes it; else why not, as a save would be refused: `not-a-plan`
+// for any item but the file the person opened in the session's project window, `outside` for
+// a file outside the project's folder, in Git's own `.git` or in agents' worktrees, `folder`
+// for a file, or a folder, the runner may not write.
+const textContent = z.discriminatedUnion("writable", [
+  z.strictObject({
+    kind: z.literal("text"),
+    path: z.string().max(companionLimits.path),
+    text: z.string().max(companionLimits.plan),
+    writable: z.literal(true),
+  }),
+  z.strictObject({
+    kind: z.literal("text"),
+    path: z.string().max(companionLimits.path),
+    text: z.string().max(companionLimits.plan),
+    writable: z.literal(false),
+    reason: unwritableReason.extract(["not-a-plan", "outside", "folder"]),
+  }),
+])
+
 // `companions.content`: what an item points at, read as it is now. `stamp` changes with
 // it. A file is the lines around the ones pointed at, numbered from `firstLine`, with
 // its line count where it was read to its end (`truncated` otherwise), and `clamped`
@@ -274,6 +330,10 @@ export const changeFileDiff = z.strictObject({
 // file is there and Novadeck can't read it now (no permission, in use, not a regular file);
 // `gone` where its file was there and no longer is, as Claude Code's goes with its session. Or why it can't be shown,
 // with the file's size where known.
+// A file followed with `edit` is `text` where it can be edited whole (see `textContent`); one
+// that can't is the listing above, with `uneditable` saying why: `too-large` past 256 KiB or
+// past what one `companions.save` carries, `not-text` where it isn't valid UTF-8. A binary
+// file is `binary`, and one that may hold secrets `secret` unless revealed, as without `edit`.
 export const itemContent = z.discriminatedUnion("state", [
   z.strictObject({
     state: z.literal("ready"),
@@ -290,6 +350,7 @@ export const itemContent = z.discriminatedUnion("state", [
         total: z.int().nonnegative().nullable(),
         truncated: z.boolean(),
         clamped: z.boolean(),
+        uneditable: z.enum(["too-large", "not-text"]).optional(),
       }),
       z.strictObject({
         kind: z.literal("page"),
@@ -350,6 +411,7 @@ export const itemContent = z.discriminatedUnion("state", [
         // re-read the plan and apply the notes left in it.
         skill: z.boolean(),
       }),
+      textContent,
     ]),
   }),
   z.strictObject({
@@ -366,22 +428,6 @@ export const itemContent = z.discriminatedUnion("state", [
     size: z.number().nullable(),
   }),
 ])
-
-/**
- * Why `companions.save` can't write a plan, in `PLAN_UNWRITABLE`'s data, which retrying
- * won't change until the plan or its folder does:
- * - `gone`: the plan's file is no longer there.
- * - `folder`: Novadeck may not write in the plan's folder or file.
- * - `transcript`: the plan lives in an agent's messages, not a file.
- * - `too-large`: the plan is past what Novadeck writes (256 KiB).
- * - `not-a-plan`: the item is no plan.
- * - `outside`: the plan's file is in neither its project's folder nor its agent's own
- *   plans folder, so Novadeck does not write it.
- */
-export const planUnwritable = z.strictObject({
-  reason: z.enum(["gone", "folder", "transcript", "too-large", "not-a-plan", "outside"]),
-})
-export type PlanUnwritable = z.infer<typeof planUnwritable>
 
 export type CompanionItem = z.infer<typeof companionItem>
 export type CompanionWindow = z.infer<typeof companionWindow>

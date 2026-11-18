@@ -1,4 +1,4 @@
-import type { Item } from "@novadeck/core/items"
+import type { Item, ItemId } from "@novadeck/core/items"
 import type { TerminalKey } from "@novadeck/core/port"
 import type {
   TerminalMetadata,
@@ -46,6 +46,33 @@ export const directoryOf = (
   key: { readonly projectId: string },
 ): string | undefined =>
   workspace?.projects.find((project) => project.id === key.projectId)?.directory
+
+// A file of a project: by its path from the project's root, or, outside the project's folder
+// (an agent's copy), by its own path.
+export type FileAt = { readonly projectId: string; readonly path: string }
+
+// The file a session's project window shows: where its project has it, the path its item points
+// at, which a save names, and the item.
+export type WindowFile = FileAt & { readonly at: string; readonly itemId: ItemId }
+
+// The file the project window of the session `target` shows, while it shows one.
+export const windowFileOf = (
+  workspace: Workspace | undefined,
+  target: WorkspaceTarget,
+): WindowFile | undefined => {
+  const state = sessionOf(workspace, target)?.state
+  const window = state?.roster.windows.find((each) => each.home === "project")
+  const at = window && state?.items.find((each) => each.id === window.itemId)?.path
+  const directory = directoryOf(workspace, target)
+  if (!window || !at || directory === undefined) return undefined
+  const inside = at.startsWith(`${directory}/`)
+  return {
+    projectId: target.projectId,
+    path: inside ? at.slice(directory.length + 1) : at,
+    at,
+    itemId: window.itemId,
+  }
+}
 
 // Every item the workspace's sessions hold.
 export const itemsOf = (workspace: Workspace): readonly Item[] =>

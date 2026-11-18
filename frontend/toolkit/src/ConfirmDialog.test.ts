@@ -252,4 +252,16 @@ describe("a confirm dialog's delay before confirming", () => {
       expect(button("Close a only")!.disabled).toBe(false)
     })
   })
+
+  context("without a confirm answer, as while going on waits on something else", () => {
+    it("offers only cancelling", async () => {
+      const { show, dialog, press, answers } = mount({ confirmLabel: null })
+      await show(a)
+      expect([...dialog()!.querySelectorAll("button")].map((each) => each.textContent)).toEqual([
+        "Cancel",
+      ])
+      press("Cancel")
+      expect(answers).toEqual(["cancel"])
+    })
+  })
 })

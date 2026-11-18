@@ -5,7 +5,8 @@ import { isLanguage, type Language } from "./languages.js"
 
 // Syntax highlighting with CodeMirror's parsers but no editor. A language's parser loads
 // the first time it's asked for. Each token gets `tok-*` classes, which code.css colours.
-// Viewers load this module through ./rows.ts, only once they have something to highlight.
+// Viewers load this module through ./rows.ts, only once they have something to highlight;
+// the editor, itself loaded only when needed, takes its parsers from here too.
 
 // A run of text, where it starts in its line, and the classes for its kind of token,
 // none for plain text.
@@ -31,7 +32,7 @@ const loaders = {
 
 const parsers = new Map<Language, Promise<Parser>>()
 
-const parserFor = (language: Language): Promise<Parser> => {
+export const parserFor = (language: Language): Promise<Parser> => {
   const known = parsers.get(language)
   if (known) return known
   const loading = loaders[language]()

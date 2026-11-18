@@ -81,6 +81,7 @@ const setup = ({
       chatView: false,
       agentAvatars: false,
       onboardingTour: false,
+      filesExclude: {},
     },
   })
   const ui = createUiStore({ ...initial, pageFocused: focused })

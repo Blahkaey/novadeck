@@ -1,7 +1,8 @@
+import { vi } from "vitest"
 import { page, userEvent } from "vitest/browser"
 
 import { expectStaysTrue } from "../support/layouts"
-import { layoutSettled, openWorkspace, sidebarPanel } from "../support/workspace"
+import { layoutSettled, openWorkspace, sidebarPanel, terminal } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The agents demo has a Files panel with the storefront's files. Specs run with reduced motion,
@@ -153,6 +154,198 @@ describe("The Files panel", () => {
       expect(seen.filter(({ truncated }) => truncated)).toEqual([])
       expect(seen.filter(({ width, count }) => width >= needed + 2 && count !== 2)).toEqual([])
       expect(seen.filter(({ width, count }) => width < needed && count !== 1)).toEqual([])
+    })
+  })
+
+  context("when the person asks for a row's menu", () => {
+    it("copies the row's path in the project's folder, and its path from the root", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const copied = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+      const select = page.getByRole("treeitem", { name: /^Checkout\.tsx,/ })
+      const menu = page.getByRole("menu", { name: "Checkout.tsx actions" })
+
+      await select.click({ button: "right" })
+      await expect.element(menu).toBeVisible()
+      // The right-click moved the tree's one tab stop onto the row.
+      await expect.element(select).toHaveAttribute("tabindex", "0")
+      await menu.getByRole("menuitem", { name: /^Copy Path/ }).click()
+      await select.click({ button: "right" })
+      await menu.getByRole("menuitem", { name: "Copy Relative Path" }).click()
+
+      await expect
+        .poll(() => copied.mock.calls)
+        .toEqual([
+          ["~/projects/storefront/src/checkout/Checkout.tsx"],
+          ["src/checkout/Checkout.tsx"],
+        ])
+      await expect.element(page.getByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("says above the tree that it couldn't copy, until dismissed", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"))
+      const files = page.getByRole("region", { name: "Files" })
+
+      await page.getByRole("treeitem", { name: /^Checkout\.tsx,/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Copy Relative Path" }).click()
+
+      const failure = files.getByRole("alert")
+      await expect
+        .element(failure)
+        .toHaveTextContent("Couldn't copy src/checkout/Checkout.tsx to the clipboard.")
+      await failure.getByRole("button", { name: "Dismiss" }).click()
+      await expect.element(failure).not.toBeInTheDocument()
+    })
+  })
+
+  context("when the person hides files in a project", () => {
+    it("hides a row from its menu, and shows it again by switching its pattern off", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const readme = page.getByRole("treeitem", { name: /^README\.md/ })
+      await expect.element(readme).toBeVisible()
+
+      await readme.click({ button: "right" })
+      await page.getByRole("menuitem", { name: "Hide in This Project" }).click()
+      await expect.element(readme).not.toBeInTheDocument()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      const dialog = page.getByRole("dialog", { name: "Hidden files" })
+      const mine = dialog.getByRole("list", { name: "This project's patterns" })
+      await mine.getByRole("checkbox", { name: "README.md" }).click()
+      await dialog.getByRole("button", { name: "Save" }).click()
+
+      await expect.element(dialog).not.toBeInTheDocument()
+      await expect.element(readme).toBeVisible()
+    })
+
+    it("hides what a pattern added in Hidden files matches, and opens Preferences at the patterns for every project, which hide it everywhere", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const test = page.getByRole("treeitem", { name: /^Checkout\.test\.tsx,/ })
+      const manifest = page.getByRole("treeitem", { name: /^package\.json/ })
+      await expect.element(test).toBeVisible()
+      await expect.element(manifest).toBeVisible()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      const dialog = page.getByRole("dialog", { name: "Hidden files" })
+      await dialog.getByRole("textbox", { name: "Pattern to hide" }).fill("**/*.test.tsx")
+      await dialog.getByRole("button", { name: "Add" }).click()
+      await dialog.getByRole("button", { name: "Save" }).click()
+      await expect.element(dialog).not.toBeInTheDocument()
+      await expect.element(test).not.toBeInTheDocument()
+
+      await page.getByRole("button", { name: "Hidden files" }).click()
+      await dialog.getByRole("button", { name: "Edit in Preferences" }).click()
+      const preferences = page.getByRole("dialog", { name: "Preferences" })
+      await expect
+        .element(preferences.getByRole("list", { name: "Patterns for every project" }))
+        .toBeVisible()
+      const field = preferences.getByRole("textbox", { name: "Pattern to hide" })
+      await expect.element(field).toHaveFocus()
+
+      await field.fill("package.json")
+      await preferences.getByRole("button", { name: "Add" }).click()
+      await userEvent.keyboard("{Escape}")
+      await expect.element(preferences).not.toBeInTheDocument()
+      await expect.element(manifest).not.toBeInTheDocument()
+    })
+  })
+
+  context("when the person makes, renames and deletes files", () => {
+    it("makes a file from a row's menu, focused, and deletes it with the keys once asked, Cancel first, giving the next row the focus", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const files = page.getByRole("region", { name: "Files" })
+
+      await page.getByRole("treeitem", { name: /^README\.md/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: "New File…" }).click()
+      const name = files.getByRole("textbox", { name: "Name of the new file" })
+      await expect.element(name).toHaveFocus()
+      await name.fill("index.html")
+      await expect
+        .element(files.getByText("There's already a file named index.html here."))
+        .toBeVisible()
+      await name.fill("NOTES.md")
+      await userEvent.keyboard("{Enter}")
+      const notes = page.getByRole("treeitem", { name: /^NOTES\.md/ })
+      await expect.element(notes).toHaveFocus()
+
+      await userEvent.keyboard("{Delete}")
+      const asked = page.getByRole("alertdialog", { name: "Delete NOTES.md?" })
+      await expect.element(asked.getByRole("button", { name: "Cancel" })).toHaveFocus()
+      await userEvent.keyboard("{Tab}")
+      await expect.element(asked.getByRole("button", { name: "Delete" })).toHaveFocus()
+      await userEvent.keyboard("{Enter}")
+
+      await expect.element(notes).not.toBeInTheDocument()
+      await expect.element(page.getByRole("treeitem", { name: /^package\.json/ })).toHaveFocus()
+    })
+
+    it("has the project window follow a file renamed on F2, and say once it is deleted that it is gone", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const manifest = page.getByRole("treeitem", { name: /^package\.json/ })
+      await manifest.dblClick()
+      await expect.element(terminal("package.json")).toBeVisible()
+
+      manifest.element().focus()
+      await userEvent.keyboard("{F2}")
+      const renaming = page.getByRole("textbox", { name: "New name for package.json" })
+      await expect.element(renaming).toHaveFocus()
+      await renaming.fill("manifest.json")
+      await userEvent.keyboard("{Enter}")
+      await expect.element(terminal("manifest.json")).toBeVisible()
+      await expect.element(terminal("package.json")).not.toBeInTheDocument()
+
+      await page.getByRole("treeitem", { name: /^manifest\.json/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Delete/ }).click()
+      await page
+        .getByRole("alertdialog", { name: "Delete manifest.json?" })
+        .getByRole("button", { name: "Delete" })
+        .click()
+      await expect
+        .element(terminal("manifest.json").getByText("manifest.json isn't there any more."))
+        .toBeVisible()
+    })
+  })
+
+  context("when the person cuts, copies and pastes files", () => {
+    // The tree's row of the entry at `path`, and the path of the file selected. A mouse leaves
+    // typing in the terminal, so the panel takes no focus from it.
+    const rowAt = (path: string): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`.files-tree [data-path="${CSS.escape(path)}"]`)
+    const selected = (): string | undefined =>
+      document.querySelector<HTMLElement>('.files-tree [aria-selected="true"]')?.dataset["path"]
+
+    it("copies a file into a folder, which opens on its copy, selected, then cuts another there, dimmed until it moves", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Files").click()
+      const publicFolder = page.getByRole("treeitem", { name: /^public$/ })
+
+      await page.getByRole("treeitem", { name: /^README\.md/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Copy(?!.*Path)/ }).click()
+      await publicFolder.click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Paste/ }).click()
+
+      await expect.poll(selected).toBe("public/README.md")
+      await expect.element(publicFolder).toHaveAttribute("aria-expanded", "true")
+      expect(rowAt("README.md")).not.toBeNull()
+
+      await page.getByRole("treeitem", { name: /^package\.json/ }).click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Cut/ }).click()
+      await expect
+        .element(page.getByRole("treeitem", { name: /^package\.json, .*cut/ }))
+        .toBeVisible()
+      expect(rowAt("package.json")?.closest(".files-row")?.getAttribute("data-cut")).toBe("true")
+      await publicFolder.click({ button: "right" })
+      await page.getByRole("menuitem", { name: /^Paste/ }).click()
+
+      await expect.poll(selected).toBe("public/package.json")
+      expect(rowAt("package.json")).toBeNull()
+      expect(document.querySelector(".files-row[data-cut=true]")).toBeNull()
     })
   })
 

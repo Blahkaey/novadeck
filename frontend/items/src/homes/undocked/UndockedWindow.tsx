@@ -6,7 +6,9 @@ import type { ItemStore } from "../../store/item-store"
 
 // An item undocked into a window of its own: its registration's body, as in the pane, a
 // plan editable, or something an agent showed loading from where it points now. The
-// window's menu docks it back into the terminal it was shown from.
+// window's menu docks it back into the terminal it was shown from. Focus leaving a plan's
+// window saves its edits at once, as leaving the pane does, so an agent told to re-read it
+// finds them.
 export const UndockedWindow = ({
   itemStore,
   target,
@@ -23,7 +25,13 @@ export const UndockedWindow = ({
     <registration.View item={item} itemStore={itemStore} target={target} actions={undefined} />
   )
   return (
-    <div className="artifact-window">
+    <div
+      className="artifact-window"
+      onBlur={(event) => {
+        if (item?.kind === "plan" && !event.currentTarget.contains(event.relatedTarget))
+          itemStore.plan(target, item.id).flush()
+      }}
+    >
       {!registration ? null : registration.windowLabel ? (
         <section
           className="pane-reader"

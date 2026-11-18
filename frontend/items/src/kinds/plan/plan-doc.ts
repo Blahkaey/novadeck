@@ -1,22 +1,15 @@
 import type { ItemContent, PlanUnwritableReason, PlanVersion } from "@novadeck/core/items"
 
+import { unreadableNow, type TextDoc } from "../../store/text-doc"
+
 // A stretch of the text the agent's latest revision wrote.
 export type Mark = { readonly from: number; readonly to: number }
 
-// A plan as the pane holds it, by its item: the text the person edits, and how it
-// stands against the file.
-export type PlanDoc = {
-  readonly writable: boolean
+// A plan as the pane holds it, by its item: the text the person edits and how it stands
+// against the file, with what only a plan has: its skill, and what the agent's latest
+// rewrite changed and resolved.
+export type PlanDoc = TextDoc & {
   readonly skill: boolean
-  readonly truncated: boolean
-  // The file as both sides last agreed on it, at `revision`, the backend's stamp: the
-  // agent's rewrites and the person's edits merge against it.
-  readonly base: string
-  readonly revision: string
-  // The file's line break, put back when saving. The editor and the merge work in LF.
-  readonly eol: "\n" | "\r\n"
-  // The file as the person sees it: `base` with their edits since.
-  readonly text: string
   // What the latest rewrite wrote, valid for `marked` (the text it produced).
   readonly marks: readonly Mark[]
   readonly marked: string
@@ -24,13 +17,6 @@ export type PlanDoc = {
   readonly showChanges: boolean
   // Notes the agent removed in its latest rewrite, having applied them.
   readonly resolved: number
-  // The last save didn't reach the file; it's tried again.
-  readonly unsaved: boolean
-  // The backend said saving won't work until the plan or its folder changes, and why:
-  // saves stop until the person asks for another try.
-  readonly blocked: PlanUnwritableReason | null
-  // Saves failed too many times in a row: they stop until the person retries.
-  readonly stalled: boolean
 }
 
 export const lf = (text: string): string => text.replace(/\r\n?/g, "\n")
@@ -58,11 +44,6 @@ export const docOf = ({ stamp, plan }: PlanVersion): PlanDoc => ({
   blocked: null,
   stalled: false,
 })
-
-// Whether the content says the file can't be read for now, which saves can't get past
-// either, though trying again may help.
-export const unreadableNow = (content: ItemContent | undefined): boolean =>
-  content?.state === "unavailable" && content.reason === "unreadable"
 
 // Edits the file doesn't hold and can't take for now: they live only in the pane, so
 // closing the plan loses them.

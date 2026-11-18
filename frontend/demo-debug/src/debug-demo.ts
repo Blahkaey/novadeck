@@ -1,4 +1,5 @@
 import type { SandboxState } from "@novadeck/core/desktop/sandbox"
+import type { ProjectFiles } from "@novadeck/core/files"
 import type {
   Backend,
   BackendConnectionState,
@@ -28,6 +29,7 @@ import { approvalGroups, createDemoApprovals } from "./approvals"
 import { babciaGroups } from "./babcia"
 import type { BootRehearsals } from "./boot-rehearsal"
 import { chatOfferGroups } from "./chat-offer"
+import { restoreClipboard } from "./clipboard"
 import { createDebugPanel, type DebugPanel } from "./DebugPanel"
 import { createDemoPortable, type DemoPortable } from "./desktop/portable"
 import { createDemoSandbox } from "./desktop/sandbox"
@@ -35,6 +37,7 @@ import { createDemoUninstall, type DemoUninstall } from "./desktop/uninstall"
 import { updatesGroup, type DemoUpdates } from "./desktop/updates"
 import { doorbellGroups } from "./doorbell"
 import { feedbackGroups } from "./feedback"
+import { fileEditingGroups } from "./file-editing"
 import { filesGroups } from "./files"
 import { forgesGroups } from "./forges"
 import { historyGroups } from "./history"
@@ -90,7 +93,21 @@ export type DemoLaunch = {
   readonly forges: boolean
   // Boots again with the backend offering forge integrations or not.
   readonly setForges: (offered: boolean) => void
+  // Whether the backend makes, renames, moves, copies and deletes a project's files; false for a
+  // runner without them.
+  readonly fileOperations: boolean
+  // Boots again with the backend making, renaming, moving, copying and deleting files or not.
+  readonly setFileOperations: (offered: boolean) => void
 }
+
+// A backend's files with no file made, renamed, moved, copied or deleted, as a runner without them.
+const readOnly = ({
+  create: _create,
+  move: _move,
+  copy: _copy,
+  remove: _remove,
+  ...files
+}: ProjectFiles) => files
 
 // What the panel's groups read and change of the shell around the demo.
 export type DemoShell = {
@@ -126,6 +143,8 @@ export const debugPanelOf = (backend: Backend): DebugPanel | undefined => panels
 // that can drop, a crash loop that can trip, a boot that takes its time, and the states
 // the runner's terminals, agents and desktop can be in, all driven by the debug panel.
 export const createDebugDemo = (launch: DemoLaunch): Backend => {
+  // A clipboard the last boot's panel refused is the page's own again.
+  restoreClipboard()
   const connection = createStore<BackendConnectionState>("connected")
   const crashes = createStore(0)
   const turns = demoTurns()
@@ -213,6 +232,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
   }
 
   const { worktrees: offered, forges: forgesOffered, ...withoutWorktrees } = inner
+  const files = inner.files && !launch.fileOperations ? readOnly(inner.files) : inner.files
   const installs = createDemoInstalls()
   // On the panel's own agents, which the tour runs one of. The inner demo's tour is the one its
   // player follows, so the panel's actions reach it.
@@ -222,6 +242,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
     ...withoutWorktrees,
     ...(launch.worktrees && offered ? { worktrees: offered } : {}),
     ...(launch.forges && forgesOffered ? { forges: forgesOffered } : {}),
+    ...(files && { files }),
     commit: (workspace, actions) => {
       latest = workspace
       inner.commit(workspace, actions)
@@ -301,7 +322,8 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...voiceGroups(isDemoVoice(inner.voice) ? inner.voice : undefined),
           ...historyGroups(inner.history),
           ...notesGroups(inner.notes),
-          ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined),
+          ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined, launch),
+          ...fileEditingGroups(isDemoFiles(inner.files) ? inner.files : undefined),
           ...worksGroups(inner.works),
           ...forgesGroups(launch, inner),
         ],

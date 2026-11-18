@@ -22,8 +22,8 @@ import {
   type Scroll,
   type ScrollRestore,
 } from "./markdown/scroll.js"
-import { lineChanges } from "./markdown/sync.js"
 import { theme } from "./markdown/theme.js"
+import { lineChanges } from "./sync/lines.js"
 
 export { rowAnnotations, type RowAnnotations } from "./markdown/annotations.js"
 export type { ClassedRange, Range } from "./markdown/ranges.js"
@@ -92,6 +92,10 @@ type Followers = {
 const followersOf = new WeakMap<EditorView, Followers>()
 
 const base: Extension = [
+  // Lines break at `\n` alone, so a lone `\r` in a file is text and an edit writes it back
+  // as it was; text pasted with `\r\n` breaks its lines as the editor does.
+  EditorState.lineSeparator.of("\n"),
+  EditorView.clipboardInputFilter.of((text) => text.replaceAll("\r\n", "\n")),
   history(),
   keymap.of([...defaultKeymap, ...historyKeymap]),
   markdown,

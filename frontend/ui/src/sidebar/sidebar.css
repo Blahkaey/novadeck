@@ -3,7 +3,9 @@
    panel, with a `.sidebar-panel-count` beside it and, where the list needs it, a
    `.sidebar-panel-scope` after that. Rows are `.sidebar-item`s, whose own looks
    (and hooks and tokens) are @novadeck/toolkit's sidebar-item.css. The create button at the
-   top of a panel is a `.button.sidebar-create`, ruled as quietly as the rows' edges.
+   top of a panel is a `.button.sidebar-create`, ruled as quietly as the rows' edges. What a
+   panel couldn't do is a `.sidebar-refusal` line, red-edged, its `p` beside a dismiss button;
+   each panel sets its margin.
 
    Hooks: on a panel, data-active="true" | "false".
 
@@ -47,6 +49,22 @@
 }
 .button.sidebar-create:focus-visible {
   --_bg: var(--button-hover-bg, var(--color-soft));
+}
+/* What a panel couldn't do, above its list; each panel sets its margin. */
+.sidebar-refusal {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: var(--border-width) solid var(--color-danger-fg);
+  border-radius: var(--radius-control, 4px);
+  color: var(--color-ink);
+}
+.sidebar-refusal p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .session-running::before {
   content: "·";

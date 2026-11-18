@@ -193,6 +193,43 @@ describe("a build's budgets", () => {
         weigh,
       ),
     ).toHaveLength(1)
+    // Nor is a chunk that holds the demo's module without loading it when it is imported.
+    expect(
+      budgetViolations(
+        visitorBudgets,
+        {
+          "index.js": chunk("", { isEntry: true }),
+          "connect.js": chunk("", {
+            facadeModuleId: null,
+            modules: { "/work/frontend/demo/src/visitor/connect.ts": {} },
+          }),
+        },
+        weigh,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("weighs the demo chunk that lends code to a chunk it loads later, which Rollup names for no module", () => {
+    const lending = (demoSize: number) => ({
+      "index.js": chunk("", { isEntry: true }),
+      "connect.js": chunk("y".repeat(demoSize), {
+        facadeModuleId: null,
+        isDynamicEntry: true,
+        modules: {
+          "/work/frontend/demo/src/visitor/connect.ts": {},
+          "/work/frontend/demo/src/paths.ts": {},
+        },
+      }),
+      "later.js": chunk("z".repeat(visitorBudgets.demo), {
+        facadeModuleId: "/work/frontend/demo/src/later.ts",
+        isDynamicEntry: true,
+        imports: ["connect.js"],
+      }),
+    })
+    expect(budgetViolations(visitorBudgets, lending(visitorBudgets.demo), weigh)).toEqual([])
+    expect(budgetViolations(visitorBudgets, lending(visitorBudgets.demo + 1), weigh)).toEqual([
+      `its demo load weighs ${visitorBudgets.demo + 1} bytes, over ${visitorBudgets.demo}`,
+    ])
   })
 
   it("counts what the first chunks' styles weigh, and every font they declare, in the first load", () => {

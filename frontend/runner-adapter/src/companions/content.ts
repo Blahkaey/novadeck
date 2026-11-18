@@ -10,6 +10,7 @@ import {
 import type { CompanionWindowMeta, WorkspaceTarget } from "@novadeck/core/types"
 import {
   companionLimits,
+  fitsRunner,
   harnesses,
   lookLimits,
   planUnwritable,
@@ -21,12 +22,11 @@ import {
 } from "@novadeck/protocol"
 import { hasCode, type Runner } from "@novadeck/runner-client"
 
-import { fitsRunner } from "../fits"
-
 // The runner's companion items as the UI holds them: what agents show and the person
 // attaches, each a pointer the runner keeps, and their content, which `content` reads
-// from where they point whenever it changes. A plan in a file is written back through the
-// runner; one in an agent's messages stays read-only.
+// from where they point whenever it changes. A plan in a file, and the file the person
+// opened in the project window, are written back through the runner; a plan in an agent's
+// messages stays read-only.
 
 // Agents by the names the person knows them by.
 const displayNames = Object.fromEntries(harnesses.map(({ id, name }) => [id, name])) as Record<
@@ -134,11 +134,14 @@ export const createRunnerCompanions = (
 ): Companions => ({
   ...(livePages && picture ? { picture } : {}),
   ...(livePages && phone ? { phone } : {}),
-  follow: (_target, itemId, { reveal }, on) => {
+  follow: (_target, itemId, { reveal, edit }, on) => {
     let stream: ReturnType<typeof runner.content> | undefined
     let stopped = false
     try {
-      stream = runner.content(itemId, reveal === undefined ? {} : { reveal })
+      stream = runner.content(itemId, {
+        ...(reveal !== undefined && { reveal }),
+        ...(edit && { edit }),
+      })
     } catch {
       return () => {}
     }
@@ -160,18 +163,19 @@ export const createRunnerCompanions = (
   },
   changeFile: (_target, itemId, path, layers) => runner.changeFile({ itemId, path, layers }),
   changeRead: (_target, itemId, path) => runner.changeRead({ itemId, path }),
-  save: async (_target, itemId, text, basedOn) => {
+  save: async (_target, itemId, text, basedOn, path) => {
     // One the runner can't take in one message is never sent: past a WebSocket's limit, the
     // socket would close the whole link.
     if (!fitsRunner(text, companionLimits.plan)) throw new PlanUnwritableError("too-large")
-    const result = await runner.save({ itemId, text, basedOn }).catch((error: unknown) => {
-      // A plan that can't be written says why; any other failure may pass.
+    const edit = { itemId, text, basedOn, ...(path !== undefined && { path }) }
+    const result = await runner.save(edit).catch((error: unknown) => {
+      // An edit that can't be written says why; any other failure may pass.
       const why = hasCode(error, "PLAN_UNWRITABLE") && planUnwritable.safeParse(error.data)
       throw why && why.success ? new PlanUnwritableError(why.data.reason) : error
     })
     if (result.saved) return result
     const { stamp, ...plan } = result.current
-    // Only a plan in a file is saved; one cut short is read-only.
+    // Only a plan in a file, or a file, is saved; one cut short is read-only.
     return {
       saved: false,
       current: { stamp, plan: { kind: "plan", ...plan, writable: !plan.truncated } },

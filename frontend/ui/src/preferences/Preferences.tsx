@@ -74,6 +74,36 @@ const agentSwitch = (agent: AgentName): HTMLElement | null =>
     ?.closest("li")
     ?.querySelector<HTMLElement>("[role=switch], [data-agent-install]") ?? null
 
+// The id of the field that adds a pattern for hiding files in every project.
+const filesExcludeField = "preferences-files-exclude-add"
+
+// Brings what `find` gives into view and focuses it, once the page has it: the dialog's content
+// mounts, and the dialog takes focus for itself, a moment after it opens, so focus is taken from
+// there, and again while it settles. `done` once it held, or once it never came. Returns what
+// stops it.
+const focusWhenSettled = (find: () => HTMLElement | null, done: () => void): (() => void) => {
+  let frame = 0
+  let tries = 0
+  let held = 0
+  const take = (): void => {
+    const found = find()
+    if (!found) {
+      if (++tries < 30) frame = requestAnimationFrame(take)
+      else done()
+      return
+    }
+    if (document.activeElement !== found) {
+      found.scrollIntoView?.({ block: "center" })
+      found.focus()
+      held = 0
+    } else held += 1
+    if (held < 3) frame = requestAnimationFrame(take)
+    else done()
+  }
+  frame = requestAnimationFrame(take)
+  return () => cancelAnimationFrame(frame)
+}
+
 // A titled group of settings; the title names the region unless a label is given.
 const Section = ({
   title,
@@ -157,6 +187,9 @@ export const Preferences = ({
   onTabChange,
   focusAgent = null,
   onFocusedAgent,
+  focusFilesExclude = false,
+  onFocusedFilesExclude,
+  renderFilesExclude,
   transcripts,
   hibernation,
   tour = false,
@@ -182,6 +215,14 @@ export const Preferences = ({
   // person came from a row that needs it connected; `onFocusedAgent` says it was done.
   focusAgent?: AgentName | null
   onFocusedAgent?: () => void
+  // Whether to bring the patterns for hiding files into view and focus their field once the
+  // dialog is open, as Hidden files in the Files panel asks; `onFocusedFilesExclude` says it was
+  // done.
+  focusFilesExclude?: boolean
+  onFocusedFilesExclude?: () => void
+  // The editor of the patterns for hiding files in every project, given the id its field takes,
+  // where the backend reads projects' files for the Files panel; the app gives the panel's own.
+  renderFilesExclude?: ((field: string) => ReactNode) | undefined
   value: PreferencesValue
   onChange: (value: PreferencesValue) => void
   onClose: () => void
@@ -269,29 +310,22 @@ export const Preferences = ({
       focused.current?.()
       return undefined
     }
-    // The dialog's content mounts, and the dialog takes focus for itself, a moment after it
-    // opens: take it from there once the switch is on the page, and again while it settles.
-    let frame = 0
-    let tries = 0
-    let held = 0
-    const focusSwitch = (): void => {
-      const found = agentSwitch(focusAgent)
-      if (!found) {
-        if (++tries < 30) frame = requestAnimationFrame(focusSwitch)
-        else focused.current?.()
-        return
-      }
-      if (document.activeElement !== found) {
-        found.scrollIntoView?.({ block: "center" })
-        found.focus()
-        held = 0
-      } else held += 1
-      if (held < 3) frame = requestAnimationFrame(focusSwitch)
-      else focused.current?.()
-    }
-    frame = requestAnimationFrame(focusSwitch)
-    return () => cancelAnimationFrame(frame)
+    return focusWhenSettled(
+      () => agentSwitch(focusAgent),
+      () => focused.current?.(),
+    )
   }, [open, focusAgent, hasAgents])
+  const focusedFilesExclude = useRef(onFocusedFilesExclude)
+  useEffect(() => {
+    focusedFilesExclude.current = onFocusedFilesExclude
+  }, [onFocusedFilesExclude])
+  useEffect(() => {
+    if (!open || !focusFilesExclude) return undefined
+    return focusWhenSettled(
+      () => document.getElementById(filesExcludeField),
+      () => focusedFilesExclude.current?.(),
+    )
+  }, [open, focusFilesExclude])
   const panels = useRef<HTMLDivElement>(null)
   const [openSelect, setOpenSelect] = useState<string | null>(null)
   const changeTab = (next: string): void => {
@@ -780,6 +814,14 @@ export const Preferences = ({
                     />
                   </div>
                 </div>
+              </Section>
+            )}
+            {renderFilesExclude && (
+              <Section
+                title="Files"
+                description="Files and folders that match a pattern leave the Files panel in every project. A pattern is matched against the path from the project's folder: *.log hides only the logs at the top, **/*.log every one. A project can hide more of its own, or show what one of these hides, from the panel's Hidden files."
+              >
+                {renderFilesExclude(filesExcludeField)}
               </Section>
             )}
           </TabPanel>

@@ -167,13 +167,14 @@ const Marks = ({
   return latest === 0 ? null : <Trail key={`${latest}/${shownTimes}`} latest={latest} />
 }
 
-const rowLabel = (row: FilesRow, everyone: readonly string[]): string =>
-  [row.node.name, row.node.kind, everyone.map((handle) => `@${handle}`).join(" ")]
+const rowLabel = (row: FilesRow, everyone: readonly string[], cut: boolean): string =>
+  [row.node.name, row.node.kind, cut && "cut", everyone.map((handle) => `@${handle}`).join(" ")]
     .filter(Boolean)
     .join(", ")
 
 // One file or folder of the tree: its twisty, icon and name, the marks of the agents writing it,
-// and the chips of who worked it.
+// and the chips of who worked it. A row cut to paste elsewhere is dimmed, and one a paste is
+// copying or moving now is busy: a spinner in its icon's place.
 export const TreeRow = ({
   row,
   chips,
@@ -182,6 +183,8 @@ export const TreeRow = ({
   tabStop,
   pulse,
   shownTimes,
+  cut,
+  busy,
   onActivate,
   onOpenFile,
   onFocus,
@@ -196,6 +199,10 @@ export const TreeRow = ({
   tabStop: boolean
   pulse: number | undefined
   shownTimes: number
+  // Cut, to move where the person pastes.
+  cut: boolean
+  // A paste copies or moves it now.
+  busy: boolean
   onActivate: (row: FilesRow) => void
   onOpenFile: (row: FilesRow) => void
   onFocus: (path: string) => void
@@ -216,6 +223,7 @@ export const TreeRow = ({
       data-dim={dimmedBy(node, lit)}
       data-pulse={pulse === undefined ? undefined : pulse % 2 === 1 ? "a" : "b"}
       data-selected={selected}
+      data-cut={cut}
     >
       {Array.from({ length: depth }, (_, level) => (
         <span
@@ -235,7 +243,8 @@ export const TreeRow = ({
         tabIndex={tabStop ? 0 : -1}
         aria-expanded={branch ? open : undefined}
         aria-selected={node.folder ? undefined : selected}
-        aria-label={rowLabel(row, everyone)}
+        aria-label={rowLabel(row, everyone, cut)}
+        aria-busy={busy || undefined}
         onClick={() => onActivate(row)}
         onDoubleClick={() => onOpenFile(row)}
         onFocus={() => onFocus(node.path)}
@@ -244,7 +253,7 @@ export const TreeRow = ({
           {branch && <ChevronRight size={12} strokeWidth={1.5} data-open={open} />}
         </span>
         <span className="files-icon" aria-hidden="true">
-          <Icon size={14} strokeWidth={1.5} />
+          {busy ? <span className="files-busy" /> : <Icon size={14} strokeWidth={1.5} />}
         </span>
         <span className="files-name text-body">{node.name}</span>
         <Marks row={row} shownTimes={shownTimes} />

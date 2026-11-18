@@ -1,3 +1,4 @@
+import { defaultFilesExclude, filesExcludeLimits, type FilesExclude } from "@novadeck/core/files"
 import { viewModes } from "@novadeck/core/state"
 import type { PreferencesValue } from "@novadeck/core/types"
 
@@ -6,6 +7,21 @@ import { appearancePreferenceOf, defaultPreference } from "../theme/apply"
 import { themes } from "../theme/themes"
 
 export const preferencesStorageKey = "novadeck.preferences"
+
+// The patterns for hiding files in every project as they were saved: the default where none were,
+// as before there were any; a pattern's switch where it has one, under a pattern as long as a
+// pattern may be. Anything else, as a `when` clause, is dropped and the rest kept.
+const filesExcludeOf = (saved: unknown): FilesExclude =>
+  typeof saved === "object" && saved !== null && !Array.isArray(saved)
+    ? Object.fromEntries(
+        Object.entries(saved).filter(
+          ([pattern, on]) =>
+            typeof on === "boolean" &&
+            pattern.length > 0 &&
+            pattern.length <= filesExcludeLimits.pattern,
+        ),
+      )
+    : defaultFilesExclude
 
 export const readPreferences = (): PreferencesValue => {
   const defaults: PreferencesValue = {
@@ -21,6 +37,7 @@ export const readPreferences = (): PreferencesValue => {
     chatView: false,
     agentAvatars: false,
     onboardingTour: false,
+    filesExclude: defaultFilesExclude,
   }
   try {
     const saved = JSON.parse(
@@ -49,6 +66,7 @@ export const readPreferences = (): PreferencesValue => {
         typeof saved?.agentAvatars === "boolean" ? saved.agentAvatars : defaults.agentAvatars,
       onboardingTour:
         typeof saved?.onboardingTour === "boolean" ? saved.onboardingTour : defaults.onboardingTour,
+      filesExclude: filesExcludeOf(saved?.filesExclude),
     }
   } catch {
     return defaults

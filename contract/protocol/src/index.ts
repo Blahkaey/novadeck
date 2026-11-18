@@ -128,7 +128,7 @@ export {
   type WorkPreviewWork,
   workPreviewWork,
 } from "./works.js"
-export { maxWebSocketMessageBytes, protocolVersion } from "./connection.js"
+export { fitsRunner, maxWebSocketMessageBytes, protocolVersion } from "./connection.js"
 export {
   type ForgeHost,
   forgeHost,
@@ -170,6 +170,9 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type EntryChanged,
+  type FilesExclude,
+  filesExcludeLimits,
   type FolderBrowse,
   type FolderListing,
   maxClientStateLength,

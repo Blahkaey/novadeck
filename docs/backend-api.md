@@ -301,6 +301,61 @@ root). Entries come sorted, folders first, then by name ignoring case and a lead
 (nothing is ignored outside a repository). At most 2000 are listed, the first in that
 order, and `truncated` says there were more. A missing project is `NOT_FOUND`; a folder that is
 missing, not a folder, or outside the project's directory is `INVALID_DIRECTORY`.
+`projects.filesExclude({ projectId })` answers the project's own patterns for hiding files
+from its Files panel, a map of glob to switch as VS Code's `files.exclude` writes it
+(`{ "**/dist": true, "*.log": false }`), as `projects.setFilesExclude({ projectId, patterns })`
+last kept them, and `{}` before. A save replaces them whole, and `{}` forgets them. The runner
+keeps them for clients, which match them over the person's own list for every project, and reads
+none of them itself. A pattern runs from 1 to 1024 characters (`filesExcludeLimits` in
+`@novadeck/protocol`), else `BAD_REQUEST`; more than 200 patterns is a `CONFLICT` whose message
+says so, and keeps what was there. Each project's are a row of the runner's settings
+(`filesExclude.<project id>`), as its notes are, which goes with the project; a row that can't be
+read answers `{}`, and a pattern another build kept that isn't a switch is left out. A missing
+project, or one being removed, is `NOT_FOUND`. Nothing tells other clients of a change: the Files
+panel reads them again when it is shown.
+`projects.createEntry({ projectId, path, folder })` makes an empty file, or with `folder` an empty
+folder, at `path` from the project's root, and the folders on the way that are missing;
+`projects.moveEntry({ projectId, from, to })` renames an entry, or moves it into another folder that
+is there already; `projects.copyEntry({ projectId, from, into })` copies an entry into the folder
+`into` (`""` for the project's own); `projects.removeEntry({ projectId, path })` deletes one for
+good, a folder with everything in it. The first three answer `{ path }`, the path made. Paths are as
+`projects.folder` takes them, at most 4096 characters (else `BAD_REQUEST`). Nothing found there is
+overwritten: a name that is taken is a `CONFLICT` whose message names it, except a rename of an
+entry to its own name in other letters' case, in its folder, on a filesystem that doesn't tell them
+apart, which goes through. A file or an empty folder made at a move's destination between the
+runner's check and the move itself is replaced, as the system's rename does. A copy keeps its own
+name where `into` isn't its folder and the name is free there, and otherwise takes the first free of
+`name copy.ext`, `name copy 2.ext`, `name copy 3.ext`, … as VS Code names copies (the extension from
+the last dot unless that dot leads the name, so `.env` copies as `.env copy`; a folder's whole name,
+as `src copy`; a copy of `name copy.ext` as `name copy 2.ext`); each name is taken by making it, so
+whatever else writes there meanwhile is never overwritten, and 1000 names taken is a `CONFLICT`. A
+folder copies with everything in it; links copy as links, their targets as written and never
+followed; a file is cloned where the filesystem can; files and folders keep their modes where the
+filesystem keeps them (a folder whose mode it refuses with EPERM keeps the one it was made with); a
+socket, pipe or device, or a link the system won't make (on Windows, without an administrator or
+Developer Mode; elsewhere, on a disk that holds none), is a `WRITE_REFUSED` that names it; and a
+copy that fails part way is removed again (a `WRITE_REFUSED` says what stays where it can't be). A
+move to another filesystem, which the system can't rename across, copies the entry to `to` as a copy
+does, never overwriting, then deletes at `from` what it copied: a file or link only where it is
+unchanged since (the same device, inode, size and modification time), a folder only once it is
+empty. What was added or changed there while it was copied, or what the system won't delete, stays,
+a `WRITE_REFUSED` that says what is left. A copy, or such a move, runs as long as it takes, and the
+call answers once it is done: neither the runner nor the wire puts a time limit on it. The project's
+folder itself (but as the folder a copy goes into), Git's own `.git` and what is in it (a name
+`.git` in any case, or a folder or entry that resolves into it through a link or a Windows short
+name), a path that is badly formed, goes through a file or leads out of the project's directory (as
+through a link), an entry or a destination folder that is missing, and a folder moved or copied into
+itself or below are `INVALID_DIRECTORY`. The system refusing (permission, a read-only or full disk,
+a file in use, a name too long, something added inside a folder while it is deleted, or on Windows a
+name it keeps for a device or won't hold) is `WRITE_REFUSED`, whose message says why in plain words.
+A missing project, or one being removed, is `NOT_FOUND`. A link is renamed, copied or deleted as a
+link; a folder the runner made on the way is removed again if the make fails. A client whose
+connection drops while a move, a copy or a delete runs gets `DISCONNECTED` though the runner may
+finish it; the app's adapter waits for the runner to be back before it fails such a call, as one
+that may have been done or may still be under way, and the Files panel reads the folders involved
+again, taking a move they show made as done. One asked while the client reconnects is never sent,
+and the adapter says nothing was done. See [Project Files](../SECURITY.md#project-files) for what
+the confinement promises.
 `sessions.save({ sessionId, state, visitedAt })` replaces a session's `state`, a string the
 runner stores with the session without reading it, such as a UI layout, and `visitedAt`,
 when the person last visited it (null: never). Sessions list both; the latest visit picks a
@@ -1874,7 +1929,7 @@ one from an earlier runner.
     keeps both sides and resolves them as the rest arrives, never dropping one for it.
     The client's `companions.watch()` yields `reset` before each fresh sequence, as
     `terminals.watch()` does.
-  - `companions.content({ itemId, reveal? })`, `reveal` being a path, streams what an item points at, read from
+  - `companions.content({ itemId, reveal?, edit? })`, `reveal` being a path, streams what an item points at, read from
     disk now and again each time it changes, until the item is deleted; an unknown item
     is `NOT_FOUND`. It is `ready`, with a `stamp` that changes with it, or `unavailable`
     with a reason and the file's size where known: `missing`, `unreadable`, `not-a-file`,
@@ -1887,7 +1942,22 @@ one from an earlier runner.
     `scroll` that show gave, a CSS selector to bring into view once it has loaded. A text
     file is the lines around those pointed at, read to the last of them and up to 4 MiB
     more to count the rest: `total` once it reached the file's end, else `truncated`;
-    lines past the end are pulled back to it and marked `clamped`. A plan is its text, cut
+    lines past the end are pulled back to it and marked `clamped`. With `edit`, a text file is
+    `text` instead, for the person to edit: its `path` (the path the item points at), all of its
+    `text`, decoded as UTF-8 without its byte-order mark, its line breaks as they are and no
+    line cut, and `writable` where `companions.save` writes it, else `writable: false` with the
+    `reason` a save would be refused for: `not-a-plan` (any item but the file the person opened
+    in the session's project window), `outside` (a file outside the project's folder, as the
+    real paths they are, in Git's own `.git` there however a link leads to it, or in agents'
+    worktrees where the project's folder holds them, though a project the person made of a
+    worktree is editable like any) or `folder` (a file, or a folder, the runner may not write).
+    A file whose size is past 256 KiB is listed without being read whole. A text file that
+    can't be edited whole is its lines as without `edit`,
+    with `uneditable` saying why: `too-large` (past 256 KiB, or past what one save carries once
+    JSON-escaped) or `not-text` (not valid UTF-8). A binary file is `binary`, and one that may
+    hold secrets `secret` unless revealed, as without `edit`; revealed, it is editable as any.
+    `edit` changes nothing else: an image, a page, a plan, a change or shells read as without it.
+    A plan is its text, cut
     short past 256 KiB (`truncated`), with `writable` (a plan in a file that is not cut
     short, which `companions.save` can write) and `skill` (Novadeck's plugin is installed
     for its agent). A `changes` item is a checkout measured against its repository's main
@@ -1941,20 +2011,44 @@ one from an earlier runner.
     again, across restarts (the runner keeps it beside the Worktrees panel's memory). A file the
     change as a whole did not list when last read is not marked. An unknown item, or one that is
     no change, is `NOT_FOUND`.
-  - `companions.save({ itemId, text, basedOn })` writes the person's edit to a plan kept in
-    a file, atomically, keeping the file's permissions, unless the file's stamp is no longer
-    `basedOn` (a text plan's stamp is a hash of its text; a file plan's is its size,
+  - `companions.save({ itemId, text, basedOn, path? })` writes the person's edit to a plan kept in
+    a file, or to the file they opened in the session's project window, atomically, keeping the
+    file's permission bits, unless the file's stamp is no longer
+    `basedOn` (a text plan's stamp is a hash of its text; a file's is its size,
     modification time and inode): then nothing is written and it answers
     `{ saved: false, current: { stamp, text, truncated, skill } }`; else
-    `{ saved: true, stamp }`. What can never be saved is `PLAN_UNWRITABLE`, whose data says
+    `{ saved: true, stamp }`. `path` is the path the edit was made on (a `text` content's
+    `path`): an item that points at another file now writes nothing (`moved`), as when another
+    window pointed the project window at the next file while the save was on its way. A plan's
+    save may leave `path` out; a file's must give it, or is refused as `moved`, since its edit
+    can't be told to be this file's. What can never be saved is `PLAN_UNWRITABLE`, whose data says
     why: `transcript` (the plan is in an agent's messages), `too-large` (a text or file over
     256 KiB), `gone` (the file is missing or no plain file), `folder` (the runner may not
-    write in the plan's folder), `outside` (the file is in neither the project's folder nor
+    write in the file's folder, or, for the project window's file, the file itself, or a rename
+    over the file is still refused with `EACCES` or `EPERM` after three tries 100 ms apart, as
+    a Windows ACL refuses it, or a program holding the file that long), `outside`
+    (a plan's file is in neither the project's folder nor
     the agent's own plans folder: `~/.claude/plans` for Claude Code, Antigravity's `brain`
-    folder; Codex keeps its plans in its messages) or `not-a-plan`. Any other failure (a full disk, a file held
-    open by another program) is an ordinary error that may pass; an unknown item is
+    folder; Codex keeps its plans in its messages; the project window's file is outside the
+    project's folder, in its `.git`, or in agents' worktrees), `moved`, `not-text` (the project
+    window's file is now binary or not
+    UTF-8) or `not-a-plan` (neither a plan nor the project window's file: a file on a
+    terminal's bar or in an undocked window is not saved, even inside the project). The
+    project window's file is saved only where its real path lies inside the session's
+    project's folder (not a terminal's own folder), outside Git's own `.git`, and outside agents'
+    worktrees (`~/.novadeck/worktrees`) unless the project's own folder is one of them or that
+    folder itself, and as the
+    file's text: its byte-order mark, if it has one as it is saved, goes back before the text,
+    and its `current` text leaves the mark out, with `truncated` and `skill` false. A file that
+    may hold secrets is saved as any other: `reveal` only keeps it off screen until the person
+    asks. A save replaces the file with a new one, renamed over it from a temporary file beside
+    it (`.name.pid.ms.tmp`, which a runner stopped partway leaves there): it keeps the permission
+    bits, not setuid, setgid or the sticky bit, nor the owner and group (a group-writable file
+    someone else owns becomes the runner's account's), ACLs or extended attributes, and another
+    name hard-linked to the file keeps the old text. Any other failure (a full disk, a rename
+    still `EBUSY`) is an ordinary error that may pass; an unknown item is
     `NOT_FOUND`.
-    Saves of one plan are handled one at a time.
+    Saves of one item are handled one at a time.
   - `companions.attach({ terminalId, path, lines?, title? })` puts a file the person
     picked on a terminal's bar, by a path absolute or from the terminal's directory:
     `TERMINAL_NOT_FOUND`, or `INVALID_FILE` saying why for a missing path, a folder, a
@@ -2074,7 +2168,7 @@ one from an earlier runner.
   step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
-`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan can never be saved; its data says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
+`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan, or the project window's file, can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change or copy a project's file, or a copy met a socket, pipe or device or a link it can't make, or a move across filesystems left something where it was; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
 `INVALID_CURSOR`, `UPLOAD_TOO_LARGE`, `RESOURCE_LIMIT` (too many calls in flight; retry later),
 `TERMINAL_LIMIT` (the runner's terminal cap is reached), and `SLOW_CONSUMER`. A
 `CONFLICT` about typing into an agent's terminal (`agents.prompt`, `agents.answer`,

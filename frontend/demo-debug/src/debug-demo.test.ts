@@ -6,6 +6,7 @@ import { noTheme } from "@novadeck/terminal-views/theme"
 import { vi } from "vitest"
 
 import { createBootRehearsals } from "./boot-rehearsal"
+import { refuseClipboard, restoreClipboard } from "./clipboard"
 import { createDebugDemo, type DemoLaunch, type DemoShell } from "./debug-demo"
 import { runProgram } from "./terminals"
 import { describe, expect, it } from "./test"
@@ -67,9 +68,31 @@ const launch = (): DemoLaunch => ({
   setWorktrees: () => {},
   forges: true,
   setForges: () => {},
+  fileOperations: true,
+  setFileOperations: () => {},
 })
 
 describe("the debug layer's demo", () => {
+  it("gives the page its own clipboard back as it boots, whichever group refused it", async () => {
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: async (text: string) => void copied.push(text) },
+      configurable: true,
+    })
+    try {
+      refuseClipboard()
+      await expect(navigator.clipboard.writeText("before")).rejects.toThrow("refused")
+
+      createDebugDemo(launch())
+      await navigator.clipboard.writeText("after")
+
+      expect(copied).toEqual(["after"])
+    } finally {
+      restoreClipboard()
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
+  })
+
   it("starts its terminals with it, and stops them with it, so a reboot leaves none behind", () => {
     life.calls.length = 0
     const backend = createDebugDemo(launch())
@@ -82,6 +105,23 @@ describe("the debug layer's demo", () => {
   it("offers agent worktrees unless the launch says the backend has none", () => {
     expect(createDebugDemo(launch()).worktrees).toBeDefined()
     expect(createDebugDemo({ ...launch(), worktrees: false }).worktrees).toBeUndefined()
+  })
+
+  it("makes, renames, copies and deletes a project's files unless the launch says the backend doesn't", () => {
+    // The agents demo, whose storefront has files.
+    const agents = { ...launch(), variant: "agents" as const }
+    const offered = createDebugDemo(agents).files
+    const reading = createDebugDemo({ ...agents, fileOperations: false }).files
+    expect([offered?.create, offered?.move, offered?.copy, offered?.remove].every(Boolean)).toBe(
+      true,
+    )
+    expect([reading?.create, reading?.move, reading?.copy, reading?.remove]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+    expect(reading?.list).toBeDefined()
   })
 
   it("offers forge integrations unless the launch says the backend has none", () => {

@@ -25,6 +25,7 @@ import type { UninstallValue } from "../preferences/UninstallApp"
 import type { VoiceAddon } from "../preferences/VoiceInput"
 import { WelcomeDialog } from "../preferences/WelcomeDialog"
 import { CrashLoopDialog } from "../shell/CrashLoopDialog"
+import { FilesExcludeList } from "../sidebar/FilesExcludeList"
 import {
   ApprovalDialog,
   approvalView,
@@ -33,6 +34,7 @@ import {
 } from "../terminals/ApprovalDialog"
 import { closeTeamTree, sameCloseTeamTree, type CloseTeamRow } from "../terminals/close-team"
 import { CloseTerminalDialog } from "../terminals/CloseTerminalDialog"
+import { LeaveEditsDialog } from "../terminals/LeaveEditsDialog"
 import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
@@ -52,6 +54,7 @@ import { Preferences, TerminalSearch } from "./deferred-views"
 import { dingOf } from "./ding"
 import { moveQuestionOf, sameMoveQuestion } from "./move-question"
 import { NameOffer } from "./NameOffer"
+import { filesShown } from "./routing"
 import {
   closeQuestion,
   crashLoopQuestion,
@@ -331,7 +334,14 @@ const SwitcherHost = ({
 
 // Dialogs and the terminal switcher, above the workspace.
 export const WorkspaceOverlays = memo((): React.JSX.Element => {
-  const { backend, commands, navigation, ui, workspace: workspaceStore } = useWorkspaceServices()
+  const {
+    backend,
+    commands,
+    navigation,
+    ui,
+    workspace: workspaceStore,
+    itemStore,
+  } = useWorkspaceServices()
   const transcripts = useTranscripts(backend.transcripts)
   const hibernation = useHibernation(backend.hibernation)
   const worktrees = useWorktrees(backend.worktrees)
@@ -357,7 +367,8 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const { go, closeDialog } = navigation
   const { chooseRecent, updatePreferences, openSearchResult, closeSwitcher } = commands
   const { confirmClose, cancelClose, retryAfterCrashLoop, dismissCrashLoop } = commands
-  const { confirmMove, cancelMove } = commands
+  const { confirmMove, cancelMove, answerLeave } = commands
+  const leaving = useUiState((state) => state.leaving)
   const moveAsk = useUiState((state) => state.moveAsk)
   const moveQuestion = useWorkspaceState(
     (workspace) => moveQuestionOf(workspace, moveAsk),
@@ -380,12 +391,13 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
     }),
     shallowEqual,
   )
-  const { dialog, section, preferences, switcher, agentFocus } = useUiState(
+  const { dialog, section, preferences, switcher, agentFocus, filesExcludeFocus } = useUiState(
     (state) => ({
       dialog: state.location.route.dialog,
       section: state.location.route.section,
       preferences: state.preferences,
       agentFocus: state.agentFocus,
+      filesExcludeFocus: state.filesExcludeFocus,
       switcher: visibleSwitcher(state.recent.switcher, context, state.location.route.dialog),
     }),
     shallowEqual,
@@ -551,6 +563,11 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         onCancel={cancelMove}
         returnFocus={(id) => terminalElement(id)?.querySelector<HTMLElement>("button") ?? null}
       />
+      <LeaveEditsDialog
+        question={leaving}
+        edits={(ask) => itemStore?.fileEdits(ask.itemId, ask.path)}
+        onAnswer={answerLeave}
+      />
       {backend.approvals && (
         <ApprovalDialog approval={approval} onAnswer={backend.approvals.answer} />
       )}
@@ -588,6 +605,22 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           tab={section}
           focusAgent={agentFocus}
           onFocusedAgent={() => ui.update((state) => ({ ...state, agentFocus: null }))}
+          focusFilesExclude={filesExcludeFocus}
+          onFocusedFilesExclude={() =>
+            ui.update((state) => ({ ...state, filesExcludeFocus: false }))
+          }
+          {...(filesShown(backend) && {
+            renderFilesExclude: (field: string) => (
+              <FilesExcludeList
+                patterns={preferences.filesExclude}
+                label="Patterns for every project"
+                inputId={field}
+                onChange={(filesExclude) =>
+                  updatePreferences({ ...ui.getSnapshot().preferences, filesExclude })
+                }
+              />
+            ),
+          })}
           onTabChange={(next) => go({ section: next })}
           onChange={updatePreferences}
           onClose={closeDialog}

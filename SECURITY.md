@@ -197,6 +197,104 @@ An upload's path goes in double-quoted when the person's own folders above it ho
 space or any character outside those letters, as `C:\R&D\...` does (`shellPath`);
 PowerShell running a `.cmd` program drops those quotes, so cmd can still split it there.
 
+## Project Files
+
+The Files panel makes empty files and folders, renames, moves and copies them, and deletes them
+in a project's folder, through the runner's `projects.createEntry`, `projects.moveEntry`,
+`projects.copyEntry` and `projects.removeEntry` (`backend/runner/src/workspaces/entries.ts`,
+which copies with `copy.ts` beside it). They are the runner's first writes into a project's
+folder. Only a client holding the runner's token, or the desktop app's own window through its
+port (see Terminal Runner), calls them, as the UI does when the person asks; a terminal's report
+token can't, so an agent's tool calls change no file through them. Whoever can call them can
+change any file through a shell anyway: these procedures keep a slip of the person's inside the
+project, and are no sandbox. The panel's Cut and Copy keep a path in the panel only, never on the
+system's clipboard, and Paste moves or copies within the same project.
+
+Each takes a path from the project's root, `/` between names: a leading `/`, `..`, `.`, an empty
+name, a backslash and NUL are refused (`segments` in
+`backend/runner/src/workspaces/project-paths.ts`). The folder an entry is in, resolved through any
+links, must lie inside the project's directory resolved the same way, and so must each folder made
+on the way to a new entry, and the folder a copy goes into. The entry itself is never followed: a
+link is renamed, copied or deleted as a link, never what it leads to, and a folder deleted with
+everything in it loses the links in it, not what they lead to. A folder copied copies the links in
+it as links, their targets as written, and never reads what they lead to, so nothing outside is
+copied in. A link is copied as it is written, not where it leads: one that leads outside the project
+leads there from the copy too, and a relative one resolves from where the copy is, so it can lead
+somewhere else than the original does, outside the project included. Never changed: the project's
+folder itself, and Git's own `.git` and what is in it, at either end of a move or a copy: a path
+with a name `.git` in it, in any letters' case, and a folder on the way that resolves into `.git`
+however it is named, through a link to it or by a Windows short name such as `GIT~1`, as is an entry
+that resolves to it (a link to `.git` is deleted, or copied, as a link). A folder copied with
+another repository inside it, as a vendored one, copies that repository's `.git` along, as a new
+folder; no `.git` that is there is changed. Nothing that is there is overwritten: a file is made
+with `wx`; the last folder of a new path is made alone, after any missing on the way, so one already
+there is never taken for it; and a move stops at anything at its destination, unless that is the
+entry itself in other letters' case in its own folder on a filesystem that doesn't tell them apart
+(the same device and inode, and a name the folder doesn't list as spelled). A copy takes each name
+by making it, in one step the system won't let overwrite: a file copied with `COPYFILE_EXCL` (a
+clone of it where the filesystem makes one, as Btrfs, XFS and APFS do), a folder made alone, a link
+made new; where something is there, as a link that leads nowhere, it tries the next name
+(`name copy.ext`, `name copy 2.ext`, …), 1000 at most, and each entry inside a folder copied is made
+the same way. A move makes no folder; a folder can't move, or be copied, into itself, which for a
+copy is checked by the system's identity of each folder from the destination up to the project's,
+whatever name or link leads there, and so is a move's. A move to another filesystem, which the
+system can't rename across, is copied to its destination as a copy is, never overwriting, then what
+was copied is deleted where it was: each file or link only where it is still the same file, of the
+same size and last written at the same time as when it was copied, and each folder only once it is
+empty. What a build or an agent added or changed there while the copy went stays, with its folders,
+as does what the system won't delete, and the person is told what is left. A copy keeps files' and
+folders' modes, a folder's once everything is in it, where the filesystem keeps them: one that
+refuses a folder's (EPERM, as a Windows share does) leaves it the mode it was made with, as Node's
+copy of a file does there. It refuses a socket, a pipe or a device, and a link where the system
+makes none (on Windows, an account that is no administrator without Developer Mode; elsewhere, a
+disk that holds no links), naming it; and one that fails part way, for any reason, removes what it
+made, which is new by construction, saying so where it can't. Names Windows keeps for devices or
+won't hold are refused on Windows. Folders a failed make created are removed again. Deleting is for
+good: nothing goes to the system's trash. A folder something writes into as it is deleted is tried
+twice more, then what is left stays, with the system's refusal. Nothing limits how long a copy runs
+or how much it copies but the disk: a full disk refuses it, and what it made goes.
+
+The checks come before the change, so what they saw can change before it is made: a folder on the
+way replaced by a link in between can put the change where the link leads, as any process of the
+person's account could; a file, or an empty folder, made at a move's destination in between is
+replaced by the move, as the system's rename does. In a folder being copied, a file replaced by a
+link between the copy's look at it and its copying is copied through that link, and a folder
+replaced by one between the look and its reading is read through it, what the link leads to read
+into the copy. A file that a move across filesystems found unchanged, and that changes between that
+look and its deletion, is deleted with its change. The runner refuses what the system refuses
+(permission, a read-only or full disk, a file in use), saying why, and has no other rights over the
+project's files than the account it runs as. Hard links are the same file under other names:
+deleting one leaves the others, and a copy makes a file of its own of each. A runner stopped partway
+through a copy, as by a crash, leaves the part it made. The demo (`frontend/demo/src/files.ts`)
+changes only an in-memory copy of its fixture trees.
+
+A file the person opened from the Files panel is written back through `companions.save`
+(`saveText` in `backend/runner/src/companions/editing.ts`), by the same callers. Only the item the
+session's project window holds is written, and only where its file, resolved through any links,
+lies inside the session's project's folder resolved the same way, outside Git's own `.git` there
+(a name `.git` on the way in any letters' case, so a link in the project that leads into it is
+refused too) and outside agents' worktrees (`~/.novadeck/worktrees`) where the project's folder
+holds them, as a project of the person's home folder does: an agent's copy is never written. A
+project whose own folder lies in there, one the person made of a worktree on purpose, is written
+like any other. A link that leads out, an agent's worktree copy opened in the window, and a file on a
+terminal's bar or in an undocked window (inside the project or not) are refused. So are a file the
+runner may not write, though a rename over it would succeed, and one in a folder it may not write
+in; on Windows, where the system's check reads only a file's read-only attribute, a file an ACL
+denies is found as the rename is refused, which is tried three times and then refused the same
+way, as is a file another program holds that long. A file's save must name the path its edit was
+made on, and is refused where the item points at another file since, so one file's text never
+lands in another, as when a second window pointed the project window at the next file. The text
+replaces the file whole, from a temporary file beside it (`.name.pid.ms.tmp`) renamed over it;
+nothing is written where the file changed since the edit's stamp, and a file grown past 256 KiB
+or no longer UTF-8 text is refused. The new file keeps the old one's permission bits and
+byte-order mark, and nothing else of it: setuid, setgid and the sticky bit are dropped; it is
+owned by the runner's account and group, so a group-writable file someone else owns becomes the
+runner's account's; it has none of the old one's ACLs or extended attributes; and another name
+hard-linked to the old file keeps the old text. A runner stopped partway, as by a crash, leaves the
+temporary file in the project's folder. A file that may hold secrets is written as any other: its
+gate keeps it off screen until the person reveals it, and the token's holder can write it through a
+shell anyway. The checks come before the rename, as above.
+
 ## Terminal Runner
 
 The desktop app's **Runner → Remote Runner…** form runs no script, has no preload or

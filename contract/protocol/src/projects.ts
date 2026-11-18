@@ -26,6 +26,29 @@ export const folderListing = z.strictObject({
   ),
   truncated: z.boolean(),
 })
+
+// A file or folder of a project's directory by its path from the project's root, `/` between
+// names, as the Files panel makes, renames, moves, copies and deletes them
+// (`projects.createEntry`, `moveEntry`, `copyEntry`, `removeEntry`). The runner refuses "" (the
+// root itself), but as the folder a copy goes into, and anything that leads out of the root.
+export const entryPath = z.string().max(4096)
+
+// What a change to a project's entries made: the path of the entry it made, moved or copied.
+export const entryChanged = z.strictObject({ path: entryPath })
+
+/**
+ * How many patterns a project's own list of hidden files holds at most, and how long each
+ * runs, in UTF-16 code units (`projects.setFilesExclude`).
+ */
+export const filesExcludeLimits = { patterns: 200, pattern: 1024 } as const
+
+// A project's own patterns that hide files and folders from its Files panel, as VS Code's
+// `files.exclude` writes them: a glob matched against the path from the project's root, on
+// (`true`) or switched off (`false`), which lifts the same pattern of the person's own list
+// for every project, which the client keeps. The runner keeps them for the client and reads
+// none of them itself.
+export const filesExclude = z.record(z.string().min(1).max(filesExcludeLimits.pattern), z.boolean())
+
 // A folder of the runner's machine, as `projects.browse` shows it to a client picking a
 // project's folder there: its real path, its parent's (null at the root), and the folders in
 // it by name, sorted as `projects.folder` sorts them. `truncated` says it holds more folders
@@ -51,4 +74,6 @@ export const workspaceSession = z.strictObject({
 export type Project = z.infer<typeof project>
 export type FolderListing = z.infer<typeof folderListing>
 export type FolderBrowse = z.infer<typeof folderBrowse>
+export type EntryChanged = z.infer<typeof entryChanged>
+export type FilesExclude = z.infer<typeof filesExclude>
 export type WorkspaceSession = z.infer<typeof workspaceSession>

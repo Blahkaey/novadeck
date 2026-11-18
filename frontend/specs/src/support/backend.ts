@@ -22,6 +22,7 @@ import { createDemoUninstall, uninstallScenarios } from "@novadeck/demo-debug/de
 import { createDemoUpdates } from "@novadeck/demo-debug/desktop/updates"
 import { addressParams } from "@novadeck/demo/address"
 import { demoTurns } from "@novadeck/demo/agents/turns"
+import { isDemoFiles } from "@novadeck/demo/files"
 import { isDemoInbox } from "@novadeck/demo/inbox"
 import { demoInboxRowsAll } from "@novadeck/demo/inbox/fixtures"
 import { demoResolved, demoResolvedRows } from "@novadeck/demo/inbox/resolved"
@@ -426,6 +427,28 @@ const started: {
   readonly seed: Backend["seed"]
   readonly backend: Backend
 }[] = []
+
+/** What the demo does to the files the person edits in a project window, once in each backend
+ * the page started (the one the app kept has read the file). */
+export const fileEdits = {
+  /** An agent rewrites the file at `path` of the project, as the debug panel's File editing
+   * group has one do: two lines in its middle. */
+  rewrite: (projectId: string, path: string): void => {
+    // A backend started again, as StrictMode starts one, is listed once per start.
+    for (const files of new Set(started.map(({ backend }) => backend.files)))
+      if (isDemoFiles(files)) files.edits()?.rewrite({ projectId, path })
+  },
+  /** The text the demo keeps of the file at `path` of the project, as last saved or read whole,
+   * in the backend the page started last that keeps it: the app's, where earlier specs started
+   * their own. */
+  text: (projectId: string, path: string): string | undefined =>
+    started
+      .toReversed()
+      .map(({ backend }) => backend.files)
+      .filter(isDemoFiles)
+      .map((files) => files.edits()?.text({ projectId, path }))
+      .find((text) => text !== undefined),
+}
 
 /** The backend reports that the terminal named `name` now works for the one named `lead`, in
  * the session that has both: it joins that lead's team, or forms one with it. */

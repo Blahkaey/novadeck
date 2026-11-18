@@ -1,3 +1,4 @@
+import type { FilesExclude } from "./files"
 import type { AgentName } from "./harnesses"
 import type { Item, ItemId } from "./items"
 import type { Bar } from "./items/companion-bar"
@@ -59,6 +60,8 @@ export type PreferencesValue = {
   // Whether the footer offers the onboarding tour, in its Help menu. Off by default, and only
   // with Experimental on.
   onboardingTour: boolean
+  // The patterns that hide files and folders from the Files panel in every project.
+  filesExclude: FilesExclude
 }
 export type Project = { id: string; name: string; directory: string }
 

@@ -14,7 +14,9 @@ import {
   type CompanionItem,
   type ClosedTerminal,
   type CompanionWindow,
+  type EntryChanged,
   type FeedbackDraft,
+  type FilesExclude,
   type FolderBrowse,
   type FolderListing,
   type ForgeIntegration,
@@ -153,6 +155,62 @@ export type Runner = {
      * outside the project's directory.
      */
     folder(input: { readonly projectId: string; readonly folder: string }): Promise<FolderListing>
+    /**
+     * The project's own patterns that hide files from its Files panel, as `setFilesExclude`
+     * last kept them; none before. Rejects with `NOT_FOUND` for a project the runner doesn't
+     * have.
+     */
+    filesExclude(input: { readonly projectId: string }): Promise<FilesExclude>
+    /**
+     * Replaces the project's patterns whole; none forgets them. Rejects with `CONFLICT`, saying
+     * so, for more than `filesExcludeLimits.patterns`, and with `NOT_FOUND` for a project the
+     * runner doesn't have.
+     */
+    setFilesExclude(input: {
+      readonly projectId: string
+      readonly patterns: FilesExclude
+    }): Promise<void>
+    /**
+     * Makes an empty file, or with `folder` an empty folder, at `path` from the project's root,
+     * and the folders on the way that are missing, and answers its path. Rejects with
+     * `CONFLICT` for a name taken (nothing is overwritten), `INVALID_DIRECTORY` for the root,
+     * Git's `.git`, or a path badly formed, through a file or leading out of the project,
+     * `WRITE_REFUSED` saying why the system refused, and `NOT_FOUND` for a project the runner
+     * doesn't have.
+     */
+    createEntry(input: {
+      readonly projectId: string
+      readonly path: string
+      readonly folder: boolean
+    }): Promise<EntryChanged>
+    /**
+     * Renames the file or folder at `from`, or moves it into another folder of the project, to
+     * `to`, and answers that path. Rejects as `createEntry` does, and with `INVALID_DIRECTORY`
+     * for an entry that is missing, a folder moved into itself, or a folder to go into that is
+     * missing.
+     */
+    moveEntry(input: {
+      readonly projectId: string
+      readonly from: string
+      readonly to: string
+    }): Promise<EntryChanged>
+    /**
+     * Copies the file, folder or link at `from` into the folder `into` (`""` for the project's
+     * own) and answers the copy's path: its own name where that is free in another folder, else
+     * `name copy.ext`, `name copy 2.ext`, … Nothing is overwritten; links copy as links. Rejects
+     * as `moveEntry` does, with `INVALID_DIRECTORY` for a folder copied into itself, and
+     * `CONFLICT` once 1000 names are taken. No time limit: it answers once the copy is made.
+     */
+    copyEntry(input: {
+      readonly projectId: string
+      readonly from: string
+      readonly into: string
+    }): Promise<EntryChanged>
+    /**
+     * Deletes the file or folder at `path` for good, a folder with everything in it, a link as a
+     * link. Rejects as `moveEntry` does.
+     */
+    removeEntry(input: { readonly projectId: string; readonly path: string }): Promise<void>
     /**
      * A folder of the runner's machine by its absolute `path`, or the runner owner's home
      * folder without one: its real path, its parent's (null at the root), and the folders in
@@ -604,12 +662,14 @@ export type Runner = {
     /**
      * Follows what an item points at: read now, then again each time it changes, across
      * reconnections. A file that may hold secrets is `held` unless `reveal` is the
-     * path the item points at, the file the person chose to show. Iteration
-     * ends once the item is deleted, the runner closes, or on `return()`.
+     * path the item points at, the file the person chose to show. With `edit`, a file is
+     * its whole text, saying whether `save` writes it, where it can be edited whole, or its
+     * lines saying why not. Iteration ends once the item is deleted, the runner closes, or on
+     * `return()`.
      */
     content(
       itemId: string,
-      options?: { readonly reveal?: string },
+      options?: { readonly reveal?: string; readonly edit?: boolean },
     ): AsyncIterableIterator<ItemContent, undefined>
     /**
      * One file of a changes item as a selection of its layers changed it: one run, from the
@@ -627,16 +687,21 @@ export type Runner = {
      */
     changeRead(input: { readonly itemId: string; readonly path: string }): Promise<void>
     /**
-     * Writes the person's edit to a plan kept in a file, unless it changed since `basedOn`,
-     * the stamp the edit was made on: then nothing is written and the plan as it now
-     * stands is `current`. Rejects with `NOT_FOUND`, or `PLAN_UNWRITABLE` saying why for a
-     * plan the agent keeps in its transcript, past 256 KiB, a file gone, or in a folder the
-     * runner may not write to (or no plan at all).
+     * Writes the person's edit to a plan kept in a file, or to the file they opened in the
+     * session's project window, unless it changed since `basedOn`, the stamp the edit was
+     * made on: then nothing is written and the text as it now stands is `current`. `path` is
+     * the path the edit was made on: an item pointed at another file since writes nothing. A
+     * plan's save may leave it out; a file's must give it, or is refused as moved. Rejects
+     * with `NOT_FOUND`, or `PLAN_UNWRITABLE` saying why for a plan
+     * the agent keeps in its transcript, past 256 KiB, a file gone, outside the folders it is
+     * saved in, or in a folder the runner may not write to, an item moved to another file, a
+     * file no longer text (or neither a plan nor the project window's file).
      */
     save(input: {
       readonly itemId: string
       readonly text: string
       readonly basedOn: string
+      readonly path?: string
     }): Promise<PlanSaveResult>
     /**
      * Attaches a file to a terminal's bar, by a path absolute or from the terminal's
@@ -865,6 +930,12 @@ export const connectRunner = async (
           client.projects.arrange({ order: [...input.order], pinned: [...input.pinned] }),
         ),
       folder: (input) => call((client) => client.projects.folder(input)),
+      filesExclude: (input) => call((client) => client.projects.filesExclude(input)),
+      setFilesExclude: (input) => call((client) => client.projects.setFilesExclude(input)),
+      createEntry: (input) => call((client) => client.projects.createEntry(input)),
+      moveEntry: (input) => call((client) => client.projects.moveEntry(input)),
+      copyEntry: (input) => call((client) => client.projects.copyEntry(input)),
+      removeEntry: (input) => call((client) => client.projects.removeEntry(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
     },
     sessions: {
@@ -1010,10 +1081,14 @@ export const connectRunner = async (
       list: (input) => call((client) => client.companions.list(input)),
       watch: () =>
         followAll(connection, (client, signal) => client.companions.watch(undefined, { signal })),
-      content: (itemId, { reveal } = {}) =>
+      content: (itemId, { reveal, edit } = {}) =>
         followRestarting(connection, (client, signal) =>
           client.companions.content(
-            { itemId, ...(reveal !== undefined && { reveal }) },
+            {
+              itemId,
+              ...(reveal !== undefined && { reveal }),
+              ...(edit !== undefined && { edit }),
+            },
             { signal },
           ),
         ),

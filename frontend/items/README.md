@@ -1,7 +1,8 @@
 # @novadeck/items
 
 What Novadeck shows as items: an image, a code file, a Markdown file's document view, a page, a
-plan in its editor, the changes an agent made; and beside them, a terminal's messages. The
+plan in its editor, the changes an agent made, and the file a session's project window edits; and
+beside them, a terminal's messages. The
 registry of kinds, the item view each kind draws, the store behind them (`ItemStore`), the
 taskbar of the items on a bar, the peek over a slot, and the bar drag that carries a slot to a
 terminal, a view or out into a window.
@@ -27,7 +28,8 @@ which puts messages on a terminal's bar), how it draws its bar (`drawing.tsx`) a
   items and each terminal's bar (`TerminalCompanion`'s props), the commands that act on them,
   and the `ItemStore` it creates once, beside which it starts `followMessages`.
 - **A view reads state and never writes it.** `ItemStore` (`store/item-store.ts`) is the one place that loads
-  content and writes plans, content and the revealed item; the views read it through
+  content and writes plans, the files the project window edits, content and the revealed item;
+  both kinds of document save through `store/saving.ts`. The views read it through
   `store/use-item-store.ts`. The items and the bar are core's workspace store, and messages are core's
   `Messages`. The app's part is `CompanionActions` (`actions.ts`): the named actions
   (`undock`, `dock`, `place`, `closeItem`, `markSeen`, `openBarTab`, `closeBarPane`,
@@ -49,23 +51,27 @@ which puts messages on a terminal's bar), how it draws its bar (`drawing.tsx`) a
   (`document/editor/MarkdownEditor.tsx`) loads through `lazy()`: as itself in
   `document/MarkdownDocument.tsx`, which a Markdown file's document view uses, and inside the
   plan's editor (`kinds/plan/plan-editor/PlanEditor.tsx`, from `kinds/plan/PlanTab.tsx`), which
-  adds the plan's notes to it as extensions. `store/item-store.ts` loads `@novadeck/viewers/sync` and
-  `src/kinds/plan/plan-editor/notes` with `import()`. A change that imports them statically pulls
+  adds the plan's notes to it as extensions. The project window's code editor
+  (`kinds/file/editor/CodeEditor.tsx`, from `kinds/file/ProjectFile.tsx`) loads through `lazy()`
+  too. `store/saving.ts` loads `@novadeck/viewers/sync`, and `store/item-store.ts`
+  `src/kinds/plan/plan-editor/notes`, with `import()`. A change that imports them statically pulls
   the editor into every window and can break the try build's first-load budget; compare the
   builds' chunk lists when touching either. The graph test keeps static imports and re-exports of
-  `@codemirror/*`, `@novadeck/viewers/markdown`, `@novadeck/viewers/sync` and either editor inside
-  `src/document/editor/` and `src/kinds/plan/plan-editor/`.
+  `@codemirror/*`, `@novadeck/viewers/markdown`, `@novadeck/viewers/editor`,
+  `@novadeck/viewers/sync` and the editors inside `src/document/editor/`,
+  `src/kinds/plan/plan-editor/` and `src/kinds/file/editor/`.
 - **Viewers mount through `ViewerSlot.ts`.** A registration shows an image, code or a page by
   `useViewerSlot(mountImage | mountCode | mountBrowser, ...)`, which keeps each viewer's place
-  by item id (24 places per mount). The editor is the exception: `mountMarkdown` stays inside
+  by item id (24 places per mount). The editors are the exception: `mountMarkdown` stays inside
   the lazily loaded `MarkdownEditor`, with its own store (12), shared by plans and by Markdown
-  files' document view.
+  files' document view; `mountEditor` mounts through `useViewer` inside the lazily loaded
+  `CodeEditor`, with its own store (24), by item and path.
 
 ## Subpaths
 
 Only what the app imports: `./TerminalCompanion`, `./UndockedWindow`, `./ProjectWindow` (the pane in its terminal, an item in
 a window of its own, and a session's project window), `./store` (`createItemStore`, `ItemStore` and
-its plan actions), `./bar` (`barMembers`, `composeBar`), `./messages` (`useHasMessages`, `useMessageBadge`,
+its plan and file actions), `./bar` (`barMembers`, `composeBar`), `./messages` (`useHasMessages`, `useMessageBadge`,
 `followMessages`, `MessageLinks`),
 `./TabKinds` (the kinds' marks on a terminal's tab), `./registry` (`iconOf`: whoever draws an
 item's icon), `./actions` (`CompanionActions`),

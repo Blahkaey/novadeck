@@ -77,6 +77,8 @@ const rules: Record<string, readonly string[]> = {
     "terminals/move-state.ts",
     // Which window is the project's, whose file names it.
     "terminals/project-window.ts",
+    // What leaving that window's file with edits that can't be saved asks.
+    "terminals/leave-edits.ts",
     // Unread finishes, which the Inbox reads.
     "terminals/unread-state.ts",
     // The switcher's arrangement, which commands change by its pure functions.
@@ -143,6 +145,8 @@ const vendors: Record<string, readonly string[]> = {
     "sidebar/NotesPanel.tsx",
   ],
   "react-router": ["app/", "shell/"],
+  // The Files panel's patterns for hiding files, matched as globs.
+  picomatch: ["sidebar/files-exclude.ts"],
   "react-dom": ["layouts/transition.ts", "entries/start.tsx"],
 }
 

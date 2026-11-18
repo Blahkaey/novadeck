@@ -1,6 +1,8 @@
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoFiles, demoPaths } from "@novadeck/demo/files"
+import { vi } from "vitest"
 
+import { restoreClipboard } from "./clipboard"
 import { filesGroups } from "./files"
 import { describe, expect, it } from "./test"
 import type { DemoActionContext } from "./types"
@@ -23,13 +25,23 @@ const context = (selected?: DemoActionContext["selected"]): DemoActionContext =>
   crash: () => undefined,
 })
 
+// The launch's file operations, which an action that boots again turns on or off.
+const offering = () => {
+  const offered: boolean[] = []
+  return {
+    offered,
+    launch: { setFileOperations: (next: boolean) => void offered.push(next) },
+  }
+}
+
 const run = (
   files: ReturnType<typeof createDemoFiles>,
   label: string,
   selected?: DemoActionContext["selected"],
   workspace?: Workspace,
+  launch = offering().launch,
 ) => {
-  const [group] = filesGroups(files)
+  const [group] = filesGroups(files, launch)
   void group!.actions
     .find((action) => action.label === label)!
     .run({ ...context(selected), workspace: () => workspace })
@@ -57,11 +69,11 @@ const project = (files: ReturnType<typeof createDemoFiles>) =>
 
 describe("the debug panel's Files group", () => {
   it("is absent where the demo has no files", () => {
-    expect(filesGroups(undefined)).toEqual([])
+    expect(filesGroups(undefined, offering().launch)).toEqual([])
   })
 
   it("hints what each action shows", () => {
-    const [group] = filesGroups(createDemoFiles(1))
+    const [group] = filesGroups(createDemoFiles(1), offering().launch)
     expect(group!.actions.every((action) => action.hint.length > 0)).toBe(true)
   })
 
@@ -73,7 +85,7 @@ describe("the debug panel's Files group", () => {
 
   it("stops Crow's cursor and keeps its changes, as a Files-only fixture", () => {
     const files = createDemoFiles(1)
-    const [group] = filesGroups(files)
+    const [group] = filesGroups(files, offering().launch)
     expect(group!.actions.some((action) => action.label === "Agent ends its turn")).toBe(false)
     run(files, "Agent stops writing (Files only)")
     expect(project(files).writing.crow).toBeUndefined()
@@ -130,5 +142,135 @@ describe("the debug panel's Files group", () => {
     expect((await files.list("storefront", "src/cart")).entries.length).toBeGreaterThan(0)
     expect((await files.list("storefront", "src/components")).truncated).toBe(false)
     expect((await files.list("storefront", "")).entries.length).toBeGreaterThan(0)
+  })
+
+  it("has copying a path refused until the files read normally again", async () => {
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: async (text: string) => void copied.push(text) },
+      configurable: true,
+    })
+    try {
+      const files = createDemoFiles(1)
+      run(files, "Copying a path fails")
+      await expect(navigator.clipboard.writeText("src/cart")).rejects.toThrow("refused")
+
+      run(files, "Files read normally again")
+      await navigator.clipboard.writeText("src/cart")
+
+      expect(copied).toEqual(["src/cart"])
+    } finally {
+      restoreClipboard()
+      Reflect.deleteProperty(navigator, "clipboard")
+    }
+  })
+
+  it("has the next save of a project's hidden files fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next hide-list save fails")
+    await expect(files.exclude.save("storefront", { dist: true })).rejects.toThrow()
+    await files.exclude.save("storefront", { dist: true })
+
+    run(files, "Next hide-list save fails")
+    run(files, "Files read normally again")
+
+    await files.exclude.save("storefront", {})
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
+  it("has every read of a project's hidden files fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Hidden files can't be read")
+    await expect(files.exclude.read("storefront")).rejects.toThrow()
+    await expect(files.exclude.read("infra")).rejects.toThrow()
+
+    run(files, "Files read normally again")
+
+    await expect(files.exclude.read("storefront")).resolves.toEqual({})
+  })
+
+  it("has the next paste fail, once, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next paste fails")
+    await expect(files.copy("storefront", "README.md", "public")).rejects.toThrow()
+    await expect(files.copy("storefront", "README.md", "public")).resolves.toBe("public/README.md")
+
+    run(files, "Next paste fails")
+    run(files, "Files read normally again")
+
+    await expect(files.copy("storefront", "README.md", "")).resolves.toBe("README copy.md")
+  })
+
+  it("has the next change made answer as lost, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next change's answer is lost")
+    await expect(files.move("storefront", "README.md", "README.txt")).rejects.toThrow(
+      "it may have been done",
+    )
+    await expect(files.move("storefront", "README.txt", "README.md")).resolves.toBe("README.md")
+
+    run(files, "Next change's answer is lost")
+    run(files, "Files read normally again")
+
+    await expect(files.remove("storefront", "README.md")).resolves.toBeUndefined()
+  })
+
+  it("has the next paste take 5 seconds, until the files read normally again", async () => {
+    vi.useFakeTimers()
+    try {
+      const files = createDemoFiles(1)
+      run(files, "Next paste takes 5 s")
+      let made: string | undefined
+      const copying = files.copy("storefront", "README.md", "public").then((path) => (made = path))
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(made).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      await copying
+      expect(made).toBe("public/README.md")
+
+      run(files, "Next paste takes 5 s")
+      run(files, "Files read normally again")
+
+      await expect(files.copy("storefront", "README.md", "")).resolves.toBe("README copy.md")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("has the next file made, renamed or deleted fail, until the files read normally again", async () => {
+    const files = createDemoFiles(1)
+    run(files, "Next file operation fails")
+    await expect(files.create("storefront", "notes.md", false)).rejects.toThrow()
+    await expect(files.create("storefront", "notes.md", false)).resolves.toBe("notes.md")
+
+    run(files, "Next file operation fails")
+    run(files, "Files read normally again")
+
+    await expect(files.remove("storefront", "notes.md")).resolves.toBeUndefined()
+  })
+
+  it("boots again with the backend making, renaming and deleting files, or not", () => {
+    const { offered, launch } = offering()
+    const files = createDemoFiles(1)
+    const [group] = filesGroups(files, launch)
+    const action = (label: string) => group!.actions.find((each) => each.label === label)!
+    expect([action("File operations not offered"), action("File operations offered")]).toEqual([
+      expect.objectContaining({ reboots: true }),
+      expect.objectContaining({ reboots: true }),
+    ])
+
+    run(files, "File operations not offered", undefined, undefined, launch)
+    run(files, "File operations offered", undefined, undefined, launch)
+
+    expect(offered).toEqual([false, true])
+  })
+
+  it("puts the copy failure before the way back to normal", () => {
+    const labels = filesGroups(createDemoFiles(1), offering().launch)[0]!.actions.map(
+      (action) => action.label,
+    )
+    expect(labels.indexOf("Copying a path fails")).toBe(
+      labels.indexOf("Files read normally again") - 1,
+    )
   })
 })

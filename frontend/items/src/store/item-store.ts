@@ -1,12 +1,10 @@
 import {
   kindRules,
   planVersionOf,
-  PlanUnwritableError,
   type Companions,
   type ItemContent,
   type ItemId,
   type PageTrouble,
-  type PlanUnwritableReason,
   type PlanVersion,
 } from "@novadeck/core/items"
 import {
@@ -16,20 +14,50 @@ import {
   type WorkspaceStore,
 } from "@novadeck/core/store"
 import type { Workspace, WorkspaceTarget } from "@novadeck/core/types"
+import type { Lines } from "@novadeck/viewers/editor"
 
+import {
+  editedText,
+  fileBlockOf,
+  fileDocOf,
+  fileGone,
+  fileKey,
+  fileVersionOf,
+  type FileDoc,
+} from "../kinds/file/file-doc"
 import { currentMarks, docOf, lf, type Mark, type PlanDoc } from "../kinds/plan/plan-doc"
+import { fileRewritten } from "./file-rewrite"
 import { rewritten } from "./plan-rewrite"
-import { itemIn, itemsOf, pointedAt, pointedIn } from "./pointing"
+import { itemIn, itemsOf, pointedAt, pointedIn, targetOf } from "./pointing"
+import {
+  createSaves,
+  forget,
+  retry,
+  revise,
+  saveNow,
+  saveSoon,
+  saveTimeout,
+  withDoc,
+  type Place,
+  type Saves,
+} from "./saving"
+import { fileText, unreadableNow } from "./text-doc"
 
 // What the items package holds while the app runs, apart from the items themselves and
 // how bars are arranged, which the workspace store keeps: each plan as the person edits
-// it, what each item last loaded, and which items that may hold secrets the person chose
-// to see. Every plan is followed for as long as it exists; anything else only while
-// something shows it. Components read it through ./use-item-store.ts.
+// it, each file the person edits in the project window, what each item last loaded, and
+// which items that may hold secrets the person chose to see. Every plan is followed for as
+// long as it exists; anything else only while something shows it. Components read it
+// through ./use-item-store.ts.
 
 export type ItemStoreState = {
   // Each plan once its first version came, by its item.
   readonly plans: Readonly<Record<ItemId, PlanDoc>>
+  // Each file the project window shows whole to edit, once its text first came, by its item
+  // and path (`fileKey`): it goes with what the item held, unless edits to it haven't reached
+  // the file yet, which stay, and keep being saved, until they do, when it goes unless the item
+  // still shows it, or until the item goes.
+  readonly files: Readonly<Record<string, FileDoc>>
   // What each item held when it last reported, a plan's too.
   readonly content: Readonly<Record<ItemId, ItemContent>>
   // Items that may hold secrets, which the person asked to see, each with what it pointed at
@@ -40,7 +68,13 @@ export type ItemStoreState = {
   readonly unfolded: Readonly<Record<ItemId, string>>
 }
 
-const emptyState: ItemStoreState = { plans: {}, content: {}, revealed: {}, unfolded: {} }
+const emptyState: ItemStoreState = {
+  plans: {},
+  files: {},
+  content: {},
+  revealed: {},
+  unfolded: {},
+}
 
 // What can be done with a plan, apart from showing it.
 export type PlanActions = {
@@ -59,10 +93,33 @@ export type PlanActions = {
   readonly toggleChanges: () => void
 }
 
+// What can be done with a file the person edits in the project window, apart from showing it.
+export type FileActions = {
+  // The person edited it: it's saved once typing pauses. `marks`, where the editor tells them,
+  // are the lines another writer changed, moved along with the edit.
+  readonly edit: (text: string, marks?: readonly Lines[]) => void
+  // Focus left it, or the person asked to save: what's waiting for a pause in typing is
+  // saved now.
+  readonly flush: () => void
+  // The person asked to try saving again after saves stopped, as for a plan.
+  readonly retry: () => void
+}
+
+// How the edits to a file stood once a save of them was asked for: in the file, or kept in
+// Novadeck alone, since they can't get there now.
+export type FileLeft = "saved" | "stuck"
+
 export type ItemStore = {
   readonly store: Store<ItemStoreState>
-  // Follows an item while something shows it; returns the release.
-  readonly watch: (target: WorkspaceTarget, itemId: ItemId) => () => void
+  // Follows an item while something shows it; returns the release. With `edit`, a file
+  // that can be edited is followed whole, as the project window shows its file, for every
+  // place that shows the item: one followed without it, as an image the window showed
+  // before, is followed again whole.
+  readonly watch: (
+    target: WorkspaceTarget,
+    itemId: ItemId,
+    options?: { readonly edit?: boolean },
+  ) => () => void
   // The person asked to see an item that may hold secrets, as the file at `shown` they saw
   // its gate for: an item pointed elsewhere since stays held.
   readonly reveal: (itemId: ItemId, shown: string | null) => void
@@ -70,6 +127,26 @@ export type ItemStore = {
   // folds it all with null. The pane shows it that way, whoever opens it.
   readonly unfold: (itemId: ItemId, shellId: string | null) => void
   readonly plan: (target: WorkspaceTarget, itemId: ItemId) => PlanActions
+  // The file the item showed at `path` as the person edits it.
+  readonly file: (target: WorkspaceTarget, itemId: ItemId, path: string) => FileActions
+  // Saves the person's edits to the file the item showed at `path` at once, as before the
+  // window shows another, closes, or the file moves or goes. Undefined when nothing is left
+  // to save; else answers once the edits are in the file, or once they can't get there: a
+  // save refused, saves stopped, the file gone, unreadable, no longer one the window edits
+  // whole or no longer writable, or nothing settled within a save's own time (20 s). A save
+  // that failed and is tried again is waited out.
+  readonly saveFile: (
+    target: WorkspaceTarget,
+    itemId: ItemId,
+    path: string,
+  ) => Promise<FileLeft> | undefined
+  // The person's edits to the file the item showed at `path`, as the file would hold them, to
+  // copy before they're let go; undefined where the store holds no document of it.
+  readonly fileEdits: (itemId: ItemId, path: string) => string | undefined
+  // Lets go of the person's edits to the file the item showed at `path`, unsaved, as once they
+  // copied them to leave it: it is the file as last read, while the item still shows it and
+  // has read it, and nothing otherwise.
+  readonly dropFile: (itemId: ItemId, path: string) => void
   // Tells what went wrong on a live page that shows `shown` of the item loaded.
   readonly trouble: (
     target: WorkspaceTarget,
@@ -102,6 +179,8 @@ type Followed = {
   // How many places show it, and whether it's a plan, which is followed regardless.
   watchers: number
   plan: boolean
+  // Whether a file that can be edited is followed whole, to edit.
+  edit: boolean
   // Once nothing shows it, the wait before it's let go.
   lingering?: ReturnType<typeof setTimeout> | undefined
 }
@@ -111,22 +190,9 @@ type Session = {
   readonly workspace: WorkspaceStore
   readonly store: MutableStore<ItemStoreState>
   readonly followed: Map<ItemId, Followed>
-  // Per plan, the text of the save under way, and the one waiting for typing to pause.
-  readonly saving: Map<ItemId, string>
-  // Per plan, what lets the save under way go: its answer, or its timing out, then changes
-  // nothing, as for a plan that's gone.
-  readonly dropping: Map<ItemId, () => void>
-  readonly waiting: Map<ItemId, ReturnType<typeof setTimeout>>
-  // Per plan, a rewrite that came while a save was under way, applied once it answers:
-  // until then the base it was written over isn't known.
-  readonly pending: Map<ItemId, PlanVersion>
-  // Per plan, how many saves in a row failed, which spaces out the next try.
-  readonly failures: Map<ItemId, number>
-  // Per plan, whether the wait before the next try of a failed save is running: edits and
-  // focus changes leave it alone, so only tries it spaced out count toward the cap.
-  readonly backingOff: Set<ItemId>
-  // Per plan, texts sent in saves whose answer never came: the file may hold any of them.
-  readonly unconfirmed: Map<ItemId, readonly string[]>
+  // What the plans' saves keep under way, by item, and the files', by `fileKey`.
+  readonly planSaves: Saves
+  readonly fileSaves: Saves
 }
 
 // The file the person's yes to seeing an item was for, if it still holds: it was to the file
@@ -139,206 +205,100 @@ const revealedFor = (session: Session, id: ItemId): string | undefined => {
     : undefined
 }
 
-const planIn = (session: Session, id: ItemId): PlanDoc | undefined =>
-  session.store.getSnapshot().plans[id]
+// A plan where the store holds it and the engine saves it (./saving.ts).
+const planPlace = (
+  session: Session,
+  target: WorkspaceTarget,
+  id: ItemId,
+): Place<ItemStoreState, PlanDoc> => ({
+  key: id,
+  target,
+  itemId: id,
+  path: undefined,
+  companions: session.companions,
+  store: session.store,
+  saves: session.planSaves,
+  read: (state) => state.plans[id],
+  write: (state, doc) => ({ ...state, plans: { ...state.plans, [id]: doc } }),
+  gone: (state) => {
+    const content = state.content[id]
+    return content?.state === "unavailable" && content.reason === "gone"
+  },
+  shown: (state) => state.content[id]?.state === "ready",
+  edited: lf,
+  rewritten,
+})
 
-// Changes a plan, if the pane holds it. The changed plan, or undefined when nothing changed.
-const withPlan = (
+// What the item holds, while it points at `path`: that file's, and nothing of it otherwise.
+const heldAt = (
   session: Session,
   id: ItemId,
-  change: (plan: PlanDoc) => PlanDoc,
-): PlanDoc | undefined => {
-  let changed: PlanDoc | undefined
-  session.store.update((state) => {
-    const plan = state.plans[id]
-    if (!plan) return state
-    const next = change(plan)
-    if (next === plan) return state
-    changed = next
-    return { ...state, plans: { ...state.plans, [id]: next } }
-  })
-  return changed
+  path: string,
+  state: ItemStoreState,
+): ItemContent | undefined =>
+  itemIn(session.workspace.getSnapshot(), id)?.path === path ? state.content[id] : undefined
+
+// A file the item showed at `path`, where the store holds it and the engine saves it.
+const filePlace = (
+  session: Session,
+  target: WorkspaceTarget,
+  id: ItemId,
+  path: string,
+): Place<ItemStoreState, FileDoc> => {
+  const key = fileKey(id, path)
+  const held = (state: ItemStoreState): ItemContent | undefined => heldAt(session, id, path, state)
+  return {
+    key,
+    target,
+    itemId: id,
+    path,
+    companions: session.companions,
+    store: session.store,
+    saves: session.fileSaves,
+    read: (state) => state.files[key],
+    write: (state, doc) => ({ ...state, files: { ...state.files, [key]: doc } }),
+    gone: (state) => fileGone(held(state)),
+    shown: (state) => held(state)?.state === "ready",
+    edited: (text) => editedText(text).text,
+    rewritten: fileRewritten,
+  }
 }
 
 // How long what an item held stays once nothing shows it.
 const lingerMs = 30_000
 
-// Typing reaches the file once it pauses, not on every keystroke.
-const typingPause = 400
-
-const saveSoon = (session: Session, target: WorkspaceTarget, id: ItemId): void => {
-  if (session.backingOff.has(id)) return
-  clearTimeout(session.waiting.get(id))
-  session.waiting.set(
-    id,
-    setTimeout(() => {
-      session.waiting.delete(id)
-      persist(session, target, id)
-    }, typingPause),
+// A plan's version came again: the file is back, or can be written again, and what stopped
+// saves no longer holds. A fresh version also means the link is healthy: saves that gave up
+// try again. Then it merges into the plan.
+const plannedAgain = (place: Place<ItemStoreState, PlanDoc>, version: PlanVersion): void => {
+  if (place.read(place.store.getSnapshot())?.stalled) place.saves.failures.delete(place.key)
+  withDoc(place, (plan) =>
+    plan.blocked === "gone" || (plan.blocked === "transcript" && version.plan.writable)
+      ? { ...plan, blocked: null, stalled: false }
+      : plan.stalled
+        ? { ...plan, stalled: false }
+        : plan,
   )
+  void revise(place, version)
 }
 
-// Saves what's waiting at once, as when the editor closes.
-const saveNow = (session: Session, target: WorkspaceTarget, id: ItemId): void => {
-  // While a failed save waits to be tried again, only the wait's end tries it.
-  if (!session.backingOff.has(id)) {
-    clearTimeout(session.waiting.get(id))
-    session.waiting.delete(id)
-  }
-  persist(session, target, id)
-}
-
-// How long a save may go unanswered before it counts as failed and is tried again.
-const saveTimeout = 20_000
-
-// How many saves in a row may fail before they stop until the person retries.
-const failureCap = 5
-
-// The person's edits reach the file one save at a time. A save the file refused, having
-// changed since, merges like any rewrite, and what's left of the edits goes again. A
-// save that failed is tried again, less often each time, and the plan says so, until
-// `failureCap` fail in a row. One the backend says can never work, and one made while the
-// plan's file is gone, stop at once. Either waits for the person to retry (`manual`).
-const persist = (session: Session, target: WorkspaceTarget, id: ItemId, manual = false): void => {
-  const plan = planIn(session, id)
-  // A plan the backend can't write is never saved.
-  if (session.saving.has(id) || !plan?.writable) return
-  // Says how saving stands, changing the plan only if that's new.
-  const stand = (flags: Pick<PlanDoc, "unsaved" | "blocked" | "stalled">): void => {
-    withPlan(session, id, (current) =>
-      current.unsaved === flags.unsaved &&
-      current.blocked === flags.blocked &&
-      current.stalled === flags.stalled
-        ? current
-        : { ...current, ...flags },
-    )
-  }
-  // Nothing left to save, as when the person undid the edit or the agent wrote the same.
-  if (plan.text === plan.base) {
-    session.failures.delete(id)
-    stand({ unsaved: false, blocked: null, stalled: false })
-    return
-  }
-  const content = session.store.getSnapshot().content[id]
-  const gone = content?.state === "unavailable" && content.reason === "gone"
-  if (!manual && (plan.blocked || plan.stalled || gone || session.backingOff.has(id))) return
-  const sent = plan.text
-  const basedOn = plan.revision
-  session.saving.set(id, sent)
-  const text = plan.eol === "\n" ? sent : sent.replaceAll("\n", plan.eol)
-  // Only this attempt's answer counts: one that comes after it timed out is ignored.
-  let answered = false
-  const settleAttempt = (): boolean => {
-    if (answered) return false
-    answered = true
-    clearTimeout(timer)
-    session.saving.delete(id)
-    session.dropping.delete(id)
-    return true
-  }
-  // A rewrite that came meanwhile applies now, over the base the file still has.
-  const applyPending = (): void => {
-    const pending = session.pending.get(id)
-    session.pending.delete(id)
-    if (pending) void revise(session, target, id, pending)
-  }
-  // The backend said why it never will: nothing was written, and saves stop.
-  const refused = (reason: PlanUnwritableReason): void => {
-    // A file that is gone while the stream shows it, or a rewrite of it waiting, was put
-    // back meanwhile: that's a failure that may pass, not a verdict.
-    const shown = session.store.getSnapshot().content[id]?.state === "ready"
-    if (reason === "gone" && (shown || session.pending.has(id))) return failed()
-    if (!settleAttempt()) return
-    session.failures.delete(id)
-    clearTimeout(session.waiting.get(id))
-    session.waiting.delete(id)
-    stand({ unsaved: true, blocked: reason, stalled: false })
-    applyPending()
-  }
-  const failed = (): void => {
-    if (!settleAttempt()) return
-    // It may have been written all the same: the next version of the file tells.
-    session.unconfirmed.set(id, [...(session.unconfirmed.get(id) ?? []), sent])
-    const failures = (session.failures.get(id) ?? 0) + 1
-    session.failures.set(id, failures)
-    const stalled = failures >= failureCap
-    stand({ unsaved: true, blocked: null, stalled })
-    applyPending()
-    clearTimeout(session.waiting.get(id))
-    if (stalled) {
-      session.waiting.delete(id)
-      session.backingOff.delete(id)
-      return
-    }
-    session.backingOff.add(id)
-    session.waiting.set(
-      id,
-      setTimeout(
-        () => {
-          session.waiting.delete(id)
-          session.backingOff.delete(id)
-          persist(session, target, id)
-        },
-        Math.min(30_000, 1000 * 2 ** failures),
-      ),
-    )
-  }
-  const timer = setTimeout(failed, saveTimeout)
-  session.dropping.set(id, () => {
-    answered = true
-    clearTimeout(timer)
-  })
-  session.companions.save(target, id, text, basedOn).then(
-    async (result) => {
-      if (!settleAttempt()) return
-      if (result.saved) session.unconfirmed.delete(id)
-      session.failures.delete(id)
-      stand({ unsaved: false, blocked: null, stalled: false })
-      const pending = session.pending.get(id)
-      session.pending.delete(id)
-      if (result.saved) {
-        withPlan(session, id, (current) =>
-          current.revision === basedOn
-            ? { ...current, base: sent, revision: result.stamp }
-            : current,
-        )
-        // A rewrite that came meanwhile was written over this save.
-        if (pending) await revise(session, target, id, pending)
-      } else await revise(session, target, id, result.current)
-      persist(session, target, id)
-    },
-    (error: unknown) => (error instanceof PlanUnwritableError ? refused(error.reason) : failed()),
+// A file's text came again: it is there, the item points at it, and it is text, so saves
+// refused for its being gone, elsewhere or no text go on, as do saves that gave up. Then it
+// merges into the person's edits.
+const fileAgain = (place: Place<ItemStoreState, FileDoc>, version: PlanVersion): void => {
+  if (place.read(place.store.getSnapshot())?.stalled) place.saves.failures.delete(place.key)
+  withDoc(place, (doc) =>
+    doc.blocked === "gone" || doc.blocked === "moved" || doc.blocked === "not-text"
+      ? { ...doc, blocked: null, stalled: false }
+      : doc.stalled
+        ? { ...doc, stalled: false }
+        : doc,
   )
+  void revise(place, version)
 }
 
-// The plan's file changed: the agent rewrote it over the file as the person left it. Its
-// changes merge into the person's latest edits line by line, and notes it applied are
-// gone. The merge code loads only when a plan changes, like the editor it shares.
-const revise = async (
-  session: Session,
-  target: WorkspaceTarget,
-  id: ItemId,
-  version: PlanVersion,
-): Promise<void> => {
-  const theirs = lf(version.plan.text)
-  const inFlight = session.saving.get(id)
-  // A rewrite that isn't the save under way waits for its answer: it may have been
-  // written over that save, which the plan's base doesn't hold yet.
-  if (inFlight !== undefined && inFlight !== theirs) {
-    session.pending.set(id, version)
-    return
-  }
-  const sync = await import("@novadeck/viewers/sync")
-  const unconfirmed = session.unconfirmed.get(id) ?? []
-  const echo = inFlight === theirs || unconfirmed.includes(theirs)
-  withPlan(session, id, (plan) => rewritten(plan, version, echo, unconfirmed, sync))
-  // This version settles what the file holds; saves still unanswered no longer matter.
-  session.unconfirmed.delete(id)
-  persist(session, target, id)
-}
-
-// The item reported what it holds: a plan's first version becomes its document, and later
-// ones merge into it.
+// The item reported what it holds: a plan's first version becomes its document, as does a
+// file's first whole text, and later ones merge into them.
 const received = (
   session: Session,
   target: WorkspaceTarget,
@@ -346,36 +306,37 @@ const received = (
   content: ItemContent,
 ): void => {
   const version = planVersionOf(content)
-  const known = planIn(session, id) !== undefined
-  session.store.update((state) => {
+  const file = fileVersionOf(content)
+  const state = session.store.getSnapshot()
+  const known = state.plans[id] !== undefined
+  const fileKnown = file !== undefined && state.files[fileKey(id, file.path)] !== undefined
+  session.store.update((current) => {
     const first = version && !known
-    if (state.content[id] === content && !first) return state
+    const firstFile = file && !fileKnown
+    if (current.content[id] === content && !first && !firstFile) return current
     return {
-      ...state,
-      content: { ...state.content, [id]: content },
-      ...(first ? { plans: { ...state.plans, [id]: docOf(version) } } : {}),
+      ...current,
+      content: { ...current.content, [id]: content },
+      ...(first ? { plans: { ...current.plans, [id]: docOf(version) } } : {}),
+      ...(firstFile
+        ? {
+            files: {
+              ...current.files,
+              [fileKey(id, file.path)]: fileDocOf(id, file.path, file.version),
+            },
+          }
+        : {}),
     }
   })
-  if (version && known) {
-    // The file is back, or can be written again: what stopped saves no longer holds.
-    // A fresh version also means the link is healthy: saves that gave up try again.
-    if (planIn(session, id)?.stalled) session.failures.delete(id)
-    withPlan(session, id, (plan) =>
-      plan.blocked === "gone" || (plan.blocked === "transcript" && version.plan.writable)
-        ? { ...plan, blocked: null, stalled: false }
-        : plan.stalled
-          ? { ...plan, stalled: false }
-          : plan,
-    )
-    void revise(session, target, id, version)
-  }
+  if (version && known) plannedAgain(planPlace(session, target, id), version)
+  if (file && fileKnown) fileAgain(filePlace(session, target, id, file.path), file.version)
 }
 
 const follow = (
   session: Session,
   target: WorkspaceTarget,
   id: ItemId,
-  from: Pick<Followed, "watchers" | "plan">,
+  from: Pick<Followed, "watchers" | "plan" | "edit">,
 ): Followed => {
   const reveal = revealedFor(session, id)
   const entry: Followed = {
@@ -385,6 +346,7 @@ const follow = (
     stop: () => {},
     watchers: from.watchers,
     plan: from.plan,
+    edit: from.edit,
   }
   // Known before following starts: the backend may report at once.
   session.followed.set(id, entry)
@@ -395,9 +357,10 @@ const follow = (
 // Starts what the backend reports for an item, as it's followed now. A report that
 // comes after it stops, as one held back before the item was revealed, is let go.
 const listen = (session: Session, id: ItemId, entry: Followed): void => {
-  const { target, reveal } = entry
+  const { target, reveal, edit } = entry
   let live = true
-  const stop = session.companions.follow(target, id, { reveal }, (content) => {
+  const options = { reveal, ...(edit && { edit }) }
+  const stop = session.companions.follow(target, id, options, (content) => {
     if (live && session.followed.get(id) === entry) received(session, target, id, content)
   })
   entry.stop = () => {
@@ -406,8 +369,42 @@ const listen = (session: Session, id: ItemId, entry: Followed): void => {
   }
 }
 
+// Whether a file's edits are all in the file, none on their way.
+const settledFile = (session: Session, key: string, doc: FileDoc): boolean =>
+  doc.text === doc.base && !session.fileSaves.saving.has(key)
+
+// The item's file documents go but the one at `kept`, each that holds nothing unsaved.
+const dropSettled = (session: Session, id: ItemId, kept?: string): void => {
+  const going = Object.entries(session.store.getSnapshot().files).filter(
+    ([key, doc]) => doc.item === id && doc.path !== kept && settledFile(session, key, doc),
+  )
+  if (going.length === 0) return
+  for (const [key] of going) forget(session.fileSaves, key)
+  session.store.update((state) => ({
+    ...state,
+    files: Object.fromEntries(
+      Object.entries(state.files).filter(([key]) => !going.some(([gone]) => gone === key)),
+    ),
+  }))
+}
+
+// A file's document whose edits all reached the file goes once nothing shows it there: the
+// item is let go, or points at another file now.
+const letGoUnseen = (session: Session, key: string): void => {
+  const doc = session.store.getSnapshot().files[key]
+  if (!doc || !settledFile(session, key, doc)) return
+  const item = itemIn(session.workspace.getSnapshot(), doc.item)
+  if (session.followed.has(doc.item) && item?.path === doc.path) return
+  forget(session.fileSaves, key)
+  session.store.update((state) => {
+    const { [key]: _gone, ...files } = state.files
+    return { ...state, files }
+  })
+}
+
 // An item pointed elsewhere is followed again: what it held is dropped, and so is the
-// person's yes to seeing it, which was to the file it pointed at then.
+// person's yes to seeing it, which was to the file it pointed at then. A file it showed goes
+// too, unless edits to it haven't reached it yet.
 const refollow = (session: Session, id: ItemId, entry: Followed, pointed: string): void => {
   entry.stop()
   entry.reveal = undefined
@@ -417,6 +414,20 @@ const refollow = (session: Session, id: ItemId, entry: Followed, pointed: string
     const { [id]: _content, ...content } = state.content
     const { [id]: _revealed, ...revealed } = state.revealed
     return { ...state, content, revealed }
+  })
+  dropSettled(session, id, itemIn(session.workspace.getSnapshot(), id)?.path ?? undefined)
+  listen(session, id, entry)
+}
+
+// A place that edits shows an item followed without editing: it's followed again, whole,
+// what it held dropped, as it isn't what an editor reads.
+const followToEdit = (session: Session, id: ItemId, entry: Followed): void => {
+  entry.stop()
+  entry.edit = true
+  session.store.update((state) => {
+    if (!(id in state.content)) return state
+    const { [id]: _content, ...content } = state.content
+    return { ...state, content }
   })
   listen(session, id, entry)
 }
@@ -430,7 +441,8 @@ const unfollow = (session: Session, id: ItemId): void => {
 }
 
 // Nothing shows it any more: what it last held goes, so a large image doesn't stay in
-// memory. It loads again when something shows it.
+// memory, and so does a file it showed whose edits are all saved. It loads again when
+// something shows it.
 const release = (session: Session, id: ItemId): void => {
   unfollow(session, id)
   session.store.update((state) => {
@@ -438,6 +450,7 @@ const release = (session: Session, id: ItemId): void => {
     const { [id]: _gone, ...content } = state.content
     return { ...state, content }
   })
+  dropSettled(session, id)
 }
 
 // Nothing shows it now: it goes after a while, so switching back to a terminal soon after
@@ -452,23 +465,6 @@ const linger = (session: Session, id: ItemId, entry: Followed): void => {
   }, lingerMs)
 }
 
-// A plan that's gone: its saves stop, and what they kept goes. A save under way is let go,
-// so neither its answer nor its timing out brings any of it back.
-const forgetPlan = (session: Session, id: ItemId): void => {
-  session.dropping.get(id)?.()
-  session.dropping.delete(id)
-  clearTimeout(session.waiting.get(id))
-  for (const each of [
-    session.saving,
-    session.waiting,
-    session.pending,
-    session.failures,
-    session.unconfirmed,
-  ])
-    each.delete(id)
-  session.backingOff.delete(id)
-}
-
 // A record without the items that are gone.
 const keep = <Value>(
   present: ReadonlyMap<ItemId, unknown>,
@@ -478,6 +474,15 @@ const keep = <Value>(
   return kept.length === Object.keys(record).length
     ? record
     : (Object.fromEntries(kept) as Record<ItemId, Value>)
+}
+
+// The file documents of the items still there.
+const keepFiles = (
+  present: ReadonlyMap<ItemId, unknown>,
+  files: Readonly<Record<string, FileDoc>>,
+): Readonly<Record<string, FileDoc>> => {
+  const kept = Object.entries(files).filter(([, doc]) => present.has(doc.item))
+  return kept.length === Object.keys(files).length ? files : Object.fromEntries(kept)
 }
 
 // Follows every plan in the workspace, stops following what's gone, and forgets it.
@@ -507,28 +512,33 @@ const reconcile = (session: Session, workspace: Workspace): void => {
       linger(session, id, entry)
     }
   }
+  const { planSaves, fileSaves } = session
   const planned = new Set([
-    ...session.saving.keys(),
-    ...session.waiting.keys(),
-    ...session.pending.keys(),
-    ...session.failures.keys(),
-    ...session.unconfirmed.keys(),
+    ...planSaves.saving.keys(),
+    ...planSaves.waiting.keys(),
+    ...planSaves.pending.keys(),
+    ...planSaves.failures.keys(),
+    ...planSaves.unconfirmed.keys(),
   ])
-  for (const id of planned) if (!present.has(id)) forgetPlan(session, id)
+  for (const id of planned) if (!present.has(id as ItemId)) forget(planSaves, id)
+  for (const [key, doc] of Object.entries(session.store.getSnapshot().files))
+    if (!present.has(doc.item)) forget(fileSaves, key)
   for (const [id, { target, plan }] of present) {
     if (!plan) continue
     const entry = session.followed.get(id)
     if (entry) entry.plan = true
-    else follow(session, target, id, { watchers: 0, plan: true })
+    else follow(session, target, id, { watchers: 0, plan: true, edit: false })
   }
   session.store.update((state) => {
     const next = {
       plans: keep(present, state.plans),
+      files: keepFiles(present, state.files),
       content: keep(present, state.content),
       revealed: keep(present, state.revealed),
       unfolded: keep(present, state.unfolded),
     }
     return next.plans === state.plans &&
+      next.files === state.files &&
       next.content === state.content &&
       next.revealed === state.revealed &&
       next.unfolded === state.unfolded
@@ -549,19 +559,17 @@ export const createItemStore = ({
     workspace,
     store: createStore<ItemStoreState>(emptyState),
     followed: new Map(),
-    saving: new Map(),
-    dropping: new Map(),
-    waiting: new Map(),
-    pending: new Map(),
-    failures: new Map(),
-    backingOff: new Set(),
-    unconfirmed: new Map(),
+    planSaves: createSaves(),
+    fileSaves: createSaves(),
   }
-  const watch = (target: WorkspaceTarget, id: ItemId): (() => void) => {
+  session.fileSaves.settled.add((key) => letGoUnseen(session, key))
+  const watch: ItemStore["watch"] = (target, id, options = {}) => {
     const entry =
-      session.followed.get(id) ?? follow(session, target, id, { watchers: 0, plan: false })
+      session.followed.get(id) ??
+      follow(session, target, id, { watchers: 0, plan: false, edit: options.edit === true })
     clearTimeout(entry.lingering)
     entry.lingering = undefined
+    if (options.edit === true && !entry.edit) followToEdit(session, id, entry)
     entry.watchers += 1
     let released = false
     return () => {
@@ -598,51 +606,150 @@ export const createItemStore = ({
       return { ...state, unfolded: shellId === null ? rest : { ...rest, [id]: shellId } }
     })
   }
-  const plan = (target: WorkspaceTarget, id: ItemId): PlanActions => ({
-    edit: (text, marks) => {
-      const edited = withPlan(session, id, (current) =>
-        // A plan the backend can't write takes no edits. One that was too large may not
-        // be, now.
-        text === current.text || !current.writable || current.blocked === "transcript"
-          ? current
-          : {
-              ...current,
-              text,
-              marks,
-              marked: text,
-              blocked: current.blocked === "too-large" ? null : current.blocked,
-            },
-      )
-      if (edited) saveSoon(session, target, id)
-    },
-    closeEditor: () => {
-      // The note code is already loaded: the editor that closed shares it.
-      void import("../kinds/plan/plan-editor/notes").then(({ withoutEmptyNotes }) => {
-        withPlan(session, id, (current) => {
-          if (!current.writable) return current
-          const kept = withoutEmptyNotes(current.text, currentMarks(current))
-          return kept ? { ...current, ...kept, marked: kept.text } : current
+  const plan = (target: WorkspaceTarget, id: ItemId): PlanActions => {
+    const place = planPlace(session, target, id)
+    return {
+      edit: (text, marks) => {
+        const edited = withDoc(place, (current) =>
+          // A plan the backend can't write takes no edits. One that was too large may not
+          // be, now.
+          text === current.text || !current.writable || current.blocked === "transcript"
+            ? current
+            : {
+                ...current,
+                text,
+                marks,
+                marked: text,
+                blocked: current.blocked === "too-large" ? null : current.blocked,
+              },
+        )
+        if (edited) saveSoon(place)
+      },
+      closeEditor: () => {
+        // The note code is already loaded: the editor that closed shares it.
+        void import("../kinds/plan/plan-editor/notes").then(({ withoutEmptyNotes }) => {
+          withDoc(place, (current) => {
+            if (!current.writable) return current
+            const kept = withoutEmptyNotes(current.text, currentMarks(current))
+            return kept ? { ...current, ...kept, marked: kept.text } : current
+          })
+          saveNow(place)
         })
-        saveNow(session, target, id)
-      })
-    },
-    flush: () => saveNow(session, target, id),
-    retry: () => {
-      session.failures.delete(id)
-      session.backingOff.delete(id)
-      withPlan(session, id, (current) =>
-        current.blocked || current.stalled
-          ? { ...current, blocked: null, stalled: false }
-          : current,
-      )
-      clearTimeout(session.waiting.get(id))
-      session.waiting.delete(id)
-      persist(session, target, id, true)
-    },
-    toggleChanges: () => {
-      withPlan(session, id, (current) => ({ ...current, showChanges: !current.showChanges }))
-    },
-  })
+      },
+      flush: () => saveNow(place),
+      retry: () => retry(place),
+      toggleChanges: () => {
+        withDoc(place, (current) => ({ ...current, showChanges: !current.showChanges }))
+      },
+    }
+  }
+  const file = (target: WorkspaceTarget, id: ItemId, path: string): FileActions => {
+    const place = filePlace(session, target, id, path)
+    return {
+      edit: (text, marks) => {
+        const edited = withDoc(place, (current) =>
+          // A file the backend can't write takes no edits. One that was too large may not
+          // be, now.
+          text === current.text || !current.writable
+            ? current
+            : {
+                ...current,
+                text,
+                ...(marks && { marks }),
+                blocked: current.blocked === "too-large" ? null : current.blocked,
+              },
+        )
+        if (edited) saveSoon(place)
+      },
+      flush: () => saveNow(place),
+      retry: () => retry(place),
+    }
+  }
+  // Waits until `settled` holds, or a save's own time (20 s) has passed, asking again whenever
+  // the store changes or a save settles.
+  const settling = (settled: () => boolean): Promise<boolean> =>
+    new Promise((resolve) => {
+      const end = (done: boolean): void => {
+        stopStore()
+        session.planSaves.settled.delete(check)
+        session.fileSaves.settled.delete(check)
+        clearTimeout(timer)
+        resolve(done)
+      }
+      const check = (): void => {
+        if (settled()) end(true)
+      }
+      const stopStore = session.store.subscribe(check)
+      session.planSaves.settled.add(check)
+      session.fileSaves.settled.add(check)
+      const timer = setTimeout(() => end(settled()), saveTimeout)
+      check()
+    })
+  const saveFile: ItemStore["saveFile"] = (target, id, path) => {
+    const place = filePlace(session, target, id, path)
+    // How the edits stand: in the file, where they can't get, or undefined while a save may
+    // still take them there.
+    const standing = (): FileLeft | undefined => {
+      const state = session.store.getSnapshot()
+      const doc = place.read(state)
+      if (!doc || settledFile(session, place.key, doc)) return "saved"
+      const held = heldAt(session, id, path, state)
+      return !doc.writable || doc.stalled || fileBlockOf(doc, held) !== null || unreadableNow(held)
+        ? "stuck"
+        : undefined
+    }
+    if (standing() === "saved") return undefined
+    saveNow(place)
+    return settling(() => standing() !== undefined).then(() => standing() ?? "stuck")
+  }
+  const fileEdits = (id: ItemId, path: string): string | undefined => {
+    const doc = session.store.getSnapshot().files[fileKey(id, path)]
+    return doc && fileText(doc)
+  }
+  const dropFile = (id: ItemId, path: string): void => {
+    const key = fileKey(id, path)
+    forget(session.fileSaves, key)
+    session.store.update((state) => {
+      if (!(key in state.files)) return state
+      const { [key]: _dropped, ...files } = state.files
+      const held = heldAt(session, id, path, state)
+      const read = held && fileVersionOf(held)
+      return {
+        ...state,
+        files: read?.path === path ? { ...files, [key]: fileDocOf(id, path, read.version) } : files,
+      }
+    })
+  }
+  // The app is going, as when it quits or the page reloads: every edit not in its file yet,
+  // plans' and files', is sent at once, without asking anything, as whatever can't be saved
+  // is lost. Answers where each save is kept.
+  const sendAll = (): { readonly saves: Saves; readonly key: string }[] => {
+    const state = session.store.getSnapshot()
+    const workspaceNow = session.workspace.getSnapshot()
+    const sent: { readonly saves: Saves; readonly key: string }[] = []
+    for (const [id, doc] of Object.entries(state.plans)) {
+      const target = targetOf(workspaceNow, id as ItemId)
+      if (!target || (doc.text === doc.base && !session.planSaves.saving.has(id))) continue
+      const place = planPlace(session, target, id as ItemId)
+      saveNow(place)
+      sent.push(place)
+    }
+    for (const [key, doc] of Object.entries(state.files)) {
+      const target = targetOf(workspaceNow, doc.item)
+      if (!target || settledFile(session, key, doc)) continue
+      const place = filePlace(session, target, doc.item, doc.path)
+      saveNow(place)
+      sent.push(place)
+    }
+    return sent
+  }
+  // Before a quit: what `sendAll` sent, once answered, or a save's own time at most.
+  const saveAll = async (): Promise<void> => {
+    const sent = sendAll()
+    await settling(() => sent.every(({ saves, key }) => !saves.saving.has(key)))
+  }
+  // The page is going, as on a reload, with nothing to wait for its saves.
+  const pageHides = (): void => void sendAll()
   const connect = (): (() => void) => {
     reconcile(session, workspace.getSnapshot())
     // Items change far less often than the workspace: only a session's items changing
@@ -656,8 +763,12 @@ export const createItemStore = ({
       if (before.length !== after.length || after.some((items, index) => items !== before[index]))
         reconcile(session, next)
     })
+    const stopQuit = companions.beforeQuit?.(saveAll)
+    window.addEventListener("pagehide", pageHides)
     return () => {
       stopWorkspace()
+      stopQuit?.()
+      window.removeEventListener("pagehide", pageHides)
       for (const id of session.followed.keys()) unfollow(session, id)
     }
   }
@@ -677,6 +788,10 @@ export const createItemStore = ({
     reveal,
     unfold,
     plan,
+    file,
+    saveFile,
+    fileEdits,
+    dropFile,
     trouble,
     changeFile,
     changeRead,

@@ -7,10 +7,11 @@ import { OutlineThumb } from "../../document/OutlineThumb"
 import { useViewerSlot } from "../../ViewerSlot"
 import { DocumentViewer } from "./DocumentViewer"
 import { isMarkdown } from "./markdown"
+import { uneditableText } from "./uneditable"
 
 // A text file, as plain text at once, then highlighted when its language is one Novadeck
 // knows, in the code viewer. Where its viewer was, by item, is kept, so a file shown again
-// opens where it was.
+// opens where it was. One the project window couldn't have whole to edit says why.
 const CodeViewer = ({
   id,
   content: artifact,
@@ -40,6 +41,9 @@ const CodeViewer = ({
         <span>
           lines {artifact.from}–{artifact.to} · read-only
         </span>
+        {artifact.uneditable && (
+          <span className="pane-meta-hint">{uneditableText[artifact.uneditable]}</span>
+        )}
         {artifact.clamped && <span>The file ends at line {artifact.to}.</span>}
         {artifact.truncated && <span>It's long, so only its start is shown.</span>}
       </ArtifactMeta>

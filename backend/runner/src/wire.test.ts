@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
 import { createScreen } from "@novadeck/emulator/headless"
 import {
+  filesExcludeLimits,
   protocolVersion,
   type contract,
+  type ItemContent,
   type TerminalEvent,
   type WireClient,
 } from "@novadeck/protocol"
@@ -21,6 +23,7 @@ import { startServer, type ServerOptions } from "./server.js"
 import { describe, expect, it } from "./test.js"
 import { ptyOptions } from "./testing/pty.js"
 import type { Resources } from "./testing/resources.js"
+import { WorkspaceStore } from "./workspaces/store.js"
 
 const token = "novadeck-api-tests-only-not-a-production-credential"
 const fixture = async (resources: Resources, options: ServerOptions = {}) => {
@@ -382,6 +385,169 @@ describe("workspace metadata API", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
+  it("makes, renames and deletes a project's files, and refuses what isn't the project's to change", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, ".git"), { recursive: true })
+    await writeFile(join(cwd, "notes.md"), "# Notes\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Entries", cwd })
+    const projectId = project.id
+
+    await expect(
+      client.projects.createEntry({ projectId, path: "src/cart/total.ts", folder: false }),
+    ).resolves.toEqual({ path: "src/cart/total.ts" })
+    await expect(
+      client.projects.createEntry({ projectId, path: "docs", folder: true }),
+    ).resolves.toEqual({ path: "docs" })
+    await expect(
+      client.projects.moveEntry({ projectId, from: "notes.md", to: "docs/notes.md" }),
+    ).resolves.toEqual({ path: "docs/notes.md" })
+    await client.projects.removeEntry({ projectId, path: "src" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "docs"])
+    await expect(readFile(join(cwd, "docs", "notes.md"), "utf8")).resolves.toBe("# Notes\n")
+
+    await expect(
+      client.projects.createEntry({ projectId, path: "docs/notes.md", folder: false }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "There's already something named notes.md in docs.",
+    })
+    await Promise.all(
+      [
+        client.projects.createEntry({ projectId, path: "../escaped.md", folder: false }),
+        client.projects.createEntry({ projectId, path: ".git/hooks/pre-commit", folder: false }),
+        client.projects.moveEntry({ projectId, from: "docs", to: "docs/inner" }),
+        client.projects.moveEntry({ projectId, from: "docs/notes.md", to: ".GIT" }),
+        client.projects.removeEntry({ projectId, path: "" }),
+        client.projects.removeEntry({ projectId, path: "missing.md" }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })),
+    )
+    await expect(
+      client.projects.removeEntry({ projectId: randomUUID(), path: "docs" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      client.projects.removeEntry({ projectId, path: "x".repeat(5000) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "docs"])
+    expect(await readdir(app.directory)).not.toContain("escaped.md")
+  })
+
+  it("copies a project's files under a name that is free, and refuses what isn't the project's to copy", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, ".git"), { recursive: true })
+    await mkdir(join(cwd, "src"))
+    await writeFile(join(cwd, "src", "cart.ts"), "export {}\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Copies", cwd })
+    const projectId = project.id
+
+    await expect(
+      client.projects.copyEntry({ projectId, from: "src/cart.ts", into: "src" }),
+    ).resolves.toEqual({ path: "src/cart copy.ts" })
+    await expect(client.projects.copyEntry({ projectId, from: "src", into: "" })).resolves.toEqual({
+      path: "src copy",
+    })
+    expect((await readdir(join(cwd, "src copy"))).toSorted()).toEqual(["cart copy.ts", "cart.ts"])
+
+    await Promise.all(
+      [
+        client.projects.copyEntry({ projectId, from: "src", into: "src" }),
+        client.projects.copyEntry({ projectId, from: "src/cart.ts", into: ".git" }),
+        client.projects.copyEntry({ projectId, from: "src/cart.ts", into: ".." }),
+        client.projects.copyEntry({ projectId, from: "", into: "src" }),
+        client.projects.copyEntry({ projectId, from: "missing.ts", into: "" }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })),
+    )
+    await expect(
+      client.projects.copyEntry({ projectId: randomUUID(), from: "src", into: "" }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      client.projects.copyEntry({ projectId, from: "src", into: "x".repeat(5000) }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect((await readdir(cwd)).toSorted()).toEqual([".git", "src", "src copy"])
+    expect(await readdir(join(cwd, ".git"))).toEqual([])
+  })
+
+  it("says why the system refused a change to a project's files", async ({ resources, skip }) => {
+    skip(
+      process.platform === "win32" || process.getuid?.() === 0,
+      "Root, and Windows, are never refused by a folder's permissions.",
+    )
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(join(cwd, "locked"), { recursive: true })
+    await chmod(join(cwd, "locked"), 0o555)
+    resources.defer(() => chmod(join(cwd, "locked"), 0o755))
+    const project = await client.projects.create({ id: randomUUID(), name: "Locked", cwd })
+
+    await expect(
+      client.projects.createEntry({ projectId: project.id, path: "locked/a.md", folder: false }),
+    ).rejects.toMatchObject({
+      code: "WRITE_REFUSED",
+      message: "The system doesn't allow it: permission denied.",
+    })
+  })
+
+  it("keeps a project's patterns for hiding files, within limits, for any connection", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const other = await app.connect()
+    const { project } = await app.setup(client)
+    const projectId = project.id
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual({})
+
+    await client.projects.setFilesExclude({
+      projectId,
+      patterns: { "**/dist": true, "src/app/\\[id\\]": true, "*.log": false },
+    })
+
+    await expect(other.client.projects.filesExclude({ projectId })).resolves.toEqual({
+      "**/dist": true,
+      "src/app/\\[id\\]": true,
+      "*.log": false,
+    })
+    const many = (count: number) =>
+      Object.fromEntries(Array.from({ length: count }, (_, at) => [`${at}.log`, true]))
+    await client.projects.setFilesExclude({
+      projectId,
+      patterns: many(filesExcludeLimits.patterns),
+    })
+    await expect(
+      client.projects.setFilesExclude({
+        projectId,
+        patterns: many(filesExcludeLimits.patterns + 1),
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    await Promise.all(
+      [{ "": true }, { ["x".repeat(filesExcludeLimits.pattern + 1)]: true }, { dist: "yes" }].map(
+        (patterns) =>
+          expect(
+            client.projects.setFilesExclude({ projectId, patterns: patterns as never }),
+          ).rejects.toMatchObject({ code: "BAD_REQUEST" }),
+      ),
+    )
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual(
+      many(filesExcludeLimits.patterns),
+    )
+    await client.projects.setFilesExclude({ projectId, patterns: {} })
+    await expect(client.projects.filesExclude({ projectId })).resolves.toEqual({})
+    await Promise.all(
+      [
+        client.projects.filesExclude({ projectId: randomUUID() }),
+        client.projects.setFilesExclude({ projectId: randomUUID(), patterns: {} }),
+      ].map((call) => expect(call).rejects.toMatchObject({ code: "NOT_FOUND" })),
+    )
+  })
+
   it("browses the runner's folders, from its owner's home, without making anything", async ({
     resources,
   }) => {
@@ -439,6 +605,120 @@ describe("workspace metadata API", () => {
     await expect(
       client.terminals.resize({ terminalId: randomUUID(), cols: 80, rows: 24 }),
     ).rejects.toMatchObject({ code: "TERMINAL_NOT_FOUND" })
+  })
+})
+
+describe("companion items API", () => {
+  it("follows the project window's file whole with edit, and saves it only as the file the edit was made on", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const cwd = join(app.directory, "project")
+    await mkdir(cwd)
+    await writeFile(join(cwd, "a.ts"), "const a = 1\r\n")
+    const project = await client.projects.create({ id: randomUUID(), name: "Editing", cwd })
+    const session = await client.sessions.create({
+      id: randomUUID(),
+      projectId: project.id,
+      name: "Session",
+    })
+    const { item } = await client.companions.openInProject({
+      sessionId: session.id,
+      path: "a.ts",
+      windowId: randomUUID(),
+    })
+    const controller = new AbortController()
+    resources.defer(async () => controller.abort())
+    const stream = await client.companions.content(
+      { itemId: item.id, edit: true },
+      { signal: controller.signal },
+    )
+    const first = (await stream.next()).value as ItemContent
+    expect(first).toMatchObject({
+      state: "ready",
+      content: { kind: "text", path: item.path, text: "const a = 1\r\n", writable: true },
+    })
+    const basedOn = first.state === "ready" ? first.stamp : ""
+    const edit = { itemId: item.id, text: "const a = 2\r\n", basedOn }
+    // Made on another file, or on none it names: no file's edit is this one's.
+    for (const named of [{ path: join(cwd, "b.ts") }, {}])
+      // eslint-disable-next-line no-await-in-loop -- Each save after the other.
+      await expect(client.companions.save({ ...edit, ...named })).rejects.toMatchObject({
+        code: "PLAN_UNWRITABLE",
+        data: { reason: "moved" },
+      })
+    await expect(readFile(join(cwd, "a.ts"), "utf8")).resolves.toBe("const a = 1\r\n")
+    await expect(client.companions.save({ ...edit, path: item.path! })).resolves.toMatchObject({
+      saved: true,
+    })
+    await expect(readFile(join(cwd, "a.ts"), "utf8")).resolves.toBe("const a = 2\r\n")
+    await expect(client.companions.save({ ...edit, path: "x".repeat(5000) })).rejects.toMatchObject(
+      { code: "BAD_REQUEST" },
+    )
+  })
+
+  it("refuses a plan's edit made on another file than its item points at now", async ({
+    resources,
+  }) => {
+    // A plan its agent showed on a terminal's bar, kept from before the runner started.
+    const directory = await mkdtemp(join(tmpdir(), "novadeck-api-plan-"))
+    resources.defer(() => rm(directory, { recursive: true, force: true }))
+    const database = join(directory, "workspace.sqlite")
+    const plan = join(directory, "plan.md")
+    await writeFile(plan, "# Plan\n")
+    const seeded = new WorkspaceStore(database)
+    const project = await seeded.createProject({ id: randomUUID(), name: "Plans", cwd: directory })
+    const session = seeded.createSession({ id: randomUUID(), projectId: project.id, name: "S" })
+    const terminalId = randomUUID()
+    seeded.saveTerminal({
+      id: terminalId,
+      sessionId: session.id,
+      cwd: directory,
+      agents: {},
+      promptedAt: null,
+      handle: "moth",
+      naming: { person: null, opener: null, murmur: null, own: null, summary: null },
+      openedBy: null,
+      ledBy: null,
+      command: null,
+      lastProgram: null,
+      work: null,
+    })
+    const itemId = randomUUID()
+    seeded.saveItem({
+      id: itemId,
+      sessionId: session.id,
+      terminalId,
+      windowId: null,
+      pointerKey: "plan:agent-session:",
+      kind: "plan",
+      path: plan,
+      url: null,
+      lines: null,
+      plan: { agent: "claude", session: "agent-session", actor: null, format: "file" },
+      name: "Plan",
+      detail: "",
+      secret: false,
+      by: "agent",
+      from: { terminalId, handle: "moth" },
+      version: 1,
+      openAsked: false,
+      shownAt: 1,
+      observedAt: 1,
+    })
+    seeded.close()
+    const app = await fixture(resources, { database })
+    const { client } = await app.connect()
+    await expect(
+      client.companions.save({
+        itemId,
+        text: "# Mine\n",
+        basedOn: "",
+        path: join(directory, "other.md"),
+      }),
+    ).rejects.toMatchObject({ code: "PLAN_UNWRITABLE", data: { reason: "moved" } })
+    await expect(readFile(plan, "utf8")).resolves.toBe("# Plan\n")
   })
 })
 

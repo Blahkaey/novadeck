@@ -46,6 +46,10 @@ import { context, describe, expect, it } from "../../test"
 import { followMessages, noLinks } from "./messages/messages"
 import { TerminalCompanion, type ItemCommands } from "./TerminalCompanion"
 
+// CodeMirror, as the plan's editor loads it: lazily, so it stays out of the app's first chunk.
+const { EditorSelection } = await import("@codemirror/state")
+const { EditorView } = await import("@codemirror/view")
+
 const agent = (handle: string): MessageParty => ({
   kind: "agent",
   terminalId: `id-${handle}`,
@@ -249,6 +253,61 @@ describe("a pane beside its terminal", () => {
       pointer("pointercancel", 400)
       pointer("pointermove", 600)
       expect(ratio()).toBe("40")
+    })
+  })
+
+  context("when Escape in a plan's editor only collapses what it selected", () => {
+    it("stays open, and hides on the Escape after", async () => {
+      const plan = itemFixture("plan", "01", {
+        kind: "plan",
+        name: "Plan",
+        path: "plan.md",
+        plan: { agent: "Codex", role: "root", source: "file" },
+      })
+      const companions: Companions = {
+        ...emptyCompanions(),
+        follow: (_target, _id, _options, on) => {
+          on({
+            state: "ready",
+            stamp: "1",
+            content: {
+              kind: "plan",
+              text: "# Plan\n\nSteps.\n",
+              truncated: false,
+              writable: true,
+              skill: true,
+            },
+          })
+          return () => {}
+        },
+      }
+      const { container, workspace } = renderTerminal(
+        workspaceReducer(workspaceReducer(workspaceFixture(), shown(plan)), {
+          type: "bar/open",
+          target,
+          terminalId: "01",
+          key: plan.id,
+        }),
+        undefined,
+        companions,
+      )
+      await act(async () => {
+        await vi.dynamicImportSettled()
+      })
+      const view = EditorView.findFromDOM(container.querySelector<HTMLElement>(".cm-editor")!)!
+      act(() => view.dispatch({ selection: EditorSelection.range(0, 6) }))
+      const escape = () =>
+        act(() => {
+          view.contentDOM.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+          )
+        })
+      const open = () => activeSession(workspace.getSnapshot())!.state.bars["01"]?.open
+      escape()
+      expect(view.state.selection.main.empty).toBe(true)
+      expect(open()).toBe(true)
+      escape()
+      expect(open()).toBe(false)
     })
   })
 })
@@ -1159,13 +1218,28 @@ describe("a terminal's taskbar", () => {
       await answer("Copy my edits and close")
       expect(writeText).toHaveBeenCalledOnce()
       expect(onBar(workspace)).toEqual(["first.md"])
-      expect(dialog()?.textContent).toContain("Your edits couldn't be copied")
+      expect(dialog()?.textContent).toContain(
+        "Your edits couldn't be copied, so the plan is still open. Try again, copy them from the plan yourself, or close it without them.",
+      )
       // The dialog still cancels, though it was confirmed.
       await act(async () =>
         dialog()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
       )
       await vi.waitFor(() => expect(dialog()).toBeNull())
       expect(onBar(workspace)).toEqual(["first.md"])
+    })
+
+    it("closes it without the edits once a copy failed and the person says so", async () => {
+      clipboard(() => Promise.reject(new Error("Document is not focused")))
+      const { container, workspace } = await stuck([placed("p1", "first.md")])
+      await act(async () => (icon(container, "Plan: First") as HTMLElement).click())
+      await act(async () =>
+        container.querySelector<HTMLElement>("[aria-label='Close First']")!.click(),
+      )
+      await answer("Copy my edits and close")
+      await vi.waitFor(() => expect(dialog()?.textContent).toContain("couldn't be copied"))
+      await answer("Close without my edits")
+      expect(onBar(workspace)).toEqual([])
     })
 
     it("keeps it open where there's no clipboard", async () => {

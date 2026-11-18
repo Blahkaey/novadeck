@@ -5,19 +5,28 @@
    sits inside. A file's marks are a `.files-cursor` for each agent writing it now, or else a
    `.files-trail` fading from its latest write. A panel with no tree shows `.files-empty`; an open folder
    that could not be read in full, or holds nothing, ends with a `.files-note` (in a
-   `.files-note-row`, which carries the guides).
+   `.files-note-row`, which carries the guides). The tree, or the line in its place, sits in a
+   `.files-body`, whose right-click opens the panel's menu. What the panel couldn't do, as a
+   copy the clipboard refused, is a `.files-failure` line at the top, a `.sidebar-refusal`
+   (sidebar.css). A name being typed, a new entry's or a row's in its place, is a
+   `.files-naming-row` (carrying the guides) whose `.files-naming-line` holds the twisty's room,
+   the icon and a `.files-naming-field`: the `.files-naming-input` and, under it while the name
+   won't do, a `.files-naming-problem` line in --color-danger-fg.
 
    Hooks: on a row, data-kind="modified" | "added" | "deleted" (absent: untouched),
    data-folder, data-ignored, data-dim (an agent is lit and did not touch it), data-pulse="a" |
-   "b" (a write just landed; the two names restart the animation) and, being an item,
-   data-selected. On a chip, data-writing (it is writing that row now) and data-lit. On the
-   tree, data-lit="<handle>" while an agent is lit.
+   "b" (a write just landed; the two names restart the animation), data-cut (cut, to move where
+   the person pastes) and, being an item, data-selected. A row a paste copies or moves now has
+   aria-busy="true" on its `.files-row-select`, and a `.files-busy` spinner in its icon's place.
+   On a chip, data-writing (it is writing that row now) and data-lit. On the tree,
+   data-lit="<handle>" while an agent is lit.
 
    Tokens, each optional (its fallback in brackets):
    --files-modified-fg (warning-fg), --files-added-fg (success-fg): a changed file's icon
    and name; a deleted one's are muted. --files-guide-color (line): the guide under an
-   open folder. --files-ignored-opacity (0.5), --files-dim-opacity (0.3): ignored rows,
-   and the rows a lit agent did not touch. --files-pulse-bg (the strong colour at 14%): a
+   open folder. --files-ignored-opacity (0.5), --files-dim-opacity (0.3), --files-cut-opacity
+   (0.45): ignored rows, the rows a lit agent did not touch, and a cut row, whose name is italic
+   too. --files-pulse-bg (the strong colour at 14%): a
    row as a write lands. --files-cursor-bg (strong): the cursor, its glow
    --item-selected-indicator-shadow (none); the trail's edge follows it. --files-chip-fg
    (muted), --files-chip-writing-fg (ink): an agent's chip, and one writing the row.
@@ -49,6 +58,12 @@
 }
 .files-row[data-dim="true"] {
   opacity: var(--files-dim-opacity, 0.3);
+}
+.files-row[data-cut="true"] {
+  opacity: var(--files-cut-opacity, 0.45);
+}
+.files-row[data-cut="true"] .files-name {
+  font-style: italic;
 }
 .files-row-select {
   display: flex;
@@ -227,8 +242,28 @@
   }
 }
 
+/* A paste copies or moves the row now: a spinner in its icon's place, as the History panel's. */
+.files-busy {
+  display: block;
+  width: 14px;
+  height: 1lh;
+  overflow: hidden;
+  color: var(--color-strong);
+  font-family: var(--font-glyphs, var(--font-mono));
+  text-align: center;
+}
+.files-busy::before {
+  display: block;
+  white-space: pre;
+  content: "⠋\A⠙\A⠹\A⠸\A⠼\A⠴\A⠦\A⠧\A⠇\A⠏";
+  animation: terminal-spin 800ms steps(10) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .files-cursor {
+    animation: none;
+  }
+  .files-busy::before {
     animation: none;
   }
   .files-trail {
@@ -243,6 +278,51 @@
   margin: 0;
   padding: 12px 2px;
   color: var(--color-muted);
+}
+
+/* As wide as the tree's rows. */
+.files-failure {
+  margin: 8px 0 0;
+}
+
+.files-naming-row {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.files-naming-line {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 4px 2px 0;
+}
+.files-naming-line > :is(.files-twisty, .files-icon) {
+  height: 22px;
+  align-items: center;
+}
+.files-naming-field {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+.files-naming-input {
+  height: 22px;
+  min-width: 0;
+  padding: 0 4px;
+  outline-offset: -1px;
+}
+.files-naming-input[aria-invalid="true"] {
+  --_border-color: var(--color-danger-fg);
+}
+.files-naming-problem {
+  padding: 0 0 2px 1px;
+  color: var(--color-danger-fg);
+  overflow-wrap: anywhere;
 }
 
 .files-note-row {
@@ -312,4 +392,16 @@
 .files-agent:focus-visible {
   outline: 2px solid var(--color-strong);
   outline-offset: -2px;
+}
+
+/* The patterns for hiding files (FilesExcludeList.tsx), in Preferences and the panel's Hidden
+   files dialog (`.files-exclude-dialog`): a `.files-exclude` settings card, one row a pattern,
+   each a `.files-exclude-pattern` in the mono face, broken anywhere so a long one wraps in its
+   row, and the `.files-exclude-input` that adds one, typed in the same face. */
+.files-exclude-pattern,
+.files-exclude-input {
+  font-family: var(--font-mono);
+}
+.files-exclude-pattern {
+  overflow-wrap: anywhere;
 }

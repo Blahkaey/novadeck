@@ -1,28 +1,40 @@
-import type {
-  ProjectFiles,
-  FolderEntry,
-  TouchedFile,
-  FolderListing,
-  FilesProject,
-  FilesState,
+import {
+  ChangeUnanswered,
+  filesExcludeLimits,
+  type ProjectFiles,
+  type FilesExclude,
+  type FolderEntry,
+  type TouchedFile,
+  type FolderListing,
+  type FilesProject,
+  type FilesState,
 } from "@novadeck/core/files"
+import type { ItemContent, ItemId } from "@novadeck/core/items"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceSeed } from "@novadeck/core/seed"
 import { createStore } from "@novadeck/core/store"
-import type { Workspace } from "@novadeck/core/types"
+import type { Workspace, WorkspaceTarget } from "@novadeck/core/types"
 
 import type { DemoTurns } from "./agents/turns"
+import type { DemoFileEdits } from "./file-edits"
 import { demoHandle } from "./handles"
 import { lessMotion, stillRequested } from "./motion"
+import { atOrBelow, holds, parentOf, trimmed, type Tree } from "./project-paths"
 import { demoTerminalId } from "./samples"
-import { terminalOf } from "./workspace"
+import { terminalOf, windowFileOf } from "./workspace"
 
 // The demo's Files panel: the storefront project's files, listed a folder at a time from
 // fixtures, as its agents change them. Each agent notionally works in its own worktree, so every write is its handle's.
 // Moth's changes are history, from the plan it waits on. An agent writes only while it
 // works: its terminal's agent status says it works and asks nothing of the person. Then it
 // writes while the page is in view, a file every few seconds, now and then resting between
-// turns; waiting on the person or at rest, it writes nothing and shows no cursor.
+// turns; waiting on the person or at rest, it writes nothing and shows no cursor. Each project's
+// own patterns for hiding files are kept in memory, as the runner keeps them, from none. The
+// person makes, renames, moves, copies and deletes files in memory too, in a copy of the project's
+// tree the agents' work follows (a copy starts with none of it; see ./files-changes.ts), and a
+// window showing a file they deleted, or moved away, says it is gone. The file a session's project
+// window shows is edited and saved in memory as well (see ./file-edits.ts), its text following
+// those changes. Both load with the first of them, out of the visitor build's demo load.
 
 const projectId = "storefront"
 const session = { projectId, workspaceSessionId: "initial" }
@@ -128,16 +140,18 @@ export const storefrontFiles = (
 })
 
 // The project with `handle`'s write to `path` at `at`: the file is changed by it, a
-// new one added, an existing one modified, and it is the file the agent is writing now.
+// new one added, an existing one modified, and it is the file the agent is writing now. `tree`
+// is the project's tree as it stands, the fixtures' before the person changes it.
 export const writeTo = (
   project: FilesProject,
   handle: string,
   path: string,
   at: number,
+  tree: readonly string[],
 ): FilesProject => {
   const was = project.changes[path]
   const kind =
-    was && was.kind !== "deleted" ? was.kind : entries.includes(path) || was ? "modified" : "added"
+    was && was.kind !== "deleted" ? was.kind : tree.includes(path) || was ? "modified" : "added"
   return {
     ...project,
     changes: { ...project.changes, [path]: file(kind, { ...was?.touched, [handle]: at }) },
@@ -147,13 +161,14 @@ export const writeTo = (
 
 // The project with `handle`'s change to `path` as `kind` (at `at`), or, with no kind, with it
 // no longer changing it: the file is as the others' changes leave it, and gone from the changes
-// when nobody is left.
+// when nobody is left. `tree` is as for `writeTo`.
 export const markIn = (
   project: FilesProject,
   handle: string,
   path: string,
   kind: TouchedFile["kind"] | undefined,
   at: number,
+  tree: readonly string[],
 ): FilesProject => {
   const was = project.changes[path]
   if (kind !== undefined)
@@ -170,7 +185,7 @@ export const markIn = (
     changes:
       Object.keys(touched).length === 0
         ? rest
-        : { ...rest, [path]: file(entries.includes(path) ? "modified" : "added", touched) },
+        : { ...rest, [path]: file(tree.includes(path) ? "modified" : "added", touched) },
   }
 }
 
@@ -180,12 +195,6 @@ export const endTurnIn = (project: FilesProject, handle: string): FilesProject =
   const { [handle]: _, ...writing } = project.writing
   return { ...project, writing }
 }
-
-const trimmed = (path: string): string => (path.endsWith("/") ? path.slice(0, -1) : path)
-
-// A project's tree, as the fixtures hold it: an entry ending in `/` is a folder with nothing in
-// it, and `ignored` names what the project's VCS ignores.
-type Tree = { readonly entries: readonly string[]; readonly ignored: readonly string[] }
 
 const storefront: Tree = { entries, ignored }
 
@@ -381,9 +390,39 @@ const between = (range: { min: number; max: number }, roll: number): number =>
   range.min + Math.floor(roll * (range.max - range.min + 1))
 
 export type DemoFiles = ProjectFiles & {
+  readonly exclude: NonNullable<ProjectFiles["exclude"]>
+  // The files the person edits in a project window, which the debug panel puts in faults: none
+  // until the window reads one whole or the person makes one, which loads them.
+  readonly edits: () => DemoFileEdits | undefined
+  // Loads them now where they aren't yet, as `&fileFault=` asks before the window reads a file.
+  readonly editing: () => Promise<DemoFileEdits>
+  readonly create: NonNullable<ProjectFiles["create"]>
+  readonly move: NonNullable<ProjectFiles["move"]>
+  readonly copy: NonNullable<ProjectFiles["copy"]>
+  readonly remove: NonNullable<ProjectFiles["remove"]>
   // Has the next reads of `folder` go as `fault` says, or normally for none. The panel reads
   // a folder again when it is shown again or an agent's turn ends.
   readonly degrade: (folder: string, fault: FilesFault | undefined) => void
+  // Has the next save of a project's patterns for hiding files fail, or, with false, go through
+  // again.
+  readonly failNextExcludeSave: (fails?: boolean) => void
+  // Has every read of a project's patterns for hiding files fail, or, with false, answer again.
+  readonly failExcludeReads: (fails?: boolean) => void
+  // Has the next file made, renamed or deleted fail, once, or, with false, go through again.
+  readonly failNextChange: (fails?: boolean) => void
+  // Has the next paste, a copy or a move into another folder, fail, once, or, with false, go
+  // through again.
+  readonly failNextPaste: (fails?: boolean) => void
+  // Has the next paste take `ms` before it is made or fails, once, or, with none, take no time.
+  readonly slowNextPaste: (ms?: number) => void
+  // Has the next move, copy or delete made answer as one the connection dropped under before the
+  // answer came (`ChangeUnanswered`), once, or, with false, answer again.
+  readonly loseNextAnswer: (loses?: boolean) => void
+  // Whether the person deleted the file at `path` of a project, or a folder it was in, or moved
+  // it away, and it isn't there again.
+  readonly gone: (projectId: string, path: string) => boolean
+  // Calls `on` whenever the person makes, moves or deletes a file or folder, until stopped.
+  readonly watchGone: (on: () => void) => () => void
   // Has `handle` write a file now, `path` or else the one it would next, as its turn goes on.
   readonly write: (handle: string, path?: string) => void
   // Has `handle` change `path` as `kind` without writing it now, or no longer change it.
@@ -409,6 +448,9 @@ export type DemoFiles = ProjectFiles & {
 export const isDemoFiles = (files: ProjectFiles | undefined): files is DemoFiles =>
   files !== undefined && "write" in files && "endTurn" in files
 
+// How the person changes a project's tree, loaded with their first change.
+const changes = () => import("./files-changes")
+
 export const createDemoFiles = (
   now: number = Date.now(),
   clock: FilesClock = realClock,
@@ -427,6 +469,18 @@ export const createDemoFiles = (
       return next && next !== project ? { projects: { ...was.projects, [projectId]: next } } : was
     })
   }
+  // Each project's tree as the person changed it; the fixtures' until they do.
+  const changed = new Map<string, Tree>()
+  const treeNow = (id: string): Tree => changed.get(id) ?? treeOf(id)
+  // The files the person edits in a project window, made as the window first reads one whole, the
+  // person makes one or `&fileFault=` asks: none before, when a change in Files has no text to
+  // carry along.
+  let edits: DemoFileEdits | undefined
+  const editing = async (): Promise<DemoFileEdits> => {
+    const { createFileEdits } = await import("./file-edits")
+    edits ??= createFileEdits(({ projectId: id, path }) => holds(treeNow(id), path) === "file")
+    return edits
+  }
   const write = (handle: string, path?: string): void =>
     change((project) =>
       writeTo(
@@ -434,22 +488,54 @@ export const createDemoFiles = (
         handle,
         path ?? nextFile(project, handle, clock.random(), clock.random()),
         clock.now(),
+        treeNow(projectId).entries,
       ),
     )
   const endTurn = (handle: string): void => change((project) => endTurnIn(project, handle))
   const mark = (handle: string, path: string, kind: TouchedFile["kind"] | undefined): void =>
-    change((project) => markIn(project, handle, path, kind, clock.now()))
+    change((project) =>
+      markIn(project, handle, path, kind, clock.now(), treeNow(projectId).entries),
+    )
 
   const faults = new Map<string, FilesFault>()
   const degrade = (folder: string, fault: FilesFault | undefined): void => {
     if (fault) faults.set(folder, fault)
     else faults.delete(folder)
   }
+  // Each project's own patterns, as the runner keeps them: a save of more than a project keeps is
+  // refused as the runner refuses it.
+  const excludes = new Map<string, FilesExclude>()
+  let excludeSaveFails = false
+  const failNextExcludeSave = (fails = true): void => {
+    excludeSaveFails = fails
+  }
+  let excludeReadsFail = false
+  const failExcludeReads = (fails = true): void => {
+    excludeReadsFail = fails
+  }
+  const exclude: DemoFiles["exclude"] = {
+    read: async (id) => {
+      if (excludeReadsFail) throw new Error("The demo was told to fail this read.")
+      return excludes.get(id) ?? {}
+    },
+    save: async (id, patterns) => {
+      if (excludeSaveFails) {
+        excludeSaveFails = false
+        throw new Error("The demo was told to fail this save.")
+      }
+      if (Object.keys(patterns).length > filesExcludeLimits.patterns)
+        throw new Error(
+          `A project keeps at most ${filesExcludeLimits.patterns} patterns for hiding files. Remove some to add more.`,
+        )
+      excludes.set(id, patterns)
+    },
+  }
+
   const list = async (id: string, folder: string): Promise<FolderListing> => {
     const fault = faults.get(folder)
     if (fault === "fail") throw new Error("This folder can't be read")
     if (fault === "empty") return { entries: [], truncated: false }
-    const tree = treeOf(id)
+    const tree = treeNow(id)
     const known = tree.entries.some(
       (path) => trimmed(path) === folder || path.startsWith(`${folder}/`),
     )
@@ -458,6 +544,96 @@ export const createDemoFiles = (
     return fault === "truncate"
       ? { entries: all.slice(0, truncatedTo), truncated: true }
       : { entries: all, truncated: false }
+  }
+
+  // The person's changes, refused as the runner refuses them, in its words. Each project's paths
+  // the person deleted or moved away, until made there again.
+  const away = new Map<string, readonly string[]>()
+  const goneWatchers = new Set<() => void>()
+  let changeFails = false
+  const failNextChange = (fails = true): void => {
+    changeFails = fails
+  }
+  // A paste, a copy or a move into another folder, as the debug panel has the next one go.
+  let pasteFails = false
+  const failNextPaste = (fails = true): void => {
+    pasteFails = fails
+  }
+  let pasteDelay = 0
+  const slowNextPaste = (ms = 0): void => {
+    pasteDelay = ms
+  }
+  // Throws as the debug panel asked for the next change, a paste or not, once; a paste after the
+  // time it was told to take.
+  const fault = async (pasting: boolean): Promise<void> => {
+    if (pasting) {
+      const delay = pasteDelay
+      pasteDelay = 0
+      if (delay > 0) await new Promise<void>((resolve) => void clock.after(delay, resolve))
+      if (!pasteFails) return
+      pasteFails = false
+      throw new Error("The demo was told to fail this paste.")
+    }
+    if (!changeFails) return
+    changeFails = false
+    throw new Error("The demo was told to fail this change.")
+  }
+  // The next move, copy or delete, once made, answers as unanswered, as the debug panel asks.
+  let answerLost = false
+  const loseNextAnswer = (loses = true): void => {
+    answerLost = loses
+  }
+  const answered = <T>(made: T): T => {
+    if (!answerLost) return made
+    answerLost = false
+    throw new ChangeUnanswered()
+  }
+  // The project's tree is now `tree`; `left` went from it, `arrived` came.
+  const settle = (id: string, tree: Tree, left: string | undefined, arrived: string): void => {
+    changed.set(id, tree)
+    const before = (away.get(id) ?? []).filter((each) => !atOrBelow(each, arrived))
+    away.set(id, left === undefined ? before : [...before, left])
+    goneWatchers.forEach((on) => on())
+  }
+  const create: DemoFiles["create"] = async (id, path, folder) => {
+    await fault(false)
+    const [{ made }, edited] = await Promise.all([changes(), editing()])
+    settle(id, made(treeNow(id), path, folder), undefined, path)
+    if (!folder) edited.made(id, path)
+    return path
+  }
+  // A move into another folder is a paste after a cut; one in its own folder, a rename.
+  const move: DemoFiles["move"] = async (id, from, to) => {
+    await fault(parentOf(from) !== parentOf(to))
+    const { moved, movedIn } = await changes()
+    settle(id, moved(treeNow(id), from, to), from, to)
+    edits?.moved(id, from, to)
+    if (id === projectId) change((project) => movedIn(project, from, to))
+    return answered(to)
+  }
+  // A copy into the folder `into` under the name the runner would give it, with no agent's work on
+  // it: the agents' work stays where it was.
+  const copy: DemoFiles["copy"] = async (id, from, into) => {
+    await fault(true)
+    const { copied } = await changes()
+    const { tree, to } = copied(treeNow(id), from, into)
+    settle(id, tree, undefined, to)
+    edits?.copied(id, from, to)
+    return answered(to)
+  }
+  const remove: DemoFiles["remove"] = async (id, path) => {
+    await fault(false)
+    const { removed, removedIn } = await changes()
+    settle(id, removed(treeNow(id), path), path, path)
+    edits?.removed(id, path)
+    if (id === projectId) change((project) => removedIn(project, path))
+    answered(undefined)
+  }
+  const gone = (id: string, path: string): boolean =>
+    (away.get(id) ?? []).some((each) => atOrBelow(path, each)) && !holds(treeNow(id), path)
+  const watchGone = (on: () => void): (() => void) => {
+    goneWatchers.add(on)
+    return () => goneWatchers.delete(on)
   }
 
   // One agent's turns, a write every few seconds and a rest between them, until stopped.
@@ -532,7 +708,49 @@ export const createDemoFiles = (
     }
   }
 
-  return { state, list, degrade, write, mark, endTurn, start, close, halt }
+  return {
+    state,
+    list,
+    exclude,
+    edits: () => edits,
+    editing,
+    degrade,
+    failNextExcludeSave,
+    failExcludeReads,
+    create,
+    move,
+    copy,
+    remove,
+    failNextChange,
+    failNextPaste,
+    slowNextPaste,
+    loseNextAnswer,
+    gone,
+    watchGone,
+    write,
+    mark,
+    endTurn,
+    start,
+    close,
+    halt,
+  }
+}
+
+// What a window shows of a file the person deleted, or moved away, as the runner's watch reports it.
+const missing: ItemContent = { state: "unavailable", reason: "missing", size: null }
+
+// Follows as `follow` does with what `loading` loads, once it has, unless stopped before.
+// Returns the stop.
+const once = <T>(loading: Promise<T>, follow: (loaded: T) => () => void): (() => void) => {
+  let stop: (() => void) | undefined
+  let stopped = false
+  void loading.then((loaded) => {
+    if (!stopped) stop = follow(loaded)
+  })
+  return () => {
+    stopped = true
+    stop?.()
+  }
 }
 
 // A backend with the demo's files for the storefront project.
@@ -548,9 +766,68 @@ export const withFiles = (
     const agent = terminal?.state === "running" ? terminal.agent : undefined
     return agent?.working === true && !agent.attention
   }
+  // Whether the item shows a file of its project the person deleted, or moved away.
+  const showsGone = (target: WorkspaceTarget, itemId: ItemId): boolean => {
+    const project = latest?.projects.find((each) => each.id === target.projectId)
+    const shown = project?.history.find((each) => each.id === target.workspaceSessionId)
+    const path = shown?.state.items.find((each) => each.id === itemId)?.path
+    const inside = project && `${project.directory}/`
+    return (
+      inside !== undefined &&
+      path?.startsWith(inside) === true &&
+      files.gone(target.projectId, path.slice(inside.length))
+    )
+  }
+  const { companions } = backend
   return {
     ...backend,
     files,
+    ...(companions && {
+      companions: {
+        ...companions,
+        // A window that shows a file the person deleted, or moved away, says it is gone, until
+        // it shows another file or the file is there again. The project window's file, read
+        // whole to edit, is the one the person edits here; anything else is as the demo shows it.
+        follow: (target, itemId, options, on) => {
+          let last: ItemContent | undefined
+          let wasGone = false
+          const tell = (fresh: boolean): void => {
+            const isGone = showsGone(target, itemId)
+            if (!last || (!fresh && isGone === wasGone)) return
+            wasGone = isGone
+            on(isGone ? missing : last)
+          }
+          const told = (content: ItemContent): void => {
+            last = content
+            tell(true)
+          }
+          const unwatch = files.watchGone(() => tell(false))
+          const shown = options.edit ? windowFileOf(latest, target) : undefined
+          const stop =
+            shown?.itemId === itemId
+              ? once(files.editing(), (edits) =>
+                  edits.follow(
+                    shown,
+                    (stand) => companions.follow(target, itemId, options, stand),
+                    told,
+                  ),
+                )
+              : companions.follow(target, itemId, options, told)
+          return () => {
+            stop()
+            unwatch()
+          }
+        },
+        // The project window's file is saved as the runner saves it; anything else, a plan, as
+        // the demo saves it.
+        save: async (target, itemId, text, basedOn, path) => {
+          const shown = windowFileOf(latest, target)
+          return shown?.itemId === itemId
+            ? (await files.editing()).save(shown, text, basedOn, path)
+            : companions.save(target, itemId, text, basedOn, path)
+        },
+      },
+    }),
     commit: (workspace, actions) => {
       latest = workspace
       backend.commit(workspace, actions)

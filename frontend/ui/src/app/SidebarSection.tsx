@@ -1,4 +1,5 @@
 import { allTeams, sameTeams } from "@novadeck/core/derivations"
+import type { FilesExclude } from "@novadeck/core/files"
 import type { ForgeConnection } from "@novadeck/core/forges"
 import type { ClosedTerminal, HistoryState } from "@novadeck/core/history"
 import { itemIdOf } from "@novadeck/core/items"
@@ -24,6 +25,7 @@ import {
   previewFiles,
   sameOwners,
   sameWorks,
+  savingFirst,
 } from "./files-feed"
 import { FilesSection } from "./FilesSection"
 import { useTabsAway } from "./move-to"
@@ -85,6 +87,45 @@ export const SidebarSection = memo((): React.JSX.Element => {
     (folder: string) => filesFeed!.list(projectId, folder),
     [filesFeed, projectId],
   )
+  // What hides files from it: the person's patterns for every project, and the project's own where
+  // the backend keeps them.
+  const exclude = useUiState((state) => state.preferences.filesExclude)
+  const excludeFeed = filesFeed?.exclude
+  const projectExclude = useMemo(
+    () =>
+      excludeFeed && {
+        read: () => excludeFeed.read(projectId),
+        save: (patterns: FilesExclude) => excludeFeed.save(projectId, patterns),
+      },
+    [excludeFeed, projectId],
+  )
+  // How the backend makes, moves, copies and deletes the project's files, each where it can. A
+  // move or a delete of the file a project window shows, or of a folder holding it, saves the
+  // edits to it first (`savingFirst`).
+  const entries = useMemo(() => {
+    if (!filesFeed) return undefined
+    const { create, move, copy, remove } = filesFeed
+    return {
+      ...(create && {
+        create: (path: string, folder: boolean) => create(projectId, path, folder),
+      }),
+      ...(copy && { copy: (from: string, into: string) => copy(projectId, from, into) }),
+      ...savingFirst(
+        {
+          ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),
+          ...(remove && { remove: (path: string) => remove(projectId, path) }),
+        },
+        (path, action) => commands.saveBeforeChange(projectId, path, action),
+      ),
+    }
+  }, [filesFeed, projectId, commands])
+  // What the project's windows do once the person moved one of its files.
+  const onMoved = useCallback(
+    (from: string, to: string) => void commands.followMovedFile(projectId, from, to),
+    [commands, projectId],
+  )
+  // Where the panel's paths are copied from.
+  const directory = useWorkspaceState((workspace) => activeProject(workspace)!.directory)
   const selectedHandle = useWorkspaceState((workspace) => {
     const { roster, selected } = currentState(workspace)
     return roster.terminals.find((terminal) => terminal.id === selected)?.handle
@@ -338,7 +379,13 @@ export const SidebarSection = memo((): React.JSX.Element => {
           <FilesSection
             key={projectId}
             project={filesProject ?? worksOverlay}
+            directory={directory}
             list={list}
+            exclude={exclude}
+            projectExclude={projectExclude}
+            onExcludeSettings={commands.openFilesExcludeSettings}
+            entries={entries}
+            onMoved={onMoved}
             watch={watchWorks}
             onOpenFile={onOpenFile}
             onLit={onLit}

@@ -1002,6 +1002,35 @@ describe("runner backend", () => {
   })
 
   context("when the app quits", () => {
+    it("waits for the person's edits the item store sends, and not for one it let go", async () => {
+      const quits: (() => Promise<void>)[] = []
+      const app = open(runner.listing, {
+        beforeQuit: (save) => {
+          quits.push(save)
+          return () => void quits.splice(quits.indexOf(save), 1)
+        },
+      })
+      const sent: string[] = []
+      let answer: () => void = () => {}
+      const stopKept = app.backend.companions!.beforeQuit!(() => {
+        sent.push("kept")
+        return new Promise<void>((resolve) => (answer = resolve))
+      })
+      app.backend.companions!.beforeQuit!(() => {
+        sent.push("let go")
+        return Promise.resolve()
+      })()
+      let quit = false
+      const quitting = quits[0]!().then(() => (quit = true))
+      await settled()
+      expect(sent).toEqual(["kept"])
+      expect(quit).toBe(false)
+      answer()
+      await quitting
+      stopKept()
+      app.stop()
+    })
+
     it.skipIf(process.platform !== "linux")(
       "saves the program in the foreground before the app ends the shells",
       async () => {

@@ -2,6 +2,8 @@ import type { FilesProject } from "@novadeck/core/files"
 
 import { context, describe, expect, it } from "../test"
 import { folderListings } from "../test/files"
+import type { Naming } from "./files-edit"
+import { hidesOf } from "./files-exclude"
 import {
   buildTree,
   expandable,
@@ -15,8 +17,11 @@ import {
   fileIconOf,
   foldChips,
   initialOpen,
+  isNaming,
   isNote,
+  isRow,
   rowShowing,
+  shownWork,
   trailGone,
   trailLifeMs,
   trailOpacity,
@@ -33,7 +38,7 @@ const project = (parts: Partial<FilesProject> = {}): FilesProject => ({
 
 // The rows on screen, without the notes between them.
 const visibleRows = (tree: readonly FilesNode[], open: ReadonlySet<string>): readonly FilesRow[] =>
-  visibleLines(tree, open).filter((line): line is FilesRow => !isNote(line))
+  visibleLines(tree, open).filter(isRow)
 const paths = (rows: readonly FilesRow[]): string[] => rows.map(({ node }) => node.path)
 
 describe("The Files tree", () => {
@@ -174,7 +179,7 @@ describe("The Files tree", () => {
     const open = new Set(["src", "docs"])
     const shown = (only: string[]) =>
       visibleLines(tree, open, true, new Set(only)).map((line) =>
-        isNote(line) ? `note:${line.path}` : line.node.path,
+        isRow(line) ? line.node.path : isNote(line) ? `note:${line.path}` : "naming",
       )
 
     it("leaves out the files and folders none of them touched or is writing", () => {
@@ -199,6 +204,61 @@ describe("The Files tree", () => {
         "src/b.ts",
         "d.json",
         "note:",
+      ])
+    })
+  })
+
+  context("when patterns hide entries", () => {
+    const hides = hidesOf({ "**/*.log": true, "src/gen": true }, {})
+
+    it("leaves out a listed name that matches", () => {
+      const tree = buildTree(folderListings(["app.log", "src/a.ts", "src/b.log"]), undefined, hides)
+
+      expect(tree.map((node) => node.path)).toEqual(["src"])
+      expect(tree[0]!.children.map((node) => node.path)).toEqual(["src/a.ts"])
+    })
+
+    it("leaves out a name only an agent's work has, and the folders that hold only it", () => {
+      const tree = buildTree(
+        new Map(),
+        project({
+          changes: {
+            "debug.log": { kind: "added", touched: { moth: 1 } },
+            "src/gen/api.ts": { kind: "added", touched: { moth: 1 } },
+            "src/a.ts": { kind: "modified", touched: { crow: 1 } },
+          },
+        }),
+        hides,
+      )
+
+      expect(tree.map((node) => node.path)).toEqual(["src"])
+      expect(tree[0]!.children.map((node) => node.path)).toEqual(["src/a.ts"])
+      expect(tree[0]!.touched).toEqual({ crow: 1 })
+    })
+
+    it("never builds what is inside a hidden folder, and drops its listing", () => {
+      const listings = folderListings(["src/gen/api.ts", "src/gen/deep/x.ts", "src/a.ts"])
+      const asked: string[] = []
+      const tree = buildTree(listings, undefined, (path) => {
+        asked.push(path)
+        return hides(path)
+      })
+
+      expect(asked.filter((path) => path.startsWith("src/gen/"))).toEqual([])
+      expect([...keepListings(listings, tree).keys()]).toEqual(["", "src"])
+    })
+
+    it("shows a folder whose entries are all hidden as empty", () => {
+      const tree = buildTree(
+        folderListings(["logs/a.log", "logs/b.log", "README.md"]),
+        undefined,
+        hides,
+      )
+
+      expect(visibleLines(tree, new Set(["logs"]))).toEqual([
+        { node: expect.objectContaining({ path: "logs" }), depth: 0, open: true },
+        { note: "empty", path: "logs", depth: 1 },
+        { node: expect.objectContaining({ path: "README.md" }), depth: 0, open: false },
       ])
     })
   })
@@ -305,6 +365,61 @@ describe("The Files tree", () => {
       expect(rows.map((row) => row.depth)).toEqual([0, 1, 2, 1, 0])
     })
   })
+
+  context("when the person names an entry", () => {
+    const tree = buildTree(folderListings(["a/b/c.ts", "a/d.ts", "e.ts", "empty/"]))
+    // Each line as a row's path, a field's, or a note's.
+    const shown = (open: string[], naming: Naming) =>
+      visibleLines(tree, new Set(open), false, new Set(), naming).map((line) =>
+        isRow(line)
+          ? line.node.path
+          : isNaming(line)
+            ? `field:${line.depth}:${line.naming.kind === "rename" ? line.naming.path : "new"}`
+            : `note:${line.path}`,
+      )
+
+    it("puts a new entry's field first in its folder, one deeper, or first of all for the root", () => {
+      const inA: Naming = { kind: "new", parent: "a", folder: false, from: "a/d.ts" }
+      expect(shown(["a"], inA)).toEqual(["a", "field:1:new", "a/b", "a/d.ts", "empty", "e.ts"])
+      const inRoot: Naming = { kind: "new", parent: "", folder: true, from: undefined }
+      expect(shown([], inRoot)).toEqual(["field:0:new", "a", "empty", "e.ts"])
+    })
+
+    it("says nothing of a folder being empty while a new entry is named in it", () => {
+      const inEmpty: Naming = { kind: "new", parent: "empty", folder: false, from: "empty" }
+      expect(shown(["empty"], inEmpty)).toEqual(["a", "empty", "field:1:new", "e.ts"])
+    })
+
+    it("puts a rename's field in its row's place, which keeps what is open inside it", () => {
+      const renaming: Naming = { kind: "rename", path: "a", folder: true }
+      expect(shown(["a"], renaming)).toEqual(["field:0:a", "a/b", "a/d.ts", "empty", "e.ts"])
+    })
+  })
+
+  context("when telling what the project's folder holds from an agent's work", () => {
+    it("marks an entry its folder lists, and not one only an agent's work has", () => {
+      const tree = buildTree(
+        folderListings(["src/a.ts"]),
+        project({
+          changes: {
+            "src/a.ts": { kind: "modified", touched: { moth: 1 } },
+            "src/b.ts": { kind: "added", touched: { moth: 1 } },
+            "lib/c.ts": { kind: "added", touched: { moth: 1 } },
+          },
+        }),
+      )
+      const listed = (nodes: readonly FilesNode[]): [string, boolean][] =>
+        nodes.flatMap((node) => [[node.path, node.listed], ...listed(node.children)])
+
+      expect(listed(tree)).toEqual([
+        ["lib", false],
+        ["lib/c.ts", false],
+        ["src", true],
+        ["src/a.ts", true],
+        ["src/b.ts", false],
+      ])
+    })
+  })
 })
 
 describe("Which row shows a write", () => {
@@ -326,6 +441,31 @@ describe("Which row shows a write", () => {
 
     expect(writtenPaths(before, before)).toEqual([])
     expect(writtenPaths(before, after)).toEqual(["a.ts", "b.ts"])
+  })
+})
+
+describe("The agents' work the tree shows", () => {
+  const hides = hidesOf({ "**/node_modules": true }, {})
+
+  it("leaves out changes and writes in a hidden path or below one", () => {
+    const work = project({
+      changes: {
+        "web/node_modules/react/index.js": { kind: "modified", touched: { moth: 1 } },
+        "src/a.ts": { kind: "modified", touched: { crow: 1 } },
+      },
+      writing: { moth: "web/node_modules/react/index.js", crow: "src/a.ts" },
+    })
+
+    expect(shownWork(work, hides)).toEqual({
+      changes: { "src/a.ts": { kind: "modified", touched: { crow: 1 } } },
+      writing: { crow: "src/a.ts" },
+    })
+  })
+
+  it("is the same project where none of its work is hidden", () => {
+    const work = project({ changes: { "src/a.ts": { kind: "added", touched: { moth: 1 } } } })
+
+    expect(shownWork(work, hides)).toBe(work)
   })
 })
 

@@ -9,12 +9,20 @@ import type { WorkspaceTarget } from "@novadeck/core/types"
 import { outline } from "@novadeck/viewers/text"
 import { lazy, Suspense, useRef, type ReactNode } from "react"
 
-import { ArtifactMeta, CopyText, MetaPath, Unavailable } from "../../ArtifactViewer"
+import { ArtifactMeta, MetaPath, Unavailable } from "../../ArtifactViewer"
 import type { MarkdownEditorHandle } from "../../document/editor/MarkdownEditor"
+import {
+  blockedText,
+  SaveNotice,
+  stalledText,
+  transcriptText,
+  unreadableText,
+} from "../../document/SaveNotice"
 import type { PlanActions, ItemStore } from "../../store/item-store"
+import { fileText, unreadableNow } from "../../store/text-doc"
 import { useContent, usePlan } from "../../store/use-item-store"
 import { UnderHeaderSlot } from "../../under-header"
-import { blockOf, currentMarks, unreadableNow, type PlanDoc } from "./plan-doc"
+import { blockOf, currentMarks, type PlanDoc } from "./plan-doc"
 
 // The editor loads when a plan first opens, so the workspace never pays for it: a
 // Markdown document's, with the plan's notes, which load with it.
@@ -62,51 +70,6 @@ const PlanOutline = ({
   )
 }
 
-// Why the person's edits can't be saved, and what's left to them. A plan in an agent's
-// messages reads as it does when it's read-only from the start.
-const blockedText = (reason: PlanUnwritableReason, agent: string): string => {
-  switch (reason) {
-    case "gone":
-      return "This plan's file was deleted, so your edits can't be saved. Your edits are kept here until you close this plan."
-    case "folder":
-      return "Novadeck can't write to this plan's folder, so your edits can't be saved. Your edits are kept here until you close this plan."
-    case "too-large":
-      return "This plan is too large for Novadeck to save your edits. Your edits are kept here until you close this plan."
-    case "not-a-plan":
-      return "Novadeck can't write to this, since it isn't a plan file, so your edits can't be saved. Your edits are kept here until you close this plan."
-    case "outside":
-      return "Novadeck saves plans only in the project's folder or the agent's own plans folder, and this one is elsewhere, so your edits can't be saved. Your edits are kept here until you close this plan."
-    case "transcript":
-      return readOnlyText(agent)
-  }
-}
-
-const readOnlyText = (agent: string): string =>
-  `Read-only: this plan lives in ${agent}'s messages, not a file, so notes can't go in it.`
-
-// The edits that can't reach the file, with the ways out: copy them, or try again.
-const PlanNotice = ({
-  text,
-  edits,
-  retry,
-  retryLabel,
-}: {
-  text: string
-  edits: string
-  retry: () => void
-  retryLabel: string
-}): React.JSX.Element => (
-  <div className="plan-notice" role="status">
-    <p>{text}</p>
-    <div className="plan-notice-actions">
-      <CopyText text={edits} label="Copy my edits" />
-      <button type="button" className="artifact-open" onClick={retry}>
-        {retryLabel}
-      </button>
-    </div>
-  </div>
-)
-
 const PlanBody = ({
   item,
   plan,
@@ -130,7 +93,7 @@ const PlanBody = ({
   // A plan the runner says lives in messages reads as one that was read-only from the start.
   const readOnly = !plan.writable || block === "transcript"
   // The edits as the file would hold them, with its line breaks.
-  const copyable = plan.eol === "\n" ? plan.text : plan.text.replaceAll("\n", plan.eol)
+  const copyable = fileText(plan)
   // The header every viewer has, across the pane, then the outline beside the plan.
   return (
     <>
@@ -167,7 +130,7 @@ const PlanBody = ({
           <span className="pane-meta-hint">
             {!plan.writable && plan.truncated && item.plan?.source === "file"
               ? "Read-only: it's too long to edit here."
-              : readOnlyText(agent)}
+              : transcriptText(agent)}
           </span>
         )}
         {plan.truncated && (
@@ -185,28 +148,23 @@ const PlanBody = ({
         <p className="plan-save-path">Edits save to {pathOf(item)}</p>
       )}
       {!readOnly && block && (
-        <PlanNotice
-          text={blockedText(block, agent)}
+        <SaveNotice
+          text={blockedText(block, { kind: "plan", agent })}
           edits={copyable}
           retry={pane.retry}
           retryLabel="Try saving again"
         />
       )}
       {!readOnly && !block && unreadable && (
-        <PlanNotice
-          text="Novadeck can't read this plan right now, so your edits can't be saved. Your edits are kept here until you close this plan."
+        <SaveNotice
+          text={unreadableText("plan")}
           edits={copyable}
           retry={pane.retry}
           retryLabel="Retry"
         />
       )}
       {!readOnly && !block && !unreadable && plan.stalled && (
-        <PlanNotice
-          text="Novadeck couldn't save your edits after 5 tries."
-          edits={copyable}
-          retry={pane.retry}
-          retryLabel="Retry"
-        />
+        <SaveNotice text={stalledText} edits={copyable} retry={pane.retry} retryLabel="Retry" />
       )}
       <div className="pane-reader-body" data-outline={outline(plan.text).length > 0}>
         <PlanOutline plan={plan} jump={(at) => editor.current?.jumpTo(at)} />

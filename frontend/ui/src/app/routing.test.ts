@@ -28,6 +28,7 @@ const preferences: PreferencesValue = {
   chatView: false,
   agentAvatars: false,
   onboardingTour: false,
+  filesExclude: {},
 }
 const target = { projectId: "project", workspaceSessionId: "initial" }
 const fixture = (): Workspace => ({

@@ -9,6 +9,8 @@ import {
 import { handleText } from "@novadeck/core/terminals/handle"
 
 import { dimmedBy } from "./files-agents"
+import type { Naming } from "./files-edit"
+import { hiddenUnder, type Hides } from "./files-exclude"
 
 // The Files panel's rules, apart from how it draws: the tree the project's folders and an
 // agent's work grow in, which agents a row names, which row a write lights up, and how long a
@@ -25,6 +27,8 @@ type Overlay = Pick<FilesProject, "changes" | "writing">
 
 const noOverlay: Overlay = { changes: {}, writing: {} }
 
+const hidesNothing: Hides = () => false
+
 export type FilesNode = {
   // Slash-separated from the project root, with no trailing slash.
   readonly path: string
@@ -32,6 +36,8 @@ export type FilesNode = {
   readonly folder: boolean
   // Itself ignored, or inside an ignored folder.
   readonly ignored: boolean
+  // Its folder's listing has it: it is in the project's folder, not only in an agent's work.
+  readonly listed: boolean
   // How an agent changed this file; folders have none.
   readonly kind: FileChange | undefined
   // A file's own writes by agent; a folder's latest write by each agent inside it.
@@ -62,9 +68,17 @@ export type FilesNote = {
   readonly depth: number
 }
 
-type SourceLine = FilesRow | FilesNote
+// The field the person types a name in: a new entry's, first in the folder it goes in, or a
+// row's new name, in that row's place.
+export type FilesNaming = { readonly naming: Naming; readonly depth: number }
+
+type SourceLine = FilesRow | FilesNote | FilesNaming
 
 export const isNote = (line: SourceLine): line is FilesNote => "note" in line
+
+export const isNaming = (line: SourceLine): line is FilesNaming => "naming" in line
+
+export const isRow = (line: SourceLine): line is FilesRow => !isNote(line) && !isNaming(line)
 
 // Folders first, then by name without case or a leading dot, so `.github` sits among the g's.
 const sortKey = (name: string): string => name.replace(/^\./, "").toLowerCase()
@@ -89,10 +103,12 @@ const childOf = (parent: string, name: string): string =>
 
 // The root's tree: each folder's listing, if read, with the paths agents changed joined in (a
 // changed file shows in its folder whether or not the listing has it). A folder not read yet
-// has only what agents changed inside it.
+// has only what agents changed inside it. What `hides` matches is left out, listed or changed,
+// and a hidden folder's insides with it: a folder whose entries are all hidden is empty.
 export const buildTree = (
   listings: Listings,
   { changes, writing: writingBy }: Overlay = noOverlay,
+  hides: Hides = hidesNothing,
 ): readonly FilesNode[] => {
   // The names agents changed under each folder: folders for paths with something below.
   const changed = new Map<string, Map<string, boolean>>()
@@ -111,7 +127,13 @@ export const buildTree = (
   for (const [handle, path] of Object.entries(writingBy))
     writing.set(path, [...(writing.get(path) ?? []), handle])
 
-  const make = (path: string, name: string, folder: boolean, hidden: boolean): FilesNode => {
+  const make = (
+    path: string,
+    name: string,
+    folder: boolean,
+    hidden: boolean,
+    listed: boolean,
+  ): FilesNode => {
     if (!folder) {
       const change = changes[path]
       return {
@@ -119,6 +141,7 @@ export const buildTree = (
         name,
         folder,
         ignored: hidden,
+        listed,
         kind: change?.kind,
         touched: change?.touched ?? {},
         writing: writing.get(path) ?? [],
@@ -135,6 +158,7 @@ export const buildTree = (
       name,
       folder,
       ignored: hidden,
+      listed,
       kind: undefined,
       touched: latestPerAgent(inside),
       writing: [...new Set(inside.flatMap((child) => child.writing))],
@@ -147,23 +171,37 @@ export const buildTree = (
   const childrenOf = (folder: string, hidden: boolean): readonly FilesNode[] => {
     const listing = listings.get(folder)
     // A name both listed and changed is one node; a path with something below it is a folder.
-    const names = new Map<string, { folder: boolean; ignored: boolean }>()
+    const names = new Map<string, { folder: boolean; ignored: boolean; listed: boolean }>()
     for (const entry of typeof listing === "object" ? listing.entries : [])
-      names.set(entry.name, { folder: entry.folder, ignored: entry.ignored })
+      names.set(entry.name, { folder: entry.folder, ignored: entry.ignored, listed: true })
     for (const [name, isFolder] of changed.get(folder) ?? []) {
       const known = names.get(name)
       names.set(name, {
         folder: isFolder || (known?.folder ?? false),
         ignored: known?.ignored ?? false,
+        listed: known !== undefined,
       })
     }
     return [...names]
+      .filter(([name]) => !hides(childOf(folder, name)))
       .map(([name, entry]) =>
-        make(childOf(folder, name), name, entry.folder, hidden || entry.ignored),
+        make(childOf(folder, name), name, entry.folder, hidden || entry.ignored, entry.listed),
       )
       .toSorted(byOrder)
   }
   return childrenOf("", false)
+}
+
+// What agents did in the paths the tree shows: their changes and writes in a hidden path, or
+// under a hidden folder, left out, so the agents strip, the agents kept and the lit ones go by
+// the work on screen. The same project where nothing of it is hidden.
+export const shownWork = (project: FilesProject, hides: Hides): FilesProject => {
+  const changes = Object.entries(project.changes).filter(([path]) => !hiddenUnder(hides, path))
+  const writing = Object.entries(project.writing).filter(([, path]) => !hiddenUnder(hides, path))
+  return changes.length === Object.keys(project.changes).length &&
+    writing.length === Object.keys(project.writing).length
+    ? project
+    : { changes: Object.fromEntries(changes), writing: Object.fromEntries(writing) }
 }
 
 // Whether two readings of a folder say the same, so reading it again changes nothing on screen.
@@ -220,27 +258,37 @@ export const initialOpen = (tree: readonly FilesNode[]): ReadonlySet<string> => 
 // note of what its listing lacks; `rootTruncated` ends the root's with one too. With agents in
 // `only`, the tree holds just their work: the files they touched or are writing and the folders
 // those are in. What a listing lacks doesn't matter then, as their files are there whether or not
-// it lists them, so no notes.
+// it lists them, so no notes. Where the person is `naming`, a field: a new entry's first in its
+// folder, which says nothing of being empty meanwhile, and a row's new name in its place.
 export const visibleLines = (
   tree: readonly FilesNode[],
   open: ReadonlySet<string>,
   rootTruncated = false,
   only: ReadonlySet<string> = new Set(),
+  naming: Naming | null = null,
 ): readonly SourceLine[] => {
   const lines: SourceLine[] = []
   const filtered = only.size > 0
+  const adding = naming?.kind === "new" ? naming : undefined
   const visit = (node: FilesNode, depth: number): void => {
     if (dimmedBy(node, only)) return
     const isOpen = expandable(node) && open.has(node.path)
-    lines.push({ node, depth, open: isOpen })
+    lines.push(
+      naming?.kind === "rename" && naming.path === node.path
+        ? { naming, depth }
+        : { node, depth, open: isOpen },
+    )
     if (!isOpen) return
+    const added = adding?.parent === node.path
+    if (added) lines.push({ naming: adding, depth: depth + 1 })
     node.children.forEach((child) => visit(child, depth + 1))
     if (filtered) return
     if (node.read === "failed") lines.push({ note: "failed", path: node.path, depth: depth + 1 })
     else if (node.truncated) lines.push({ note: "truncated", path: node.path, depth: depth + 1 })
-    else if (node.read === "read" && node.children.length === 0)
+    else if (node.read === "read" && node.children.length === 0 && !added)
       lines.push({ note: "empty", path: node.path, depth: depth + 1 })
   }
+  if (adding?.parent === "") lines.push({ naming: adding, depth: 0 })
   tree.forEach((node) => visit(node, 0))
   if (rootTruncated && !filtered) lines.push({ note: "truncated", path: "", depth: 0 })
   return lines

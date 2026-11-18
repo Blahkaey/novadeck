@@ -147,6 +147,8 @@ export const shownItemWith = (
 export type ImageContent = { readonly kind: "image"; readonly src: string }
 
 // A text file, with the lines it pointed at. `firstLine` numbers the first of `lines`.
+// Followed with `edit`, one that can't be edited whole says why in `uneditable`: it is past
+// what Novadeck edits (256 KiB), or isn't UTF-8 text.
 export type FileContent = {
   readonly kind: "file"
   readonly path: string
@@ -160,6 +162,7 @@ export type FileContent = {
   readonly truncated: boolean
   // The lines it pointed at ran past the file's end, which they now stop at.
   readonly clamped: boolean
+  readonly uneditable?: "too-large" | "not-text" | undefined
 }
 
 // A web page, by its http(s) address. `live` when the app can load it in the
@@ -259,6 +262,27 @@ export type ChangesContent = {
 
 export type ShownContent = ImageContent | FileContent | PageContent | ChangesContent
 
+// A text file followed with `edit` that can be edited whole: all of its text, its line breaks
+// as they are, without a byte-order mark, which `save` puts back. `path` is the path the
+// item pointed at as it was read, which a save names. `writable` when `save` writes it; else
+// why not, as a save would be refused: the item is no file of the project window
+// (`not-a-plan`), the file is outside the project's folder, in Git's own `.git` or in agents'
+// worktrees (`outside`), or Novadeck may not write it or in its folder (`folder`).
+export type TextContent =
+  | {
+      readonly kind: "text"
+      readonly path: string
+      readonly text: string
+      readonly writable: true
+    }
+  | {
+      readonly kind: "text"
+      readonly path: string
+      readonly text: string
+      readonly writable: false
+      readonly reason: Extract<PlanUnwritableReason, "not-a-plan" | "outside" | "folder">
+    }
+
 // How a background shell's output stands: its last `lines` (numbered from `firstLine`) of
 // `total` read; `none` where its harness writes it nowhere Novadeck can read; `unreadable`
 // where its file is there and Novadeck can't read it now; `gone` where its file was there and
@@ -323,7 +347,7 @@ export type ItemContent =
   | {
       readonly state: "ready"
       readonly stamp: string
-      readonly content: ShownContent | PlanContent | ShellsContent
+      readonly content: ShownContent | PlanContent | ShellsContent | TextContent
     }
   | {
       readonly state: "unavailable"
@@ -340,14 +364,18 @@ export const planVersionOf = (content: ItemContent): PlanVersion | undefined =>
     : undefined
 
 // Saving an edit: the plan's new stamp, or, when the file changed since the stamp the
-// edit was made on, the plan as it now stands, to merge the edit into.
+// edit was made on, the plan as it now stands, to merge the edit into. A file's save answers
+// alike, its text as it now stands as a plan's that is never cut short and has no skill.
 export type PlanSaved =
   | { readonly saved: true; readonly stamp: string }
   | { readonly saved: false; readonly current: PlanVersion }
 
-// Why a plan can't be written, which saving it again won't change until the plan or its
-// folder does: its file is gone, Novadeck may not write in its folder or file, it lives in
-// an agent's messages, it is past what Novadeck writes, or the item is no plan.
+// Why a plan, or a file the person opened in the project window, can't be written, which
+// saving it again won't change until the item, the file or its folder does: its file is
+// gone, Novadeck may not write in its folder or file, it lives in an agent's messages, it is
+// past what Novadeck writes, the item is neither a plan nor the project window's file, the
+// file is outside the folders Novadeck saves in, the item points at another file than the
+// edit was made on (`moved`), or the file is no longer UTF-8 text (`not-text`).
 export type PlanUnwritableReason =
   | "gone"
   | "folder"
@@ -355,6 +383,8 @@ export type PlanUnwritableReason =
   | "too-large"
   | "not-a-plan"
   | "outside"
+  | "moved"
+  | "not-text"
 
 // What `save` rejects with when the plan can't be written for good. Any other rejection
 // is a failure that may pass, which the pane tries again.
@@ -393,10 +423,12 @@ export type Companions = {
   // Reports what the item holds now, then again whenever that changes, until stopped.
   // One that may hold secrets reports `secret` unless `reveal` is the path the item points at:
   // the person's yes is to a file, not to whatever the item is pointed at when it's heard.
+  // With `edit`, a text file is its whole text (`TextContent`), or, where it can't be edited
+  // whole, its lines saying why; a backend that edits no files reports it as without.
   readonly follow: (
     target: WorkspaceTarget,
     itemId: ItemId,
-    options: { readonly reveal: string | undefined },
+    options: { readonly reveal: string | undefined; readonly edit?: boolean },
     on: (content: ItemContent) => void,
   ) => () => void
   // One file of a changes item as a selection of its layers (ids) changed it, read when asked
@@ -412,13 +444,17 @@ export type Companions = {
   // changes again. Absent where the backend can't keep it: the pane then grays it for as
   // long as the content stays as it was.
   readonly changeRead?: (target: WorkspaceTarget, itemId: ItemId, path: string) => Promise<void>
-  // Writes the person's edit to the plan, unless it changed since `basedOn`. Rejects with
-  // a `PlanUnwritableError` when the plan can't be written at all.
+  // Writes the person's edit to the plan, or to the file the project window holds, unless it
+  // changed since `basedOn`. `path` is the path the edit was made on (a text file's `path`):
+  // an item pointed at another file since is refused as `moved`. A plan's save may leave it
+  // out; a file's must give it, or is refused as `moved`. Rejects with a
+  // `PlanUnwritableError` when it can't be written at all.
   readonly save: (
     target: WorkspaceTarget,
     itemId: ItemId,
     text: string,
     basedOn: string,
+    path?: string,
   ) => Promise<PlanSaved>
   // Tells what went wrong on a live page, which the item's show `shown` (its `version`)
   // loaded, so the agent that showed it can hear. Best effort: it never fails, and a
@@ -429,6 +465,10 @@ export type Companions = {
     shown: number,
     troubles: readonly PageTrouble[],
   ) => void
+  // Where the app lets the person's edits reach their files before its window closes or the
+  // app quits: it waits for what `save` returns, as long as it waits for the page's other
+  // saves. Returns the undo. Absent where nothing waits for a quit, as in a browser.
+  readonly beforeQuit?: (save: () => Promise<void>) => () => void
   // Opens a file in the session's project window, by a path from the project's folder or
   // absolute: the item the window holds is pointed at it, or, when the session has none,
   // the window is made under `windowId`. Resolves with the item and its window as they now

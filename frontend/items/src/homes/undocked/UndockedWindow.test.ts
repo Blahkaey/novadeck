@@ -15,13 +15,18 @@ afterEach(() => unmounts.splice(0).forEach((unmount) => unmount()))
 
 const target = { projectId: "project", workspaceSessionId: "initial" }
 
+// The window over `item`, the backend reporting it as `load`, with the saves it was sent.
 const undocked = async (item: Item, load: ItemContent) => {
+  const saves: string[] = []
   const companions: Companions = {
     follow: (_target, _id, _options, on) => {
       on(load)
       return () => {}
     },
-    save: () => new Promise(() => {}),
+    save: (_target, _id, text) => {
+      saves.push(text)
+      return new Promise(() => {})
+    },
     trouble: () => {},
   }
   const workspace = createWorkspaceStore(
@@ -34,7 +39,7 @@ const undocked = async (item: Item, load: ItemContent) => {
   await act(async () => {
     await vi.dynamicImportSettled()
   })
-  return rendered
+  return { ...rendered, itemStore, saves }
 }
 
 describe("an item undocked into a window", () => {
@@ -56,6 +61,30 @@ describe("an item undocked into a window", () => {
       )
       expect(frame?.getAttribute("aria-label")).toBe("Plan")
       expect(frame?.querySelector(".document-editor")).not.toBeNull()
+    })
+
+    it("saves the person's edit at once when focus leaves the window", async () => {
+      const item = itemFixture("plan", "01", {
+        kind: "plan",
+        name: "plan.md",
+        path: "plan.md",
+        plan: { agent: "Codex", role: "root", source: "file" },
+      })
+      const { container, itemStore, saves } = await undocked(item, {
+        state: "ready",
+        stamp: "1",
+        content: { kind: "plan", text: "# Plan\n", truncated: false, writable: true, skill: true },
+      })
+      act(() => itemStore.plan(target, item.id).edit("# Plan\n\nMine.\n", []))
+      act(() => {
+        container.querySelector(".cm-content")!.dispatchEvent(
+          new FocusEvent("focusout", {
+            bubbles: true,
+            relatedTarget: document.createElement("button"),
+          }),
+        )
+      })
+      expect(saves).toEqual(["# Plan\n\nMine.\n"])
     })
   })
 

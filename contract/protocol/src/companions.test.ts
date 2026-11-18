@@ -4,10 +4,12 @@ import type { z } from "zod"
 import {
   changeFileDiff,
   companionItem,
+  companionLimits,
   itemContent,
   maxChangeSideBytes,
   pageLook,
   pageLookAnswer,
+  planUnwritable,
 } from "./companions.js"
 
 const lookId = "11111111-1111-4111-8111-111111111111"
@@ -142,5 +144,55 @@ describe("a change as layers", () => {
     expect(changeFileDiff.safeParse({ run: { ...run, after: `${run.after}x` } }).success).toBe(
       false,
     )
+  })
+})
+
+describe("a file followed to be edited", () => {
+  const text = { kind: "text" as const, path: "/p/a.ts", text: "a\r\nb" }
+  const ready = (content: unknown) => ({ state: "ready", stamp: "s", content })
+
+  it("carries its whole text, writable, or not with why", () => {
+    for (const content of [
+      { ...text, writable: true },
+      { ...text, writable: false, reason: "outside" },
+      { ...text, writable: false, reason: "folder" },
+      { ...text, writable: false, reason: "not-a-plan" },
+    ])
+      expect(itemContent.parse(ready(content))).toEqual(ready(content))
+  })
+
+  it("says why only where it can't be saved, and only why it can't up front", () => {
+    for (const content of [
+      { ...text, writable: true, reason: "outside" },
+      { ...text, writable: false },
+      { ...text, writable: false, reason: "moved" },
+      { ...text, writable: true, text: "x".repeat(companionLimits.plan + 1) },
+    ])
+      expect(itemContent.safeParse(ready(content)).success).toBe(false)
+  })
+
+  it("is its listing, saying why it can't be edited whole", () => {
+    const listing = {
+      kind: "file",
+      path: "/p/big.log",
+      firstLine: 1,
+      lines: ["a"],
+      from: 1,
+      to: 1,
+      total: null,
+      truncated: true,
+      clamped: false,
+    }
+    for (const uneditable of ["too-large", "not-text"])
+      expect(itemContent.parse(ready({ ...listing, uneditable }))).toEqual(
+        ready({ ...listing, uneditable }),
+      )
+    expect(itemContent.parse(ready(listing))).toEqual(ready(listing))
+    expect(itemContent.safeParse(ready({ ...listing, uneditable: "binary" })).success).toBe(false)
+  })
+
+  it("is refused saving, saying why, as an edit made on another file or a file no longer text", () => {
+    for (const reason of ["moved", "not-text"])
+      expect(planUnwritable.parse({ reason })).toEqual({ reason })
   })
 })

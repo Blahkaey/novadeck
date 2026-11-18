@@ -63,6 +63,47 @@ describe("readPreferences", () => {
     }
   })
 
+  it("hides the folders' notes macOS and Windows leave until other patterns for hiding files are saved", () => {
+    expect(readPreferences().filesExclude).toEqual({ "**/.DS_Store": true, "**/Thumbs.db": true })
+    localStorage.setItem(preferencesStorageKey, JSON.stringify({ fontSize: 15 }))
+    expect(readPreferences().filesExclude).toEqual({ "**/.DS_Store": true, "**/Thumbs.db": true })
+    for (const saved of ["**/dist", ["**/dist"], null, 3]) {
+      localStorage.setItem(preferencesStorageKey, JSON.stringify({ filesExclude: saved }))
+
+      expect(readPreferences().filesExclude).toEqual({
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+      })
+    }
+  })
+
+  it("keeps saved patterns for hiding files, none among them too, through a read and a save", () => {
+    localStorage.setItem(preferencesStorageKey, JSON.stringify({ filesExclude: {} }))
+    expect(readPreferences().filesExclude).toEqual({})
+
+    writePreferences({ ...readPreferences(), filesExclude: { "**/dist": true, "*.log": false } })
+
+    expect(readPreferences().filesExclude).toEqual({ "**/dist": true, "*.log": false })
+  })
+
+  it("drops a saved pattern without a switch, or empty, or too long, and keeps the rest", () => {
+    localStorage.setItem(
+      preferencesStorageKey,
+      JSON.stringify({
+        filesExclude: {
+          "**/dist": true,
+          "*.log": { when: "$(basename).ts" },
+          "*.tmp": "true",
+          "": true,
+          ["x".repeat(1025)]: true,
+          ["y".repeat(1024)]: false,
+        },
+      }),
+    )
+
+    expect(readPreferences().filesExclude).toEqual({ "**/dist": true, ["y".repeat(1024)]: false })
+  })
+
   it("keeps agent avatars off unless they were switched on", () => {
     expect(readPreferences().agentAvatars).toBe(false)
     localStorage.setItem(preferencesStorageKey, JSON.stringify({ agentAvatars: "yes" }))

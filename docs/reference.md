@@ -510,6 +510,176 @@ terminals. They close and go to History, and you can restore them into another s
 A project's last session can't be deleted. The order, names and deletions are the runner's,
 so they stay after a reload, and the project opens the session you were in last.
 
+## Files
+
+**Files** is a panel on the sidebar's rail with the open project's files as a tree, each
+folder read as you open it. Where a backend doesn't read a project's files, the panel isn't
+there.
+
+Right-click a file or folder for its menu:
+
+- **New File…** and **New Folder…** make an empty one inside a folder, or beside a file
+  (see below).
+- **Cut** (`Ctrl+X`; `Cmd+X` on macOS) and **Copy** (`Ctrl+C`; `Cmd+C`) keep it to paste
+  elsewhere, and **Paste** (`Ctrl+V`; `Cmd+V`) moves or copies what you cut or copied inside a
+  folder, or beside a file (see below).
+- **Copy Path** copies its full path on the computer the project is on, which is the
+  runner's. `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or folder
+  with the keyboard on it.
+- **Copy Relative Path** copies its path from the project's folder, as `src/cart/useCart.ts`.
+- **Rename…** (`F2`) names it anew in its place.
+- **Delete** (`Delete`; `Cmd+Backspace` on macOS) deletes it, a folder with everything in it,
+  once you confirm. It doesn't go to the trash, and can't be undone.
+- **Hide in This Project** hides it from the tree in this project (see below).
+
+Both paths are written as that computer writes them, with backslashes for a project on Windows. A
+file that only an agent's work has, which the project's folder doesn't hold yet, copies the path it
+will have there. Its menu, and that of a file an agent deleted, offers no new file or folder, cut,
+copy, paste, rename or delete: they are the agent's to change. Right-click the tree's empty space,
+or the line in its place when the folder is empty, everything in it is hidden, or it can't be read,
+for the project's folder itself: **New File…** and **New Folder…** make one at its top, **Paste**
+pastes there, **Copy Path** copies the folder's own path, and **Refresh** reads the files again. A
+copy that works says nothing. One that can't, as where a browser doesn't let the page use the
+clipboard, puts a line above the tree saying so until you dismiss it or hide the panel.
+
+### Editing a file
+
+Double-click a file, or press `Enter` on it, to open it in the session's project window, where you
+edit it in place: a Markdown file in its document, any other in a code editor. Your edits are saved
+to the file once you pause typing, when you click away from the window, and at once with `Ctrl+S`
+(`Cmd+S` on macOS). A save that fails is tried again, the window saying it isn't saved yet; after 5
+failed tries it stops, with **Retry**. Only the project window edits: a file on a terminal's bar or
+in a window of its own reads as before.
+
+Some files open read-only, with a line saying why: one that isn't one of the project's own files,
+as an agent's copy in its worktree, a file in Git's own folder or a link that leads outside the
+project's folder; a file, or one in a folder, the computer won't let Novadeck write; and a file too
+large to edit here (past 256 KiB) or that isn't UTF-8 text, which shows its lines. A binary file
+says only that it isn't text, as before. A file that turns too large or stops being text while
+edits to it aren't saved keeps your edits in the editor, saying why they can't be saved.
+
+When the file changes while you edit it, as when an agent writes it, the window shows the new text
+if nothing of yours is unsaved; otherwise the change is merged into your edits line by line, the
+lines it changed are marked, and the result is saved. A file whose lines all end in CRLF keeps
+CRLF; any other keeps its line breaks as they are.
+
+If your edits can't be saved (the file was deleted, its folder can't be written, it is too large,
+or it is no longer text), the window says why and keeps them, with **Copy my edits** and, where the
+file can still be written, **Try saving again**; a deleted file that comes back is saved to. While
+Novadeck can't read the file for the moment, it says so and keeps them too, with **Retry**.
+Opening another file in the window, closing it, removing its session or project, or renaming,
+moving or deleting the file or a folder holding it saves your edits first, and waits for the save,
+up to 20 seconds; a save that failed once and is being tried again is waited for. A save that takes
+more than 2 seconds shows **Saving your edits to** the file, with **Cancel**, which stays with the
+file; once the save lands, what you asked for goes on by itself. Where the edits can't be saved, or
+no save answered in that time, Novadeck asks first: **Copy my edits and switch** (or close,
+rename, move, delete) copies them to the clipboard and goes on, and **Cancel** stays. If the copy fails, nothing is done and the question says so, offering **Switch without my
+edits** (or close, rename, move, delete), which lets your edits go. A rename, move or delete you
+cancel isn't made, and the line above the tree says why; a session or project you stay for isn't
+removed. Closing a plan whose edits can't be saved asks the same, offering **Close without my
+edits** once a copy failed.
+
+When Novadeck quits, or the page reloads or closes in a browser, every edit not yet saved, to a
+file or a plan, is sent at once, without asking. Edits that can't be saved then are lost: the
+desktop app waits a moment for the saves before it quits, not for an answer from you.
+
+### Making, renaming and deleting
+
+A new file or folder is named in a field first in the folder it goes in, which opens; a rename
+in a field in the row's place, with the name selected up to its extension. `Enter` makes the
+change and `Escape` leaves it; clicking away makes it when the name will do, and leaves it
+otherwise. A line under the field says what is wrong with a name: empty, holding `\`, `.` or
+`..`, or the name of something already beside it. A new name may hold `/` to make the folders
+on the way too, as `api/v2/orders.ts`; a rename can't. The new or renamed file is selected,
+and with the keys, focused; a renamed folder stays open with what it shows. A file the project
+window shows that you rename, or that is in a folder you rename, opens there at its new name; a
+deleted one says it is not there any more. Nothing already there is overwritten, though a file
+made at a rename's new name in the moment between Novadeck's check and the rename is replaced.
+A change the computer refuses, as for want of permission, a name it won't keep or a disk that
+is full, puts a line above the tree saying why, and a file or folder that one of your hiding
+patterns hides is still made or renamed, with a line naming the pattern. A field whose row, or
+folder, leaves the tree, as when an agent removes it, closes; switching to another app leaves
+it open with what you typed. Novadeck never changes the project's folder itself or Git's own
+`.git`, however a link or name leads to it. Where a backend doesn't make, rename or delete
+files, the menus don't offer it.
+
+### Cutting, copying and pasting
+
+**Cut** and **Copy** keep the file or folder in the panel to paste, as one item: what you cut or
+copy next takes its place. It is the panel's own, for this project, and never on your system's
+clipboard, so `Ctrl+C` on a row copies no text. A cut row is dimmed, with its name in italics, until
+you paste it or press `Escape` in the tree; `Escape` lets go of a cut before it lets go of the
+agents you keep lit. **Paste** stays greyed in the menus while there is nothing to paste. What you
+cut or copied follows a rename of it, or of a folder it is in, and is let go once it, or that
+folder, is deleted or found gone.
+
+Paste puts it inside the folder you pasted on, which opens, beside the file you pasted on, or at the
+top of the project from the tree's empty space. A copy takes its own name where that is free there,
+and otherwise the first free of `name copy.ext`, `name copy 2.ext`, `name copy 3.ext` and so on, as
+VS Code names copies (`.env copy`, and a folder's `src copy`); a folder is copied with everything in
+it, links as links, never what they lead to. What you copied stays to paste again. A cut moves
+there, and is done once it has: pasted back into its own folder it changes nothing and lets go. A
+move never replaces what is there: a taken name puts a line above the tree saying so, and the cut
+stays to paste elsewhere. A move onto another disk is made as a copy, then what was copied is
+deleted where it was: what was added or changed there while it was copied stays, as does what the
+computer won't delete, and the line says what is left.
+
+While a paste runs, the row you cut or copied shows a spinner in its icon's place; a long copy shows
+no progress, and is never cut short. Several pastes can run at once, though a cut can't be pasted
+again while its paste runs. Afterwards a file pasted is selected, unless you selected another
+meanwhile, and the row pasted takes the keyboard focus where it is still on the row you pasted on;
+the project window follows a file you moved, as it does a rename. A paste that fails, as one the
+computer refuses or one whose entry is gone (a cut then lets go), puts a line above the tree saying
+why, though you hid the panel and showed it again meanwhile, and the folders involved are read
+again.
+
+If the connection to the runner drops while a paste, a rename or a delete runs, the runner may still
+finish it. Once the runner is back, the folders involved are read again: a move or a rename they
+show made is taken as done; otherwise a line says Novadeck lost its connection before it heard
+whether it could make the change, and that it may have been done or may still be under way. A change
+asked for while the runner isn't connected is never sent, and the line says nothing was done.
+
+The tree reads its open folders again when the panel is shown and when an agent's turn ends
+in the project; it doesn't watch the folder for changes. **Refresh**, beside **Collapse
+folders** at the top of the panel, reads them again now, for a change made outside Novadeck.
+
+### Hiding files
+
+Files and folders that match a pattern leave the tree, with everything inside a hidden folder,
+and what agents did there leaves the agents strip too. When everything at the top of the
+project's folder is hidden, the panel says so in the tree's place. Patterns are written as VS
+Code's `files.exclude` writes them, and matched against the path from the project's folder:
+
+| Pattern         | Matches                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| `*`             | Any characters within one name: `*.log` hides `app.log`.         |
+| `?`             | One character within a name.                                     |
+| `**`            | Any number of folders, none included: `**/dist` hides every one. |
+| `{a,b}`, `[ab]` | Either of the words, and one of the characters.                  |
+
+A pattern without `**` matches from the top only: `*.log` hides the logs at the top of the
+project, and `**/*.log` every one. Names that start with a dot match as any other. `.git` is
+never listed. A leading `!`, `@(…)`-style groups and VS Code's `when` clauses aren't supported:
+`!` and the groups match themselves.
+
+There are two lists:
+
+- **Every project**, in Preferences → General → Files. It starts with `**/.DS_Store` and
+  `**/Thumbs.db`. Each pattern has a checkbox: unchecked, it stays in the list but hides nothing.
+- **This project**, where the runner keeps it: **Hidden files**, the crossed-out eye beside
+  **Refresh**, opens it, with the list for every project under it as it is and **Edit in
+  Preferences** to change that one. A project's own patterns hide more there; one of the patterns
+  for every project added here unchecked shows what it hides, in this project only. Changes
+  apply once you press **Save**, which adds a pattern typed and not added too; a save that fails
+  keeps the dialog open and says why. **Edit in Preferences** saves your changes the same way
+  before it opens Preferences, and stays if the save fails. **Hide in This Project** on a row's
+  menu adds that row's own path to the list as the runner holds it then, so a change made in
+  another window stays; its glob characters are escaped, so `src/app/[id]` hides that folder
+  alone. If the list can't be read or saved, a line above the tree says so. Until the panel has
+  read a project's list, neither **Hidden files** nor **Hide in This Project** is offered. A
+  project's list is read again when the panel is shown and on **Refresh**, so a change made in
+  another window shows then.
+
 ## Notes
 
 **Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
@@ -822,9 +992,17 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |
 | Navigate the workspace                            | `Shift+Esc`        | `Shift+Esc`                      |
 
-In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and
-previous of its tabs, and on a tab with focus the arrow keys, `Home` and `End` move along
-them and `Delete` closes it.
+In a terminal's companion pane, `Ctrl+PageDown` and `Ctrl+PageUp` show the next and previous of its
+tabs, and on a tab with focus the arrow keys, `Home` and `End` move along them and `Delete` closes
+it. In the project window, `Ctrl+S` (`Cmd+S` on macOS) saves the file you edit at once. In the Files
+panel, `Shift+Alt+C` (`Shift+Option+C` on macOS) copies the path of the file or
+folder with the keyboard on it, `F2` renames it and `Delete` (`Cmd+Backspace` on macOS) asks to
+delete it, and `Ctrl+X`, `Ctrl+C` and `Ctrl+V` (`Cmd` on macOS) cut it, copy it and paste on it,
+with the panel's own clipboard; held down, `Ctrl+V` pastes once. Their letters are the ones the keys
+type, or, on a layout that types no Latin letters, as a Russian one, the keys in their places. On a
+Files row those keys are the panel's, and on macOS a forward `Delete` too, which does nothing there:
+they never rename or close the selected terminal, as they do while navigating, nor reach the
+system's clipboard. In the field a name is typed in, they cut, copy and paste its text as usual.
 
 The keyboard's home is the selected terminal. A mouse click on the sidebar, a header or
 the view switch leaves typing there, and the shortcuts above work from terminal input.

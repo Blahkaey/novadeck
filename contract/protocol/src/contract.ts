@@ -48,7 +48,16 @@ import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
 import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
-import { clientState, folderBrowse, folderListing, project, workspaceSession } from "./projects.js"
+import {
+  clientState,
+  entryChanged,
+  entryPath,
+  filesExclude,
+  folderBrowse,
+  folderListing,
+  project,
+  workspaceSession,
+} from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
 import { sliceChange } from "./slices.js"
 import {
@@ -83,6 +92,13 @@ export const errors = {
   CONFLICT: { status: 409, data: conflictReason.optional() },
   // A plan can't be written, and why (`planUnwritable`): saving it again won't help.
   PLAN_UNWRITABLE: { status: 409, data: planUnwritable },
+  // The system refused to make, move, copy or delete a file or folder of a project, as for want
+  // of permission, a disk that is full or read-only, a file in use, a name it won't keep, or a
+  // socket, pipe or device to copy; the message says which in plain words. Nothing changed but
+  // what the system had done before it refused, as the files a deleted folder lost first, or
+  // what the message says stays, as a moved entry's copy, or a failed copy's part it couldn't
+  // remove.
+  WRITE_REFUSED: { status: 409 },
   TERMINAL_LIMIT: { status: 429 },
   TERMINAL_NOT_FOUND: { status: 404 },
   TERMINAL_EXITED: { status: 409 },
@@ -152,6 +168,59 @@ export const contract = {
     folder: procedure
       .input(z.strictObject({ projectId: id, folder: z.string().max(4096) }))
       .output(folderListing),
+    // The project's own patterns that hide files from its Files panel, as `setFilesExclude`
+    // last kept them: none before. A project the runner doesn't have is NOT_FOUND.
+    filesExclude: procedure.input(z.strictObject({ projectId: id })).output(filesExclude),
+    // Replaces the project's patterns whole; none forgets them. More than
+    // `filesExcludeLimits.patterns` is a CONFLICT that says so. A project the runner doesn't
+    // have is NOT_FOUND.
+    setFilesExclude: procedure
+      .input(z.strictObject({ projectId: id, patterns: filesExclude }))
+      .output(z.void()),
+    // Makes an empty file, or with `folder` an empty folder, at `path` in the project's
+    // directory, and the folders on the way to it that are missing, and answers its path. A
+    // name that is taken is a CONFLICT: nothing found there is overwritten. The root itself,
+    // Git's own `.git` and what is in it (by its name in any case, or through a link or a short
+    // name that resolves into it), or a path that is badly formed, goes through a file or leads
+    // out of the project's directory, as through a link, is INVALID_DIRECTORY; the system
+    // refusing is WRITE_REFUSED, saying why. A project the runner doesn't have is NOT_FOUND.
+    // Whoever holds the token can change any file through a shell anyway.
+    createEntry: procedure
+      .input(z.strictObject({ projectId: id, path: entryPath, folder: z.boolean() }))
+      .output(entryChanged),
+    // Renames the file or folder at `from`, or moves it into another folder of the project, to
+    // `to`, and answers that path. A link moves as a link. A name taken at `to` is a CONFLICT,
+    // unless it is `from` itself spelled in other letters' case in its own folder, on a
+    // filesystem that doesn't tell them apart; a file or an empty folder made at `to` after that
+    // check is replaced, as the system's rename does. A move to another filesystem, which the
+    // system can't rename across, copies the entry to `to` as `copyEntry` copies, never
+    // overwriting, then deletes it at `from`; one that can't be deleted then stays with its copy
+    // made, a WRITE_REFUSED that says so. A folder into itself, an entry at `from` or a folder
+    // for `to` that is missing (a move makes none), and what `createEntry` refuses are
+    // INVALID_DIRECTORY; the system refusing is WRITE_REFUSED, saying why.
+    moveEntry: procedure
+      .input(z.strictObject({ projectId: id, from: entryPath, to: entryPath }))
+      .output(entryChanged),
+    // Copies the file, folder or link at `from` into the folder `into` ("" for the project's
+    // own) and answers the copy's path: under its own name where `into` isn't its folder and the
+    // name is free there, else the first free of `name copy.ext`, `name copy 2.ext`, … as VS Code
+    // names copies. Each name is taken by making it, so nothing is overwritten. A folder copies
+    // with everything in it; a link copies as a link, never followed, inside a folder too; files
+    // and folders keep their modes. A copy that fails part way is removed again. A folder into
+    // itself or below, an entry at `from` or a folder `into` that is missing, and what
+    // `createEntry` refuses are INVALID_DIRECTORY; 1000 names taken is a CONFLICT; the system
+    // refusing, or a socket, pipe or device to copy, is WRITE_REFUSED, saying why. It runs as
+    // long as the copy takes.
+    copyEntry: procedure
+      .input(z.strictObject({ projectId: id, from: entryPath, into: entryPath }))
+      .output(entryChanged),
+    // Deletes the file or folder at `path` for good, a folder with everything in it; a link
+    // goes, not what it leads to. An entry that is missing, and what `createEntry` refuses, are
+    // INVALID_DIRECTORY; the system refusing, as when something is added inside a folder while
+    // it goes, is WRITE_REFUSED, saying why.
+    removeEntry: procedure
+      .input(z.strictObject({ projectId: id, path: entryPath }))
+      .output(z.void()),
     // A folder of the runner's machine and the folders in it, for a client that picks a
     // project's folder there, as the desktop app of a runner on another machine does: `path`
     // absolute, or the runner owner's home folder when omitted. Only looks: it makes nothing.
@@ -695,10 +764,17 @@ export const contract = {
     // deleted. A file that may hold secrets is unavailable as `secret` unless `reveal` is the
     // path the item points at, the file the person chose to show: an item pointed at
     // another file since (a project window re-pointed) is `secret` again, and revealed again
-    // if pointed back.
+    // if pointed back. With `edit`, a file is its whole text, saying whether `save` writes it,
+    // where it can be edited whole, or its listing saying why not (see `itemContent`).
     // An unknown item is NOT_FOUND.
     content: procedure
-      .input(z.strictObject({ itemId: id, reveal: z.string().max(4096).optional() }))
+      .input(
+        z.strictObject({
+          itemId: id,
+          reveal: z.string().max(4096).optional(),
+          edit: z.boolean().optional(),
+        }),
+      )
       .output(eventIterator(itemContent)),
     // One file of a changes item as a selection of its layers changed it: the file's diff
     // and the text of each side, as one range of layers (see
@@ -720,18 +796,24 @@ export const contract = {
     changeRead: procedure
       .input(z.strictObject({ itemId: id, path: z.string().min(1).max(companionLimits.path) }))
       .output(z.void()),
-    // Writes the person's edit to a plan kept in a file, atomically, unless the file
-    // changed since `basedOn`, the stamp the edit was made on: then nothing is written and
-    // the plan as it now stands comes back. A plan kept in an agent's transcript can't be
+    // Writes the person's edit to a plan kept in a file, or to the file they opened in the
+    // session's project window, atomically, unless the file changed since `basedOn`, the
+    // stamp the edit was made on: then nothing is written and the text as it now stands
+    // comes back. `path` is the path the edit was made on: an item pointed at another file
+    // since writes nothing (`moved`). A plan's save may leave it out; a file's must give it,
+    // or is refused as `moved`, as its edit can't be told to be this file's. A plan kept in an
+    // agent's transcript can't be
     // written, and nor can one past 256 KiB, a file that is gone, one in a folder the
-    // runner may not write to, or an item that is no plan: PLAN_UNWRITABLE, saying why
-    // (`gone`, `folder`, `transcript`, `too-large`, `not-a-plan`, `outside`). An unknown item is NOT_FOUND.
+    // runner may not write to, or an item that is neither: PLAN_UNWRITABLE, saying why
+    // (`gone`, `folder`, `transcript`, `too-large`, `not-a-plan`, `outside`, `moved`,
+    // `not-text`). An unknown item is NOT_FOUND.
     save: procedure
       .input(
         z.strictObject({
           itemId: id,
           text: z.string().max(companionLimits.plan),
           basedOn: z.string().max(128),
+          path: z.string().max(companionLimits.path).optional(),
         }),
       )
       .output(planSaveResult),
