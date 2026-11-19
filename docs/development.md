@@ -711,8 +711,10 @@ App:
   projects start with none. Adding, checking off, editing, moving (by drag, the Move menu or Alt
   and the arrows), deleting and Clear done all work there, so they need no action. The sidebar, at
   most 400px wide, shows the board one column at a time; its three columns side by side need
-  520px, which no frame of the app gives it yet. Each action acts on the open project's
-  notes and leaves the others': "Next notes change fails" makes the next change fail once (the
+  520px, which the phone drawer gives it: on a window from about 590 to 700px wide, the Todo
+  panel opens over the whole width, as the Inbox's does. Each action but the last two acts on
+  the open project's notes and leaves the others': "Next notes change fails" makes the next
+  change fail once (the
   list or the board stays as the backend has it, and a line above it says the change wasn't
   saved, until a change takes), "Sample notes" puts storefront's samples in the open project,
   "No notes" empties both (each says what it is for), "No todos" empties the board and keeps
@@ -722,7 +724,12 @@ App:
   whose line is as long as one can be, with details that have a heading, lists, code and a link,
   and "An agent adds a todo" puts a card first in To do, marked as added by the first agent
   running in the session on screen (Claude Code's @wren, from History, where none runs), as an
-  agent's `note` tool adds one.
+  agent's `note` tool adds one. "Card moves not offered" boots the demo again with a backend
+  that can't place a note, as a runner from before the Todo board: the cards have no Move
+  button, can't be dragged, and Alt and the arrows move none, a line under the add field says
+  moving cards needs the runner updated, checking off and opening again still take a card to
+  Done and To do, and the Notes panel's notes still move (by the older `move`); "Card moves
+  offered" boots it again with them.
 - **Inbox:** each action adds one row of its kind to the Inbox, over what the agents wait on,
   waiting from now and in place of the one of its kind already there: a stuck agent, Codex's
   command permission, an unreadable dialog, a held message, a decision with options, a

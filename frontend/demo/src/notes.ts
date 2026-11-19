@@ -101,7 +101,7 @@ export const createDemoNotes = (
   now: number,
   withSamples = true,
   clock: () => number = Date.now,
-): Notes & DemoNotesControl => {
+): Notes & { readonly place: NonNullable<Notes["place"]> } & DemoNotesControl => {
   const state = createStore<NotesState>({
     notes: withSamples ? demoNotes(now) : [],
     failed: false,

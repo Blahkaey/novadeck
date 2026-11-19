@@ -73,11 +73,16 @@ export type Notes = {
   readonly add: (projectId: string, note: { readonly text: string; readonly todo: boolean }) => void
   // Changes a note; one the backend doesn't have is left alone.
   readonly change: (id: string, change: NoteChange) => void
-  // Moves an open note to `index` among its project's open notes, as `openNotes` lists them.
+  // Moves an open note to `index` among its project's open notes, as `openNotes` lists them:
+  // how a plain note is put in order where the backend can't `place` one.
   readonly move: (id: string, index: number) => void
   // Puts a note in its place, as `placed` does: a todo into `column` of the board, a plain
   // note (column null) among the plain notes, before the note `before` or, for null, last.
-  readonly place: (id: string, column: BoardColumn | null, before: string | null) => void
+  // Absent where the backend can't, as a runner from before the Todo board: its cards then
+  // change column only as they are checked off or opened again.
+  readonly place?:
+    | ((id: string, column: BoardColumn | null, before: string | null) => void)
+    | undefined
   // Deletes notes for good.
   readonly remove: (ids: readonly string[]) => void
 }
@@ -87,12 +92,6 @@ const done = (note: Note): boolean => note.doneAt !== null
 // A project's notes that are not checked off, in the person's order.
 export const openNotes = (notes: readonly Note[], projectId: string): Note[] =>
   notes.filter((note) => note.projectId === projectId && !done(note))
-
-// A project's todos that are checked off, the one checked last first.
-export const doneNotes = (notes: readonly Note[], projectId: string): Note[] =>
-  notes
-    .filter((note) => note.projectId === projectId && done(note))
-    .toSorted((a, b) => b.doneAt! - a.doneAt!)
 
 // The board column a note stands in; null for a plain note, which is on no board.
 export const noteColumn = (note: Note): BoardColumn | null => {
@@ -234,6 +233,20 @@ export const placed = (
   const at = anchor !== -1 ? anchor : last !== -1 ? last + 1 : notes.indexOf(note)
   const next = rest.toSpliced(at, 0, after)
   return next.every((each, index) => each === notes[index]) ? notes : next
+}
+
+// The index among the open notes of `projectId`, as `move` takes it, that puts its plain note
+// `id` where `placed` would: just before the plain note `before`, or after the last plain note
+// for null.
+export const plainIndex = (
+  notes: readonly Note[],
+  projectId: string,
+  id: string,
+  before: string | null,
+): number => {
+  const rest = openNotes(notes, projectId).filter((each) => each.id !== id)
+  const anchor = rest.findIndex((each) => each.id === before && !each.todo)
+  return anchor !== -1 ? anchor : rest.findLastIndex((each) => !each.todo) + 1
 }
 
 // Without the notes `ids`.

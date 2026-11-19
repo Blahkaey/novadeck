@@ -70,8 +70,8 @@ export const noteRefusal = {
     "takes none in it. Say in your reply what you would have noted.",
   spent: `An agent may add ${notesPerMinute} notes a minute. Say in your reply what you would have noted.`,
   full:
-    `The user's Notes for this project are full: a project keeps at most ` +
-    `${noteLimits.perProject} notes. Say in your reply what you would have noted.`,
+    `The user's Todo board and Notes for this project are full: a project keeps at most ` +
+    `${noteLimits.perProject} todos and notes together. Say in your reply what you would have noted.`,
 }
 
 /** What the `note` call needs of the runner. */

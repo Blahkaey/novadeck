@@ -170,8 +170,8 @@ export const NotesPanel = ({
   // Adds a plain note with these words.
   onAdd: (text: string) => void
   onChange: (id: string, change: NoteChange) => void
-  // Puts a note before another (null: last); a plain note takes no column.
-  onPlace: (id: string, column: null, before: string | null) => void
+  // Puts a plain note before another (null: last).
+  onPlace: (id: string, before: string | null) => void
   onRemove: (ids: readonly string[]) => void
 }): React.JSX.Element => {
   const plain = useMemo(() => plainNotes(notes, projectId), [notes, projectId])
@@ -200,7 +200,7 @@ export const NotesPanel = ({
   }
   // Moves a note to its spot, and gives its `part` the focus back where one held it.
   const move = (note: Note, spot: Spot, part: Part | null): void => {
-    onPlace(note.id, null, spot.before)
+    onPlace(note.id, spot.before)
     setMoved(movedWords(note.text, spot.index, plain.length))
     if (part) focus.request(note.id, part)
   }

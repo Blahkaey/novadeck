@@ -59,19 +59,19 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "ids"> & {
         failed: boolean
         onAdd: (text: string) => void
         onChange: (id: string, change: NoteChange) => void
-        onPlace: (id: string, column: null, before: string | null) => void
+        onPlace: (id: string, before: string | null) => void
         onRemove: (ids: readonly string[]) => void
       }
     | undefined
   // The same notes for the Todo board, whose field adds a todo and whose cards are placed in
-  // its columns. Left out, there is no Todo panel.
+  // its columns, where the backend can place them. Left out, there is no Todo panel.
   todo:
     | {
         notes: readonly Note[]
         failed: boolean
         onAdd: (text: string) => void
         onChange: (id: string, change: NoteChange) => void
-        onPlace: (id: string, column: BoardColumn, before: string | null) => void
+        onPlace: ((id: string, column: BoardColumn, before: string | null) => void) | undefined
         onRemove: (ids: readonly string[]) => void
       }
     | undefined

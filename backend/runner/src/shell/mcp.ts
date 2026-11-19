@@ -1429,7 +1429,7 @@ const note: Tool<{ readonly todos: number; readonly notes: number }> = {
   call: "note",
   request: (args) => picked(args, ["notes"]),
   said: (answer) => `Added ${noted(answer)}. Add no more unless they ask.`,
-  failed: "Novadeck couldn't add to the user's Notes.",
+  failed: "Novadeck couldn't add to the user's Todo board or Notes.",
 }
 
 // What the runner answers the worktree calls with, as the tools read it.

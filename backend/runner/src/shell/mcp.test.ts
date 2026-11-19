@@ -1502,6 +1502,10 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       isError: true,
       content: [{ type: "text", text: "Say it in your reply." }],
     })
+    // A failure with no reason of the runner's names where the notes would have gone.
+    expect(JSON.stringify(await call({ notes }, { ok: false }))).toContain(
+      "Novadeck couldn't add to the user's Todo board or Notes.",
+    )
   })
 
   it("leaves the note tool out of what it says of itself, so nothing reminds an agent of it", async () => {

@@ -95,3 +95,7 @@ export const emptyColumnWords: Readonly<Record<BoardColumn, string>> = {
 
 // What the board says while the project has no todos.
 export const emptyBoardWords = "Todos you add here stay with this project."
+
+// What the board says where the backend can't place its cards, as a runner from before the
+// board: checking off and opening again still move them.
+export const unplacedWords = "Moving cards needs the runner updated to this version of Novadeck."

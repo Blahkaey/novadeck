@@ -48,10 +48,15 @@ const card = (id: string, parts: Partial<Note> = {}): Note => ({
 })
 
 // The board over notes kept as a backend keeps them: each change is applied by the core's
-// rules, and the board drawn again with what they made.
-const show = (first: readonly Note[], options: { failed?: boolean; width?: number } = {}) => {
+// rules, and the board drawn again with what they made. A backend that can't place a card
+// (`placing` false) is one from before the board.
+const show = (
+  first: readonly Note[],
+  options: { failed?: boolean; width?: number; now?: number; placing?: boolean } = {},
+) => {
   measured = options.width ?? 0
   let notes = first
+  let now = options.now ?? Date.now()
   let made = 0
   const calls = {
     add: vi.fn<(text: string) => void>(),
@@ -63,6 +68,7 @@ const show = (first: readonly Note[], options: { failed?: boolean; width?: numbe
     projectId: "storefront",
     notes,
     failed: options.failed ?? false,
+    now,
     onAdd: (text: string) => {
       calls.add(text)
       keep(added(notes, card(`new-${(made += 1)}`, { text: noteLine(text) })))
@@ -71,10 +77,13 @@ const show = (first: readonly Note[], options: { failed?: boolean; width?: numbe
       calls.change(id, change)
       keep(changed(notes, id, change, 500))
     },
-    onPlace: (id: string, column: BoardColumn, before: string | null) => {
-      calls.place(id, column, before)
-      keep(placed(notes, id, column, before, 500))
-    },
+    onPlace:
+      options.placing === false
+        ? undefined
+        : (id: string, column: BoardColumn, before: string | null) => {
+            calls.place(id, column, before)
+            keep(placed(notes, id, column, before, 500))
+          },
     onRemove: (ids: readonly string[]) => {
       calls.remove(ids)
       keep(removed(notes, ids))
@@ -83,6 +92,11 @@ const show = (first: readonly Note[], options: { failed?: boolean; width?: numbe
   const page = render(createElement(TodoBoard, props()))
   const keep = (next: readonly Note[]): void => {
     notes = next
+    page.rerender(createElement(TodoBoard, props()))
+  }
+  // The board told another time, as its panel tells it.
+  const at = (time: number): void => {
+    now = time
     page.rerender(createElement(TodoBoard, props()))
   }
   const list = (label: string): HTMLElement | null =>
@@ -120,9 +134,11 @@ const show = (first: readonly Note[], options: { failed?: boolean; width?: numbe
       )
     })
   const click = (on: HTMLElement) => act(() => on.click())
+  // The lines the board says, apart from where its cards went.
   const said = () =>
-    [...page.container.querySelectorAll("[role=status]")].map((line) => line.textContent)
-  const announced = () => page.container.querySelector("[aria-live=polite]")?.textContent
+    [...page.container.querySelectorAll("p.notes-empty")].map((line) => line.textContent)
+  const announced = () =>
+    page.container.querySelector('[role=status][aria-label="Board moves"]')?.textContent
   return {
     page,
     calls,
@@ -137,6 +153,7 @@ const show = (first: readonly Note[], options: { failed?: boolean; width?: numbe
     click,
     said,
     announced,
+    at,
     notes: () => notes,
   }
 }
@@ -254,6 +271,20 @@ describe("Checking a card off", () => {
 
     expect(row("d").querySelector(".todo-card-date")?.textContent).toMatch(/^Done \d/)
   })
+
+  it("says it against the time it is told, a date once that is another day", () => {
+    const doneAt = new Date(2026, 10, 19, 9, 5).getTime()
+    const { row, at } = show([card("d", { doneAt })], {
+      width: 800,
+      now: new Date(2026, 10, 19, 15, 0).getTime(),
+    })
+    const date = () => row("d").querySelector(".todo-card-date")?.textContent
+
+    expect(date()).toMatch(/^Done .*9.05/)
+    at(new Date(2026, 10, 20, 8, 0).getTime())
+    expect(date()).toMatch(/^Done .*\b19\b/)
+    expect(date()).not.toMatch(/05/)
+  })
 })
 
 describe("Moving a card", () => {
@@ -324,6 +355,37 @@ describe("Moving a card", () => {
     expect(button("Edit Card c").getAttribute("aria-keyshortcuts")).toBe(
       "Alt+ArrowUp Alt+ArrowRight",
     )
+  })
+})
+
+describe("A board whose backend can't place cards, as a runner from before it", () => {
+  it("offers no Move menu, names no keys, and says moving cards needs the runner updated", () => {
+    const { page, button, said } = show(storefront, { placing: false })
+
+    expect(page.container.querySelector(".todo-card-move")).toBeNull()
+    expect(button("Edit Card a").hasAttribute("aria-keyshortcuts")).toBe(false)
+    expect(said()).toEqual(["Moving cards needs the runner updated to this version of Novadeck."])
+  })
+
+  it("moves nothing with Alt and the arrows", async () => {
+    const { button, press, texts, tab } = show(storefront, { placing: false })
+
+    await press(button("Edit Card a"), "ArrowRight", { altKey: true })
+    await press(button("Edit Card a"), "ArrowDown", { altKey: true })
+
+    expect(tab("To do").getAttribute("aria-selected")).toBe("true")
+    expect(texts("To do")).toEqual(["Card a", "Card c"])
+  })
+
+  it("still checks a card off to Done and opens it again in To do", async () => {
+    const { checkbox, click, texts, calls } = show(storefront, { width: 800, placing: false })
+
+    await click(checkbox("Card c"))
+    expect(calls.change).toHaveBeenCalledWith("c", { done: true })
+    expect(texts("Done")).toEqual(["Card c", "Card d"])
+
+    await click(checkbox("Card c"))
+    expect(texts("To do")).toEqual(["Card c", "Card a"])
   })
 })
 

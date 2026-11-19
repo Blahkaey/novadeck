@@ -15,6 +15,7 @@ import { websocket, type Transport } from "@novadeck/wire/client"
 import { pause, runnerBackend, type RunnerBackend } from "./backend"
 import { desktopOptions } from "./desktop/app"
 import { reportPoolTo, sizePoolTo } from "./desktop/renderer-pool"
+import { placesNotes } from "./notes"
 import type { RunnerListing } from "./sessions/seed"
 
 /** The desktop app's runner: the one the app starts, over a port it hands the page. */
@@ -161,12 +162,15 @@ export const connectRunnerBackend = async (
       },
       agents,
       forges,
+      notesPlaced,
     ] = await Promise.all([
       runner.settings.get(),
       runner.agents.list(),
       // A runner from before forges has none, and the person is offered none. Cached: the
       // start waits on no forge's tool; Preferences looks again as it opens.
       runner.forges.list({ cached: true }).catch(() => undefined),
+      // A runner from before the Todo board can't place a note: its cards aren't moved.
+      placesNotes(runner.notes),
     ])
     const appOptions = desktopOptions(app)
     reportPoolTo(app)
@@ -183,6 +187,7 @@ export const connectRunnerBackend = async (
           transcriptsAvailable,
           agents,
           ...(forges !== undefined && { forges }),
+          placesNotes: notesPlaced,
           welcomed,
           inboxOrder,
           inboxSnoozed,

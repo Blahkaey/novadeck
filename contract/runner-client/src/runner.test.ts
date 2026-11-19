@@ -109,6 +109,17 @@ describe("a call", () => {
       expect(hasCode(await failure(runner.projects.list()), "CLOSING")).toBe(true)
     })
   })
+
+  context("the runner doesn't have, as an older one", () => {
+    it("rejects as NOT_FOUND, and one it has with input it refuses as BAD_REQUEST", async () => {
+      // How the adapter tells a runner from before `notes.place` (`placesNotes`).
+      const older = await fakeRunner({ notes: { list: api.notes.list.handler(() => []) } })
+      const newer = await fakeRunner({ notes: { place: api.notes.place.handler(() => []) } })
+      const asked = { projectId: "", id: "" }
+      expect(hasCode(await failure(older.runner.notes.place(asked)), "NOT_FOUND")).toBe(true)
+      expect(hasCode(await failure(newer.runner.notes.place(asked)), "BAD_REQUEST")).toBe(true)
+    })
+  })
 })
 
 describe("voice.record", () => {

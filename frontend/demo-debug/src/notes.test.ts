@@ -1,7 +1,6 @@
 import {
   boardCards,
   boardColumns,
-  doneNotes,
   noteLimits,
   openNotes,
   plainNotes,
@@ -47,21 +46,37 @@ const onScreen = (projectId: string, terminals: Partial<TerminalMetadata>[]): Wo
 
 const setup = () => {
   const notes = createDemoNotes(0)
-  const [group] = notesGroups(notes)
+  const placing: boolean[] = []
+  const [group] = notesGroups({ setPlacesNotes: (next) => void placing.push(next) }, notes)
   const action = (label: string) => group!.actions.find((each) => each.label === label)!
   const run = (label: string, projectId?: string) => void action(label).run(context(projectId))
   // Runs it with this workspace on screen.
   const runOn = (label: string, workspace: Workspace) =>
     void action(label).run({ ...context(), workspace: () => workspace })
-  return { notes, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
+  return { notes, placing, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
 }
 
 describe("the debug panel's Notes and Todo group", () => {
   it("offers nothing where the backend's notes aren't the demo's", () => {
     const { state, add, change, move, place, remove } = createDemoNotes(0)
 
-    expect(notesGroups(undefined)).toEqual([])
-    expect(notesGroups({ state, add, change, move, place, remove })).toEqual([])
+    const launch = { setPlacesNotes: () => {} }
+
+    expect(notesGroups(launch, undefined)).toEqual([])
+    expect(notesGroups(launch, { state, add, change, move, place, remove })).toEqual([])
+  })
+
+  it("boots the demo again with cards that move, or that don't, as on an older runner", () => {
+    const { group, placing, run } = setup()
+
+    run("Card moves not offered")
+    run("Card moves offered")
+    expect(placing).toEqual([false, true])
+    expect(
+      group.actions
+        .filter(({ label }) => label.startsWith("Card moves"))
+        .map((each) => each.reboots),
+    ).toEqual([true, true])
   })
 
   it("makes the next change fail, once, with the notes kept", () => {
@@ -114,7 +129,7 @@ describe("the debug panel's Notes and Todo group", () => {
 
     run("Every todo done", "storefront")
     expect(openNotes(state().notes, "storefront")).toEqual([])
-    expect(doneNotes(state().notes, "storefront")).toHaveLength(6)
+    expect(boardCards(state().notes, "storefront", "done")).toHaveLength(6)
     // A todo checked off is in progress no more.
     expect(state().notes.filter((note) => "doing" in note)).toEqual([])
   })

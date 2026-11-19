@@ -189,6 +189,10 @@ export type RunnerBackendOptions = {
   // Where each forge stands, as the runner said at startup; forges are not offered when absent
   // (an older runner has none).
   readonly forges?: readonly ForgeIntegration[]
+  // Whether the runner puts notes in their places (`placesNotes`), as it answered at startup:
+  // false for a runner from before the Todo board, whose notes offer no `place`. It does when
+  // absent.
+  readonly placesNotes?: boolean
   readonly welcomed?: boolean
   // The order the person dragged the Inbox's rows into, as the runner said at startup; the
   // rows keep the Inbox's own order, and can't be dragged, when absent.
@@ -1492,7 +1496,11 @@ export const runnerBackend = (
   // History, followed the same way.
   const history = createRunnerHistory(runner.history, track)
   // The person's notes, followed the same way.
-  const notes = createRunnerNotes(runner.notes, { track })
+  // A runner without `notes.place` is never asked it.
+  const { place: _, ...unplaced } = runner.notes
+  const notes = createRunnerNotes(options.placesNotes === false ? unplaced : runner.notes, {
+    track,
+  })
   // Works, read once at the start and followed while the Worktrees panel is watched.
   const works = createRunnerWorks(runner.works, track)
   let following = false

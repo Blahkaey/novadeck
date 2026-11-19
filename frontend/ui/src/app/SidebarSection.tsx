@@ -3,7 +3,7 @@ import type { FilesExclude } from "@novadeck/core/files"
 import type { ForgeConnection } from "@novadeck/core/forges"
 import type { ClosedTerminal, HistoryState } from "@novadeck/core/history"
 import { itemIdOf } from "@novadeck/core/items"
-import { noNotes, type Note, type NotesState } from "@novadeck/core/notes"
+import { noNotes, plainIndex, type Note, type NotesState } from "@novadeck/core/notes"
 import { orderedIds } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
@@ -254,7 +254,15 @@ export const SidebarSection = memo((): React.JSX.Element => {
             failed: notesFailed,
             onAdd: (text: string) => notesFeed.add(projectId, { text, todo: false }),
             onChange: notesFeed.change,
-            onPlace: notesFeed.place,
+            // A backend that can't place a note, as an older runner, moves it among the open
+            // notes to the same place.
+            onPlace: (id: string, before: string | null) =>
+              notesFeed.place
+                ? notesFeed.place(id, null, before)
+                : notesFeed.move(
+                    id,
+                    plainIndex(notesFeed.state.getSnapshot().notes, projectId, id, before),
+                  ),
             onRemove: notesFeed.remove,
           }
         : undefined,

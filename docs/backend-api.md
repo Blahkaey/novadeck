@@ -1918,7 +1918,15 @@ one from an earlier runner.
     doesn't have is skipped.
   - The UI's adapter shows each change at once, over what the runner last reported, and
     takes the runner's answer in its place; a change the runner refuses leaves the notes as
-    the runner has them and sets the port's `notes.state.failed` until a change takes.
+    the runner has them and sets the port's `notes.state.failed` until a change takes. A
+    runner from before the Todo board has no `notes.place`: at startup the adapter asks it
+    to place a note by ids no note can have (`placesNotes`), which a runner with the call
+    refuses as `BAD_REQUEST` and changes nothing, and one without it answers `NOT_FOUND`.
+    Against that runner the port offers no `notes.place`: the board's cards change column
+    only as they are checked off or opened again, and Notes puts a plain note in order with
+    `notes.move`, at the index among the open notes that lands it where `place` would.
+    `frontend/runner-adapter/src/notes-rules.test.ts` runs the core's rules and the runner's
+    over the same cases, so the two keep agreeing.
   - The MCP `note` tool, the agents' only way in, adds 1 to 20 notes (`noteLimits.perCall`),
     each `{ text, todo?, body? }` (a todo unless `todo` is false), first in the caller's
     project's list in the order given, each with a runner-made id and `by` naming the

@@ -7,7 +7,7 @@
 
    Hooks: data-drop="before" on the card a dragged card would land in front of, "end" on the
    column cards it would land last in, "start" on the tab of the column it would land first
-   in.
+   in. The line where it would land is the card's, or the column cards', `::after`.
 
    Tokens: none of its own; it reads the palette's (muted, line, strong) and the item recipe's
    (--item-hover-bg). */
@@ -15,7 +15,7 @@
   border-bottom: var(--border-width) solid var(--color-line);
 }
 .todo-tab {
-  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  padding: 6px;
   cursor: pointer;
 }
 .todo-tab[data-drop="start"] {
@@ -26,9 +26,17 @@
   color: var(--color-muted);
 }
 
-/* Where a dragged card would land: a line just above the card it would stand before, or
-   under a column's last card. */
-.todo-card[data-drop="before"]::before,
+/* A column's cards scroll in a box that starts a gap above its first card, so the line above
+   that card shows within it, while the cards stand where they would without it. */
+.todo-column-cards {
+  margin-top: -4px;
+  padding-top: 4px;
+}
+
+/* Where a dragged card would land: a line in the gap just above the card it would stand
+   before, or under a column's last card. A card is an item, whose `::before` is the item
+   recipe's selected indicator, so the line is its `::after`. */
+.todo-card[data-drop="before"]::after,
 .todo-column-cards[data-drop="end"]::after {
   content: "";
   height: 2px;
@@ -36,7 +44,7 @@
   background-color: var(--color-strong);
   pointer-events: none;
 }
-.todo-card[data-drop="before"]::before {
+.todo-card[data-drop="before"]::after {
   position: absolute;
   inset-inline: 4px;
   top: -3px;

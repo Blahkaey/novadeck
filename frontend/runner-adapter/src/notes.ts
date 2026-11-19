@@ -12,14 +12,32 @@ import {
   type NotesState,
 } from "@novadeck/core/notes"
 import { createStore } from "@novadeck/core/store"
-import type { Runner } from "@novadeck/runner-client"
+import { hasCode, type Runner } from "@novadeck/runner-client"
 
 import { consume } from "./streams"
 
 // The runner's notes: every project's as `notes.watch` reports them, and the person's changes
 // shown at once, over what the runner last said, until it answers each. Its answer is the
 // project's notes as the change left them, so a change that took never shows twice; one that
-// didn't leaves the notes as the runner has them, and the state says so.
+// didn't leaves the notes as the runner has them, and the state says so. A runner from before
+// the Todo board has no `notes.place`, and the notes then offer no `place`.
+
+// The runner's calls on the notes; `place` only where it has it (see `placesNotes`).
+export type RunnerNoteCalls = Omit<Runner["notes"], "place"> &
+  Partial<Pick<Runner["notes"], "place">>
+
+// Whether the runner puts notes in their places (`notes.place`), which one from before the
+// Todo board doesn't. It is asked to place a note by ids no note can have: a runner with the
+// call refuses them as a bad request and changes nothing, and one without it answers that it
+// has no such call (NOT_FOUND). Any other answer, as a dropped connection, is taken for a
+// runner with it, as most are.
+export const placesNotes = async (calls: Pick<Runner["notes"], "place">): Promise<boolean> => {
+  const failure = await calls.place({ projectId: "", id: "" }).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  return !hasCode(failure, "NOT_FOUND")
+}
 
 export type RunnerNotes = {
   readonly notes: Notes
@@ -42,7 +60,7 @@ const keep = (
 type Pending = (notes: readonly Note[]) => readonly Note[]
 
 export const createRunnerNotes = (
-  calls: Runner["notes"],
+  calls: RunnerNoteCalls,
   {
     // Keeps a call the backend waits for before it stops, as its other calls are.
     track = (work) => work,
@@ -133,6 +151,7 @@ export const createRunnerNotes = (
   }
 
   const shown = (): readonly Note[] => state.getSnapshot().notes
+  const { place } = calls
 
   const notes: Notes = {
     state,
@@ -183,22 +202,24 @@ export const createRunnerNotes = (
         () => calls.move({ projectId: note.projectId, id, index }),
       )
     },
-    place: (id, column, before) => {
-      const note = shown().find((each) => each.id === id)
-      const at = now()
-      if (!note || placed(shown(), id, column, before, at) === shown()) return
-      send(
-        note.projectId,
-        (current) => placed(current, id, column, before, at),
-        () =>
-          calls.place({
-            projectId: note.projectId,
-            id,
-            ...(column !== null && { column }),
-            ...(before !== null && { before }),
-          }),
-      )
-    },
+    ...(place && {
+      place: (id, column, before) => {
+        const note = shown().find((each) => each.id === id)
+        const at = now()
+        if (!note || placed(shown(), id, column, before, at) === shown()) return
+        send(
+          note.projectId,
+          (current) => placed(current, id, column, before, at),
+          () =>
+            place({
+              projectId: note.projectId,
+              id,
+              ...(column !== null && { column }),
+              ...(before !== null && { before }),
+            }),
+        )
+      },
+    }),
     remove: (ids) => {
       const gone = shown().filter((note) => ids.includes(note.id))
       for (const projectId of new Set(gone.map((note) => note.projectId))) {

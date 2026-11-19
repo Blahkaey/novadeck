@@ -3,13 +3,13 @@ import {
   boardCards,
   boardColumns,
   changed,
-  doneNotes,
   moved,
   noteColumn,
   noteLimits,
   noteLine,
   openNotes,
   placed,
+  plainIndex,
   plainNotes,
   removed,
   todosLeft,
@@ -42,10 +42,6 @@ describe("A project's notes", () => {
   it("lists the open ones in the person's order, and no other project's", () => {
     expect(ids(openNotes(notes, "p"))).toEqual(["a", "c"])
     expect(ids(openNotes(notes, "q"))).toEqual(["other"])
-  })
-
-  it("lists the ones checked off apart, the one checked last first", () => {
-    expect(ids(doneNotes(notes, "p"))).toEqual(["d", "b"])
   })
 
   it("counts the todos still to do, not the plain notes", () => {
@@ -265,6 +261,39 @@ describe("Moving a note", () => {
     expect(moved(notes, "a", 0)).toBe(notes)
     expect(moved(notes, "b", 0)).toBe(notes)
     expect(moved(notes, "nope", 0)).toBe(notes)
+  })
+})
+
+describe("Moving a plain note where the backend can't place one", () => {
+  const notes = [
+    note("a"),
+    note("plain1", { todo: false }),
+    note("x", { projectId: "q", todo: false }),
+    note("done1", { doneAt: 10 }),
+    note("b", { doing: true }),
+    note("plain2", { todo: false }),
+    note("plain3", { todo: false }),
+    note("c"),
+  ]
+  const spots: readonly [string, string | null][] = [
+    ["plain3", "plain1"],
+    ["plain1", "plain3"],
+    ["plain1", null],
+    ["plain3", null],
+  ]
+
+  it.each(spots)("moves %s before %s, as placing it would", (id, before) => {
+    const order = (next: readonly Note[]) => ids(openNotes(next, "p"))
+    expect(order(moved(notes, id, plainIndex(notes, "p", id, before)))).toEqual(
+      order(placed(notes, id, null, before, 500)),
+    )
+    expect(ids(plainNotes(moved(notes, id, plainIndex(notes, "p", id, before)), "p"))).toEqual(
+      ids(plainNotes(placed(notes, id, null, before, 500), "p")),
+    )
+  })
+
+  it("puts it after the last plain note, not the last open todo", () => {
+    expect(plainIndex(notes, "p", "plain1", null)).toBe(4)
   })
 })
 

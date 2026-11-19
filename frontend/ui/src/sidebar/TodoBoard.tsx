@@ -6,7 +6,7 @@ import {
   PointerSensor,
 } from "@dnd-kit/dom"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
-import { DragDropProvider, useDroppable } from "@dnd-kit/react"
+import { DragDropProvider, useDroppable, type DragEndEvent } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
 import {
   boardCards,
@@ -49,6 +49,7 @@ import {
   emptyColumnWords,
   firstIn,
   movedCardWords,
+  unplacedWords,
   type BoardIds,
   type CardSpot,
   type DropTarget,
@@ -90,6 +91,13 @@ const clearBar = ({ ids }: Clearing): React.JSX.Element => (
   </SubjectBar>
 )
 
+// How a card moves where the backend can place it: one place up or down its column, or first
+// into another column, each from the control `part`.
+type CardMoves = {
+  readonly step: (by: -1 | 1, part: Part) => void
+  readonly column: (to: BoardColumn, part: Part) => void
+}
+
 // The keys that move a card, as its controls name them: Alt with up and down within its
 // column, with left and right to the column beside it.
 const moveKeys = (column: BoardColumn, index: number, count: number): string | undefined =>
@@ -100,9 +108,33 @@ const moveKeys = (column: BoardColumn, index: number, count: number): string | u
     ...(columnBeside(column, 1) ? ["Alt+ArrowRight"] : []),
   ].join(" ") || undefined
 
+// A card's Move menu: up and down its column, then each column, which takes it first.
+const moveItems = (
+  move: CardMoves,
+  column: BoardColumn,
+  index: number,
+  count: number,
+): readonly ContextMenuAction[] => [
+  { value: "up", label: "Move up", disabled: index === 0, onSelect: () => move.step(-1, "move") },
+  {
+    value: "down",
+    label: "Move down",
+    disabled: index === count - 1,
+    onSelect: () => move.step(1, "move"),
+  },
+  ...boardColumns.map((to, at) => ({
+    value: to,
+    label: columnLabels[to],
+    disabled: to === column,
+    separated: at === 0,
+    onSelect: () => move.column(to, "move"),
+  })),
+]
+
 // One card: its checkbox, its line, which a click edits and a drag moves, the agent's mark
 // where an agent added it, its Move menu, and a button that shows what is under it; on a done
-// card, when it was checked off.
+// card, when it was checked off. Where it can't be moved (`move` undefined), no drag, menu or
+// key moves it.
 const Card = ({
   note,
   column,
@@ -120,8 +152,7 @@ const Card = ({
   onToggle,
   onKind,
   onDelete,
-  onStep,
-  onColumn,
+  move,
 }: {
   note: Note
   column: BoardColumn
@@ -140,43 +171,19 @@ const Card = ({
   onToggle: () => void
   onKind: () => void
   onDelete: () => void
-  // One place up or down its column, from the control `part`.
-  onStep: (by: -1 | 1, part: Part) => void
-  // First into another column, from the control `part`.
-  onColumn: (to: BoardColumn, part: Part) => void
+  move: CardMoves | undefined
 }): React.JSX.Element => {
   const { ref, handleRef, isDragSource } = useSortable({
     id: note.id,
     index,
     group: column,
     data: { drop: { kind: "card", column, id: note.id } } satisfies DropData,
-    disabled: editing !== null,
+    disabled: editing !== null || !move,
     plugins: [],
     transition,
   })
   const bodyId = useId()
-  const keys = moveKeys(column, index, count)
-  const moves: readonly ContextMenuAction[] = [
-    {
-      value: "up",
-      label: "Move up",
-      disabled: index === 0,
-      onSelect: () => onStep(-1, "move"),
-    },
-    {
-      value: "down",
-      label: "Move down",
-      disabled: index === count - 1,
-      onSelect: () => onStep(1, "move"),
-    },
-    ...boardColumns.map((to, at) => ({
-      value: to,
-      label: columnLabels[to],
-      disabled: to === column,
-      separated: at === 0,
-      onSelect: () => onColumn(to, "move"),
-    })),
-  ]
+  const keys = move && moveKeys(column, index, count)
   return (
     <div
       ref={ref}
@@ -187,21 +194,23 @@ const Card = ({
       data-drop={dropBefore ? "before" : undefined}
       // Alt and the arrows move the card, from any of its controls but a field being typed in.
       onKeyDown={(event) => {
-        if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+        if (!move || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
         const part = (event.target as HTMLElement).dataset.part
         if (part !== "check" && part !== "line" && part !== "details" && part !== "move") return
         const by = { ArrowUp: -1, ArrowDown: 1, ArrowLeft: -1, ArrowRight: 1 } as const
         if (!Object.hasOwn(by, event.key)) return
         event.preventDefault()
         const step = by[event.key as keyof typeof by]
-        if (event.key === "ArrowUp" || event.key === "ArrowDown") onStep(step, part)
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") move.step(step, part)
         else {
           const to = columnBeside(column, step)
-          if (to) onColumn(to, part)
+          if (to) move.column(to, part)
         }
       }}
     >
-      <div className="notes-row-line flex min-w-0 items-start gap-2 py-2 pr-1.5 pl-2.5">
+      {/* Side by side a column is too narrow to set a card's line beside its buttons: the line
+          takes the card's width and the buttons go under it, on the right. */}
+      <div className="notes-row-line flex min-w-0 items-start gap-2 py-2 pr-1.5 pl-2.5 group-data-[layout=wide]/board:flex-wrap group-data-[layout=wide]/board:justify-end">
         <Checkbox
           className="mt-px"
           checked={column === "done"}
@@ -216,7 +225,7 @@ const Card = ({
           <button
             ref={handleRef}
             type="button"
-            className="notes-row-text min-w-0 flex-1 text-left text-body leading-[18px]"
+            className="notes-row-text min-w-0 flex-1 text-left text-body leading-[18px] group-data-[layout=wide]/board:basis-[calc(100%-2rem)]"
             data-part="line"
             aria-label={`Edit ${note.text}`}
             aria-keyshortcuts={keys}
@@ -226,24 +235,26 @@ const Card = ({
           </button>
         )}
         {note.by && <AddedBy by={note.by} />}
-        <ContextMenu
-          label={`Move ${note.text}`}
-          opensOn="click"
-          placement="bottom-end"
-          tooltip="Move to…"
-          items={moves}
-          trigger={
-            <button
-              type="button"
-              className="todo-card-move icon-button small dim quiet"
-              data-part="move"
-              aria-label={`Move ${note.text}`}
-              aria-keyshortcuts={keys}
-            >
-              <ArrowRightLeft size={14} strokeWidth={1.6} />
-            </button>
-          }
-        />
+        {move && (
+          <ContextMenu
+            label={`Move ${note.text}`}
+            opensOn="click"
+            placement="bottom-end"
+            tooltip="Move to…"
+            items={moveItems(move, column, index, count)}
+            trigger={
+              <button
+                type="button"
+                className="todo-card-move icon-button small dim quiet"
+                data-part="move"
+                aria-label={`Move ${note.text}`}
+                aria-keyshortcuts={keys}
+              >
+                <ArrowRightLeft size={14} strokeWidth={1.6} />
+              </button>
+            }
+          />
+        )}
         <NoteDetailsButton note={note} expanded={expanded} body={bodyId} onToggle={onToggle} />
       </div>
       {note.doneAt !== null && (
@@ -340,7 +351,7 @@ const ColumnTab = ({
     <Tab
       ref={ref}
       value={column}
-      className="todo-tab flex min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 py-1.5 text-label font-medium"
+      className="todo-tab flex min-w-0 flex-1 items-center justify-center gap-1.5 text-label font-medium"
       {...(dropOn && { "data-drop": "start" })}
     >
       {columnLabels[column]}
@@ -353,13 +364,16 @@ const ColumnTab = ({
 // each in the person's order. A field at the top adds a card to To do; each card is checked off
 // (to Done) or opened again (to To do), edited, opened for its details, made a plain note,
 // deleted, or moved: dragged within its column or to another, or with its Move menu or Alt and
-// the arrows. Done's button clears every done card after asking. Its width picks its layout:
-// three columns side by side where there is room for them, else one at a time with a switch
-// between them. It takes everything it shows and does as props, so any frame can hold it.
+// the arrows, where the backend can place it; else only checking off and opening again move
+// it, and a line says why. Done's button clears every done card after asking. Its width picks
+// its layout: three columns side by side where there is room for them, else one at a time with
+// a switch between them. It takes everything it shows and does as props, so any frame can hold
+// it.
 export const TodoBoard = ({
   projectId,
   notes,
   failed,
+  now,
   onAdd,
   onChange,
   onPlace,
@@ -370,11 +384,14 @@ export const TodoBoard = ({
   notes: readonly Note[]
   // The person's last change didn't take, and the notes are as the backend has them.
   failed: boolean
+  // The time done cards say when they were checked off against.
+  now: number
   // Adds a todo with these words, first in To do.
   onAdd: (text: string) => void
   onChange: (id: string, change: NoteChange) => void
-  // Puts a todo into a column, before a card of it (null: last).
-  onPlace: (id: string, column: BoardColumn, before: string | null) => void
+  // Puts a todo into a column, before a card of it (null: last); undefined where the backend
+  // can't, as a runner from before the board.
+  onPlace: ((id: string, column: BoardColumn, before: string | null) => void) | undefined
   onRemove: (ids: readonly string[]) => void
 }): React.JSX.Element => {
   const cards = useMemo(
@@ -387,8 +404,6 @@ export const TodoBoard = ({
   )
   const empty = boardColumns.every((column) => cards[column].length === 0)
   const full = notesFull(notes.filter((note) => note.projectId === projectId).length)
-  // Done cards say when they were checked off against the day it is as the board opens.
-  const [now] = useState(() => Date.now())
   const root = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
@@ -435,14 +450,16 @@ export const TodoBoard = ({
     setDraft("")
   }
   // Puts a card in its spot, says where it went, shows its column, and gives its `part` the
-  // focus back where one held it.
-  const place = (note: Note, spot: CardSpot, part: Part | null): void => {
-    onPlace(note.id, spot.column, spot.before)
-    const count = ids[spot.column].filter((id) => id !== note.id).length + 1
-    setMoved(movedCardWords(note.text, spot.column, spot.index, count))
-    setShown(spot.column)
-    if (part) focus.request(note.id, part)
-  }
+  // focus back where one held it; none where the backend can't place a card.
+  const place =
+    onPlace &&
+    ((note: Note, spot: CardSpot, part: Part | null): void => {
+      onPlace(note.id, spot.column, spot.before)
+      const count = ids[spot.column].filter((id) => id !== note.id).length + 1
+      setMoved(movedCardWords(note.text, spot.column, spot.index, count))
+      setShown(spot.column)
+      if (part) focus.request(note.id, part)
+    })
   const card = (note: Note, column: BoardColumn, index: number): React.JSX.Element => (
     <Card
       key={note.id}
@@ -485,14 +502,18 @@ export const TodoBoard = ({
         focus.beside(note.id, "line", addField)
         onRemove([note.id])
       }}
-      onStep={(by, part) => {
-        const spot = stepSpot(ids[column], note.id, by)
-        if (spot) place(note, { column, ...spot }, part)
-      }}
-      onColumn={(to, part) => {
-        const spot = firstIn(ids, note.id, to)
-        if (spot) place(note, spot, part)
-      }}
+      move={
+        place && {
+          step: (by, part) => {
+            const spot = stepSpot(ids[column], note.id, by)
+            if (spot) place(note, { column, ...spot }, part)
+          },
+          column: (to, part) => {
+            const spot = firstIn(ids, note.id, to)
+            if (spot) place(note, spot, part)
+          },
+        }
+      }
     />
   )
   const column = (each: BoardColumn): React.JSX.Element => (
@@ -509,7 +530,7 @@ export const TodoBoard = ({
   return (
     <div
       ref={root}
-      className="todo-board flex min-h-0 min-w-0 flex-1 flex-col"
+      className="todo-board group/board flex min-h-0 min-w-0 flex-1 flex-col"
       data-layout={layout}
     >
       <form
@@ -546,6 +567,7 @@ export const TodoBoard = ({
           {emptyBoardWords}
         </p>
       )}
+      {!place && <p className="notes-empty">{unplacedWords}</p>}
       <div ref={setFrame} className="todo-frame mt-2.5 flex min-h-0 min-w-0 flex-1 flex-col">
         <DragDropProvider
           sensors={sensors}
@@ -560,19 +582,22 @@ export const TodoBoard = ({
             setDragged(source ? String(source.id) : null)
           }}
           onDragOver={(event) => setOver(dropOf(event.operation.target?.data) ?? null)}
-          onDragEnd={(event) => {
-            setDragged(null)
-            setOver(null)
-            const { source, target } = event.operation
-            if (!isSortable(source)) return
-            const from = find(String(source.id))
-            if (!from) return
-            const held = source.element?.contains(document.activeElement) ?? false
-            const to = event.canceled ? undefined : dropOf(target?.data)
-            const spot = to && dropSpot(ids, from.note.id, from.column, to)
-            if (spot) place(from.note, spot, held ? "line" : null)
-            else if (held) focus.request(from.note.id, "line")
-          }}
+          // Cards are dragged only where the backend places them.
+          {...(place && {
+            onDragEnd: (event: DragEndEvent) => {
+              setDragged(null)
+              setOver(null)
+              const { source, target } = event.operation
+              if (!isSortable(source)) return
+              const from = find(String(source.id))
+              if (!from) return
+              const held = source.element?.contains(document.activeElement) ?? false
+              const to = event.canceled ? undefined : dropOf(target?.data)
+              const spot = to && dropSpot(ids, from.note.id, from.column, to)
+              if (spot) place(from.note, spot, held ? "line" : null)
+              else if (held) focus.request(from.note.id, "line")
+            },
+          })}
         >
           {layout === "wide" ? (
             <div className="todo-columns grid min-h-0 flex-1 grid-cols-3 gap-3">
@@ -625,7 +650,7 @@ export const TodoBoard = ({
           )}
         </DragDropProvider>
       </div>
-      <span className="sr-only" aria-live="polite">
+      <span className="sr-only" role="status" aria-label="Board moves">
         {moved}
       </span>
       <ConfirmDialog

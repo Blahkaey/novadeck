@@ -1,4 +1,4 @@
-import { boardCards, doneNotes, openNotes, plainNotes, todosLeft } from "@novadeck/core/notes"
+import { boardCards, openNotes, plainNotes, todosLeft } from "@novadeck/core/notes"
 import type { Backend } from "@novadeck/core/port"
 
 import { createDemoNotes, demoNotes, isDemoNotes, withNotes } from "./notes"
@@ -25,7 +25,7 @@ describe("The demo's notes", () => {
     expect(notes.filter((note) => note.by).map(({ text, by }) => [text, by])).toEqual([
       ["Move the price formatter into the shared package", { agent: "codex", handle: "pike" }],
     ])
-    expect(doneNotes(notes, "storefront").map(({ text }) => text)).toEqual([
+    expect(boardCards(notes, "storefront", "done").map(({ text }) => text)).toEqual([
       "Rename the checkout route",
       "Update the screenshots in the README",
     ])
@@ -88,7 +88,7 @@ describe("The demo's notes", () => {
     expect(texts()).toEqual(["Ship it", "Remember the flag"])
     notes.change(ship!.id, { done: true })
     expect(texts()).toEqual(["Remember the flag"])
-    expect(doneNotes(state().notes, "storefront")[0]).toMatchObject({
+    expect(boardCards(state().notes, "storefront", "done")[0]).toMatchObject({
       text: "Ship it",
       doneAt: now + 4_000,
     })

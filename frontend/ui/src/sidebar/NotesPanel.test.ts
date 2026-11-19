@@ -43,7 +43,7 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
   const calls = {
     add: vi.fn<(text: string) => void>(),
     change: vi.fn<(id: string, change: NoteChange) => void>(),
-    place: vi.fn<(id: string, column: null, before: string | null) => void>(),
+    place: vi.fn<(id: string, before: string | null) => void>(),
     remove: vi.fn<(ids: readonly string[]) => void>(),
   }
   const props = () => ({
@@ -60,9 +60,9 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
       calls.change(id, change)
       keep(changed(notes, id, change, 500))
     },
-    onPlace: (id: string, column: null, before: string | null) => {
-      calls.place(id, column, before)
-      keep(placed(notes, id, column, before, 500))
+    onPlace: (id: string, before: string | null) => {
+      calls.place(id, before)
+      keep(placed(notes, id, null, before, 500))
     },
     onRemove: (ids: readonly string[]) => {
       calls.remove(ids)
@@ -285,13 +285,13 @@ describe("Moving a note", () => {
     line.focus()
     await press(line, "ArrowDown", { altKey: true })
 
-    expect(calls.place).toHaveBeenCalledWith("a", null, "c")
+    expect(calls.place).toHaveBeenCalledWith("a", "c")
     expect(texts()).toEqual(["Note b", "Note a", "Note c"])
     expect(page.container.querySelector("[aria-live=polite]")?.textContent).toBe("Note a, 2 of 3")
     await eventually(() => expect(document.activeElement).toBe(button("Edit Note a")))
 
     await press(button("Edit Note a"), "ArrowDown", { altKey: true })
-    expect(calls.place).toHaveBeenLastCalledWith("a", null, null)
+    expect(calls.place).toHaveBeenLastCalledWith("a", null)
     expect(texts()).toEqual(["Note b", "Note c", "Note a"])
   })
 

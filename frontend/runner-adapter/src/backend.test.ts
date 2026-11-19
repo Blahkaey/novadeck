@@ -1621,3 +1621,15 @@ describe("the works, as the backend starts", () => {
     app.stop()
   })
 })
+
+describe("the notes, by what the runner answered at startup", () => {
+  it("are placed where the runner places them, and not where it can't, as an older one", () => {
+    const placing = open()
+    const older = open(runner.listing, { placesNotes: false })
+    expect(placing.backend.notes?.place).toBeDefined()
+    expect(older.backend.notes?.place).toBeUndefined()
+    expect(older.backend.notes?.move).toBeDefined()
+    placing.stop()
+    older.stop()
+  })
+})

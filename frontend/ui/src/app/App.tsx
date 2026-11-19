@@ -351,7 +351,8 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
                     }}
                     mobileRail={sidebarRail(true)}
                     mobileLabel={panelLabels[sidebarPanel]}
-                    mobileWide={sidebarPanel === "inbox"}
+                    // The Inbox's list and the Todo board's three columns take the whole width.
+                    mobileWide={sidebarPanel === "inbox" || sidebarPanel === "todo"}
                     mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
                     sidebar={<SidebarSection />}
                   >

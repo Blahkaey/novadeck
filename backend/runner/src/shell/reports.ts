@@ -99,7 +99,7 @@ export const unansweredCalls = {
   tell: { ok: false, reason: "Novadeck couldn't save the update." },
   done: { ok: false, reason: "Novadeck couldn't save the report." },
   feedback: { ok: false, reason: "Novadeck couldn't save the feedback draft." },
-  note: { ok: false, reason: "Novadeck couldn't add to the user's Notes." },
+  note: { ok: false, reason: "Novadeck couldn't add to the user's Todo board or Notes." },
   describe: { ok: false, reason: "Novadeck couldn't describe the terminal." },
   models: { ok: false, reason: "Novadeck couldn't list the models." },
 } as const satisfies { readonly [type in CallType]: { ok: false; reason: string } }

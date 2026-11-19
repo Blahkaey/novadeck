@@ -149,7 +149,7 @@ describe("an agent's note", () => {
     records.get("t1")!.summary.sessionId = "gone"
     expect(await note({ notes: [{ text: "x" }] })).toEqual({
       ok: false,
-      reason: "Novadeck couldn't add to the user's Notes.",
+      reason: "Novadeck couldn't add to the user's Todo board or Notes.",
     })
   })
 
@@ -159,7 +159,7 @@ describe("an agent's note", () => {
       await note({ notes: [{ text: "x" }] }, { terminalId: "t1", token: "b".repeat(48) }),
     ).toEqual({
       ok: false,
-      reason: "Novadeck couldn't add to the user's Notes.",
+      reason: "Novadeck couldn't add to the user's Todo board or Notes.",
     })
   })
 })

@@ -5,9 +5,10 @@ import {
   type Note as RunnerNote,
 } from "@novadeck/protocol"
 import type { NotesWatchItem } from "@novadeck/runner-client"
+import { WireError } from "@novadeck/wire"
 import { expectTypeOf, vi } from "vitest"
 
-import { createRunnerNotes } from "./notes"
+import { createRunnerNotes, placesNotes } from "./notes"
 import { context, describe, expect, it } from "./test"
 import { channel } from "./testing/channel"
 
@@ -30,7 +31,9 @@ type Held = {
   readonly refuse: () => void
 }
 
-const followed = () => {
+// The notes over a runner that answers each call when the test says; one from before the
+// Todo board has no `place`.
+const followed = ({ placing = true }: { placing?: boolean } = {}) => {
   const stream = channel<NotesWatchItem>()
   const calls: Held[] = []
   const held =
@@ -47,7 +50,7 @@ const followed = () => {
       add: held("add"),
       update: held("update"),
       move: held("move"),
-      place: held("place"),
+      ...(placing && { place: held("place") }),
       remove: held("remove"),
     },
     { newId: () => `new-${(made += 1)}`, now: () => 500 },
@@ -66,7 +69,18 @@ const followed = () => {
     await vi.waitFor(() => expect(calls).toHaveLength(count))
     return calls
   }
-  return { notes, stream, stop, texts, listed, sent, state: () => notes.state.getSnapshot() }
+  // Places a note, as a runner that can does.
+  const place = (...args: Parameters<NonNullable<typeof notes.place>>) => notes.place!(...args)
+  return {
+    notes,
+    place,
+    stream,
+    stop,
+    texts,
+    listed,
+    sent,
+    state: () => notes.state.getSnapshot(),
+  }
 }
 
 describe("The notes, as the runner reports them", () => {
@@ -204,12 +218,12 @@ describe("A change the person makes to the notes", () => {
   })
 
   it("places a card at once, and asks the runner for only what it was given", async () => {
-    const { notes, texts, listed, sent, state } = followed()
+    const { place, texts, listed, sent, state } = followed()
     const plain = (id: string) => note(id, { todo: false })
     await listed(note("a"), note("b"), plain("p1"), note("c"), plain("p2"))
-    notes.place("c", "doing", null)
-    notes.place("b", "doing", "c")
-    notes.place("p2", null, "p1")
+    place("c", "doing", null)
+    place("b", "doing", "c")
+    place("p2", null, "p1")
     expect(texts()).toEqual(["a", "p2", "p1", "b", "c"])
     expect(
       state()
@@ -225,29 +239,44 @@ describe("A change the person makes to the notes", () => {
   })
 
   it("asks nothing for a card already in its place, or a column given a plain note", async () => {
-    const { notes, listed, sent } = followed()
+    const { place, listed, sent } = followed()
     await listed(note("a"), note("b"), note("plain", { todo: false }))
-    notes.place("a", "todo", "b")
-    notes.place("plain", "todo", null)
-    notes.place("a", null, null)
-    notes.place("nope", "done", null)
+    place("a", "todo", "b")
+    place("plain", "todo", null)
+    place("a", null, null)
+    place("nope", "done", null)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(await sent(0)).toEqual([])
   })
 
   context("when the runner refuses a place", () => {
     it("goes back to the runner's order and says so", async () => {
-      const { notes, texts, listed, sent, state } = followed()
+      const { place, texts, listed, sent, state } = followed()
       await listed(note("a"), note("b"), note("c"))
-      notes.place("c", "done", null)
+      place("c", "done", null)
       expect(state().notes[2]).toEqual(note("c", { doneAt: 500 }))
-      notes.place("a", "todo", null)
+      place("a", "todo", null)
       expect(texts()).toEqual(["b", "a", "c"])
       const [done, last] = await sent(2)
       done!.answer([note("a"), note("b"), note("c", { doneAt: 400 })])
       last!.refuse()
       await vi.waitFor(() => expect(state().failed).toBe(true))
       expect(state().notes).toEqual([note("a"), note("b"), note("c", { doneAt: 400 })])
+    })
+  })
+
+  context("on a runner from before the Todo board", () => {
+    it("offers no place, and still moves a plain note among the open ones", async () => {
+      const { notes, texts, listed, sent } = followed({ placing: false })
+      await listed(note("a"), note("p1", { todo: false }), note("p2", { todo: false }))
+      expect(notes.place).toBeUndefined()
+      notes.move("p2", 1)
+      expect(texts()).toEqual(["a", "p2", "p1"])
+      const calls = await sent(1)
+      expect(calls[0]).toMatchObject({
+        name: "move",
+        input: { projectId: "p", id: "p2", index: 1 },
+      })
     })
   })
 
@@ -263,5 +292,35 @@ describe("A change the person makes to the notes", () => {
       ["remove", { projectId: "p", ids: ["a"] }],
       ["remove", { projectId: "q", ids: ["c"] }],
     ])
+  })
+})
+
+describe("Whether the runner places notes", () => {
+  const asking = (answer: () => Promise<never>) => {
+    const asked: unknown[] = []
+    const place = (input: unknown) => {
+      asked.push(input)
+      return answer()
+    }
+    const calls: Parameters<typeof placesNotes>[0] = { place }
+    return { asked, calls }
+  }
+
+  it("asks with ids no note has, which a runner with the call refuses as a bad request", async () => {
+    const { asked, calls } = asking(() =>
+      Promise.reject(new WireError("BAD_REQUEST", "Input validation failed")),
+    )
+    expect(await placesNotes(calls)).toBe(true)
+    expect(asked).toEqual([{ projectId: "", id: "" }])
+  })
+
+  it("takes a runner that has no such call, as an older one, for one that doesn't", async () => {
+    const { calls } = asking(() => Promise.reject(new WireError("NOT_FOUND", "Not Found")))
+    expect(await placesNotes(calls)).toBe(false)
+  })
+
+  it("takes any other answer for one that does, as most are", async () => {
+    const { calls } = asking(() => Promise.reject(new WireError("DISCONNECTED")))
+    expect(await placesNotes(calls)).toBe(true)
   })
 })

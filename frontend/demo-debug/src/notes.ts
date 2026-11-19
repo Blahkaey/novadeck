@@ -4,13 +4,15 @@ import type { Backend } from "@novadeck/core/port"
 import type { Workspace } from "@novadeck/core/types"
 import { demoNotes, isDemoNotes } from "@novadeck/demo/notes"
 
+import type { DemoLaunch } from "./debug-demo"
 import type { DemoActionGroup } from "./types"
 
 // The panel's group for the states of the Notes panel and the Todo board that adding, checking
 // off and moving by hand reach slowly or not at all: a change the backend doesn't save, a
 // project that is full, a board with no cards, one with nothing left to do, a note long enough
-// to wrap and scroll, and a todo an agent adds as the person asked it to. Each acts on the
-// project on screen and leaves the others' notes alone.
+// to wrap and scroll, a todo an agent adds as the person asked it to, and a backend that can't
+// move cards, as a runner from before the Todo board. Each but the last acts on the project on
+// screen and leaves the others' notes alone; the last boots the demo again.
 
 const todo = (projectId: string, id: string, text: string, now: number): Note => ({
   id: `demo-note-${projectId}-${id}`,
@@ -112,7 +114,10 @@ export const agentTodo = (projectId: string, by: NoteAuthor, id: string, now: nu
 const here = (workspace: () => { readonly activeProjectId: string } | undefined): string =>
   workspace()?.activeProjectId ?? "storefront"
 
-export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[] => {
+export const notesGroups = (
+  launch: Pick<DemoLaunch, "setPlacesNotes">,
+  notes: Backend["notes"],
+): readonly DemoActionGroup[] => {
   if (!isDemoNotes(notes)) return []
   // The open project's notes become `mine`; every other project's stay.
   const set = (projectId: string, mine: readonly Note[]): void =>
@@ -183,6 +188,18 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
             const theirs = agentTodo(here(workspace), by, `agent-${(made += 1)}`, Date.now())
             notes.set(added(notes.state.getSnapshot().notes, theirs))
           },
+        },
+        {
+          label: "Card moves not offered",
+          hint: "The Todo board's cards have no Move button, can't be dragged, and Alt and the arrows move none, as on a runner from before the board; a line under its add field says moving cards needs the runner updated. Checking a card off and opening it again still take it to Done and To do, and the Notes panel's notes still move",
+          reboots: true,
+          run: () => launch.setPlacesNotes(false),
+        },
+        {
+          label: "Card moves offered",
+          hint: "The Todo board's cards move by drag, by their Move button's menu, and with Alt and the arrows, as the demo starts",
+          reboots: true,
+          run: () => launch.setPlacesNotes(true),
         },
       ],
     },

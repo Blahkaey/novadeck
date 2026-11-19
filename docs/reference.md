@@ -746,7 +746,10 @@ The **Todo** board has three columns: **To do**, **In progress** and **Done**, e
 many cards it holds. The count beside the panel's title, and in the tooltip of its rail
 toggle, is how many todos are still to do, those in progress among them. The board lays
 itself out by its own width: under 520 pixels, as in the sidebar, it shows one column at a
-time, with a tab for each above it; wider, it shows the three side by side.
+time, with a tab for each above it; wider, it shows the three side by side, each scrolling on
+its own. On a narrow window, where the sidebar opens over the workspace, the Todo panel opens
+over the whole width, as the Inbox does, so from about 590 pixels wide it shows the three
+columns.
 
 Type in the field at the top and press Enter to add a card, first in To do. Tick a card's
 checkbox to check it off: it moves first in Done, which shows when it was checked off.
@@ -762,7 +765,10 @@ with **Move up**, **Move down** and a choice of column, which puts the card firs
 focus the card and press Alt with the up or down arrow to move it within its column, and with
 the left or right arrow to move it first into the column beside. Where the board shows one
 column, it follows a card you move to another. A screen reader hears where each card went.
-The order of every column is yours and is kept.
+The order of every column is yours and is kept. Connected to a runner from an older version of
+Novadeck, cards can't be moved, by dragging, the menu or the keys, and a line under the field
+says moving cards needs the runner updated; checking a card off and opening it again still
+take it to Done and To do, and Notes' notes still move.
 
 Notes and todos are kept by the runner with the workspace, so they stay after a restart and
 show in every window, and they go with their project when you remove it. A project keeps up to
