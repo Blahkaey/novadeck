@@ -64,6 +64,24 @@ export const filesExcludeLimits = { patterns: 200, pattern: 1024 } as const
 // Windows leave behind.
 export const defaultFilesExclude: FilesExclude = { "**/.DS_Store": true, "**/Thumbs.db": true }
 
+// How a project's own checkout stands against its remote's main. `behind` is set where the
+// checkout is on main and main is ahead of it, which the backend moves by itself where nothing is
+// in the way: the branch, the remote's name for it, and how many commits it lacks. `moved` counts
+// the times the backend moved the checkout to main, and `head` is the commit it is at (null
+// where there is none): when either changes, the files on disk may have.
+export type CheckoutState = {
+  readonly behind: {
+    readonly branch: string
+    readonly remote: string
+    readonly count: number
+  } | null
+  readonly moved: number
+  readonly head: string | null
+}
+
+// What an update of the checkout did: it moved (or had nothing to move), or git's reason.
+export type CheckoutUpdate = { readonly ok: true } | { readonly ok: false; readonly said: string }
+
 export type ProjectFiles = {
   readonly state: Store<FilesState>
   // A folder of the project's directory as it is now, by its path from the project's root
@@ -95,6 +113,12 @@ export type ProjectFiles = {
   readonly move?: (projectId: string, from: string, to: string) => Promise<string>
   readonly copy?: (projectId: string, from: string, into: string) => Promise<string>
   readonly remove?: (projectId: string, path: string) => Promise<void>
+  // How the project's own checkout stands as it is now. Rejects when the project has gone.
+  // Absent where a backend has no checkout to move.
+  readonly checkout?: (projectId: string) => Promise<CheckoutState>
+  // Fast-forwards the checkout to the remote's main on the person's say, tracked changes
+  // allowed; `ok: false` says why not. Absent where `checkout` is.
+  readonly update?: (projectId: string) => Promise<CheckoutUpdate>
 }
 
 // What a change of a project's files rejects with where the link to the backend dropped before it

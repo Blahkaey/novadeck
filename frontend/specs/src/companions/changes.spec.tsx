@@ -7,7 +7,7 @@ import { describe, expect, it } from "../test"
 // main (a1c3f9e, then 7d02b4a) and an edit not committed.
 const openChange = async () => {
   await openShowcase()
-  await chooseFromIconSubmenu("Dev server", "8 changes", "Open", "Changes")
+  await chooseFromIconSubmenu("Dev server", "13 changes", "Open", "Changes")
   const pane = companionPane("Dev server")
   await expect.element(pane.getByRole("listbox", { name: "Layers" })).toBeVisible()
   return pane
@@ -42,7 +42,10 @@ describe("A change's pane", () => {
     await expect.element(layer(pane, /^Uncommitted/)).toHaveAttribute("aria-selected", "false")
     await expect.element(pane.getByText("3 files · a1c3f9e")).toBeVisible()
     await expect.element(file(pane, "cookies.ts")).not.toBeInTheDocument()
-    await expect.element(pane.getByText(/^Click it again to see everything/)).toBeVisible()
+    // The rows say what a click does, on themselves.
+    await expect
+      .element(layer(pane, /Check session expiry/))
+      .toHaveAttribute("title", "Click again to see everything")
 
     // Another row clicked is kept alone instead.
     await layer(pane, /Test verifySession/).click()
@@ -57,7 +60,9 @@ describe("A change's pane", () => {
     await layer(pane, /Test verifySession/).click()
     await expect.element(pane.getByText("6 files · everything")).toBeVisible()
     await expect.element(layer(pane, /^Uncommitted/)).toHaveAttribute("aria-selected", "true")
-    await expect.element(pane.getByText(/^Click a commit to see only it/)).toBeVisible()
+    await expect
+      .element(layer(pane, /Test verifySession/))
+      .toHaveAttribute("title", "Click to see only this commit")
   })
 
   it("unfolds what a file changed, one file at a time, then opens it, steps and goes back", async () => {

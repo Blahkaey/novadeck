@@ -126,7 +126,7 @@ const press = (on: Element, key: string, init: KeyboardEventInit = {}) =>
       new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
     )
   })
-const meta = (container: HTMLElement) => container.querySelector(".artifact-meta")?.textContent
+const notice = (container: HTMLElement) => container.querySelector(".pane-notice")?.textContent
 
 describe("the project window", () => {
   context("a Markdown file", () => {
@@ -179,7 +179,9 @@ describe("the project window", () => {
       const editor = container.querySelector(".artifact-editor")
       expect(editor?.hasAttribute("data-readonly")).toBe(false)
       expect(editorIn(container).state.doc.toString()).toBe("const a = 1\n")
-      expect(meta(container)).toBe("/p/cart.ts")
+      expect(container.querySelector("[role=heading]")?.getAttribute("aria-description")).toContain(
+        "/p/cart.ts",
+      )
     })
 
     it("saves the person's edit at once on Ctrl+S, naming the file", async () => {
@@ -199,6 +201,32 @@ describe("the project window", () => {
         )
       })
       expect(saves).toEqual(["/p/cart.ts"])
+    })
+
+    it("previews a data file and saves edits made in its source", async () => {
+      const path = "/p/cart.json"
+      const item = { ...source, name: "cart.json", path }
+      const text = '{"total":1}'
+      const { container, sent, saves } = await opened(
+        item,
+        ready({ kind: "text", path, text, writable: true }),
+      )
+      const viewed = () => container.querySelector(".artifact-file")?.getAttribute("data-view")
+      expect(viewed()).toBe("preview")
+      expect(container.querySelector(".artifact-editor")).toBeNull()
+      const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Show source"]')!
+      await act(async () => {
+        toggle.click()
+        await vi.dynamicImportSettled()
+      })
+      expect(viewed()).toBe("source")
+      expect(editorIn(container).state.doc.toString()).toBe(text)
+      type(container, "\n")
+      press(editorIn(container).contentDOM, "s", { ctrlKey: true })
+      expect(saves).toEqual([path])
+      expect(sent).toEqual([text + "\n"])
+      act(() => toggle.click())
+      expect(viewed()).toBe("preview")
     })
 
     it("edits a Markdown file in its document", async () => {
@@ -227,7 +255,7 @@ describe("the project window", () => {
       )
       expect(container.querySelector(".artifact-editor")?.hasAttribute("data-readonly")).toBe(true)
       expect(editorIn(container).state.readOnly).toBe(true)
-      expect(meta(container)).toContain(
+      expect(notice(container)).toContain(
         "Read-only: it's not one of the project's own files, but outside its folder, in Git's own folder or an agent's copy.",
       )
     })
@@ -253,8 +281,8 @@ describe("the project window", () => {
       })
       expect(container.querySelector(".artifact-editor")).toBeNull()
       expect(container.querySelector(".code-viewer")).not.toBeNull()
-      expect(meta(container)).toContain("read-only")
-      expect(meta(container)).toContain("It's too large to edit here.")
+      expect(notice(container)).toContain("Read-only")
+      expect(notice(container)).toContain("It's too large to edit here.")
     })
   })
 
@@ -318,17 +346,17 @@ describe("the project window", () => {
         },
       })
       expect(editorIn(container).state.doc.toString()).toBe("const a = 1\nconst b = 2\n")
-      expect(container.querySelector(".plan-notice p")?.textContent).toBe(
+      expect(container.querySelector(".pane-notice p")?.textContent).toBe(
         "This file is too large for Novadeck to save your edits. Your edits are kept here until you close this file.",
       )
-      expect(container.querySelector(".plan-notice button")?.textContent).toBe("Copy my edits")
+      expect(container.querySelector(".pane-notice button")?.textContent).toBe("Copy my edits")
     })
 
     it("says a file that turned binary is no longer text", async () => {
       const { container, emit } = await opened(source, whole("const a = 1\n"))
       type(container, "const b = 2\n")
       await emit({ state: "unavailable", reason: "binary", size: 10 })
-      expect(container.querySelector(".plan-notice p")?.textContent).toMatch(
+      expect(container.querySelector(".pane-notice p")?.textContent).toMatch(
         /^This file is no longer text Novadeck can edit/,
       )
     })
@@ -364,11 +392,11 @@ describe("the project window", () => {
       await act(async () => {
         await vi.dynamicImportSettled()
       })
-      expect(container.querySelector(".plan-notice p")?.textContent).toBe(
+      expect(container.querySelector(".pane-notice p")?.textContent).toBe(
         "This file is no longer text Novadeck can edit, so your edits can't be saved. Your edits are kept here until you close this file.",
       )
       expect(
-        [...container.querySelectorAll(".plan-notice button")].map((each) => each.textContent),
+        [...container.querySelectorAll(".pane-notice button")].map((each) => each.textContent),
       ).toEqual(["Copy my edits", "Try saving again"])
     })
   })

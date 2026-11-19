@@ -168,6 +168,8 @@ export const scriptedRunner = ({
       copyEntry: api.projects.copyEntry.handler(unplayed("projects.copyEntry")),
       removeEntry: api.projects.removeEntry.handler(unplayed("projects.removeEntry")),
       browse: api.projects.browse.handler(unplayed("projects.browse")),
+      checkout: api.projects.checkout.handler(() => ({ behind: null, moved: 0, head: null })),
+      updateCheckout: api.projects.updateCheckout.handler(unplayed("projects.updateCheckout")),
     },
     sessions: {
       list: api.sessions.list.handler(() => [session]),
@@ -186,6 +188,7 @@ export const scriptedRunner = ({
       answerApproval: api.terminals.answerApproval.handler(unplayed("terminals.answerApproval")),
       release: api.terminals.release.handler(unplayed("terminals.release")),
       move: api.terminals.move.handler(unplayed("terminals.move")),
+      active: api.terminals.active.handler(() => {}),
       watch: api.terminals.watch.handler(async function* ({ signal }) {
         const changes = channel<TerminalChange>()
         watchers.add(changes)
@@ -320,6 +323,7 @@ export const scriptedRunner = ({
       attach: api.companions.attach.handler(unplayed("companions.attach")),
       openInProject: api.companions.openInProject.handler(unplayed("companions.openInProject")),
       pageTrouble: api.companions.pageTrouble.handler(unplayed("companions.pageTrouble")),
+      part: api.companions.part.handler(unplayed("companions.part")),
       looks: api.companions.looks.handler(idle),
       answerLook: api.companions.answerLook.handler(unplayed("companions.answerLook")),
       move: api.companions.move.handler(unplayed("companions.move")),

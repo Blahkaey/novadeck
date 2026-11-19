@@ -7,7 +7,7 @@ import { contentOf, diffOf, type Files, type History, type Step } from "./histor
 // What the dev server's terminal shows of an agent's whole change, in each shape the pane
 // draws: an ordinary change in layers (commits since main and the work not committed yet),
 // files renamed, deleted and added, a binary file, one that may hold secrets, a change past
-// what the runner reads, and none. Each is a small history of file texts (./history.ts), so
+// what the runner reads, a compare of two refs an agent showed, and none. Each is a small history of file texts (./history.ts), so
 // the layers, the counts and every file's diff come from the same lines.
 
 const repo = "~/projects/studio"
@@ -446,6 +446,59 @@ export const changesArtifacts: readonly SampleArtifact[] = [
       },
     ],
   }),
+  // A compare an agent showed when asked for a branch's commits: no work not committed yet,
+  // and no pull request link, as it is the refs', not the checkout's.
+  sample("change-compare", "Compare · studio · feature/contact-form", {
+    base: "main",
+    head: "feature/contact-form",
+    start: { "src/pages/Home.tsx": text("export const Home = () => null") },
+    steps: [
+      {
+        id: hash("c0ffee1"),
+        subject: "Add the contact form",
+        time: minutes(300),
+        set: { "src/pages/Contact.tsx": text("export const Contact = () => <form />") },
+      },
+      {
+        id: hash("c0ffee2"),
+        subject: "Validate the contact form's email",
+        time: minutes(120),
+        set: {
+          "src/pages/Contact.tsx": text(
+            'const valid = (email: string) => email.includes("@")',
+            "",
+            "export const Contact = () => <form />",
+          ),
+        },
+      },
+    ],
+  }),
+  // The same compare of a remote-tracking ref, in each state of how current origin is: fetched a
+  // moment ago (the header says nothing), over an hour ago, a fetch that failed, and never. The
+  // head names tell them apart, as titles are the runner's: "Compare · <folder> · <head>".
+  ...(
+    [
+      ["fresh", { fetchedAgo: 2 * 60_000 }],
+      ["stale", { fetchedAgo: 3 * 60 * 60_000 }],
+      ["failed", { fetchedAgo: 20 * 60_000, failed: "Could not resolve host: github.com" }],
+      ["unfetched", {}],
+    ] as const
+  ).map(([state, origin]) =>
+    sample(`change-compare-${state}`, `Compare · studio · feature/contact-${state}`, {
+      base: "origin/main",
+      head: `feature/contact-${state}`,
+      origin,
+      start: { "src/pages/Home.tsx": text("export const Home = () => null") },
+      steps: [
+        {
+          id: hash(`c0ffee3${state}`),
+          subject: "Add the contact form",
+          time: minutes(300),
+          set: { "src/pages/Contact.tsx": text("export const Contact = () => <form />") },
+        },
+      ],
+    }),
+  ),
   sample("change-none", "No changes", {
     start: { "README.md": readme },
     steps: [{ id: "uncommitted", subject: "", time: null }],

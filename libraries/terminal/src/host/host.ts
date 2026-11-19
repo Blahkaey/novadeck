@@ -277,7 +277,7 @@ export const createTerminalHost = (options: TerminalHostOptions): TerminalHost =
             ...(earlier !== undefined && { after: earlier }),
             scrollback: options.scrollback,
             controller,
-            ...(options.pty && { pty: options.pty }),
+            ...(options.pty && { pty: { ...options.pty, id, listing } }),
             ...(options.failed && {
               failed: (error: unknown, event: string) => options.failed!(error, event, id),
             }),

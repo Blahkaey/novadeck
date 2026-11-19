@@ -15,6 +15,8 @@ export const createRunnerFiles = (
     readonly projects: Pick<
       Runner["projects"],
       | "folder"
+      | "checkout"
+      | "updateCheckout"
       | "filesExclude"
       | "setFilesExclude"
       | "createEntry"
@@ -57,5 +59,7 @@ export const createRunnerFiles = (
     copy: async (projectId, from, into) =>
       (await answered(() => projects.copyEntry({ projectId, from, into }))).path,
     remove: (projectId, path) => answered(() => projects.removeEntry({ projectId, path })),
+    checkout: (projectId) => projects.checkout({ projectId }),
+    update: (projectId) => projects.updateCheckout({ projectId }),
   }
 }

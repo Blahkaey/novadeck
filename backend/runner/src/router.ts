@@ -24,6 +24,7 @@ import type { History } from "./history.js"
 import { logs } from "./log.js"
 import type { Feedback } from "./messaging/feedback.js"
 import type { Murmur } from "./murmur/service.js"
+import type { ActiveTerminals } from "./terminals/active.js"
 import type { Terminals } from "./terminals/index.js"
 import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
@@ -35,6 +36,7 @@ import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
 import type { Projects } from "./workspaces/projects.js"
 import type { WorkspaceStore } from "./workspaces/store.js"
+import type { MainCheckouts } from "./worktrees/main-checkout.js"
 
 const log = logs.for("router")
 
@@ -100,6 +102,12 @@ const noWorks = {
   fetch: () => Promise.resolve(),
 }
 
+// What the Files panel's checkout state is without a worktrees service: nothing to say or move.
+const noCheckouts = {
+  read: () => Promise.resolve({ behind: null, moved: 0, head: null }),
+  update: () => Promise.resolve({ ok: false as const, said: "There is nothing to update." }),
+}
+
 const noTour: Pick<Tour, "prepare" | "brief" | "nudge"> = {
   prepare: () => Promise.reject(new DomainError("CONFLICT", "No tour is offered.")),
   brief: () => {
@@ -126,6 +134,8 @@ export const createRouter = (options: {
   works?: Works
   /** The person's notes on each project. */
   notes: Notes
+  /** The projects' own checkouts against their remote's main. */
+  checkouts?: Pick<MainCheckouts, "read" | "update">
   agents: Harnesses
   /** The forges pull requests come from; without it none is offered. */
   forges?: Forges
@@ -136,6 +146,8 @@ export const createRouter = (options: {
   transcriptsAvailable: () => Promise<boolean>
   /** Whether the runner is shutting down. */
   closing: () => boolean
+  /** Which terminals the people at the clients use; without it, reports of them are ignored. */
+  activity?: Pick<ActiveTerminals, "report">
   /** The runner settings were saved. */
   settingsSaved?: () => void
   /** Novadeck's tour; without it, starting one is a CONFLICT. */
@@ -145,6 +157,7 @@ export const createRouter = (options: {
   const history = options.history ?? noHistory
   const works = options.works ?? noWorks
   const { notes } = options
+  const checkouts = options.checkouts ?? noCheckouts
   const forges = options.forges ?? noForges
   const tour: Pick<Tour, "prepare" | "brief" | "nudge"> = options.tour ?? noTour
   // A plan's content says whether Novadeck's plugin is installed into its agent, which the
@@ -201,6 +214,12 @@ export const createRouter = (options: {
         return removeEntry(store.project(input.projectId).cwd, input.path)
       }),
       browse: api.projects.browse.handler(({ input }) => browseFolder(input.path)),
+      checkout: api.projects.checkout.handler(({ input }) =>
+        checkouts.read(store.project(input.projectId).cwd),
+      ),
+      updateCheckout: api.projects.updateCheckout.handler(({ input }) =>
+        checkouts.update(store.project(input.projectId).cwd),
+      ),
     },
     sessions: {
       list: api.sessions.list.handler(({ input }) => projects.sessions(input.projectId)),
@@ -261,6 +280,9 @@ export const createRouter = (options: {
           context.session.id,
           signal,
         ),
+      ),
+      active: api.terminals.active.handler(({ input, context }) =>
+        options.activity?.report(context.session.id, input.terminalId),
       ),
       write: api.terminals.write.handler(({ input, context }) =>
         terminals.write(input, context.session.id),
@@ -372,6 +394,7 @@ export const createRouter = (options: {
       }),
       changeFile: api.companions.changeFile.handler(({ input }) => items.changeFile(input)),
       changeRead: api.companions.changeRead.handler(({ input }) => items.changeRead(input)),
+      part: api.companions.part.handler(({ input }) => items.part(input)),
       save: api.companions.save.handler(async ({ input }) => {
         const item = store.item(input.itemId)
         if (!item) throw new DomainError("NOT_FOUND", "Item not found")

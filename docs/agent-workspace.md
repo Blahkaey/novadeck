@@ -306,6 +306,55 @@ port's optional `companions` capability (`frontend/core/src/items.ts`):
 A file that may hold secrets is `secret` until the person asks to see it, and `reveal` is the path
 they asked for: the item re-pointed to another file reads `secret` again.
 
+A file (the `file` item kind) shows as code, highlighted and numbered, unless its type has a
+preview: the previews are a list in `frontend/items/src/kinds/file/previews/`, each naming the
+files it takes (by how the name ends), its icon, its view and, optionally, its peek miniature,
+and a type joins with one line there. Markdown's is the read-only document with its outline. A CSV or TSV file's is a table
+(`previews/table/`, its own small RFC 4180 reader: quoted fields with delimiters, line breaks
+and doubled quotes, a byte-order mark; a CSV's delimiter is the comma, semicolon or tab that at
+least half its first lines hold, most steadily): the header held on top, each column sorted
+from its header (up, down, the file's order; numbers by value, empty cells last), numbers to
+the right, each row led by the line it starts on, and where it was scrolled and sorted kept as
+the code viewer's place is. Past 200 rows it draws only the rows in view (`rows-window.ts`),
+its columns held to widths from all its rows' text, so a data file read whole stays quick.
+A long cell shows its first six lines, and, where it runs past them, a Show all button under
+it shows it whole and back (kept with the place); shown short again, its row's top comes back
+into view.
+What the runner read of a long file is only part of it (its start, or the lines around those
+pointed at, whose rows it marks and opens at, up to its budget), and the table says so under
+it: which lines, that a first line too long to read whole came cut, that it shows only the
+first 1,000 columns, and that lines pointed at past the file's end were pulled back to it.
+Lines past the file's first have no header, so their columns are lettered, and may start
+inside a quoted record, so the table starts at the first line from which the rows read whole
+(weighed on the first 256 lines). A quoted field the part cuts off in its last 64 lines ends
+there; a quote never closed in a file shown whole, or open longer in a part, reads as text
+from its record on, as a TSV's inch mark. Each
+column's decimal mark is the one all its numbers read with (a comma first in a semicolon file),
+and digits led by a zero (IDs, postcodes) are text. A
+file with a preview opens on it, with a Show source tool in the pane's row (Ctrl+Shift+V, ⌘⇧V
+on a Mac, from anywhere in the file) that switches it to the bare file in the code viewer and
+back. A preview's own tools join the row before it (`usePreviewTools`); one that can't read its
+file says so in its body, the switch still there. The choice is the item's, for the file it
+shows: it holds while the pane is built again, as across Focus, Grid and Canvas, for the files
+lately switched, isn't saved past a reload, and another file the item is pointed at (as the
+project window's is) opens on its preview. A plan is its own kind and has no switch.
+
+JSON, JSONL/NDJSON and YAML files preview as a tree (`previews/data.tsx`, drawn by
+`@novadeck/viewers/tree`): objects and arrays open and close, a closed one shows its first
+entries and its count, and a row copies its value or its jq path. Only the rows in sight are
+drawn; what's open and the scroll are kept by item. JSONL reads one row per record, a record
+that doesn't read showing why; YAML reads anchors, merge keys and several documents. A preview
+can send its file to its source with a note: a whole file that doesn't read goes there once per
+load, its note saying where it stops, with that line pointed at. A data file (JSON, JSONL,
+NDJSON, YAML, CSV or TSV, the protocol's `isDataPath`) is read whole from its start, up to 2 MiB
+(`companionLimits.data`, each line's break counted) of whole lines, none cut but a first line
+that alone runs past it, while other text
+files are read up to 400 lines around what was pointed at, each cut at 4,096 characters. When
+the lines pointed at lie past a data file's budget, it's read the same way from 40 lines before
+them. A data file past its budget arrives in part: a JSONL file shows the records it holds,
+and a JSON or YAML file says only its start came and offers its source. Its source draws at
+most 2,000 lines, around the line pointed at, and its miniature its first 40.
+
 A file followed with `edit` is its whole text (`TextContent`): decoded as UTF-8 without its
 byte-order mark, line breaks as they are, no line cut, with `writable`, or why a save would be
 refused, known before any edit is offered. Only the file the person opened in the
@@ -347,10 +396,11 @@ refreshSession()") and the lines it spans; a change past 36 rows shows its start
 "N more changed lines · +N −N · Show", and the unchanged stretches between changes are folded
 with a click to show them. Esc or ‹ shrinks the heading back into its row; J and K step through
 the selection's files. Lines are unified, in classic green and red from the
-theme's own tokens (the row ground is `--color-success` / `--color-danger` mixed to 55%, 50% on a
-light scheme; bar, sign and number are the `-fg` inks; a changed token is that ink at 24%), the
-changed tokens of a replaced line marked, and lines whose tokens are the same with other
-whitespace shown once as plain lines and counted apart ("+4 −6 · 4 re-indented"). Monochrome
+theme's own `--color-success-fg` / `--color-danger-fg` inks (a sea green and a rose in Coolant),
+carried by the gutter: the number and sign sit on the ink at 20% (18% on a light scheme), the line
+on the ink at 5% (7%), with no bar. The changed tokens of a replaced line are marked, each
+changed run one mark at the ink's 30%, and lines whose tokens are the same with other
+whitespace are shown once as plain lines and counted apart ("+4 −6 · 4 re-indented"). Monochrome
 themes read by the `+` and `−` signs.
 
 What it says of a change is facts only, computed in the page from the two sides' text with the
@@ -491,7 +541,8 @@ with every safety check again at that time:
   plugin manifest (with `env_vars` naming the terminal's variables, since Codex starts
   MCP servers without the terminal's environment), `mcp_config.json` for Antigravity.
   Its first tool, `show`, takes one source under the key that names it, with that
-  source's own options inside: a `file` (its path and optional lines), a `page` (its
+  source's own options inside: a `file` (its path and optional lines, or for a video or recording `at`,
+  the second its show starts it at, which only that show carries out), a `page` (its
   `url`, and optionally `scroll`, a CSS selector of the element to bring into view once it
   loads) or `changes` (`{}` or `{ path }`: the whole change in a repository, see below);
   beside it the options every source shares, a title and `open`, which the agent
@@ -520,7 +571,12 @@ with every safety check again at that time:
   path, a folder, a pipe or a device, and a page address that isn't http(s), carries a
   user name or password, or is too long. Binary files are accepted and load as
   `binary`; an image over 8 MB is accepted and loads as too large to preview, which the
-  answer says. Showing the same file or page again updates the item on the agent's own
+  answer says. A video (`.mp4`, `.m4v`, `.webm`, `.mov`, kind `video`) or an audio recording
+  (`.mp3`, `.m4a`, `.aac`, `.wav`, `.ogg`, `.oga`, `.opus`, `.flac`, kind `audio`, played as the
+  whole pane with its name and a waveform, not a picture) is played with the pane's own controls: its content is its format and size, never its bytes, which the UI
+  reads with `companions.part`, 2 MiB at a time while the file is as its stamp names it,
+  and plays whole from a blob, so the desktop app, a browser and the demo play it alike.
+  Rendered again, it reloads where the person was; one over 512 MB loads as too large to play. Showing the same file or page again updates the item on the agent's own
   bar, or else the latest it showed that the person moved into a window or onto another
   bar, where it stays. Items are told apart by a file's real path or a page's `pageKey`
   (`protocol/src/pages.ts`): its address without the fragment, or for a server on this
@@ -571,6 +627,42 @@ with every safety check again at that time:
   shows its own work only; only a range that reaches the oldest layer starts at the merge base
   (for the newest layer's commit, where that commit left main), so the whole of it is
   `git diff main...HEAD`.
+
+  A **compare** is a changes item of two refs an agent names, for a person who asks to see a
+  branch's commits, a run of commits or two branches side by side: `show { changes: { base?,
+  head?, path? } }`, with `base` defaulting to the repository's main branch (by its name, as
+  above) and `head` to `HEAD`. A ref is anything git reads as a commit (a branch, remote
+  branch, tag, hash or `HEAD~5`), never one that starts with `-` or holds `:`, white space or a
+  control or invisible format character. It is read as the checkout's change is, with `head` in place of `HEAD` and
+  `base` in place of main: `head`'s commits since its merge base with `base`, newest first, at
+  most 100, so the whole of it is `git diff base...head`, and a run of commits is the ref before
+  the first as `base`. It has no work not committed yet and takes no snapshot. It is an item of
+  its own beside the working tree's, keyed `changes:<repository root>\n<base>...<head>`,
+  named "Compare · <folder> · <head>", kept with its refs (`compare_base`, `compare_head`, as
+  the agent named them, read again each time, so a branch that moves moves it), and its
+  content names `head`, which the pane reads to link no pull request (the checkout's isn't
+  its). The files read in a compare are its own, kept in memory with its listing for the 32
+  compares read latest (the checkout's own marks keep only what its work changes), so they
+  don't outlast the runner. `close` takes the same refs; a ref git can't find refuses the
+  show, naming it. A repository whose worktree goes takes its compares with it.
+
+  **Remote refs in a compare are kept current.** When `base` or `head` names a remote-tracking ref
+  (`origin/x`, or the default main base, which `origin/HEAD` names), `show` first makes the repository's
+  origin current with `MainFetcher.fetchBriefly`: nothing if it was fetched in the last minute, a fetch
+  under way is shared, and the call waits at most five seconds while the fetch keeps its usual limit and
+  carries on (the open compare's next read, within the changes poll, finds what it brought); a remote that
+  hangs or fails leaves the refs as they were. For as long as such a compare is on a bar its repository
+  stays on the fetch schedule (every five minutes, as a tracked worktree's is) though it has no tracked
+  worktree: `Worktrees`' `repositories` host hook adds it to what each look fetches, and its state is
+  forgotten once the compare closes (and not while a fetch is under way or was within the period).
+  Only `origin` counts: a ref of any other remote (`upstream/x`) is never fetched and has no note, and a
+  name `origin/x` that git doesn't know yet is taken for one a fetch may bring, so a branch pushed since
+  the last fetch can be shown; a local branch named `origin/x` is none. The person's checkout is not
+  fast-forwarded by such a fetch (see "Fetching"): that follows only for a repository with a tracked
+  worktree, by its scheduled fetch. The content of such a compare carries `origin: { fetchedAt?, failed? }`, which the
+  pane's header turns into a quiet note only where freshness is in doubt: "origin fetch failed · last
+  fetched 3 h ago" (the reason in its title), "origin last fetched 3 h ago" once over an hour old (both
+  amber, as the Worktrees panel's age is), or "origin not fetched yet". Fresh, it says nothing.
 
   One snapshot service (`backend/runner/src/checkouts/snapshots.ts`) takes the working tree for
   both the changes item and the Worktrees panel (Works), so a checkout both read is taken once:
@@ -833,7 +925,13 @@ with every safety check again at that time:
   terminal or one in History, null once orphaned), whether it was `adopted` and whether Novadeck made
   its branch (`branch_made`). A terminal may own several, and ownership moves only through agents.
   - **`open_worktree({ branch, repo?, from?, group? })`** runs `git worktree add -b` from
-    `from` (the checkout's `HEAD`), or checks out the branch if it exists, with 60 seconds,
+    `from` (left out: the checkout's `HEAD`, or the remote's main when the checkout is on the local
+    branch that main is, as `main` for `origin/main`, and `HEAD` is a strict ancestor of it, so a stale
+    checkout doesn't make a stale branch; a feature branch, a `HEAD` ahead or diverged, or no main
+    keeps `HEAD`; main is fetched first, before the service's queue and not if it was fetched in the last
+    minute, and the call waits at most five seconds for it: the fetch keeps its usual time limit and
+    carries on in the background, and a remote that is slow or fails leaves the cached main, so creating
+    never waits on the network), or checks out the branch if it exists, with 60 seconds,
     and `core.longpaths` on Windows, after `git check-ref-format --branch`. It answers the path,
     the branch and the paths of AGENTS.md, CLAUDE.md and GEMINI.md at the worktree's top, and
     tells the agent to read them, as no harness loads them from an added folder.
@@ -919,6 +1017,28 @@ with every safety check again at that time:
     The main branch is `origin/HEAD` where the repository sets it; a clone with no `origin/HEAD`
     measures against its local `main`, which a fetch doesn't move, so such a work carries no
     `fetchedAt` and its row doesn't say "main as of".
+    **The checkout follows the fetch** (`worktrees/fast-forward.ts`). After each successful fetch the
+    repository's home checkout (`homeOf`, never a linked worktree) is fast-forwarded to origin's main,
+    but only when all of this holds: main is a remote-tracking ref `origin/<x>` and `HEAD` is the symbolic
+    ref `refs/heads/<x>`; no merge, cherry-pick, revert, rebase, bisect or sequencer is in progress and
+    there is no `index.lock`; no tracked file has changes, staged or not (untracked files don't count; git
+    refuses to overwrite them); `HEAD` is a strict ancestor of main. The checks read with
+    `--no-optional-locks` and run with the fetch's no-prompt environment; `HEAD` and the branch are read
+    again right before the move, and the branch once more after it (a change is logged at warn level). It is
+    `git -c core.hooksPath=<an empty folder the runner owns, `no-hooks` beside its database, emptied and owner-only at first
+    use and kept; a private temporary one without a database> -c core.fsmonitor=false -c merge.autoStash=false merge --ff-only --no-verify-signatures
+    --no-overwrite-ignore --quiet <the commit checked>`, with no time limit and outside the shutdown
+    scope, since a checkout stopped halfway leaves a half-updated tree. The fetch doesn't wait for the
+    move, so a merge that hangs stalls nothing else. Moves of one repository run one at a time. Any failure, a lock held by the person's git, a shallow clone or a missing ref is debug-logged
+    and ignored, and the next fetch tries again. It only happens for repositories with a tracked
+    worktree, as only those are fetched. The one switch is `MainFetcher`'s `follow` option.
+    Where the checkout is on main and behind and was not moved, whatever held it (tracked changes, an
+    operation, a file in the way, a repository not fetched since), `projects.checkout` reports `behind`, and the Files panel says "main is N behind origin" with
+    Update (`projects.updateCheckout`): the same move with tracked changes allowed, where git itself
+    refuses if a changed file is in the way, and its reason is shown in plain words ("Your changes to
+    src/a.ts would be overwritten."). The panel asks every 20 s while shown, one read at a time, and when
+    `moved` or `head` (the commit HEAD is at) changes, which the person's own pull does too, reads its
+    folders again, so added and removed files show.
   - **Restore and looking again.** A restore from History makes a new terminal id; when the restore
     is confirmed (or a newer row of the same conversation replaces the row) `ClosedTerminals` tells
     the service, which moves the old id's worktrees to the new one in its queue before the row goes.

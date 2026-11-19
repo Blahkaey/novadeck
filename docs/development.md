@@ -452,8 +452,33 @@ Agents:
   without my edits; "Plan back to normal" lets
   saves and copies work again. Specs open the showcase
   with `&planFault=` `transcript`, `gone`, `folder`, `too-large` or `failing`.
+- **Video:** only in the `showcase` variant, on the selected terminal's bar. The dev server's
+  terminal (`@fox`) already holds walkthrough.webm, a four-second test card with a quiet tone
+  (`frontend/demo/src/showcase/clip.ts`; its bytes load only when played), played with the
+  pane's own bar. "Show a video" opens it again as a later show; "Show a video that loads
+  slowly" reads it in 8 KB parts half a second apart, so the pane says "Loading 24 of 79 KB"
+  for about five seconds; "Show a video too large to play" and "Show a video that's gone" and
+  "Show a video that can't be read" are the pane's unavailable states; "Show a video whose read
+  fails" rejects its first part, as a dropped link to the runner does, so the pane says
+  dropped.webm couldn't be loaded; "Show a file the browser can't play" is garbage under a video's name, which the pane says it can't play here;
+  "Show a video that may hold secrets" joins the stack unopened until you pick its tab.
+  "Show the video again from 0:02" starts walkthrough.webm at 0:02, once, and "Rewrite the video"
+  shows it under a new stamp, as if its file was rewritten: the old one plays on under a
+  Loading chip, then the new one swaps in at the same time, playing or paused. "Rewrite the
+  video, caught mid-write" first shows a half-written file (read a second after it settles,
+  unplayable, so the old one plays on), then the render's end 2.5 s later, which swaps in.
+- **Audio:** the same variant, the "Audio" group beside "Video". The dev server's terminal
+  also holds voiceover.opus, six seconds of a tone that swells and fades (`showcase/recording.ts`;
+  its bytes load only when played), played as the whole pane: its name over its waveform,
+  which scrubs, and the video's bar below, with no picture.
+  The group mirrors Video's: "Show a recording", "...that loads slowly" (four parts, about two
+  seconds), "...too large to play" / "...that's gone" / "...that can't be read" (the unavailable
+  states), "...whose read fails" (couldn't be loaded), "Show a recording the browser can't
+  play" (garbage under a name), "...that may hold
+  secrets" (a tab that opens when picked), "Show the recording again from 0:02", "Rewrite the
+  recording" and "Rewrite the recording, caught mid-write".
 - **Changes:** only in the `showcase` variant, no action needed: the dev server's terminal
-  (`@fox`, the third) holds its items on the bar beside those that can't show, eight of them
+  (`@fox`, the third) holds its items on the bar beside those that can't show, thirteen of them
   changes, one in each shape the changes pane draws: an ordinary change in layers (a refactor of
   auth: two commits since main and an edit not committed, with a re-indented file, new,
   changed and removed declarations, imports, a test, a Markdown heading, a small edit and a
@@ -461,7 +486,11 @@ Agents:
   added, a change with very long lines, a binary file, a file that may hold secrets, a change
   past what the runner reads (files listed by name, and "This change is too large to show
   here"), a merge of main shown against its first parent, flagged, as on a runner whose git is
-  older than 2.38 ("merge, against its first parent"), and one with no changes ("No changes against main"). Their data is
+  older than 2.38 ("merge, against its first parent"), and one with no changes ("No changes against main"); a compare of two refs (`change-compare`), and
+  the same of `origin/main` in each state of how current origin is, told apart by their heads
+  (`feature/contact-fresh`, `-stale`, `-failed`, `-unfetched`): fetched minutes ago (no note),
+  over an hour ago ("origin last fetched 3 h ago", amber), a failed fetch ("origin fetch failed · last
+  fetched 20 min ago", amber, the reason in its title) and never fetched ("origin not fetched yet"). Their data is
   `frontend/demo/src/showcase/changes.ts`: each is a small history of file texts
   (`history.ts`, a small git for the demo), from which the layers, their counts and every
   file's hunks and sides are read, as the runner reads them from git, so the facts the pane shows
@@ -556,6 +585,12 @@ Agents:
   yet, as after switching to another project, shows neither the Hidden files button nor Hide in
   This Project, and one that has keeps them, its Hide in This Project then saying above the tree
   that it couldn't hide the path.
+  The checkout's line over the tree ("main is 3 behind origin" with Update) shows where the runner
+  left the checkout behind main: "Checkout is behind main" shows it, "Checkout can't update" makes Update
+  refuse with git's reason (and Retry), "Checkout is up to date" takes it away (the panel asks
+  every 20 s while shown), and "Main moves the checkout" adds `src/checkout/Receipt.tsx` and
+  removes `src/components/Price.tsx`, which the shown panel reads in within those seconds; Update
+  does the same.
   A strip of agent chips above the tree lists the agents with work in the project, in the
   session's roster order, each light-able by a click (any number, Escape lets them go; with
   none kept the selected terminal's agent is lit). The `messages` variant has a squad, as
@@ -860,7 +895,7 @@ App:
   the selected terminal's worktree, or the project's first (one is made if it has none): the row's
   detail line ends in its state's glyph and "#812" beside its trash button, a link to the pull request's page,
   and the work's changes item (in the showcase with "On, with Worktrees", select its row) has
-  "PR #812" in its header, which opens the page in the browser.
+  a "#812" chip in its row, which opens the page in the browser.
 - **Guides:** "Toggle icon guides" draws a dashed box over every icon (`svg.lucide`) and a
   dashed line through its middle, 20 px past each side, both 1 px and half see-through
   (`--icon-guide-color` changes them), for checking how icons line up with their text;

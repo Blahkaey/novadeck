@@ -65,19 +65,21 @@ export const SaveNotice = ({
   retryLabel,
 }: {
   text: string
-  edits: string
+  edits?: string | undefined
   retry?: (() => void) | undefined
-  retryLabel: string
+  retryLabel?: string
 }): React.JSX.Element => (
-  <div className="plan-notice" role="status">
+  <div className="pane-notice" data-tone="warning" role="status">
     <p>{text}</p>
-    <div className="plan-notice-actions">
-      <CopyText text={edits} label="Copy my edits" />
-      {retry && (
-        <button type="button" className="artifact-open" onClick={retry}>
-          {retryLabel}
-        </button>
-      )}
-    </div>
+    {(edits !== undefined || retry) && (
+      <div className="pane-notice-actions">
+        {edits !== undefined && <CopyText text={edits} label="Copy my edits" />}
+        {retry && (
+          <button type="button" className="artifact-open" onClick={retry}>
+            {retryLabel}
+          </button>
+        )}
+      </div>
+    )}
   </div>
 )

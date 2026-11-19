@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { setTimeout as sleep } from "node:timers/promises"
 
 import type { PlanSource } from "@novadeck/harness-core/events"
-import { companionLimits, onThisMachine, pageKey, titleFrom } from "@novadeck/protocol"
+import { companionLimits, onThisMachine, pageKey, titleFrom, videoLimits } from "@novadeck/protocol"
 import type {
   AgentName,
   ChangeFileDiff,
@@ -16,10 +16,12 @@ import type {
   PageLookAnswer,
   PageTrouble,
   PlanSaveResult,
+  FilePart,
 } from "@novadeck/protocol"
 import { KeyedChanges } from "@novadeck/wire/server"
 
 import { waitAfter } from "../checkouts/git.js"
+import { mainBranch } from "../checkouts/repository.js"
 import { Snapshots } from "../checkouts/snapshots.js"
 import { DomainError } from "../errors.js"
 import { logs } from "../log.js"
@@ -29,21 +31,26 @@ import { tail } from "../text.js"
 import { worktreesRoot } from "../worktrees/root.js"
 import { displayed, repositoryOf, samePlace, worktreeBranch } from "./changes.js"
 import {
+  formatOf,
   hashOf,
   loadFile,
   loadPlan,
+  loadPlayed,
   maxImageBytes,
   pageAt,
+  partsOf,
   planTitle,
   pointAt,
   probe,
+  readPart,
   type PlanText,
   type Pointed,
 } from "./content.js"
 import { loadText, saveText, type SaveFolders } from "./editing.js"
 import { findRepository, LayerReader, type ReadMarks } from "./layers.js"
 import { PageLooks } from "./looks.js"
-import type { ItemRecord, ItemRecords, WindowRecord } from "./records.js"
+import type { Compare, ItemRecord, ItemRecords, WindowRecord } from "./records.js"
+import { remoteCompare } from "./remote-compare.js"
 import {
   failure,
   named,
@@ -104,6 +111,17 @@ type CompanionOptions = {
   readonly environment?: () => NodeJS.ProcessEnv
   /** How often `content` looks at what an item points at, in milliseconds. */
   readonly pollMs?: number
+  /**
+   * Remote refs: makes a repository's current for a caller that waits at most `ms` (the fetch
+   * itself carries on), and tells when it was last fetched and why a fetch failed. Without it
+   * compares measure against the remote refs as they are.
+   */
+  readonly origin?: {
+    readonly fetchBriefly: (commonDir: string, ms: number) => Promise<void>
+    readonly status: (commonDir: string) => { fetchedAt?: number; failed?: string }
+  }
+  /** How long showing a compare of remote refs waits for a fetch, in milliseconds (five seconds). */
+  readonly fetchWaitMs?: number
   /** How often `content` reads a change again, in milliseconds: git runs each time. */
   readonly changesMs?: number
   /** How long an agent's look waits for the client's picture, in milliseconds. */
@@ -141,7 +159,16 @@ export type LookPicture = Exclude<PageLookAnswer, { readonly reason: string }>
 /** What an item points at, and what it says of it, before it is kept. */
 type Pointer = Pick<
   ItemRecord,
-  "pointerKey" | "kind" | "path" | "url" | "lines" | "plan" | "name" | "detail" | "secret"
+  | "pointerKey"
+  | "kind"
+  | "path"
+  | "url"
+  | "lines"
+  | "plan"
+  | "name"
+  | "detail"
+  | "secret"
+  | "compare"
 >
 
 const size = (bytes: number): string => {
@@ -175,9 +202,29 @@ const changesFailures = 2
 const unavailable = (reason: "missing" | "unreadable") =>
   ({ state: "unavailable", reason, size: null }) as const
 
-/** What keys the change of a repository on a bar: one item per repository. */
-const changesKey = (root: string): string =>
-  `changes:${process.platform === "win32" ? root.toLowerCase() : root}`
+/**
+ * What keys the change of a repository on a bar: one item per repository, and one per compare
+ * of two refs in it, which no ref can be confused with (none holds a line break).
+ */
+const changesKey = (root: string, compare?: Compare): string =>
+  `changes:${process.platform === "win32" ? root.toLowerCase() : root}${
+    compare ? `\n${compare.base}...${compare.head}` : ""
+  }`
+
+/**
+ * The compare a changes request names, if it names one: its `head` against its `base`, which
+ * default to HEAD and the repository's main branch; why not where it has no main to default to.
+ */
+const compareOf = async (
+  root: string,
+  given: { readonly base?: string | undefined; readonly head?: string | undefined },
+): Promise<Compare | RequestFailure | undefined> => {
+  if (given.base === undefined && given.head === undefined) return undefined
+  const base = given.base ?? (await mainBranch(root))?.name
+  if (base === undefined)
+    return failure("This repository has no main branch to compare with: give base too.")
+  return { base, head: given.head ?? "HEAD" }
+}
 
 /** What keys the shells item of a terminal: one on its bar, never a path or an address. */
 const shellsKey = (terminalId: string): string => `shells:${terminalId}`
@@ -269,13 +316,13 @@ export class CompanionItems {
   /** The ends of shells' output files, read for their items. */
   private readonly tails = new ShellTails()
   /**
-   * The element each page's latest show brings into view, with that show's version: only
-   * that show carries it out, so it stays here rather than with the item, and goes with the
-   * next show or the item.
+   * What each item's latest show carries out, with that show's version: the element a page
+   * brings into view, or the second a video starts at. Only that show carries it out, so it
+   * stays here rather than with the item, and goes with the next show or the item.
    */
-  private readonly scrolls = new Map<
+  private readonly cues = new Map<
     string,
-    { readonly version: number; readonly selector: string }
+    { readonly version: number; readonly scroll?: string; readonly at?: number }
   >()
   /** Agents' looks at pages, on their way to the client. */
   private readonly looks = new PageLooks()
@@ -327,13 +374,17 @@ export class CompanionItems {
   }
 
   /**
-   * Closes every changes item of the repository whose top is `root`, wherever it is held: its
-   * worktree is gone, so there is nothing left for it to show.
+   * Closes every changes item of the repository whose top is `root`, wherever it is held, its
+   * compares too: its worktree is gone, so there is nothing left for them to show.
    */
   closeChangesAt(root: string): void {
     const key = changesKey(root)
     for (const item of this.records.items())
-      if (item.kind === "changes" && item.pointerKey === key) this.delete(item.id)
+      if (
+        item.kind === "changes" &&
+        (item.pointerKey === key || item.pointerKey.startsWith(`${key}\n`))
+      )
+        this.delete(item.id)
   }
 
   /**
@@ -383,8 +434,14 @@ export class CompanionItems {
     }
     if (!kept) return failure("Novadeck couldn't show it.")
     const scroll = "page" in request ? request.page.scroll : undefined
-    if (scroll === undefined) this.scrolls.delete(kept.item.id)
-    else this.scrolls.set(kept.item.id, { version: kept.item.version, selector: scroll })
+    const at = "file" in request ? request.file.at : undefined
+    if (scroll === undefined && at === undefined) this.cues.delete(kept.item.id)
+    else
+      this.cues.set(kept.item.id, {
+        version: kept.item.version,
+        ...(scroll !== undefined && { scroll }),
+        ...(at !== undefined && { at }),
+      })
     const moved = kept.item.terminalId !== place.terminalId
     return {
       ok: true,
@@ -482,8 +539,13 @@ export class CompanionItems {
           own ? "your" : item.from ? `${mention(item.from.handle)}'s` : "its agent's"
         } background shells, as Novadeck lists them)`
       // A repository's folder is named by the repository: shown without invisible characters.
+      const compared = item.compare
+        ? `, compare: ${displayed(item.compare.head)} against ${displayed(item.compare.base)}`
+        : ""
       const where =
-        item.kind === "changes" ? displayed(item.path ?? "") : (item.url ?? item.path ?? "")
+        item.kind === "changes"
+          ? `${displayed(item.path ?? "")}${compared}`
+          : (item.url ?? item.path ?? "")
       const placed =
         item.terminalId !== terminalId
           ? `moved by the user ${this.whereMoved(item)}`
@@ -1164,18 +1226,28 @@ export class CompanionItems {
     if ("changes" in request) {
       const root = await repositoryOf(resolve(place.cwd, request.changes.path ?? "."))
       if (!root.ok) return root
+      const compare = await compareOf(root.root, request.changes)
+      if (compare !== undefined && "ok" in compare) return compare
+      // A compare of remote refs is as old as the last fetch: made current first, for a moment.
+      if (compare) await this.freshen(root.root, compare)
       // As the agent left it, not as a snapshot of a moment ago.
-      const read = await this.layers.read(root.root, true)
+      const read = await this.layers.read(root.root, true, compare)
       if (!read.ok) return read
       const { detail } = read.change
-      const branch = request.title === undefined ? await worktreeBranch(root.root) : undefined
+      // A compare is named by its head, as the header says what it is against.
+      const branch = compare
+        ? compare.head
+        : request.title === undefined
+          ? await worktreeBranch(root.root)
+          : undefined
       const name = branch === undefined ? read.change.name : `${read.change.name} · ${branch}`
       return {
         ok: true,
         tooLarge: false,
         pointer: {
-          pointerKey: changesKey(root.root),
+          pointerKey: changesKey(root.root, compare),
           kind: "changes",
+          compare,
           path: root.root,
           url: null,
           lines: null,
@@ -1186,12 +1258,19 @@ export class CompanionItems {
         },
       }
     }
-    const { path, lines } = request.file
+    const { path, lines, at } = request.file
     const pointed = await pointAt(path, place.cwd, this.environment())
     if (!pointed.ok) return pointed
+    if (at !== undefined && pointed.kind !== "video" && pointed.kind !== "audio")
+      return failure(
+        "Only a video or a recording starts at a second; give at only for a video or audio file.",
+      )
     return {
       ok: true,
-      tooLarge: pointed.kind === "image" && pointed.size > maxImageBytes,
+      tooLarge:
+        (pointed.kind === "image" && pointed.size > maxImageBytes) ||
+        ((pointed.kind === "video" || pointed.kind === "audio") &&
+          pointed.size > videoLimits.bytes),
       pointer: this.filePointer(pointed, path, place.cwd, place.project, {
         ...(request.title !== undefined && { title: request.title }),
         ...(lines && { lines }),
@@ -1244,17 +1323,29 @@ export class CompanionItems {
     if ("changes" in request) {
       const folder = resolve(place.cwd, request.changes.path ?? ".")
       const root = await repositoryOf(folder)
-      if (root.ok) return { ok: true, key: changesKey(root.root), given: root.root }
+      if (root.ok) {
+        const compare = await compareOf(root.root, request.changes)
+        if (compare !== undefined && "ok" in compare) return compare
+        return { ok: true, key: changesKey(root.root, compare), given: root.root }
+      }
       if (root.kind !== "missing") return root
       // The folder is gone (a worktree removed): the change shown from it is still on the
-      // bar, found by where it was shown from, as a file's is by the folders that remain.
+      // bar, found by where it was shown from, as a file's is by the folders that remain, and
+      // by the compare named, if one was.
+      const { base, head } = request.changes
+      const compared = base !== undefined || head !== undefined
       const shown = this.records
         .barItems(place.terminalId)
         .find(
           (item) =>
             item.kind === "changes" &&
             item.path !== null &&
-            (samePlace(item.path, folder) || inside(item.path, folder)),
+            (samePlace(item.path, folder) || inside(item.path, folder)) &&
+            (compared
+              ? item.compare !== undefined &&
+                (base === undefined || item.compare.base === base) &&
+                item.compare.head === (head ?? "HEAD")
+              : item.compare === undefined),
         )
       return shown ? { ok: true, key: shown.pointerKey, given: shown.path ?? folder } : root
     }
@@ -1263,8 +1354,8 @@ export class CompanionItems {
   }
 
   /**
-   * How a file is described: an image by its size and format, a text file by its path and
-   * lines.
+   * How a file is described: an image, a video or a recording by its size and format, a text file by
+   * its path and lines.
    */
   private detail(
     pointed: Pointed,
@@ -1272,9 +1363,8 @@ export class CompanionItems {
     given: string,
     lines: { readonly from: number; readonly to: number } | undefined,
   ): string {
-    if (pointed.kind === "image") {
-      const format = pointed.path.split(".").at(-1)!.toUpperCase().replace("JPG", "JPEG")
-      return `${size(pointed.size)} ${format}`
+    if (pointed.kind === "image" || pointed.kind === "video" || pointed.kind === "audio") {
+      return `${size(pointed.size)} ${formatOf(pointed.path)}`
     }
     const shown = project && inside(project, pointed.path) ? relative(project, pointed.path) : given
     const range = lines ? ` · lines ${lines.from}–${lines.to}` : ""
@@ -1423,12 +1513,58 @@ export class CompanionItems {
     if (item.path === null) return unavailable("missing")
     const found = await findRepository(item.path)
     if (!found.ok) return unavailable(found.missing ? "missing" : "unreadable")
-    const read = await this.layers.read(found.root)
+    const read = await this.layers.read(found.root, false, item.compare)
     if (!read.ok) return unavailable("unreadable")
     const { content, detail } = read.change
     const now = this.records.item(item.id)
     if (now && now.version === item.version && now.detail !== detail) this.save({ ...now, detail })
-    return content
+    // A compare of remote refs says how current they are, so a fetch that landed is read again.
+    const common = await this.remoteOf(item)
+    if (common === undefined || content.state !== "ready" || content.content.kind !== "changes")
+      return content
+    const origin = this.options.origin?.status(common) ?? {}
+    return {
+      ...content,
+      stamp: hashOf(`${content.stamp}\n${JSON.stringify(origin)}`),
+      content: { ...content.content, origin },
+    }
+  }
+
+  // The compares' remote-ness, found once per item where git could tell: the common git dir of a
+  // compare that reads a remote-tracking ref, null for one that does not.
+  private readonly remotes = new Map<string, string | null>()
+
+  private async remoteOf(item: ItemRecord): Promise<string | undefined> {
+    if (item.kind !== "changes" || item.compare === undefined || item.path === null)
+      return undefined
+    const known = this.remotes.get(item.pointerKey)
+    if (known !== undefined) return known ?? undefined
+    const found = await findRepository(item.path)
+    if (!found.ok) return undefined
+    const common = await remoteCompare(found.root, item.compare)
+    // A probe that failed is tried again on the next read.
+    if (common !== undefined) this.remotes.set(item.pointerKey, common)
+    return common ?? undefined
+  }
+
+  /**
+   * The repositories (common git dirs) whose compares read remote refs: kept fetched on the
+   * runner's schedule for as long as such a compare is on a bar.
+   */
+  async remoteRepositories(): Promise<readonly string[]> {
+    const shown = this.records.items().filter((item) => item.compare !== undefined)
+    const live = new Set(shown.map((item) => item.pointerKey))
+    for (const key of this.remotes.keys()) if (!live.has(key)) this.remotes.delete(key)
+    const found = await Promise.all(shown.map((item) => this.remoteOf(item)))
+    return [...new Set(found.filter((each) => each !== undefined))]
+  }
+
+  /** Makes a compare's remote refs current, if it reads any: a fetch that outlasts the wait goes on. */
+  private async freshen(root: string, compare: Compare): Promise<void> {
+    if (!this.options.origin) return
+    const common = await remoteCompare(root, compare).catch(() => undefined)
+    if (typeof common === "string")
+      await this.options.origin.fetchBriefly(common, this.options.fetchWaitMs ?? 5000)
   }
 
   /**
@@ -1442,15 +1578,20 @@ export class CompanionItems {
     return this.tails.content(shells)
   }
 
-  /** The changes item's repository, for a call about it; NOT_FOUND where there is none. */
-  private async changeRoot(itemId: string): Promise<string> {
+  /**
+   * The changes item's repository, and the compare it is if it is one, for a call about it;
+   * NOT_FOUND where there is none.
+   */
+  private async changeRoot(
+    itemId: string,
+  ): Promise<{ readonly root: string; readonly compare: Compare | undefined }> {
     if (this.stopping) throw new DomainError("CLOSING")
     const item = this.item(itemId)
     if (item.kind !== "changes" || item.path === null)
       throw new DomainError("NOT_FOUND", "Item is no change")
     const found = await findRepository(item.path)
     if (!found.ok) throw new DomainError("NOT_FOUND", "The repository is gone")
-    return found.root
+    return { root: found.root, compare: item.compare }
   }
 
   /**
@@ -1462,13 +1603,30 @@ export class CompanionItems {
     readonly path: string
     readonly layers: readonly string[]
   }): Promise<ChangeFileDiff> {
-    const read = await this.layers.file(
-      await this.changeRoot(input.itemId),
-      input.path,
-      input.layers,
-    )
+    const { root, compare } = await this.changeRoot(input.itemId)
+    const read = await this.layers.file(root, input.path, input.layers, compare)
     if (!read.ok) throw new Error(read.reason)
     return read.diff
+  }
+
+  /**
+   * A part of an item's file (see `companions.part`), of a kind read in parts: read only
+   * while the file is as `stamp` names it, and one that may hold secrets only once the person
+   * chose to show the path the item points at. NOT_FOUND for an unknown item or one of
+   * another kind.
+   */
+  async part(input: {
+    readonly itemId: string
+    readonly stamp: string
+    readonly offset: number
+    readonly reveal?: string | undefined
+  }): Promise<FilePart> {
+    if (this.stopping) throw new DomainError("CLOSING")
+    const item = this.item(input.itemId)
+    const largest = partsOf[item.kind]
+    if (largest === undefined) throw new DomainError("NOT_FOUND", "That item isn't read in parts")
+    const reveal = input.reveal !== undefined && input.reveal === item.path
+    return readPart(item, input, reveal, largest, this.environment())
   }
 
   /**
@@ -1477,9 +1635,12 @@ export class CompanionItems {
    * marked. NOT_FOUND for an unknown item or one that is no change.
    */
   async changeRead(input: { readonly itemId: string; readonly path: string }): Promise<void> {
-    const root = await this.changeRoot(input.itemId)
-    const listed = this.layers.listedFile(root, input.path)
-    if (listed) await this.options.reads?.mark(root, listed.path, listed.blob)
+    const { root, compare } = await this.changeRoot(input.itemId)
+    const listed = this.layers.listedFile(root, input.path, compare)
+    if (!listed) return
+    // A compare's reads are its own: the checkout's are kept only for what its work changes.
+    if (compare) this.layers.markCompare(root, compare, listed.path, listed.blob)
+    else await this.options.reads?.mark(root, listed.path, listed.blob)
   }
 
   private read(
@@ -1490,8 +1651,10 @@ export class CompanionItems {
   ): Promise<ItemContent> {
     if (item.kind === "changes") return this.readChange(item)
     if (item.kind === "shells") return this.readShells(item)
+    const cue = this.cues.get(item.id)
+    const cued = cue?.version === item.version ? cue : undefined
     if (item.kind === "page") {
-      const scroll = this.scrolls.get(item.id)
+      const scroll = cued?.scroll
       return Promise.resolve({
         state: "ready",
         // Each show is content of its own.
@@ -1500,13 +1663,15 @@ export class CompanionItems {
           kind: "page",
           url: item.url ?? "",
           shown: item.version,
-          ...(scroll?.version === item.version && { scroll: scroll.selector }),
+          ...(scroll !== undefined && { scroll }),
         },
       })
     }
     if (item.kind === "plan") return loadPlan(item, live)
     if (edit && item.kind === "file")
       return loadText(item, reveal, this.saveFolders(item), this.environment())
+    if (item.kind === "video" || item.kind === "audio")
+      return loadPlayed(item, reveal, { shown: item.version, at: cued?.at }, this.environment())
     return loadFile(item, reveal, this.environment())
   }
 
@@ -1515,7 +1680,7 @@ export class CompanionItems {
   }
 
   private removed(item: ItemRecord, window: WindowRecord | undefined): void {
-    this.scrolls.delete(item.id)
+    this.cues.delete(item.id)
     this.sink?.gone(item)
     for (const reader of this.readers.get(item.id) ?? []) reader.abort()
     this.emit(

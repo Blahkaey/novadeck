@@ -1,15 +1,10 @@
-import {
-  pathOf,
-  notePattern,
-  notesIn,
-  type Item,
-  type PlanUnwritableReason,
-} from "@novadeck/core/items"
+import { notePattern, notesIn, type Item, type PlanUnwritableReason } from "@novadeck/core/items"
 import type { WorkspaceTarget } from "@novadeck/core/types"
 import { outline } from "@novadeck/viewers/text"
-import { lazy, Suspense, useRef, type ReactNode } from "react"
+import { Diff } from "lucide-react"
+import { lazy, Suspense, useRef } from "react"
 
-import { ArtifactMeta, MetaPath, Unavailable } from "../../ArtifactViewer"
+import { Unavailable } from "../../ArtifactViewer"
 import type { MarkdownEditorHandle } from "../../document/editor/MarkdownEditor"
 import {
   blockedText,
@@ -18,10 +13,10 @@ import {
   transcriptText,
   unreadableText,
 } from "../../document/SaveNotice"
+import { PaneTools, usePaneNote } from "../../pane-row"
 import type { PlanActions, ItemStore } from "../../store/item-store"
 import { fileText, unreadableNow } from "../../store/text-doc"
 import { useContent, usePlan } from "../../store/use-item-store"
-import { UnderHeaderSlot } from "../../under-header"
 import { blockOf, currentMarks, type PlanDoc } from "./plan-doc"
 
 // The editor loads when a plan first opens, so the workspace never pays for it: a
@@ -75,7 +70,6 @@ const PlanBody = ({
   plan,
   block,
   unreadable,
-  actions,
   pane,
 }: {
   item: Item
@@ -84,7 +78,6 @@ const PlanBody = ({
   block: PlanUnwritableReason | null
   // The file can't be read for now, which may pass.
   unreadable: boolean
-  actions: ReactNode
   pane: PlanActions
 }): React.JSX.Element => {
   const editor = useRef<MarkdownEditorHandle | null>(null)
@@ -94,78 +87,79 @@ const PlanBody = ({
   const readOnly = !plan.writable || block === "transcript"
   // The edits as the file would hold them, with its line breaks.
   const copyable = fileText(plan)
-  // The header every viewer has, across the pane, then the outline beside the plan.
+  const resolved =
+    plan.resolved > 0 && plan.marked === plan.text
+      ? [`${agent} resolved ${plural(plan.resolved, "note")}`]
+      : []
+  usePaneNote(resolved)
+  const changes = `${plural(plan.changes, "change")} since you last read`
+  // The one line of words: what keeps the edits from the file, else what keeps the plan from
+  // being edited or read whole. Each is its own notice, so one that gives way to another is gone
+  // before it comes back.
+  const notice =
+    !readOnly && block ? (
+      <SaveNotice
+        key="blocked"
+        text={blockedText(block, { kind: "plan", agent })}
+        edits={copyable}
+        retry={pane.retry}
+        retryLabel="Try saving again"
+      />
+    ) : !readOnly && unreadable ? (
+      <SaveNotice
+        key="unreadable"
+        text={unreadableText("plan")}
+        edits={copyable}
+        retry={pane.retry}
+        retryLabel="Retry"
+      />
+    ) : !readOnly && plan.stalled ? (
+      <SaveNotice
+        key="stalled"
+        text={stalledText}
+        edits={copyable}
+        retry={pane.retry}
+        retryLabel="Retry"
+      />
+    ) : !readOnly && plan.unsaved ? (
+      <SaveNotice key="unsaved" text="Not saved yet. Trying again." />
+    ) : readOnly ? (
+      <SaveNotice
+        key="read-only"
+        text={
+          !plan.writable && plan.truncated && item.plan?.source === "file"
+            ? "Read-only: it's too long to edit here."
+            : transcriptText(agent)
+        }
+      />
+    ) : plan.truncated ? (
+      <SaveNotice key="long" text="It's long, so only its start is shown." />
+    ) : // Without Novadeck's skill, notes wait for the person to point the agent at them.
+    !plan.skill && notesIn(plan.text) > 0 ? (
+      <SaveNotice
+        key="skill"
+        text={`${agent} doesn't have Novadeck's skill. Ask it to re-read the plan.`}
+      />
+    ) : null
   return (
     <>
-      <ArtifactMeta actions={actions}>
-        {pathOf(item) === null ? (
-          <span className="artifact-meta-name" title={item.detail || item.name}>
-            {item.detail || item.name}
-          </span>
-        ) : (
-          <MetaPath path={pathOf(item)!} />
-        )}
-        <span>v{item.version}</span>
-        {marks.length > 0 && (
-          <button
-            className="plan-changes-toggle"
-            data-tone="warning"
-            aria-pressed={plan.showChanges}
-            onClick={pane.toggleChanges}
-          >
-            <i aria-hidden="true" />
-            {plural(plan.changes, "change")} since you last read
-            <span>{plan.showChanges ? "Hide" : "Show"}</span>
-          </button>
-        )}
-        {plan.unsaved && !plan.stalled && !block && !unreadable && (
-          <span className="pane-meta-hint">Not saved yet. Trying again.</span>
-        )}
-        {plan.resolved > 0 && plan.marked === plan.text && (
-          <span>
-            {agent} resolved {plural(plan.resolved, "note")}
-          </span>
-        )}
-        {readOnly && (
-          <span className="pane-meta-hint">
-            {!plan.writable && plan.truncated && item.plan?.source === "file"
-              ? "Read-only: it's too long to edit here."
-              : transcriptText(agent)}
-          </span>
-        )}
-        {plan.truncated && (
-          <span className="pane-meta-hint">It's long, so only its start is shown.</span>
-        )}
-        {/* Without Novadeck's skill, notes wait for the person to point the agent at them. */}
-        {plan.writable && !plan.skill && notesIn(plan.text) > 0 && (
-          <span className="pane-meta-hint">
-            {agent} doesn't have Novadeck's skill. Ask it to re-read the plan.
-          </span>
-        )}
-      </ArtifactMeta>
-      {/* The whole path, wrapped, not shortened as the header's is: where the edits go. */}
-      {!readOnly && !block && pathOf(item) !== null && (
-        <p className="plan-save-path">Edits save to {pathOf(item)}</p>
-      )}
-      {!readOnly && block && (
-        <SaveNotice
-          text={blockedText(block, { kind: "plan", agent })}
-          edits={copyable}
-          retry={pane.retry}
-          retryLabel="Try saving again"
-        />
-      )}
-      {!readOnly && !block && unreadable && (
-        <SaveNotice
-          text={unreadableText("plan")}
-          edits={copyable}
-          retry={pane.retry}
-          retryLabel="Retry"
-        />
-      )}
-      {!readOnly && !block && !unreadable && plan.stalled && (
-        <SaveNotice text={stalledText} edits={copyable} retry={pane.retry} retryLabel="Retry" />
-      )}
+      <PaneTools
+        tools={
+          marks.length > 0
+            ? [
+                {
+                  key: "changes",
+                  icon: Diff,
+                  label: `${plan.showChanges ? "Hide" : "Show"} the ${changes}`,
+                  pressed: plan.showChanges,
+                  badge: plan.changes,
+                  onClick: pane.toggleChanges,
+                },
+              ]
+            : []
+        }
+      />
+      {notice}
       <div className="pane-reader-body" data-outline={outline(plan.text).length > 0}>
         <PlanOutline plan={plan} jump={(at) => editor.current?.jumpTo(at)} />
         <div className="pane-document-scroll" data-changes={plan.showChanges}>
@@ -194,13 +188,10 @@ export const PlanTab = ({
   itemStore,
   target,
   item,
-  actions,
 }: {
   itemStore: ItemStore
   target: WorkspaceTarget
   item: Item
-  // What the place showing the plan offers, at the end of its header.
-  actions?: ReactNode
 }): React.JSX.Element => {
   const plan = usePlan(itemStore, item.id)
   const content = useContent(itemStore, target, item)
@@ -211,7 +202,7 @@ export const PlanTab = ({
     plan.text !== plan.base &&
     (blockOf(plan, content) === "gone" || unreadableNow(content))
   if (content?.state === "unavailable" && !kept)
-    return <Unavailable item={item} reason={content.reason} size={content.size} actions={actions} />
+    return <Unavailable item={item} reason={content.reason} size={content.size} />
   return plan ? (
     // A plan that becomes writable, or stops being so, keeps its editor, history and place.
     <PlanBody
@@ -219,13 +210,9 @@ export const PlanTab = ({
       plan={plan}
       block={blockOf(plan, content)}
       unreadable={unreadableNow(content)}
-      actions={actions}
       pane={itemStore.plan(target, item.id)}
     />
   ) : (
-    <>
-      <UnderHeaderSlot />
-      <div className="artifact-status" />
-    </>
+    <div className="artifact-status" />
   )
 }

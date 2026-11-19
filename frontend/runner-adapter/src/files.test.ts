@@ -14,6 +14,8 @@ import { startTestRunner } from "./testing/runner"
 type Projects = Pick<
   Runner["projects"],
   | "folder"
+  | "checkout"
+  | "updateCheckout"
   | "filesExclude"
   | "setFilesExclude"
   | "createEntry"
@@ -34,6 +36,8 @@ const projects = (
 ): { readonly projects: Projects; readonly status: { readonly state: typeof state } } => ({
   projects: {
     folder: unused,
+    checkout: unused,
+    updateCheckout: unused,
     filesExclude: unused,
     setFilesExclude: unused,
     createEntry: unused,
@@ -174,6 +178,33 @@ describe("the runner's files", () => {
     })
   })
 
+  it("asks how the checkout stands and updates it, by project", async () => {
+    const asked: string[] = []
+    const files = createRunnerFiles(
+      projects({
+        checkout: async (input) => {
+          asked.push(`checkout ${input.projectId}`)
+          return {
+            behind: { branch: "main", remote: "origin/main", count: 3 },
+            moved: 1,
+            head: "abc",
+          }
+        },
+        updateCheckout: async (input) => {
+          asked.push(`update ${input.projectId}`)
+          return { ok: false, said: "Your local changes would be overwritten." }
+        },
+      }),
+      there,
+    )
+    await expect(files.checkout?.("p")).resolves.toMatchObject({ behind: { count: 3 } })
+    await expect(files.update?.("p")).resolves.toEqual({
+      ok: false,
+      said: "Your local changes would be overwritten.",
+    })
+    expect(asked).toEqual(["checkout p", "update p"])
+  })
+
   context("on a real runner", () => {
     it("reads the project's folders as they are, and refuses what leads out", async () => {
       const runner = await startTestRunner()
@@ -196,6 +227,11 @@ describe("the runner's files", () => {
         })
         await expect(files.list(project.id, "..")).rejects.toMatchObject({
           code: "INVALID_DIRECTORY",
+        })
+        await expect(files.checkout?.(project.id)).resolves.toEqual({
+          behind: null,
+          moved: 0,
+          head: null,
         })
       } finally {
         await runner.close()

@@ -31,6 +31,22 @@ describe("a show request", () => {
     })
   })
 
+  it("takes a second to start a file at, from the start, up to a day in", () => {
+    expect(readShowRequest({ file: { path: "demo.mp4", at: 12.5 } })).toEqual({
+      ok: true,
+      request: { file: { path: "demo.mp4", at: 12.5 } },
+    })
+    for (const at of [-1, 86_401, "12"])
+      expect(readShowRequest({ file: { path: "demo.mp4", at } })).toEqual({
+        ok: false,
+        reason: 'The request\'s "file.at" is not valid.',
+      })
+    // What is beside the terminal is known by its path, whatever second it started at.
+    expect(readCloseShownRequest({ file: { path: "demo.mp4", at: 3 } })).toMatchObject({
+      ok: false,
+    })
+  })
+
   it("names a page by its url, or a file, never both, and lines only inside a file", () => {
     expect(readShowRequest({ page: { url: "http://localhost:5173/" }, open: true })).toEqual({
       ok: true,
@@ -40,7 +56,8 @@ describe("a show request", () => {
       readShowRequest({ page: { url: "http://localhost:5173/" }, file: { path: "a.ts" } }),
     ).toEqual({
       ok: false,
-      reason: "Give one source, file: { path }, page: { url } or changes: { path? }, not several.",
+      reason:
+        "Give one source, file: { path }, page: { url } or changes: { path?, base?, head? }, not several.",
     })
     expect(
       readShowRequest({ page: { url: "http://a/" }, lines: { from: 1, to: 1 } }),
@@ -57,13 +74,14 @@ describe("a show request", () => {
     expect(readShowRequest({ page: { url: "" } })).toMatchObject({ ok: false })
     expect(readShowRequest({})).toEqual({
       ok: false,
-      reason: "Give one source, file: { path }, page: { url } or changes: { path? }.",
+      reason: "Give one source, file: { path }, page: { url } or changes: { path?, base?, head? }.",
     })
     // A flat address or path, with no source around it, is told the shape.
     for (const flat of [{ path: "a.ts" }, { url: "http://localhost:5173/" }])
       expect(readShowRequest(flat)).toEqual({
         ok: false,
-        reason: "Give one source, file: { path }, page: { url } or changes: { path? }.",
+        reason:
+          "Give one source, file: { path }, page: { url } or changes: { path?, base?, head? }.",
       })
     expect(readShowRequest("a.ts")).toEqual({ ok: false, reason: "The request is not valid." })
     expect(readShowRequest({ page: { url: "http://a/" }, ['x"y'.repeat(40)]: 1 })).toEqual({
@@ -109,17 +127,18 @@ describe("a close request", () => {
     })
     expect(readCloseShownRequest({ file: { path: "a.ts" }, page: { url: "http://a/" } })).toEqual({
       ok: false,
-      reason: "Give one source, file: { path }, page: { url } or changes: { path? }, not several.",
+      reason:
+        "Give one source, file: { path }, page: { url } or changes: { path?, base?, head? }, not several.",
     })
     expect(readCloseShownRequest({})).toEqual({
       ok: false,
-      reason: "Give one source, file: { path }, page: { url } or changes: { path? }.",
+      reason: "Give one source, file: { path }, page: { url } or changes: { path?, base?, head? }.",
     })
   })
 })
 
 describe("a request for the changes", () => {
-  it("is changes {} with the shared title and open, and takes only a folder", () => {
+  it("is changes {} with the shared title and open, and takes a folder", () => {
     expect(readShowRequest({ changes: {} })).toEqual({ ok: true, request: { changes: {} } })
     expect(readShowRequest({ changes: {}, title: "Work", open: true })).toEqual({
       ok: true,
@@ -131,13 +150,51 @@ describe("a request for the changes", () => {
     })
     expect(readCloseShownRequest({ changes: { path: "../wt" } })).toMatchObject({ ok: true })
     expect(readShowRequest({ changes: { path: "" } })).toMatchObject({ ok: false })
-    expect(readShowRequest({ changes: { base: "main" } })).toEqual({
-      ok: false,
-      reason: 'The request\'s "changes.base" is not valid.',
-    })
     expect(readShowRequest({ changes: {}, file: { path: "a.ts" } })).toMatchObject({ ok: false })
     expect(readCloseShownRequest({ changes: {} })).toEqual({ ok: true, request: { changes: {} } })
     expect(readCloseShownRequest({ changes: { paths: [] } })).toMatchObject({ ok: false })
+  })
+
+  it("takes a compare's base and head as refs git reads, never an option, a path or a space", () => {
+    for (const ref of [
+      "main",
+      "origin/feature/login",
+      "v1.4",
+      "HEAD~5",
+      "a1b2c3d",
+      "main^",
+      "@{u}",
+    ])
+      expect(readShowRequest({ changes: { base: ref, head: ref } })).toEqual({
+        ok: true,
+        request: { changes: { base: ref, head: ref } },
+      })
+    expect(readShowRequest({ changes: { path: "../wt", head: "feature" } })).toEqual({
+      ok: true,
+      request: { changes: { path: "../wt", head: "feature" } },
+    })
+    expect(readCloseShownRequest({ changes: { base: "main", head: "feature" } })).toMatchObject({
+      ok: true,
+    })
+    for (const ref of [
+      "",
+      "--output=x",
+      "-p",
+      "main:a.ts",
+      "a b",
+      "a\nb",
+      "a\\b",
+      "a\u202eb",
+      "x".repeat(257),
+    ])
+      expect(readShowRequest({ changes: { head: ref } })).toEqual({
+        ok: false,
+        reason: 'The request\'s "changes.head" is not valid.',
+      })
+    expect(readShowRequest({ changes: { base: "-x" } })).toEqual({
+      ok: false,
+      reason: 'The request\'s "changes.base" is not valid.',
+    })
   })
 })
 

@@ -20,7 +20,29 @@ export const companionLimits = {
   // `lineLength`, and how much of all its shells' outputs it holds at most, in UTF-16 code units.
   shellLines: 400,
   shellsText: 1024 * 1024,
+  // How much of a data file (`isDataPath`) is read, from its start, in UTF-8 bytes: whole
+  // lines only, none cut to `lineLength`, and as many as fit, as its preview reads the
+  // file as a whole. Its text in UTF-16 code units runs no longer.
+  data: 2 * 1024 * 1024,
 } as const
+
+/**
+ * How much of a file one `companions.part` carries, in bytes, for an item the client reads
+ * in parts rather than whole. A part travels as base64, so its text runs to `partText`
+ * characters.
+ */
+export const partBytes = 2 * 1024 * 1024
+export const partText = Math.ceil(partBytes / 3) * 4
+
+/** A video or a recording the pane plays: the largest one it takes, which it holds whole as it plays. */
+export const videoLimits = { bytes: 512 * 1024 * 1024 } as const
+
+// The files whose preview reads them as a whole, as a tree or a table, by extension.
+const dataExtensions = new Set(["json", "jsonl", "ndjson", "yaml", "yml", "csv", "tsv"])
+
+/** Whether a file is read as data: whole, up to `companionLimits.data`, not by its lines. */
+export const isDataPath = (path: string): boolean =>
+  dataExtensions.has(/\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase() ?? "")
 
 // What agents show and the person attaches beside a terminal: a pointer to a file, a
 // page or a plan, never a copy of it, which `companions.content` reads when it loads.
@@ -32,12 +54,14 @@ export const companionLimits = {
 // whether it is a file or text in the agent's own transcript or rollout. A shells item is
 // the background shells the agent in its terminal left running, one per terminal, which the
 // runner makes as the first one starts; it points at nothing (`path` and `url` are null).
+// A video or an audio recording is a file too, played rather than read, which the runner
+// tells by its extension.
 const itemHolder = z.union([z.strictObject({ terminalId: id }), z.strictObject({ windowId: id })])
 export const companionItem = z.strictObject({
   id,
   sessionId: id,
   holder: itemHolder,
-  kind: z.enum(["image", "file", "page", "plan", "changes", "shells"]),
+  kind: z.enum(["image", "video", "audio", "file", "page", "plan", "changes", "shells"]),
   name: z.string().max(companionLimits.name),
   detail: z.string().max(companionLimits.detail),
   path: z.string().max(companionLimits.path).nullable(),
@@ -181,6 +205,8 @@ export const maxChangeLayers = 100
 export const maxLayerFiles = 2000
 export const maxChangesBytes = 4 * 1024 * 1024
 export const maxChangeSideBytes = 512 * 1024
+/** How long a ref a compare names runs at most: a branch, a tag, a hash or an expression of one. */
+export const maxCompareRef = 256
 
 // One file a layer changed: its path (and its old one when renamed), how it changed, and
 // how many lines were added and removed. Lines that differ from their old ones only by
@@ -318,7 +344,9 @@ const textContent = z.discriminatedUnion("writable", [
 // or is HEAD where there is none): its layers, newest first, each the files it changed with
 // their counts, not their diffs, which `companions.changeFile` gives one file at a time.
 // The layers are the checkout's commits since the merge base with main, then, above
-// them, the work not committed yet (staged, unstaged and untracked, not ignored). At most
+// them, the work not committed yet (staged, unstaged and untracked, not ignored). A compare
+// (`head` set) is two refs an agent named instead: `head`'s commits since its merge base with
+// `base`, as `git diff base...head` reads, with no work not committed yet. At most
 // `maxChangeLayers` layers and `maxLayerFiles` files are listed, `truncated` says when
 // more changed (in `files` too); `root` is the repository's folder, which its paths are from.
 // `read` names the files of `files` the person read (`companions.changeRead`) that are still as
@@ -328,8 +356,11 @@ const textContent = z.discriminatedUnion("writable", [
 // Novadeck can read (a Codex command run in a terminal of its own, or under the person's own
 // `shell_environment_policy`); `unreadable` where its
 // file is there and Novadeck can't read it now (no permission, in use, not a regular file);
-// `gone` where its file was there and no longer is, as Claude Code's goes with its session. Or why it can't be shown,
-// with the file's size where known.
+// `gone` where its file was there and no longer is, as Claude Code's goes with its session.
+// A video or a recording (`audio`) is its format and size, which `companions.part` reads in
+// parts for the client to play, and its stamp names the file as those parts must be read from; `shown` counts
+// the agent's shows, as a page's does, and `at` is the second the latest show starts it at.
+// Or why it can't be shown, with the file's size where known.
 // A file followed with `edit` is `text` where it can be edited whole (see `textContent`); one
 // that can't is the listing above, with `uneditable` saying why: `too-large` past 256 KiB or
 // past what one `companions.save` carries, `not-text` where it isn't valid UTF-8. A binary
@@ -340,18 +371,34 @@ export const itemContent = z.discriminatedUnion("state", [
     stamp: z.string().max(128),
     content: z.discriminatedUnion("kind", [
       z.strictObject({ kind: z.literal("image"), src: z.string().max(12 * 1024 * 1024) }),
-      z.strictObject({
-        kind: z.literal("file"),
-        path: z.string().max(companionLimits.path),
-        firstLine: z.int().min(1),
-        lines: z.array(z.string().max(companionLimits.lineLength)).max(companionLimits.lines),
-        from: z.int().min(1),
-        to: z.int().min(1),
-        total: z.int().nonnegative().nullable(),
-        truncated: z.boolean(),
-        clamped: z.boolean(),
-        uneditable: z.enum(["too-large", "not-text"]).optional(),
-      }),
+      z
+        .strictObject({
+          kind: z.literal("file"),
+          path: z.string().max(companionLimits.path),
+          firstLine: z.int().min(1),
+          // A data file's lines run as long as its text; others' are held to the limits below.
+          lines: z.array(z.string().max(companionLimits.data)).max(companionLimits.data + 1),
+          from: z.int().min(1),
+          to: z.int().min(1),
+          total: z.int().nonnegative().nullable(),
+          truncated: z.boolean(),
+          clamped: z.boolean(),
+          uneditable: z.enum(["too-large", "not-text"]).optional(),
+        })
+        .check((context) => {
+          const { path, lines } = context.value
+          const issue = (message: string): void => {
+            context.issues.push({ code: "custom", input: context.value, path: ["lines"], message })
+          }
+          if (isDataPath(path)) {
+            const size = lines.reduce((sum, line) => sum + line.length, 0)
+            if (size > companionLimits.data) issue("A data file's text runs past its limit")
+            return
+          }
+          if (lines.length > companionLimits.lines) issue("Too many lines")
+          if (lines.some((line) => line.length > companionLimits.lineLength))
+            issue("A line runs past its limit")
+        }),
       z.strictObject({
         kind: z.literal("page"),
         url: z.string().max(companionLimits.url),
@@ -362,6 +409,15 @@ export const itemContent = z.discriminatedUnion("state", [
         kind: z.literal("changes"),
         root: z.string().max(companionLimits.path),
         base: z.string().max(256),
+        head: z.string().max(maxCompareRef).optional(),
+        // For a compare that reads a remote-tracking ref: when the repository's origin was last
+        // fetched (epoch milliseconds; absent if never) and why its last fetch failed, if it did.
+        origin: z
+          .strictObject({
+            fetchedAt: z.number().optional(),
+            failed: z.string().max(300).optional(),
+          })
+          .optional(),
         layers: z.array(changeLayer).max(maxChangeLayers),
         // The files the change as a whole differs from main by, as git lists the range from
         // main to the newest layer (the layers' own files added up are not that), up to
@@ -412,6 +468,20 @@ export const itemContent = z.discriminatedUnion("state", [
         skill: z.boolean(),
       }),
       textContent,
+      z.strictObject({
+        kind: z.literal("video"),
+        mime: z.string().max(64),
+        size: z.int().nonnegative().max(videoLimits.bytes),
+        shown: z.int().min(1),
+        at: z.number().nonnegative().optional(),
+      }),
+      z.strictObject({
+        kind: z.literal("audio"),
+        mime: z.string().max(64),
+        size: z.int().nonnegative().max(videoLimits.bytes),
+        shown: z.int().min(1),
+        at: z.number().nonnegative().optional(),
+      }),
     ]),
   }),
   z.strictObject({
@@ -429,6 +499,19 @@ export const itemContent = z.discriminatedUnion("state", [
   }),
 ])
 
+// `companions.part`: the part of an item's file from the offset asked for, as base64, up to
+// `partBytes` bytes (fewer at the file's end); `changed` when the file is no longer
+// as the stamp asked with names it, so the client reads it again from its new content; or
+// why it can't be read now.
+export const filePart = z.discriminatedUnion("state", [
+  z.strictObject({ state: z.literal("part"), data: z.string().max(partText) }),
+  z.strictObject({ state: z.literal("changed") }),
+  z.strictObject({
+    state: z.literal("unavailable"),
+    reason: z.enum(["missing", "unreadable", "not-a-file", "too-large", "secret"]),
+  }),
+])
+
 export type CompanionItem = z.infer<typeof companionItem>
 export type CompanionWindow = z.infer<typeof companionWindow>
 export type CompanionChange = z.infer<typeof companionChange>
@@ -441,3 +524,4 @@ export type ChangeLayer = z.infer<typeof changeLayer>
 export type DiffHunk = z.infer<typeof diffHunk>
 export type ChangeFileDiff = z.infer<typeof changeFileDiff>
 export type PlanSaveResult = z.infer<typeof planSaveResult>
+export type FilePart = z.infer<typeof filePart>

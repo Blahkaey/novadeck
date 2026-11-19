@@ -2,13 +2,11 @@ import { itemIdOf, type FileContent } from "@novadeck/core/items"
 import { createKept, type Kept, type ViewerState } from "@novadeck/viewers"
 import type { ClassedRange } from "@novadeck/viewers/markdown"
 import { outline } from "@novadeck/viewers/text"
-import { useMemo, useRef, type ReactNode } from "react"
+import { useMemo, useRef } from "react"
 
-import { ArtifactMeta, MetaPath } from "../../ArtifactViewer"
 import type { MarkdownEditorHandle } from "../../document/editor/MarkdownEditor"
 import { MarkdownDocument } from "../../document/MarkdownDocument"
 import { fileKey } from "./file-doc"
-import { uneditableText } from "./uneditable"
 
 // Where each file's editor was left, by the item showing it and the file it showed: the same
 // item shown another file, as the project window's is when the person opens one, opens that
@@ -90,24 +88,12 @@ export const DocumentViewer = ({
   id,
   name,
   content,
-  actions,
 }: {
   id: string
   name: string
   content: FileContent
-  actions?: ReactNode
 }): React.JSX.Element => (
   <div className="pane-reader artifact-document">
-    <ArtifactMeta actions={actions}>
-      <MetaPath path={content.path} />
-      <span>read-only</span>
-      {content.uneditable && (
-        <span className="pane-meta-hint">{uneditableText[content.uneditable]}</span>
-      )}
-      {content.truncated && (
-        <span className="pane-meta-hint">It's long, so only its start is shown.</span>
-      )}
-    </ArtifactMeta>
     <MarkdownFile
       id={id}
       name={name}
@@ -115,5 +101,6 @@ export const DocumentViewer = ({
       text={content.lines.join("\n")}
       readOnly
     />
+    {content.truncated && <p className="artifact-cut">It's long, so only its start is shown.</p>}
   </div>
 )

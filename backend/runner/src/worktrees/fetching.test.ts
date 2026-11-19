@@ -218,10 +218,15 @@ describe("fetching origins", () => {
     expect(calls).toHaveLength(2)
   })
 
-  it("forgets a repository no longer tracked", async () => {
+  it("forgets a repository no longer tracked, once its period has passed", async () => {
     const git = fake()
-    const fetcher = new MainFetcher({ run: git.run, environment: {} })
+    let now = 1_000_000
+    const fetcher = new MainFetcher({ now: () => now, run: git.run, environment: {} })
     await fetcher.fetchDue(["/a/.git"])
+    // Fetched a moment ago: kept, as a caller that asked for it may not be listed yet.
+    await fetcher.fetchDue([])
+    expect(fetcher.fetchedAt("/a/.git")).toBe(now)
+    now += 5 * minute
     await fetcher.fetchDue([])
     expect(fetcher.fetchedAt("/a/.git")).toBeUndefined()
   })
@@ -271,6 +276,8 @@ describe("fetching for real", () => {
       owner: (id) => (owners.has(id) ? "open" : "history"),
       root: f.root,
       projectFolder: () => f.clone,
+      // Always due: opening the worktree fetched main for its base already.
+      cleanup: { fetcher: new MainFetcher({ every: 0 }) },
     })
     resources.defer(() => worktrees.stop())
     const opened = await worktrees.open({
@@ -296,7 +303,6 @@ describe("fetching for real", () => {
     // Not merged as far as this clone knows.
     await worktrees.tidy()
     expect(existsSync(opened.path)).toBe(true)
-    expect(worktrees.fetchedAt(common)).toBeUndefined()
     await worktrees.tidy(true)
     expect(existsSync(opened.path)).toBe(false)
     expect(sh(f.clone, "branch", "--list", "feature")).toBe("")

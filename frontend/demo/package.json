@@ -26,6 +26,7 @@
     "./notes": "./src/notes.ts",
     "./samples": "./src/samples.ts",
     "./showcase/agents": "./src/showcase/agents.ts",
+    "./showcase/artifacts": "./src/showcase/artifacts.ts",
     "./showcase/demo": "./src/showcase/demo.ts",
     "./showcase/simulation": "./src/showcase/simulation.ts",
     "./terminals/runtime": "./src/terminals/runtime.ts",

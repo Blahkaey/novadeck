@@ -159,6 +159,8 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       removeEntry: (input) =>
         note(`remove entry ${input.path}`, () => runner.projects.removeEntry(input)),
       browse: (input) => runner.projects.browse(input),
+      checkout: (input) => runner.projects.checkout(input),
+      updateCheckout: (input) => runner.projects.updateCheckout(input),
     },
     sessions: {
       list: (input) => runner.sessions.list(input),
@@ -190,6 +192,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       close: (id) => note(`close ${id}`, () => runner.terminals.close(id)),
       rename: (id, title) => note(`rename ${id}`, () => runner.terminals.rename(id, title)),
       resetTitle: (id) => note(`reset title ${id}`, () => runner.terminals.resetTitle(id)),
+      active: (id) => note(`active ${id}`, () => runner.terminals.active(id)),
       busy: () => runner.terminals.busy(),
       upload: (id, file) => note(`upload ${id}`, () => runner.terminals.upload(id, file)),
       restart: (id, size) => note(`restart ${id}`, () => runner.terminals.restart(id, size)),
@@ -279,6 +282,8 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
         note(`reset window ${windowId}`, () => runner.companions.resetWindowTitle(windowId)),
       pageTrouble: (input) =>
         note(`page trouble ${input.itemId}`, () => runner.companions.pageTrouble(input)),
+      part: (input) =>
+        note(`part ${input.itemId} ${input.offset}`, () => runner.companions.part(input)),
       looks: () => runner.companions.looks(),
       answerLook: (answer) =>
         note(`answer look ${answer.lookId}`, () => runner.companions.answerLook(answer)),

@@ -39,6 +39,7 @@ import {
   pageTrouble,
   planSaveResult,
   planUnwritable,
+  filePart,
 } from "./companions.js"
 import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
@@ -49,6 +50,8 @@ import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
 import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
 import {
+  checkoutState,
+  checkoutUpdate,
   clientState,
   entryChanged,
   entryPath,
@@ -227,6 +230,16 @@ export const contract = {
     // A path that isn't absolute, is missing, is no folder or can't be read is
     // INVALID_DIRECTORY. Whoever holds the token can read any folder through a shell anyway.
     browse: procedure.input(z.strictObject({ path: directory.optional() })).output(folderBrowse),
+    // How the project's own checkout stands against its remote's main, as it is now (see
+    // `checkoutState`). A project outside a git repository, or one with no remote main, is
+    // `behind: null`. A project the runner doesn't have is NOT_FOUND.
+    checkout: procedure.input(z.strictObject({ projectId: id })).output(checkoutState),
+    // Fast-forwards the project's own checkout to its remote's main on the person's say: the
+    // same `git merge --ff-only` the runner does by itself, but with tracked changes allowed
+    // (git still refuses where one of them is in the way). Refused, with git's reason, while an
+    // operation is half done; answers ok where there is nothing to move. A project the runner
+    // doesn't have is NOT_FOUND.
+    updateCheckout: procedure.input(z.strictObject({ projectId: id })).output(checkoutUpdate),
   },
   sessions: {
     // In the order the person arranged them; a session created since comes first.
@@ -378,6 +391,14 @@ export const contract = {
       .input(z.strictObject({ terminalId: id, cols: columns, rows }))
       .output(z.void()),
     ack: procedure.input(z.strictObject({ terminalId: id, sequence })).output(z.void()),
+    // The terminal this client's person is using now, null for none: the one on screen in Focus
+    // view, the selected one in Grid and Canvas, while the window has their focus. Each client
+    // has one, which replaces its last and lapses with its connection, and the runner gives
+    // the terminals in use the CPU of the app's own window, as the others' programs yield it
+    // (a CPU weight on Linux, a priority on macOS and Windows). Changes come a few a second at
+    // most to the system, however fast they are told. A terminal not there is not an error: the
+    // call stands for whenever it starts.
+    active: procedure.input(z.strictObject({ terminalId: id.nullable() })).output(z.void()),
     close: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
     // Renames a terminal: the runner keeps the title with the terminal, running or saved
     // to restore, and announces it on `watch`. One it keeps nothing of is
@@ -776,6 +797,21 @@ export const contract = {
         }),
       )
       .output(eventIterator(itemContent)),
+    // An item's file from `offset`, up to `partBytes` bytes, for a kind the client reads in
+    // parts (a video, a recording), read only while the file is as `stamp` (its content's)
+    // names it: else `changed`. One that may hold secrets is `secret` unless `reveal` is the
+    // path the item points at, as in `content`. An unknown item, or one of a kind not read in
+    // parts, is NOT_FOUND.
+    part: procedure
+      .input(
+        z.strictObject({
+          itemId: id,
+          stamp: z.string().max(128),
+          offset: z.int().nonnegative(),
+          reveal: z.string().max(4096).optional(),
+        }),
+      )
+      .output(filePart),
     // One file of a changes item as a selection of its layers changed it: the file's diff
     // and the text of each side, as one range of layers (see
     // `changeFileDiff`). A layer no longer there is left out, as is a file the selection

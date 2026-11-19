@@ -94,7 +94,10 @@ const projectOf = ({ pinned, ...project }: ProjectRow): Project => ({
 // where its handle comes in the order they were given (`handle_seq`) and when it was
 // given (`handle_given_at`).
 // 17: an item may be a terminal's background shells (`kind` takes 'shells').
-const schemaVersion = 17
+// 18: a changes item may be a compare of two refs an agent named (`compare_base`,
+// `compare_head`).
+// 19: an item may be a video or a recording (`kind` takes 'video' and 'audio').
+const schemaVersion = 19
 const schema = `
   CREATE TABLE projects (
     position INTEGER PRIMARY KEY,
@@ -337,7 +340,7 @@ const schema = `
     window_id TEXT UNIQUE,
     -- A file's resolved path, a page's pageKey, or a plan's slot, unique on one bar.
     pointer_key TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('image', 'file', 'page', 'plan', 'changes', 'shells')),
+    kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'audio', 'file', 'page', 'plan', 'changes', 'shells')),
     path TEXT,
     url TEXT,
     lines_from INTEGER,
@@ -362,6 +365,10 @@ const schema = `
     open_asked INTEGER NOT NULL,
     shown_at REAL NOT NULL,
     observed_at REAL,
+    -- A changes item's two refs where it is a compare an agent named, as it named them:
+    -- head against base. Both null for a checkout's own change, and for every other kind.
+    compare_base TEXT,
+    compare_head TEXT CHECK ((compare_base IS NULL) = (compare_head IS NULL)),
     FOREIGN KEY (terminal_id, session_id) REFERENCES terminals(id, session_id)
       ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (window_id, session_id) REFERENCES companion_windows(id, session_id)
@@ -1015,6 +1022,75 @@ const migrations: Readonly<Record<number, Step>> = {
       shown_by, from_terminal, from_handle, version, open_asked, shown_at, observed_at FROM companion_items_16;
     DROP TABLE companion_items_16;
   `,
+  // A changes item may be a compare of two refs; every item there is is none.
+  17: `
+    ALTER TABLE companion_items ADD COLUMN compare_base TEXT;
+    ALTER TABLE companion_items ADD COLUMN compare_head TEXT
+      CHECK ((compare_base IS NULL) = (compare_head IS NULL));
+  `,
+  // An item may be a video or a recording, which the kind's CHECK must take: rebuilt as in
+  // the step from 16. One shown before it is a file there, which its next show makes a video
+  // or a recording.
+  18: `
+    ALTER TABLE companion_items RENAME TO companion_items_18;
+    DROP INDEX IF EXISTS companion_items_bar;
+    DROP INDEX IF EXISTS companion_items_session;
+    CREATE TABLE companion_items (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      terminal_id TEXT,
+      window_id TEXT UNIQUE,
+      -- A file's resolved path, a page's pageKey, or a plan's slot, unique on one bar.
+      pointer_key TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'audio', 'file', 'page', 'plan', 'changes', 'shells')),
+      path TEXT,
+      url TEXT,
+      lines_from INTEGER,
+      lines_to INTEGER,
+      -- A plan's agent, session and actor (empty for the root), and whether it is a file
+      -- or text in the transcript or rollout at path.
+      plan_agent TEXT,
+      plan_agent_session TEXT,
+      plan_actor TEXT,
+      plan_format TEXT CHECK (plan_format IN ('file', 'text')),
+      name TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      -- Whether it is a file that may hold secrets, which opens only when the person picks it.
+      secret INTEGER NOT NULL,
+      shown_by TEXT NOT NULL CHECK (shown_by IN ('agent', 'person')),
+      -- The terminal it was shown or attached in, and its handle; both null for a file the
+      -- person opened in their project window.
+      from_terminal TEXT,
+      from_handle TEXT,
+      version INTEGER NOT NULL,
+      -- Whether its latest show asked to open it.
+      open_asked INTEGER NOT NULL,
+      shown_at REAL NOT NULL,
+      observed_at REAL,
+      -- A changes item's two refs where it is a compare an agent named, as it named them:
+      -- head against base. Both null for a checkout's own change, and for every other kind.
+      compare_base TEXT,
+      compare_head TEXT CHECK ((compare_base IS NULL) = (compare_head IS NULL)),
+      FOREIGN KEY (terminal_id, session_id) REFERENCES terminals(id, session_id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+      FOREIGN KEY (window_id, session_id) REFERENCES companion_windows(id, session_id)
+        ON DELETE CASCADE,
+      CHECK ((terminal_id IS NULL) <> (window_id IS NULL)),
+      CHECK ((from_terminal IS NULL) = (from_handle IS NULL))
+    ) STRICT;
+    CREATE UNIQUE INDEX companion_items_bar ON companion_items(terminal_id, pointer_key)
+      WHERE terminal_id IS NOT NULL;
+    CREATE INDEX companion_items_session ON companion_items(session_id);
+    INSERT INTO companion_items (rowid, id, session_id, terminal_id, window_id, pointer_key, kind, path, url, lines_from,
+      lines_to, plan_agent, plan_agent_session, plan_actor, plan_format, name, detail, secret,
+      shown_by, from_terminal, from_handle, version, open_asked, shown_at, observed_at,
+      compare_base, compare_head)
+    SELECT rowid, id, session_id, terminal_id, window_id, pointer_key, kind, path, url, lines_from,
+      lines_to, plan_agent, plan_agent_session, plan_actor, plan_format, name, detail, secret,
+      shown_by, from_terminal, from_handle, version, open_asked, shown_at, observed_at,
+      compare_base, compare_head FROM companion_items_18;
+    DROP TABLE companion_items_18;
+  `,
 }
 // SQLite's primary result codes that say a step doesn't fit the database it met, or that
 // it is damaged, as against a full disk, an I/O error or a lock, after which a later start
@@ -1566,6 +1642,8 @@ type ItemRow = {
   open_asked: number
   shown_at: number
   observed_at: number | null
+  compare_base: string | null
+  compare_head: string | null
 }
 
 const itemOf = (row: ItemRow): ItemRecord => ({
@@ -1603,6 +1681,8 @@ const itemOf = (row: ItemRow): ItemRecord => ({
   openAsked: row.open_asked === 1,
   shownAt: row.shown_at,
   observedAt: row.observed_at,
+  ...(row.compare_base !== null &&
+    row.compare_head !== null && { compare: { base: row.compare_base, head: row.compare_head } }),
 })
 
 type WindowRow = {
@@ -2775,20 +2855,21 @@ export class WorkspaceStore
 
   /** Adds or changes an item; TERMINAL_NOT_FOUND when its terminal or session is gone. */
   saveItem(item: ItemRecord): void {
-    const { plan, lines, from } = item
+    const { plan, lines, from, compare } = item
     referencing(
       "TERMINAL_NOT_FOUND",
       () => this.queries.run`
       INSERT INTO companion_items (id, session_id, terminal_id, window_id, pointer_key, kind, path,
         url, lines_from, lines_to, plan_agent, plan_agent_session, plan_actor, plan_format, name,
         detail, secret, shown_by, from_terminal, from_handle, version, open_asked, shown_at,
-        observed_at)
+        observed_at, compare_base, compare_head)
       VALUES (${item.id}, ${item.sessionId}, ${item.terminalId}, ${item.windowId},
         ${item.pointerKey}, ${item.kind}, ${item.path}, ${item.url}, ${lines?.from ?? null},
         ${lines?.to ?? null}, ${plan?.agent ?? null}, ${plan?.session ?? null},
         ${plan ? (plan.actor ?? "") : null}, ${plan?.format ?? null}, ${item.name},
         ${item.detail}, ${item.secret ? 1 : 0}, ${item.by}, ${from?.terminalId ?? null}, ${from?.handle ?? null},
-        ${item.version}, ${item.openAsked ? 1 : 0}, ${item.shownAt}, ${item.observedAt})
+        ${item.version}, ${item.openAsked ? 1 : 0}, ${item.shownAt}, ${item.observedAt},
+        ${compare?.base ?? null}, ${compare?.head ?? null})
       ON CONFLICT (id) DO UPDATE SET terminal_id = excluded.terminal_id,
         window_id = excluded.window_id, pointer_key = excluded.pointer_key, kind = excluded.kind,
         path = excluded.path, url = excluded.url, lines_from = excluded.lines_from,
@@ -2798,7 +2879,8 @@ export class WorkspaceStore
         secret = excluded.secret, shown_by = excluded.shown_by,
         from_terminal = excluded.from_terminal, from_handle = excluded.from_handle,
         version = excluded.version, open_asked = excluded.open_asked, shown_at = excluded.shown_at,
-        observed_at = excluded.observed_at
+        observed_at = excluded.observed_at, compare_base = excluded.compare_base,
+        compare_head = excluded.compare_head
     `,
     )
   }

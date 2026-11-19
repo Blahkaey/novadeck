@@ -273,4 +273,31 @@ describe("the debug panel's Files group", () => {
       labels.indexOf("Files read normally again") - 1,
     )
   })
+
+  it("has the checkout behind main, refuse an update, and main move it", async () => {
+    const files = createDemoFiles(1)
+    expect((await files.checkout!("storefront")).behind).toBeNull()
+    run(files, "Checkout is behind main")
+    expect((await files.checkout!("storefront")).behind).toMatchObject({ count: 3 })
+    run(files, "Checkout can't update")
+    expect(await files.update!("storefront")).toMatchObject({ ok: false })
+    expect((await files.checkout!("storefront")).behind).not.toBeNull()
+    run(files, "Checkout is behind main")
+    expect(await files.update!("storefront")).toEqual({ ok: true })
+    expect(await files.checkout!("storefront")).toEqual({ behind: null, moved: 1, head: "demo-1" })
+    run(files, "Main moves the checkout")
+    expect((await files.checkout!("storefront")).moved).toBe(2)
+    const names = (await files.list("storefront", "src/checkout")).entries.map(({ name }) => name)
+    expect(names).toContain("Receipt.tsx")
+    await expect(
+      files.move("storefront", "src/checkout/Receipt.tsx", "src/checkout/Invoice.tsx"),
+    ).resolves.toBe("src/checkout/Invoice.tsx")
+    const renamed = (await files.list("storefront", "src/checkout")).entries.map(({ name }) => name)
+    expect(renamed).toContain("Invoice.tsx")
+    expect(renamed).not.toContain("Receipt.tsx")
+    const components = await files.list("storefront", "src/components")
+    expect(components.entries.map(({ name }) => name)).not.toContain("Price.tsx")
+    run(files, "Checkout is up to date")
+    expect((await files.checkout!("storefront")).behind).toBeNull()
+  })
 })

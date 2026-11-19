@@ -66,6 +66,8 @@
 @import "@novadeck/items/artifact.css" layer(components);
 @import "@novadeck/items/changes.css" layer(components);
 @import "@novadeck/items/shells.css" layer(components);
+@import "@novadeck/items/video.css" layer(components);
+@import "@novadeck/items/audio.css" layer(components);
 @import "@novadeck/items/messages.css" layer(components);
 @import "./app/visitor.css" layer(components);
 @import "./shell/region.css" layer(components);
@@ -102,6 +104,7 @@
 @import "@novadeck/viewers/image.css" layer(components);
 @import "@novadeck/viewers/browser.css" layer(components);
 @import "@novadeck/viewers/markdown.css" layer(components);
+@import "@novadeck/viewers/tree.css" layer(components);
 @import "@novadeck/items/prose.css" layer(components);
 @import "@novadeck/items/syntax.css" layer(components);
 @import "./preferences/settings.css" layer(components);

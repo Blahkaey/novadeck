@@ -356,6 +356,15 @@ that may have been done or may still be under way, and the Files panel reads the
 again, taking a move they show made as done. One asked while the client reconnects is never sent,
 and the adapter says nothing was done. See [Project Files](../SECURITY.md#project-files) for what
 the confinement promises.
+`projects.checkout({ projectId })` says how the project's own checkout stands against its remote's main:
+`{ behind: { branch, remote, count } | null, moved, head }`. `behind` is set where the checkout is on
+the branch main is and main is strictly ahead of it, which the runner moves by itself where nothing is in the
+way (see agent-workspace.md, "Fetching"): what it reports is what was left, for whatever reason. `moved`
+counts the times the runner moved the checkout since it began, and `head` is the commit HEAD is at
+(`null` where there is none); a change in either says files on disk may have changed. A project outside a
+repository, or with no remote main, is `{ behind: null, moved: 0, head: null }`. `projects.updateCheckout({ projectId })` fast-forwards it on the
+person's say, tracked changes allowed, answering `{ ok: true }` (also where there was nothing to move) or
+`{ ok: false, said }` with git's reason or the operation in progress.
 `sessions.save({ sessionId, state, visitedAt })` replaces a session's `state`, a string the
 runner stores with the session without reading it, such as a UI layout, and `visitedAt`,
 when the person last visited it (null: never). Sessions list both; the latest visit picks a
@@ -485,7 +494,8 @@ terminal `TERMINAL_NOT_FOUND`.
 
 The MCP `ask`, `tell` and `done` tools add questions and updates to the Inbox. In a Novadeck
 terminal the server's `instructions` say when each serves: `ask` doesn't stop the work, as
-most decisions aren't blocking, and its question is also put in the reply; `tell` is for
+most decisions aren't blocking; everything put in the Inbox is an extra copy, so the
+reply still says it in full and never mentions the Inbox; `tell` is for
 milestones; `done` is the agent's own short report when the task it was given is finished,
 not when it answers a question or finishes a step. With a lead, the agent uses them all the
 same and also sends its lead the same. Claude Code reads the instructions up
@@ -1185,8 +1195,12 @@ one from an earlier runner.
   rewritten (the items follow again from the start). An item is the person's or the
   agent's text, a tool call with its input as text, or a tool's result, numbered from
   the record's start, with when it was written; `call` pairs a result with its call by a
-  runner-issued ref. Text past 16 KiB is cut short and marked `truncated`, and reasoning
-  never appears. `outcome` says what came of a tool call, as its harness's decoder read it
+  runner-issued ref. Text past 16 KiB is cut short and marked `truncated`. Reasoning
+  appears only where the harness's own terminal shows it to the person as the agent's words:
+  Claude Code's updates (a thinking block of its `narration` kind), which come as `assistant`
+  text items with `thinking: true`, the chat drawing them tagged "summary" as its terminal
+  does. Codex's and Antigravity's terminals show none of their reasoning as such (see
+  [Harness coverage](harness-coverage.md)), so none of it appears, nor does any other thinking. `outcome` says what came of a tool call, as its harness's decoder read it
   from the record, before any cut, and null where the harness says nothing: `failed`
   (true, false, or null where unknown), `exit`, `running` (it goes on past this result, a
   command in the background, whose `failed` stays null), `size` (a count and its unit) and

@@ -26,6 +26,7 @@ import {
   type FileDoc,
 } from "../kinds/file/file-doc"
 import { currentMarks, docOf, lf, type Mark, type PlanDoc } from "../kinds/plan/plan-doc"
+import { blobs } from "../parts/blobs"
 import { fileRewritten } from "./file-rewrite"
 import { rewritten } from "./plan-rewrite"
 import { itemIn, itemsOf, pointedAt, pointedIn, targetOf } from "./pointing"
@@ -162,6 +163,8 @@ export type ItemStore = {
   readonly changeRead: (target: WorkspaceTarget, itemId: ItemId, path: string) => void
   // Follows every plan in the workspace from here on; returns the stop.
   readonly connect: () => () => void
+  // An item's file in parts, for a kind read so: the backend's, where it has one.
+  readonly part?: Companions["part"]
   // Takes a picture of a live page for it to rest as: the backend's, where it has one.
   readonly picture?: Companions["picture"]
   // Makes a live page's view a phone's, or not: the backend's, where it has one.
@@ -193,6 +196,9 @@ type Session = {
   // What the plans' saves keep under way, by item, and the files', by `fileKey`.
   readonly planSaves: Saves
   readonly fileSaves: Saves
+  // The items in the workspace when it was last looked at: one gone since was closed, and the
+  // bytes loaded for it go with it.
+  readonly items: Set<ItemId>
 }
 
 // The file the person's yes to seeing an item was for, if it still holds: it was to the file
@@ -499,6 +505,9 @@ const reconcile = (session: Session, workspace: Workspace): void => {
           plan: kindRules[item.kind].follow === "always",
           pointed: pointedAt(item),
         })
+  for (const id of session.items) if (!present.has(id)) blobs.drop(id)
+  session.items.clear()
+  for (const id of present.keys()) session.items.add(id)
   for (const [id, entry] of session.followed) {
     const found = present.get(id)
     if (!found) {
@@ -561,6 +570,7 @@ export const createItemStore = ({
     followed: new Map(),
     planSaves: createSaves(),
     fileSaves: createSaves(),
+    items: new Set(),
   }
   session.fileSaves.settled.add((key) => letGoUnseen(session, key))
   const watch: ItemStore["watch"] = (target, id, options = {}) => {
@@ -772,7 +782,7 @@ export const createItemStore = ({
       for (const id of session.followed.keys()) unfollow(session, id)
     }
   }
-  const { picture, phone } = companions
+  const { picture, phone, part } = companions
   const trouble: ItemStore["trouble"] = (target, itemId, shown, troubles) =>
     session.companions.trouble(target, itemId, shown, troubles)
   const changeFile: ItemStore["changeFile"] = (target, itemId, path, layers) =>
@@ -798,5 +808,6 @@ export const createItemStore = ({
     connect,
     ...(picture && { picture }),
     ...(phone && { phone }),
+    ...(part && { part }),
   }
 }

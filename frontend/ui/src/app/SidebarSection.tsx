@@ -87,6 +87,16 @@ export const SidebarSection = memo((): React.JSX.Element => {
     (folder: string) => filesFeed!.list(projectId, folder),
     [filesFeed, projectId],
   )
+  const checkout = useMemo(
+    () =>
+      filesFeed?.checkout && filesFeed.update
+        ? {
+            read: () => filesFeed.checkout!(projectId),
+            update: () => filesFeed.update!(projectId),
+          }
+        : undefined,
+    [filesFeed, projectId],
+  )
   // What hides files from it: the person's patterns for every project, and the project's own where
   // the backend keeps them.
   const exclude = useUiState((state) => state.preferences.filesExclude)
@@ -386,6 +396,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
             onExcludeSettings={commands.openFilesExcludeSettings}
             entries={entries}
             onMoved={onMoved}
+            checkout={checkout}
             watch={watchWorks}
             onOpenFile={onOpenFile}
             onLit={onLit}

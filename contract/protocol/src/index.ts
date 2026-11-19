@@ -64,6 +64,7 @@ export {
   type CompanionChange,
   type CompanionItem,
   companionLimits,
+  isDataPath,
   type CompanionWindow,
   itemContent,
   type ItemContent,
@@ -72,6 +73,7 @@ export {
   maxChangeLayers,
   maxChangesBytes,
   maxChangeSideBytes,
+  maxCompareRef,
   maxLayerFiles,
   maxLookPicture,
   maxPageTroubles,
@@ -83,6 +85,11 @@ export {
   planUnwritable,
   type PlanUnwritable,
   uncommittedLayer,
+  videoLimits,
+  filePart,
+  type FilePart,
+  partBytes,
+  partText,
 } from "./companions.js"
 export {
   type ClosedTerminal,
@@ -170,6 +177,8 @@ export {
   type TerminalMessages,
 } from "./messages.js"
 export {
+  type CheckoutState,
+  type CheckoutUpdate,
   type EntryChanged,
   type FilesExclude,
   filesExcludeLimits,

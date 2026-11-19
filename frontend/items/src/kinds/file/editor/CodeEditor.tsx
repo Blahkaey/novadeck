@@ -22,6 +22,7 @@ export const CodeEditor = ({
   label,
   onEdit,
   onSave,
+  at,
 }: {
   // The item showing it.
   id: ItemId
@@ -33,6 +34,7 @@ export const CodeEditor = ({
   label: string
   onEdit: (text: string) => void
   onSave: () => void
+  at?: number | undefined
 }): React.JSX.Element => {
   // The latest callbacks, for the editor's own, which it reads once as it mounts.
   const latest = useRef({ onEdit, onSave })
@@ -45,7 +47,7 @@ export const CodeEditor = ({
     (): EditorContent => ({ text, path, readOnly, marks }),
     [text, path, readOnly, marks],
   )
-  const { ref } = useViewer(mountEditor, {
+  const { ref, viewer } = useViewer(mountEditor, {
     id: fileKey(id, path),
     content,
     label,
@@ -53,6 +55,9 @@ export const CodeEditor = ({
     onEdit: edited,
     onSave: saved,
   })
+  useLayoutEffect(() => {
+    if (at !== undefined) viewer?.jumpTo({ line: at })
+  }, [viewer, at])
   return (
     <div
       ref={ref}

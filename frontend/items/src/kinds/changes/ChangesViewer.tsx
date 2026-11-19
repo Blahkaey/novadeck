@@ -1,12 +1,14 @@
 import type { PullRequest } from "@novadeck/core/forges"
 import { type ChangesContent, type Item } from "@novadeck/core/items"
-import { useCallback, useMemo, type KeyboardEvent } from "react"
+import { GitPullRequest } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react"
 
-import { ArtifactMeta, type ArtifactBodyProps } from "../../ArtifactViewer"
-import { OpenInBrowser } from "../../OpenInBrowser"
+import type { ArtifactBodyProps } from "../../ArtifactViewer"
+import { PaneTools, usePaneNote } from "../../pane-row"
 import { FileTree } from "./FileTree"
 import { FileView } from "./FileView"
 import { LayerList } from "./LayerList"
+import { originNote } from "./origin-note"
 import { usePullRequest } from "./pull-requests"
 import { alone, idsOf, pick, selectedOf, selectionName } from "./selection"
 import { filesOf, filesOfRange, rowsOf } from "./tree"
@@ -15,7 +17,8 @@ import { useChangesView } from "./view-state"
 
 // An agent's change, measured against main: its layers (the uncommitted work and each commit
 // since the merge base) to pick from, the files they changed as a tree, and one file at a time
-// opened into its changes. Read-only. What was picked and opened is kept by item; the files read
+// opened into its changes; or a compare an agent showed, a head's commits since it left a base,
+// which has no uncommitted work. Read-only. What was picked and opened is kept by item; the files read
 // are the backend's, kept until each changes again.
 
 const noun = (count: number): string => `${count} ${count === 1 ? "file" : "files"}`
@@ -27,17 +30,19 @@ const stateWords: Readonly<Record<PullRequest["state"], string>> = {
   closed: "closed",
 }
 
-// The work's pull request, opened in the browser as a page item's own link is: "PR #812". Only a
+// The work's pull request, a small chip in the row that opens it in the browser: "#812". Only a
 // web page's address is linked.
 const PullRequestLink = ({ pull }: { pull: PullRequest }): React.JSX.Element | null =>
   /^https?:\/\//i.test(pull.url) ? (
-    <OpenInBrowser
-      url={pull.url}
-      className="changes-pull"
-      label={`PR #${pull.number}, ${stateWords[pull.state]}, opens in browser`}
+    <a
+      className="artifact-open changes-pull"
+      href={pull.url}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`PR #${pull.number}, ${stateWords[pull.state]}, opens in browser`}
     >
-      PR #{pull.number}
-    </OpenInBrowser>
+      <GitPullRequest size={12} aria-hidden="true" />#{pull.number}
+    </a>
   ) : null
 
 // What the whole change comes to, from its own list of files (the net against main).
@@ -50,13 +55,22 @@ const sums = (
   reindented: content.files.reduce((sum, file) => sum + file.reindented, 0),
 })
 
+// The time, read again every minute, as the age of a fetch is said to the minute.
+const useMinute = (): number => {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
 export const ChangesViewer = ({
   item,
   content,
   stamp,
   target,
   itemStore,
-  actions,
 }: ArtifactBodyProps<"changes">): React.JSX.Element => {
   const [view, update] = useChangesView(itemStore, item.id)
   // What the files' diffs are read at: the content's stamp, kept where only the files
@@ -84,7 +98,21 @@ export const ChangesViewer = ({
     [rows],
   )
   const all = useMemo(() => sums(content), [content])
-  const pull = usePullRequest(content.root)
+  const minute = useMinute()
+  const note = originNote(content.origin, minute)
+  const worktreePull = usePullRequest(content.root)
+  // A compare is of the refs the agent named, not the checkout's work: its pull request isn't.
+  const pull = content.head === undefined ? worktreePull : undefined
+  // What the tab's tooltip says of the change, which the row's header used to: its base, and what
+  // the whole change comes to.
+  usePaneNote([
+    `against ${content.base}`,
+    all.files === 0
+      ? "no changes"
+      : `${noun(all.files)}${content.truncated ? ", more than shown" : ""} · +${all.added} −${all.removed}${all.reindented > 0 ? ` ${all.reindented} re-indented` : ""}`,
+    // How current a compare's remote refs are, where that is in doubt, and why a fetch failed.
+    ...(note ? [note.title === undefined ? note.text : `${note.text}: ${note.title}`] : []),
+  ])
 
   // A file opened is read: grayed at once, until the content comes again with the backend's word.
   const markRead = useCallback(
@@ -135,29 +163,29 @@ export const ChangesViewer = ({
 
   return (
     <>
-      <ArtifactMeta
-        actions={
+      <PaneTools
+        chip={
           pull ? (
-            // Beside the actions as a page's Open in browser is beside its buttons.
-            <span className="changes-head-end">
-              <PullRequestLink pull={pull} />
-              {actions}
-            </span>
+            <PullRequestLink pull={pull} />
           ) : (
-            actions
+            note && (
+              // A compare has no pull request: where its remote refs may be old, the row says so.
+              <span
+                className="changes-origin"
+                data-stale={note.stale || undefined}
+                title={note.title}
+              >
+                {note.text}
+                {note.title !== undefined && (
+                  // The reason, for those who can't hover to read the title.
+                  <span className="changes-origin-why">: {note.title}</span>
+                )}
+              </span>
+            )
           )
         }
-      >
-        <code className="artifact-meta-name" title={item.name}>
-          {item.name}
-        </code>
-        <span>
-          {all.files === 0
-            ? `no changes against ${content.base}`
-            : `${noun(all.files)}${content.truncated ? ", more than shown" : ""} · +${all.added} −${all.removed}${all.reindented > 0 ? ` ${all.reindented} re-indented` : ""} · against ${content.base}`}{" "}
-          · read-only
-        </span>
-      </ArtifactMeta>
+        tools={[]}
+      />
       <div
         ref={host}
         className="changes-host"
@@ -188,6 +216,7 @@ export const ChangesViewer = ({
                 <LayerList
                   layers={content.layers}
                   selected={selected}
+                  only={alone(ids, view.picked)}
                   onPick={(id) => update((now) => ({ ...now, picked: pick(ids, now.picked, id) }))}
                 />
                 <div className="changes-files-head">
@@ -228,12 +257,6 @@ export const ChangesViewer = ({
                       layers={layers}
                     />
                   )}
-                </div>
-                <div className="changes-hint">
-                  {alone(ids, view.picked)
-                    ? "Click it again to see everything"
-                    : "Click a commit to see only it"}{" "}
-                  · click a file to unfold it · double-click opens it
                 </div>
               </>
             )}

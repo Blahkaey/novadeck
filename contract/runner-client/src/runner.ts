@@ -16,6 +16,8 @@ import {
   type CompanionWindow,
   type EntryChanged,
   type FeedbackDraft,
+  type CheckoutState,
+  type CheckoutUpdate,
   type FilesExclude,
   type FolderBrowse,
   type FolderListing,
@@ -26,6 +28,7 @@ import {
   type InterruptResult,
   type ChangeFileDiff,
   type ItemContent,
+  type FilePart,
   type MurmurSettings,
   type MurmurState,
   type Note,
@@ -218,6 +221,19 @@ export type Runner = {
      * missing, is no folder or can't be read.
      */
     browse(input: { readonly path?: string }): Promise<FolderBrowse>
+    /**
+     * How the project's own checkout stands against its remote's main: how far behind it is
+     * where it is on main with main ahead of it, how many times the runner moved it, and the
+     * commit it is at. Rejects
+     * with `NOT_FOUND` for a project the runner doesn't have.
+     */
+    checkout(input: { readonly projectId: string }): Promise<CheckoutState>
+    /**
+     * Fast-forwards the project's own checkout to its remote's main on the person's say, tracked
+     * changes allowed; `ok: false` says git's reason. Rejects with `NOT_FOUND` for a project the
+     * runner doesn't have.
+     */
+    updateCheckout(input: { readonly projectId: string }): Promise<CheckoutUpdate>
   }
   readonly sessions: {
     list(input: { readonly projectId: string }): Promise<WorkspaceSession[]>
@@ -372,6 +388,8 @@ export type Runner = {
      * resting sees it), read from the system now (with `fresh`, by a read that starts after the call), and those the runner couldn't read (`unknown`, never
      * idle). Ask only while someone looks at the answer, or is about to act on it.
      */
+    /** The terminal this client's person uses now, or none; see the contract's `terminals.active`. */
+    active(terminalId: string | null): Promise<void>
     busy(options?: {
       readonly fresh?: true
     }): Promise<{ readonly busy: string[]; readonly unknown: string[] }>
@@ -744,6 +762,18 @@ export type Runner = {
     renameWindow(windowId: string, title: string): Promise<void>
     /** Gives a window its item's name again; rejects as `renameWindow` does. */
     resetWindowTitle(windowId: string): Promise<void>
+    /**
+     * An item's file from `offset`, up to `partBytes` bytes, for a kind read in parts (a
+     * video, a recording), while it is as
+     * `stamp` names it; `changed` when it is not. Rejects with `NOT_FOUND` for an unknown
+     * item or one of a kind not read in parts.
+     */
+    part(input: {
+      readonly itemId: string
+      readonly stamp: string
+      readonly offset: number
+      readonly reveal?: string
+    }): Promise<FilePart>
     /** What went wrong on a page item during its show `shown`, as the pane saw it. */
     pageTrouble(input: {
       readonly itemId: string
@@ -937,6 +967,8 @@ export const connectRunner = async (
       copyEntry: (input) => call((client) => client.projects.copyEntry(input)),
       removeEntry: (input) => call((client) => client.projects.removeEntry(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
+      checkout: (input) => call((client) => client.projects.checkout(input)),
+      updateCheckout: (input) => call((client) => client.projects.updateCheckout(input)),
     },
     sessions: {
       list: (input) => call((client) => client.sessions.list(input)),
@@ -970,6 +1002,7 @@ export const connectRunner = async (
       rename: (terminalId, title) =>
         call((client) => client.terminals.rename({ terminalId, title })),
       resetTitle: (terminalId) => call((client) => client.terminals.resetTitle({ terminalId })),
+      active: (terminalId) => call((client) => client.terminals.active({ terminalId })),
       busy: (only) => call((client) => client.terminals.busy(only)),
       async upload(terminalId, { name, data }) {
         if (data.length > maxUploadBytes) throw new WireError<RunnerErrorCode>("UPLOAD_TOO_LARGE")
@@ -1107,6 +1140,7 @@ export const connectRunner = async (
         call((client) => client.companions.renameWindow({ windowId, title })),
       resetWindowTitle: (windowId) =>
         call((client) => client.companions.resetWindowTitle({ windowId })),
+      part: (input) => call((client) => client.companions.part(input)),
       pageTrouble: (input) => call((client) => client.companions.pageTrouble(input)),
       looks: () =>
         followSession(connection, (client, signal) =>

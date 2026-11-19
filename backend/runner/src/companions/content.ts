@@ -7,9 +7,13 @@ import { StringDecoder } from "node:string_decoder"
 import type { PlanSource } from "@novadeck/harness-core/events"
 import {
   companionLimits,
+  isDataPath,
   type AgentName,
   type ItemContent,
   type PlanSaveResult,
+  type FilePart,
+  partBytes,
+  videoLimits,
 } from "@novadeck/protocol"
 
 import { harnesses } from "../harnesses/registry.js"
@@ -20,14 +24,45 @@ import { failure, type RequestFailure } from "./request.js"
 import { secret } from "./secrets.js"
 import { isMissing, stampOf } from "./stamps.js"
 
-// What is shown as an image, by extension.
+// What is shown as an image, by extension: what Chromium decodes itself, as the desktop app
+// and a browser both are, JPEG XL among them (probed in Electron 45.2.2, Chromium 156). HEIC,
+// TIFF and gzipped SVG aren't, so they stay files.
 const images: { readonly [extension: string]: string } = {
   ".png": "image/png",
+  ".apng": "image/apng",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
+  ".jpe": "image/jpeg",
+  ".jfif": "image/jpeg",
+  ".pjpeg": "image/jpeg",
+  ".pjp": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".jxl": "image/jxl",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".cur": "image/x-icon",
   ".svg": "image/svg+xml",
+}
+// What is played as a video, by extension: what Chromium plays, as the desktop app and a
+// browser both are. A QuickTime file plays where its codec is one of those.
+const videos: { readonly [extension: string]: string } = {
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+}
+// What is played as a recording, by extension, as above.
+const recordings: { readonly [extension: string]: string } = {
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
+  ".opus": "audio/ogg",
+  ".flac": "audio/flac",
 }
 /** The largest image previewed; a larger one is listed without its picture. */
 export const maxImageBytes = 8 * 1024 * 1024
@@ -58,6 +93,33 @@ export const unavailable = (
 /** Whether a file is shown as an image, by its extension. */
 const isImage = (path: string): boolean => images[extname(path).toLowerCase()] !== undefined
 
+/** Whether a file is played as a video, by its extension. */
+const isVideo = (path: string): boolean => videos[extname(path).toLowerCase()] !== undefined
+
+/** Whether a file is played as a recording, by its extension. */
+const isAudio = (path: string): boolean => recordings[extname(path).toLowerCase()] !== undefined
+
+// The formats a person names otherwise than by their extension: JPEG's other extensions are
+// JPEG, and JPEG XL is spelt out.
+const formatNames: { readonly [extension: string]: string } = {
+  ".jpg": "JPEG",
+  ".jpe": "JPEG",
+  ".jfif": "JPEG",
+  ".pjpeg": "JPEG",
+  ".pjp": "JPEG",
+  ".jxl": "JPEG XL",
+}
+
+/** A file's format as a person names it, by its extension: "JPEG" for a.jfif, "PNG" for a.png. */
+export const formatOf = (path: string): string => {
+  const extension = extname(path).toLowerCase()
+  return formatNames[extension] ?? extension.slice(1).toUpperCase()
+}
+
+/** How a file is shown, by its extension: as an image, played as a video or a recording, or read. */
+const kindOf = (path: string): Pointed["kind"] =>
+  isImage(path) ? "image" : isVideo(path) ? "video" : isAudio(path) ? "audio" : "file"
+
 /**
  * The lines of a file of `total` lines shown, from `first` to `last`, and the ones
  * pointed at, `from` to `to`: every line of a short file; around `lines` in a longer
@@ -83,7 +145,7 @@ export type Pointed = {
   readonly ok: true
   /** Its path, symlinks resolved. */
   readonly path: string
-  readonly kind: "image" | "file"
+  readonly kind: "image" | "video" | "audio" | "file"
   readonly size: number
   readonly secret: boolean
 }
@@ -107,7 +169,7 @@ export const pointAt = async (
   return {
     ok: true,
     path,
-    kind: isImage(path) ? "image" : "file",
+    kind: kindOf(path),
     size: stats.size,
     secret: secret(path, env),
   }
@@ -288,10 +350,123 @@ export const openShown = async (
 }
 
 /**
+ * A data file's lines from line `start` (its first by default), read as its preview reads
+ * it, as a whole: every line whole, as many as `companionLimits.data` holds, in UTF-16 code
+ * units and a unit for each line's break, which its UTF-8 bytes are never fewer than;
+ * `ended` once that's all of them,
+ * and `count`, the lines read in all. A line the limit stops inside is left out, unless
+ * it's the first kept, which comes cut short, so the file shows something. Lines before
+ * `start` are counted, not kept. A NUL byte near its start makes it binary.
+ */
+const readWhole = async (
+  handle: FileHandle,
+  start = 1,
+): Promise<{ lines: string[]; ended: boolean; count: number } | "binary"> => {
+  const decoder = new StringDecoder("utf8")
+  const breaks = /\r\n|\r|\n/g
+  const buffer = Buffer.alloc(chunkBytes)
+  const budget = companionLimits.data
+  const lines: string[] = []
+  let size = 0
+  let count = 0
+  // The line being read, held only once it's one to keep, and whether any of it came.
+  let line = ""
+  let begun = false
+  // A carriage return ended the last chunk, so a line feed opening the next is its pair.
+  let carriage = false
+  let position = 0
+  const keeping = (): boolean => count + 1 >= start
+  // Whether the line being read still fits, its break counted, so no more lines come than
+  // the limit; once one doesn't, the read stops there.
+  const fits = (): boolean => {
+    if (size + line.length + 1 <= budget) return true
+    if (lines.length === 0) lines.push(line.slice(0, budget))
+    return false
+  }
+  const end = (): boolean => {
+    if (keeping()) {
+      if (!fits()) return false
+      lines.push(line)
+      size += line.length + 1
+    }
+    count += 1
+    line = ""
+    begun = false
+    return true
+  }
+  const take = (text: string): boolean => {
+    let at = carriage && text.startsWith("\n") ? 1 : 0
+    breaks.lastIndex = at
+    for (let found = breaks.exec(text); found; found = breaks.exec(text)) {
+      if (keeping()) line += text.slice(at, found.index)
+      if (!end()) return false
+      at = breaks.lastIndex
+    }
+    if (at < text.length) begun = true
+    if (keeping()) line += text.slice(at)
+    if (text.length > 0) carriage = text.endsWith("\r")
+    // A line still being read stops the read once it's past the limit: none has begun after
+    // a break that ends the text.
+    return !keeping() || !begun || fits()
+  }
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop -- One chunk after another.
+    const { bytesRead } = await handle.read(buffer, 0, chunkBytes, position)
+    if (bytesRead === 0) break
+    const chunk = buffer.subarray(0, bytesRead)
+    if (position < sniffBytes && chunk.subarray(0, sniffBytes - position).includes(0))
+      return "binary"
+    position += bytesRead
+    if (!take(decoder.write(chunk))) return { lines, ended: false, count }
+  }
+  if (!take(decoder.end())) return { lines, ended: false, count }
+  // The line a final newline ends is the last; an empty file has one empty line.
+  if ((begun || count === 0) && !end()) return { lines, ended: false, count }
+  return { lines, ended: true, count }
+}
+
+/**
+ * A data file's lines as its item shows them: from its start, or, when the lines pointed at
+ * lie past what its start's budget holds, from a little before them, as a text file's
+ * window is; from its last lines when they lie past its end.
+ */
+const readData = async (
+  handle: FileHandle,
+  pointed: { readonly from: number; readonly to: number } | null,
+): Promise<{ first: number; lines: string[]; ended: boolean; count: number } | "binary"> => {
+  const whole = await readWhole(handle)
+  if (whole === "binary" || whole.ended || !pointed || pointed.to < whole.lines.length)
+    return whole === "binary" ? whole : { first: 1, ...whole }
+  const first = Math.max(1, pointed.from - contextLines)
+  const around = await readWhole(handle, first)
+  if (around === "binary" || around.lines.length > 0)
+    return around === "binary" ? around : { first, ...around }
+  const last = Math.max(1, around.count - contextLines)
+  const end = await readWhole(handle, last)
+  return end === "binary" ? end : { first: last, ...end }
+}
+
+/** The lines pointed at, pulled into the lines read, `first` to `last`, and whether they were. */
+const pointedAt = (
+  first: number,
+  last: number,
+  lines: { readonly from: number; readonly to: number } | null | undefined,
+): { from: number; to: number; clamped: boolean } => {
+  const from = Math.max(first, Math.min(lines?.from ?? first, last))
+  const to = Math.max(from, Math.min(lines?.to ?? last, last))
+  return {
+    from,
+    to,
+    clamped: lines !== null && lines !== undefined && (from !== lines.from || to !== lines.to),
+  }
+}
+
+/**
  * An image or a text file, as it is now, symlinks resolved. One that may hold secrets is
  * `secret` unless `reveal`; an image past the preview limit is `too-large`; a text file
  * with a NUL byte near its start is `binary`. A text file is read up to a budget, then
- * shown around its lines.
+ * shown around its lines; a data file (`isDataPath`), as a whole from its start, up to
+ * its own budget.
  */
 export const loadFile = async (
   item: Pick<ItemRecord, "kind" | "path" | "lines" | "secret">,
@@ -313,6 +488,28 @@ export const loadFile = async (
         state: "ready",
         stamp,
         content: { kind: "image", src: `data:${mime};base64,${bytes.toString("base64")}` },
+      }
+    }
+    if (isDataPath(path)) {
+      const read = await readData(handle, item.lines)
+      if (read === "binary") return unavailable("binary", stats.size)
+      const { first, lines, ended, count } = read
+      const pointed = pointedAt(first, first + lines.length - 1, item.lines)
+      return {
+        state: "ready",
+        stamp,
+        content: {
+          kind: "file",
+          path: tail(path, companionLimits.path),
+          firstLine: first,
+          lines,
+          from: pointed.from,
+          to: pointed.to,
+          total: ended ? count : null,
+          truncated: !ended,
+          // Only lines past the file's end are pulled back, never those past what was read.
+          clamped: ended && pointed.clamped,
+        },
       }
     }
     const read = await readLines(handle, item.lines)
@@ -343,6 +540,115 @@ export const loadFile = async (
     await handle.close().catch(() => {})
   }
 }
+
+/**
+ * A video or a recording, as it is now, symlinks resolved: its format and size, never its
+ * bytes, which `readPart` reads as the client plays it. Its stamp is the file's own, which each part
+ * is read against. One that may hold secrets is `secret` unless `reveal`; one past what the
+ * pane plays is `too-large`. `shown` is its item's version, and `at` the second its latest
+ * show starts it at.
+ */
+export const loadPlayed = async (
+  item: Pick<ItemRecord, "kind" | "path" | "secret">,
+  reveal: boolean,
+  show: { readonly shown: number; readonly at: number | undefined },
+  env?: NodeJS.ProcessEnv,
+): Promise<ItemContent> => {
+  if (item.path === null) return unavailable("missing")
+  let path: string
+  let stats: Stats
+  try {
+    path = await realpath(item.path)
+    stats = await stat(path)
+  } catch (error) {
+    return unavailable(reasonOf(error))
+  }
+  if (!stats.isFile()) return unavailable("not-a-file")
+  if ((item.secret || secret(path, env)) && !reveal) return unavailable("secret", stats.size)
+  if (stats.size > videoLimits.bytes) return unavailable("too-large", stats.size)
+  return {
+    state: "ready",
+    stamp: stampOf(stats),
+    content: {
+      kind: item.kind === "audio" ? "audio" : "video",
+      mime: mimeOf(path, item.kind),
+      size: stats.size,
+      shown: show.shown,
+      ...(show.at !== undefined && { at: show.at }),
+    },
+  }
+}
+
+/** A played file's format, by its extension, or by its kind where that names none. */
+const mimeOf = (path: string, kind: ItemRecord["kind"]): string => {
+  const extension = extname(path).toLowerCase()
+  return (
+    (kind === "audio" ? recordings[extension] : videos[extension]) ??
+    (kind === "audio" ? "audio/mpeg" : "video/mp4")
+  )
+}
+
+/** The kinds the client reads in parts, by the largest file each takes, in bytes. */
+export const partsOf: { readonly [kind in ItemRecord["kind"]]?: number } = {
+  video: videoLimits.bytes,
+  audio: videoLimits.bytes,
+}
+
+/**
+ * A part of an item's file from `offset`, up to `partBytes` bytes, read only while the
+ * file is as `stamp` names it: `changed` once it isn't, as when it was rendered again, so the
+ * client starts over from its new content. Past its end, the part is empty. A file past
+ * `largest` bytes, the most its kind takes, is `too-large`.
+ */
+export const readPart = async (
+  item: Pick<ItemRecord, "path" | "secret">,
+  part: { readonly stamp: string; readonly offset: number },
+  reveal: boolean,
+  largest: number,
+  env?: NodeJS.ProcessEnv,
+): Promise<FilePart> => {
+  if (item.path === null) return { state: "unavailable", reason: "missing" }
+  let path: string
+  let opened: Awaited<ReturnType<typeof openPlain>>
+  try {
+    path = await realpath(item.path)
+    opened = await openPlain(path)
+  } catch (error) {
+    const reason = reasonOf(error)
+    return { state: "unavailable", reason: reason === "missing" ? "missing" : unreadable(reason) }
+  }
+  if ("state" in opened) return { state: "unavailable", reason: "not-a-file" }
+  const { handle, stats } = opened
+  try {
+    if ((item.secret || secret(path, env)) && !reveal)
+      return { state: "unavailable", reason: "secret" }
+    if (stats.size > largest) return { state: "unavailable", reason: "too-large" }
+    if (stampOf(stats) !== part.stamp) return { state: "changed" }
+    const length = Math.max(0, Math.min(partBytes, stats.size - part.offset))
+    const buffer = Buffer.alloc(length)
+    let read = 0
+    while (read < length) {
+      // eslint-disable-next-line no-await-in-loop -- One chunk after another.
+      const { bytesRead } = await handle.read(buffer, read, length - read, part.offset + read)
+      if (bytesRead === 0) break
+      read += bytesRead
+    }
+    // Written to while it was read: what was read may be half of each.
+    const after = await handle.stat()
+    if (stampOf(after) !== part.stamp) return { state: "changed" }
+    return { state: "part", data: buffer.subarray(0, read).toString("base64") }
+  } catch (error) {
+    return { state: "unavailable", reason: unreadable(reasonOf(error)) }
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+/** A reason a part can't be read for, of those a part can give. */
+const unreadable = (
+  reason: Unavailable["reason"],
+): Extract<FilePart, { state: "unavailable" }>["reason"] =>
+  reason === "not-a-file" || reason === "missing" ? reason : "unreadable"
 
 /** A plan's text, cut short past what the protocol takes, and when it last changed. */
 export type PlanText = {

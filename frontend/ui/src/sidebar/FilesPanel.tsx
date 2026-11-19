@@ -66,6 +66,7 @@ import {
   type Listings,
   type FilesRow,
 } from "./files-tree"
+import { CheckoutLine, useCheckout, type Checkout } from "./FilesCheckout"
 import { FilesExcludeDialog } from "./FilesExcludeDialog"
 import { NameRow } from "./FilesNameRow"
 import { FilesStrip } from "./FilesStrip"
@@ -155,6 +156,7 @@ const FilesPanelView = ({
   entries,
   onMoved,
   turn,
+  checkout,
   watch,
   onOpenFile,
   onLit,
@@ -185,6 +187,8 @@ const FilesPanelView = ({
   onMoved?: ((from: string, to: string) => void) | undefined
   // When an agent's turn last ended in the project, which has the folders read again.
   turn: number
+  // The project's own checkout against its remote's main, where the backend has one to move.
+  checkout?: Checkout | undefined
   // Follows the works `project` comes from until the returned release is called, where it
   // comes from them.
   watch?: (() => () => void) | undefined
@@ -294,6 +298,9 @@ const FilesPanelView = ({
     if (!showing) return
     for (const folder of wanted) if (!listings.has(folder) && !isReading(folder)) read(folder)
   }, [showing, wanted, listings, read, isReading])
+  // The backend moved the checkout to main: the files on disk changed, so what is on screen is
+  // read again, added and removed files with it.
+  const checkoutState = useCheckout(checkout, showing, turn, () => wantedNow.current.forEach(read))
   const [selected, setSelected] = useState<string | null>(null)
   // The row the menu was last asked on; undefined for the tree's empty space.
   const [menuRow, setMenuRow] = useState<FilesRow | undefined>()
@@ -826,6 +833,14 @@ const FilesPanelView = ({
         </>
       }
     >
+      {checkoutState.state && (
+        <CheckoutLine
+          state={checkoutState.state}
+          updating={checkoutState.updating}
+          refused={checkoutState.refused}
+          onUpdate={checkoutState.update}
+        />
+      )}
       {failed && (
         <div className="sidebar-refusal files-failure" role="alert">
           <p className="text-control">{failed}</p>

@@ -1,6 +1,8 @@
 import {
   ChangeUnanswered,
   filesExcludeLimits,
+  type CheckoutState,
+  type CheckoutUpdate,
   type ProjectFiles,
   type FilesExclude,
   type FolderEntry,
@@ -389,6 +391,13 @@ const restMs = { min: 10_000, max: 20_000 }
 const between = (range: { min: number; max: number }, roll: number): number =>
   range.min + Math.floor(roll * (range.max - range.min + 1))
 
+// How the debug panel has the storefront's own checkout stand against main: `count` commits
+// behind where Novadeck left it alone, and `refusal`, git's reason, where an update is refused.
+export type DemoCheckout = { readonly count: number; readonly refusal?: string }
+
+// The file main brings to the checkout when it moves, and the one it takes away.
+export const movedFiles = { added: "src/checkout/Receipt.tsx", removed: "src/components/Price.tsx" }
+
 export type DemoFiles = ProjectFiles & {
   readonly exclude: NonNullable<ProjectFiles["exclude"]>
   // The files the person edits in a project window, which the debug panel puts in faults: none
@@ -400,6 +409,11 @@ export type DemoFiles = ProjectFiles & {
   readonly move: NonNullable<ProjectFiles["move"]>
   readonly copy: NonNullable<ProjectFiles["copy"]>
   readonly remove: NonNullable<ProjectFiles["remove"]>
+  // Has the storefront's checkout stand as `checkout` says (undefined: up to date).
+  readonly stand: (checkout: DemoCheckout | undefined) => void
+  // Has main move the checkout, as a fetch does where nothing holds it back: the files on disk
+  // change (`movedFiles`), which the panel, shown, reads again within a few seconds.
+  readonly moveCheckout: () => void
   // Has the next reads of `folder` go as `fault` says, or normally for none. The panel reads
   // a folder again when it is shown again or an agent's turn ends.
   readonly degrade: (folder: string, fault: FilesFault | undefined) => void
@@ -496,6 +510,54 @@ export const createDemoFiles = (
     change((project) =>
       markIn(project, handle, path, kind, clock.now(), treeNow(projectId).entries),
     )
+
+  // The storefront's checkout, and how many times main moved it (an update counts).
+  let standing: DemoCheckout | undefined
+  let checkoutMoves = 0
+  const stand = (checkout: DemoCheckout | undefined): void => {
+    standing = checkout
+  }
+  const moveCheckout = (): void => {
+    if (checkoutMoves === 0) {
+      const tree = treeNow(projectId)
+      settle(
+        projectId,
+        {
+          ...tree,
+          entries: [
+            ...tree.entries.filter(
+              (path) => path !== movedFiles.removed && path !== movedFiles.added,
+            ),
+            movedFiles.added,
+          ],
+        },
+        movedFiles.removed,
+        movedFiles.added,
+      )
+    }
+    checkoutMoves += 1
+  }
+  const checkout = async (id: string): Promise<CheckoutState> =>
+    id === projectId && standing
+      ? {
+          behind: { branch: "main", remote: "origin/main", count: standing.count },
+          moved: checkoutMoves,
+          head: `demo-${checkoutMoves}`,
+        }
+      : {
+          behind: null,
+          moved: id === projectId ? checkoutMoves : 0,
+          head: id === projectId ? `demo-${checkoutMoves}` : null,
+        }
+  const update = async (id: string): Promise<CheckoutUpdate> => {
+    if (id === projectId && standing?.refusal !== undefined)
+      return { ok: false, said: standing.refusal }
+    if (id === projectId && standing) {
+      standing = undefined
+      moveCheckout()
+    }
+    return { ok: true }
+  }
 
   const faults = new Map<string, FilesFault>()
   const degrade = (folder: string, fault: FilesFault | undefined): void => {
@@ -727,6 +789,10 @@ export const createDemoFiles = (
     loseNextAnswer,
     gone,
     watchGone,
+    checkout,
+    update,
+    stand,
+    moveCheckout,
     write,
     mark,
     endTurn,

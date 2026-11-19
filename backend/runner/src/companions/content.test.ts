@@ -2,6 +2,9 @@ import { spawnSync } from "node:child_process"
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
+  ftruncateSync,
+  openSync,
   lstatSync,
   readdirSync,
   readFileSync,
@@ -18,19 +21,22 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { loadProbe } from "@novadeck/harness-core/testing/probes"
-import { companionLimits } from "@novadeck/protocol"
+import { companionLimits, itemContent, partBytes, videoLimits } from "@novadeck/protocol"
 
 import { describe, expect, it as base } from "../test.js"
 import { adapterFolder } from "../testing/adapters.js"
 import {
   captureWindow,
+  formatOf,
   loadFile,
   loadPlan,
+  loadPlayed,
   pageAt,
   planTitle,
   pointAt,
   readPlanFile,
   readTextPlan,
+  readPart,
   savePlan as savePlanIn,
 } from "./content.js"
 
@@ -85,6 +91,25 @@ describe("what a show points at", () => {
       size: png.length,
     })
     await expect(pointAt(".env", directory)).resolves.toMatchObject({ ok: true, secret: true })
+  })
+
+  it("is a video by its extension, whatever its case", async ({ directory }) => {
+    for (const name of ["demo.mp4", "clip.WEBM", "take.mov", "cut.m4v"]) {
+      writeFileSync(join(directory, name), "video")
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(pointAt(name, directory)).resolves.toMatchObject({ ok: true, kind: "video" })
+    }
+    // One Chromium doesn't play is read as a file, which says it isn't text.
+    writeFileSync(join(directory, "old.avi"), "video")
+    await expect(pointAt("old.avi", directory)).resolves.toMatchObject({ kind: "file" })
+  })
+
+  it("is a recording by its extension, whatever its case", async ({ directory }) => {
+    for (const name of ["take.mp3", "voice.M4A", "tone.wav", "mix.ogg", "note.opus", "a.flac"]) {
+      writeFileSync(join(directory, name), "sound")
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(pointAt(name, directory)).resolves.toMatchObject({ ok: true, kind: "audio" })
+    }
   })
 
   it("may hold secrets where the environment it is given says a tool keeps its login", async ({
@@ -340,6 +365,113 @@ describe("a text file as it loads", () => {
   })
 })
 
+describe("a data file as it loads", () => {
+  const contentOf = async (path: string, lines?: { from: number; to: number }) => {
+    const loaded = await loadFile(file(path, lines ? { lines } : {}), false)
+    if (loaded.state !== "ready" || loaded.content.kind !== "file") throw new Error("not loaded")
+    return loaded.content
+  }
+
+  it("is read whole from its start, its long lines uncut, whatever lines were pointed at", async ({
+    directory,
+  }) => {
+    const path = join(directory, "rollout.jsonl")
+    const long = JSON.stringify({ text: "x".repeat(20_000) })
+    writeFileSync(path, `${long}\n${numbered(1000)}`)
+    const content = await contentOf(path, { from: 500, to: 510 })
+    expect(content).toMatchObject({
+      firstLine: 1,
+      from: 500,
+      to: 510,
+      total: 1001,
+      truncated: false,
+    })
+    expect(content.lines[0]).toBe(long)
+    expect(content.lines).toHaveLength(1001)
+  })
+
+  it("stops at its budget on a whole line, its line count then unknown", async ({ directory }) => {
+    const path = join(directory, "big.csv")
+    const row = `${"a".repeat(1023)}\r\n`
+    writeFileSync(path, row.repeat(3 * 1024))
+    const content = await contentOf(path)
+    expect(content).toMatchObject({ firstLine: 1, total: null, truncated: true, clamped: false })
+    expect(content.lines.every((line) => line === "a".repeat(1023))).toBe(true)
+    // Each line counts its break.
+    expect(content.lines.length * 1024).toBeLessThanOrEqual(companionLimits.data)
+    expect((content.lines.length + 1) * 1024).toBeGreaterThan(companionLimits.data)
+  })
+
+  it("reads around lines pointed at past its budget, from a little before them, whole", async ({
+    directory,
+  }) => {
+    const path = join(directory, "long.jsonl")
+    const record = (at: number) => JSON.stringify({ at, text: "x".repeat(6000) })
+    writeFileSync(path, Array.from({ length: 900 }, (_, at) => record(at + 1)).join("\n"))
+    const content = await contentOf(path, { from: 800, to: 802 })
+    expect(content).toMatchObject({ firstLine: 760, from: 800, to: 802, clamped: false })
+    expect(content.lines[40]).toBe(record(800))
+    expect(content.lines.at(-1)).toBe(record(900))
+    expect(content).toMatchObject({ total: 900, truncated: false })
+  })
+
+  it("reads its last lines when the lines pointed at lie past its end", async ({ directory }) => {
+    const path = join(directory, "long.jsonl")
+    writeFileSync(path, `${'{"x":"' + "y".repeat(3000) + '"}\n'}`.repeat(1000))
+    const content = await contentOf(path, { from: 5000, to: 5001 })
+    expect(content).toMatchObject({ firstLine: 960, from: 1000, to: 1000, total: 1000 })
+    expect(content).toMatchObject({ clamped: true, truncated: false })
+  })
+
+  it("holds every line that fits to the byte, the last whole one too", async ({ directory }) => {
+    const path = join(directory, "edge.csv")
+    // Each line costs its text and its break: exactly the budget.
+    const count = companionLimits.data / 1024
+    writeFileSync(path, `${"a".repeat(1023)}\n`.repeat(count))
+    const content = await contentOf(path)
+    expect(content).toMatchObject({ total: count, truncated: false })
+    expect(content.lines).toHaveLength(count)
+  })
+
+  it("holds no more lines than the protocol takes, however many empty ones", async ({
+    directory,
+  }) => {
+    const path = join(directory, "blank.jsonl")
+    writeFileSync(path, "\n".repeat(companionLimits.data * 2))
+    const loaded = await loadFile(file(path), false)
+    expect(itemContent.safeParse(loaded).success).toBe(true)
+    expect(loaded).toMatchObject({ content: { truncated: true } })
+  })
+
+  it("keeps a first line past its budget, cut short, so it shows something", async ({
+    directory,
+  }) => {
+    const path = join(directory, "min.json")
+    writeFileSync(path, `[${'"x",'.repeat(companionLimits.data / 4)}"x"]`)
+    const content = await contentOf(path)
+    expect(content).toMatchObject({ total: null, truncated: true })
+    expect(content.lines).toHaveLength(1)
+    expect(content.lines[0]).toHaveLength(companionLimits.data)
+  })
+
+  it("pulls lines pointed at past its end back to it, and reads a NUL as binary", async ({
+    directory,
+  }) => {
+    const path = join(directory, "ci.yml")
+    writeFileSync(path, "a: 1\nb: 2\n")
+    await expect(contentOf(path, { from: 2, to: 9 })).resolves.toMatchObject({
+      lines: ["a: 1", "b: 2"],
+      from: 2,
+      to: 2,
+      total: 2,
+      clamped: true,
+    })
+    const binary = join(directory, "blob.json")
+    writeFileSync(binary, Buffer.from([0x7b, 0, 0x7d]))
+    await expect(loadFile(file(binary), false)).resolves.toMatchObject({ reason: "binary" })
+  })
+})
+
 describe("an image as it loads", () => {
   it("is a data URL of its type, up to the preview limit", async ({ directory }) => {
     const path = join(directory, "dot.png")
@@ -354,6 +486,220 @@ describe("an image as it loads", () => {
       state: "unavailable",
       reason: "too-large",
       size: 8 * 1024 * 1024 + 1,
+    })
+  })
+
+  it("is any format Chromium decodes, typed by its extension", async ({ directory }) => {
+    const types = {
+      "a.apng": "image/apng",
+      "a.jfif": "image/jpeg",
+      "a.pjpeg": "image/jpeg",
+      "a.pjp": "image/jpeg",
+      "a.AVIF": "image/avif",
+      "photo.jxl": "image/jxl",
+      "a.jpe": "image/jpeg",
+      "a.bmp": "image/bmp",
+      "favicon.ico": "image/x-icon",
+      "a.cur": "image/x-icon",
+    }
+    for (const [name, type] of Object.entries(types)) {
+      const path = join(directory, name)
+      writeFileSync(path, png)
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(pointAt(name, directory), name).resolves.toMatchObject({ kind: "image" })
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(loadFile({ ...file(path), kind: "image" }, false), name).resolves.toMatchObject({
+        state: "ready",
+        content: { kind: "image", src: expect.stringMatching(`^data:${type};`) },
+      })
+    }
+  })
+
+  it("names a format as a person does, JPEG's other extensions as JPEG", () => {
+    const named = {
+      "a.png": "PNG",
+      "a.jpg": "JPEG",
+      "a.JPEG": "JPEG",
+      "a.jpe": "JPEG",
+      "a.jfif": "JPEG",
+      "a.PJPEG": "JPEG",
+      "a.pjp": "JPEG",
+      "photo.jxl": "JPEG XL",
+      "favicon.ico": "ICO",
+      "pointer.cur": "CUR",
+      "a.svg": "SVG",
+      "demo.webm": "WEBM",
+      "take.mp3": "MP3",
+    }
+    expect(Object.fromEntries(Object.keys(named).map((name) => [name, formatOf(name)]))).toEqual(
+      named,
+    )
+  })
+
+  it("isn't a format Chromium can't draw, which stays a file", async ({ directory }) => {
+    // A gzipped SVG has no encoding a data URL can carry.
+    for (const name of ["a.tiff", "a.tif", "a.heic", "a.heif", "a.svgz"]) {
+      writeFileSync(join(directory, name), png)
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(pointAt(name, directory), name).resolves.toMatchObject({ kind: "file" })
+    }
+  })
+})
+
+// A file of `size` bytes, with nothing written, which takes no room on disk.
+const sparse = (path: string, size: number) => {
+  const handle = openSync(path, "w")
+  ftruncateSync(handle, size)
+  closeSync(handle)
+}
+
+const video = (path: string, secret = false) => ({ kind: "video" as const, path, secret })
+const recording = (path: string) => ({ kind: "audio" as const, path, secret: false })
+
+const videoStamp = (content: Awaited<ReturnType<typeof loadPlayed>>): string =>
+  content.state === "ready" ? content.stamp : ""
+
+describe("a video as it loads", () => {
+  it("is its format, size and the file's stamp, never its bytes", async ({ directory }) => {
+    const path = join(directory, "demo.webm")
+    writeFileSync(path, "frames")
+    const loaded = await loadPlayed(video(path), false, { shown: 2, at: 12.5 })
+    expect(loaded).toEqual({
+      state: "ready",
+      stamp: expect.any(String),
+      content: { kind: "video", mime: "video/webm", size: 6, shown: 2, at: 12.5 },
+    })
+    // A show that gives no second starts it where the person is.
+    await expect(loadPlayed(video(path), false, { shown: 3, at: undefined })).resolves.toEqual({
+      ...loaded,
+      content: { kind: "video", mime: "video/webm", size: 6, shown: 3 },
+    })
+    writeFileSync(path, "frames, rendered again")
+    const again = await loadPlayed(video(path), false, { shown: 3, at: undefined })
+    expect(videoStamp(again)).not.toBe(videoStamp(loaded))
+  })
+
+  it("says why it can't play: missing, a folder, secret unless revealed, too large", async ({
+    directory,
+  }) => {
+    const shown = { shown: 1, at: undefined }
+    await expect(loadPlayed(video(join(directory, "gone.mp4")), false, shown)).resolves.toEqual({
+      state: "unavailable",
+      reason: "missing",
+      size: null,
+    })
+    mkdirSync(join(directory, "folder.mp4"))
+    await expect(
+      loadPlayed(video(join(directory, "folder.mp4")), false, shown),
+    ).resolves.toMatchObject({ reason: "not-a-file" })
+    const held = join(directory, "held.mp4")
+    writeFileSync(held, "frames")
+    await expect(loadPlayed(video(held, true), false, shown)).resolves.toEqual({
+      state: "unavailable",
+      reason: "secret",
+      size: 6,
+    })
+    await expect(loadPlayed(video(held, true), true, shown)).resolves.toMatchObject({
+      state: "ready",
+    })
+    const big = join(directory, "big.mp4")
+    sparse(big, videoLimits.bytes + 1)
+    await expect(loadPlayed(video(big), false, shown)).resolves.toEqual({
+      state: "unavailable",
+      reason: "too-large",
+      size: videoLimits.bytes + 1,
+    })
+  })
+})
+
+describe("a recording as it loads", () => {
+  it("is its format, size and the file's stamp, as a video's are", async ({ directory }) => {
+    for (const [name, mime] of [
+      ["take.mp3", "audio/mpeg"],
+      ["voice.m4a", "audio/mp4"],
+      ["note.opus", "audio/ogg"],
+      ["a.flac", "audio/flac"],
+    ] as const) {
+      const path = join(directory, name)
+      writeFileSync(path, "sound")
+      // eslint-disable-next-line no-await-in-loop -- One file after another.
+      await expect(loadPlayed(recording(path), false, { shown: 1, at: 3 })).resolves.toEqual({
+        state: "ready",
+        stamp: expect.any(String),
+        content: { kind: "audio", mime, size: 5, shown: 1, at: 3 },
+      })
+    }
+  })
+})
+
+describe("a part of a video", () => {
+  it("is its bytes from the offset, a part at a time, and none past its end", async ({
+    directory,
+  }) => {
+    const path = join(directory, "demo.mp4")
+    const bytes = Buffer.from(Array.from({ length: partBytes + 10 }, (_, index) => index % 251))
+    writeFileSync(path, bytes)
+    const loaded = await loadPlayed(video(path), false, { shown: 1, at: undefined })
+    const stamp = videoStamp(loaded)
+    const first = await readPart(video(path), { stamp, offset: 0 }, false, videoLimits.bytes)
+    const second = await readPart(
+      video(path),
+      { stamp, offset: partBytes },
+      false,
+      videoLimits.bytes,
+    )
+    const past = await readPart(
+      video(path),
+      { stamp, offset: bytes.length },
+      false,
+      videoLimits.bytes,
+    )
+    const read = [first, second].map((part) =>
+      part.state === "part" ? Buffer.from(part.data, "base64") : Buffer.alloc(0),
+    )
+    expect(read.map((part) => part.length)).toEqual([partBytes, 10])
+    expect(Buffer.concat(read).equals(bytes)).toBe(true)
+    expect(past).toEqual({ state: "part", data: "" })
+  })
+
+  it("is changed once the file isn't as its stamp names it", async ({ directory }) => {
+    const path = join(directory, "demo.mp4")
+    writeFileSync(path, "frames")
+    const loaded = await loadPlayed(video(path), false, { shown: 1, at: undefined })
+    const stamp = videoStamp(loaded)
+    writeFileSync(path, "frames, rendered again")
+    await expect(
+      readPart(video(path), { stamp, offset: 0 }, false, videoLimits.bytes),
+    ).resolves.toEqual({
+      state: "changed",
+    })
+  })
+
+  it("is never read from a file that may hold secrets, unless revealed, or that is gone", async ({
+    directory,
+  }) => {
+    const path = join(directory, "held.mp4")
+    writeFileSync(path, "frames")
+    const loaded = await loadPlayed(video(path, true), true, { shown: 1, at: undefined })
+    const stamp = videoStamp(loaded)
+    await expect(
+      readPart(video(path, true), { stamp, offset: 0 }, false, videoLimits.bytes),
+    ).resolves.toEqual({
+      state: "unavailable",
+      reason: "secret",
+    })
+    await expect(
+      readPart(video(path, true), { stamp, offset: 0 }, true, videoLimits.bytes),
+    ).resolves.toEqual({
+      state: "part",
+      data: Buffer.from("frames").toString("base64"),
+    })
+    unlinkSync(path)
+    await expect(
+      readPart(video(path), { stamp, offset: 0 }, false, videoLimits.bytes),
+    ).resolves.toEqual({
+      state: "unavailable",
+      reason: "missing",
     })
   })
 })

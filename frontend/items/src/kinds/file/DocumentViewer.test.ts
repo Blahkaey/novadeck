@@ -59,17 +59,17 @@ describe("a Markdown file's document", () => {
     )
   })
 
-  it("says why, where the project window couldn't have it whole to edit", () => {
+  it("says when it shows only the start of a long file", () => {
     const { container, unmount } = render(
       createElement(DocumentViewer, {
         id: "voice",
         name: "brand-voice.md",
-        content: { ...content, uneditable: "not-text" },
+        content: { ...content, truncated: true },
       }),
     )
     unmounts.push(unmount)
-    expect(container.querySelector(".artifact-meta")?.textContent).toContain(
-      "read-onlyIt isn't UTF-8 text, so it can't be edited here.",
+    expect(container.querySelector(".artifact-cut")?.textContent).toBe(
+      "It's long, so only its start is shown.",
     )
   })
 

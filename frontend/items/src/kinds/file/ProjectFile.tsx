@@ -1,20 +1,20 @@
-import type { Item, ItemContent } from "@novadeck/core/items"
+import type { FileContent, Item, ItemContent } from "@novadeck/core/items"
 import type { Lines } from "@novadeck/viewers/editor"
 import type { ClassedRange } from "@novadeck/viewers/markdown"
 import { lazy, Suspense, useMemo } from "react"
 
-import { ArtifactMeta, MetaPath, Unavailable } from "../../ArtifactViewer"
+import { Unavailable } from "../../ArtifactViewer"
 import { blockedText, SaveNotice, stalledText, unreadableText } from "../../document/SaveNotice"
 import type { ViewProps } from "../../registration"
 import { linesOf } from "../../store/file-rewrite"
 import type { FileActions } from "../../store/item-store"
 import { fileText, unreadableNow } from "../../store/text-doc"
 import { useContent, useFileDoc } from "../../store/use-item-store"
-import { UnderHeaderSlot } from "../../under-header"
 import { MarkdownFile } from "./DocumentViewer"
 import { fileBlockOf, fileKey, type FileDoc } from "./file-doc"
 import { FileViewer } from "./FileViewer"
 import { isMarkdown } from "./markdown"
+import { previewFor } from "./previews"
 import { readOnlyText } from "./uneditable"
 
 // The editor loads when a file is first edited, CodeMirror with it, so the workspace never
@@ -73,18 +73,65 @@ const TextFile = ({
   const block = fileBlockOf(doc, content) ?? (reason !== undefined && edited ? reason : null)
   const edits = fileText(doc)
   const ranges = useMemo(() => rangesOf(doc.text, doc.marks), [doc.text, doc.marks])
+  const listing = useMemo((): FileContent | undefined => {
+    if (!whole || !previewFor(doc.path)) return undefined
+    const lines = doc.text.split(/\r\n|\r|\n/)
+    if (lines.length > 1 && lines.at(-1) === "") lines.pop()
+    return {
+      kind: "file",
+      path: doc.path,
+      lines,
+      firstLine: 1,
+      from: 1,
+      to: lines.length,
+      total: lines.length,
+      clamped: false,
+      truncated: false,
+    }
+  }, [whole, doc.path, doc.text])
+  const documentEditor = isMarkdown(doc.path) ? (
+    <div className="pane-reader artifact-document">
+      <MarkdownFile
+        id={item.id}
+        name={item.name}
+        path={doc.path}
+        text={doc.text}
+        readOnly={readOnly}
+        onEdit={(text, moved) =>
+          file.edit(
+            text,
+            linesOf(
+              text,
+              moved.filter(({ className }) => className === changedClass),
+            ),
+          )
+        }
+        ranges={ranges}
+      />
+    </div>
+  ) : undefined
+  const sourceEditor = (at?: number): React.JSX.Element => (
+    <Suspense fallback={<div className="artifact-code" />}>
+      <CodeEditor
+        id={item.id}
+        path={doc.path}
+        text={doc.text}
+        readOnly={readOnly}
+        marks={doc.marks}
+        label={item.name}
+        onEdit={file.edit}
+        onSave={file.flush}
+        at={at}
+      />
+    </Suspense>
+  )
   return (
     <>
-      <ArtifactMeta>
-        <MetaPath path={doc.path} />
-        {reason !== undefined && !edited && (
-          <span className="pane-meta-hint">{readOnlyText[reason]}</span>
-        )}
-        {doc.unsaved && !doc.stalled && !block && !unreadable && (
-          <span className="pane-meta-hint">Not saved yet. Trying again.</span>
-        )}
-        {doc.marks.length > 0 && <span>The marked lines changed while you edited.</span>}
-      </ArtifactMeta>
+      {reason !== undefined && !edited && <SaveNotice text={readOnlyText[reason]} />}
+      {doc.unsaved && !doc.stalled && !block && !unreadable && (
+        <SaveNotice text="Not saved yet. Trying again." />
+      )}
+      {doc.marks.length > 0 && <SaveNotice text="The marked lines changed while you edited." />}
       {block && (
         <SaveNotice
           text={blockedText(block, { kind: "file" })}
@@ -104,39 +151,10 @@ const TextFile = ({
       {!block && !unreadable && doc.stalled && (
         <SaveNotice text={stalledText} edits={edits} retry={file.retry} retryLabel="Retry" />
       )}
-      {isMarkdown(doc.path) ? (
-        <div className="pane-reader artifact-document">
-          <MarkdownFile
-            id={item.id}
-            name={item.name}
-            path={doc.path}
-            text={doc.text}
-            readOnly={readOnly}
-            onEdit={(text, moved) =>
-              file.edit(
-                text,
-                linesOf(
-                  text,
-                  moved.filter(({ className }) => className === changedClass),
-                ),
-              )
-            }
-            ranges={ranges}
-          />
-        </div>
+      {listing ? (
+        <FileViewer item={item} content={listing} editors={{ sourceEditor, documentEditor }} />
       ) : (
-        <Suspense fallback={<div className="artifact-code" />}>
-          <CodeEditor
-            id={item.id}
-            path={doc.path}
-            text={doc.text}
-            readOnly={readOnly}
-            marks={doc.marks}
-            label={item.name}
-            onEdit={file.edit}
-            onSave={file.flush}
-          />
-        </Suspense>
+        (documentEditor ?? sourceEditor())
       )}
     </>
   )
@@ -178,20 +196,9 @@ export const ProjectFile = ({ item, itemStore, target }: ViewProps): React.JSX.E
           onReveal={() => itemStore.reveal(item.id, item.path)}
         />
       ) : listing ? (
-        <FileViewer
-          item={item}
-          content={listing}
-          actions={undefined}
-          itemStore={itemStore}
-          stamp={load?.state === "ready" ? load.stamp : ""}
-          target={target}
-          trouble={(shown, troubles) => itemStore.trouble(target, item.id, shown, troubles)}
-        />
+        <FileViewer item={item} content={listing} />
       ) : (
-        <>
-          <UnderHeaderSlot />
-          <div className="artifact-status" />
-        </>
+        <div className="artifact-status" />
       )}
     </div>
   )

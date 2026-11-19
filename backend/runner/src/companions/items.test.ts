@@ -1213,6 +1213,110 @@ describe("an item's content", () => {
     })
   })
 
+  it("plays a video from the second only the show that gave it starts at", async ({ fixture }) => {
+    writeFileSync(join(fixture.directory, "demo.mp4"), "frames")
+    const moth = fixture.terminal("moth")
+    const shown = await fixture.items.show(moth, { file: { path: "demo.mp4", at: 12.5 } })
+    expect(shown).toMatchObject({ ok: true, kind: "video", name: "demo.mp4" })
+    const itemId = shown.ok ? shown.id : ""
+    expect(fixture.items.list(fixture.sessionId).items).toEqual([
+      expect.objectContaining({ id: itemId, kind: "video", detail: "6 B MP4" }),
+    ])
+    const first = await fixture.items.load(itemId, false)
+    expect(first).toEqual({
+      state: "ready",
+      stamp: expect.any(String),
+      content: { kind: "video", mime: "video/mp4", size: 6, shown: 1, at: 12.5 },
+    })
+    expect(itemContent.parse(first)).toEqual(first)
+    // Shown again without one, it plays on from where the person is.
+    await fixture.items.show(moth, { file: { path: "demo.mp4" } })
+    await expect(fixture.items.load(itemId, false)).resolves.toEqual({
+      state: "ready",
+      stamp: expect.any(String),
+      content: { kind: "video", mime: "video/mp4", size: 6, shown: 2 },
+    })
+    const stamp = first.state === "ready" ? first.stamp : ""
+    await expect(fixture.items.part({ itemId, stamp, offset: 0 })).resolves.toEqual({
+      state: "part",
+      data: Buffer.from("frames").toString("base64"),
+    })
+    writeFileSync(join(fixture.directory, "demo.mp4"), "frames, rendered again")
+    await expect(fixture.items.part({ itemId, stamp, offset: 0 })).resolves.toEqual({
+      state: "changed",
+    })
+  })
+
+  it("names an image by its format, a JFIF file as JPEG", async ({ fixture }) => {
+    writeFileSync(join(fixture.directory, "photo.jfif"), "pixels")
+    const moth = fixture.terminal("moth")
+    const shown = await fixture.items.show(moth, { file: { path: "photo.jfif" } })
+    expect(shown).toMatchObject({ ok: true, kind: "image", name: "photo.jfif" })
+    expect(fixture.items.list(fixture.sessionId).items).toEqual([
+      expect.objectContaining({ kind: "image", detail: "6 B JPEG" }),
+    ])
+  })
+
+  it("plays a recording as a video is played, from its parts", async ({ fixture }) => {
+    writeFileSync(join(fixture.directory, "take.mp3"), "sound")
+    const moth = fixture.terminal("moth")
+    const shown = await fixture.items.show(moth, { file: { path: "take.mp3", at: 1 } })
+    expect(shown).toMatchObject({ ok: true, kind: "audio", name: "take.mp3" })
+    const itemId = shown.ok ? shown.id : ""
+    expect(fixture.items.list(fixture.sessionId).items).toEqual([
+      expect.objectContaining({ id: itemId, kind: "audio", detail: "5 B MP3" }),
+    ])
+    const loaded = await fixture.items.load(itemId, false)
+    expect(loaded).toMatchObject({
+      state: "ready",
+      content: { kind: "audio", mime: "audio/mpeg", size: 5, shown: 1, at: 1 },
+    })
+    expect(itemContent.parse(loaded)).toEqual(loaded)
+    const stamp = loaded.state === "ready" ? loaded.stamp : ""
+    await expect(fixture.items.part({ itemId, stamp, offset: 0 })).resolves.toEqual({
+      state: "part",
+      data: Buffer.from("sound").toString("base64"),
+    })
+  })
+
+  it("starts only a video at a second, and reads parts of nothing else", async ({ fixture }) => {
+    writeFileSync(join(fixture.directory, "a.ts"), "a\n")
+    const moth = fixture.terminal("moth")
+    await expect(fixture.items.show(moth, { file: { path: "a.ts", at: 3 } })).resolves.toEqual({
+      ok: false,
+      reason:
+        "Only a video or a recording starts at a second; give at only for a video or audio file.",
+    })
+    const shown = await fixture.items.show(moth, { file: { path: "a.ts" } })
+    await expect(
+      fixture.items.part({ itemId: shown.ok ? shown.id : "", stamp: "", offset: 0 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await expect(
+      fixture.items.part({ itemId: randomUUID(), stamp: "", offset: 0 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+  })
+
+  it("reads no part of a video that may hold secrets until the person shows its path", async ({
+    fixture,
+  }) => {
+    mkdirSync(join(fixture.directory, ".ssh"))
+    const path = join(fixture.directory, ".ssh", "clip.mp4")
+    writeFileSync(path, "frames")
+    const moth = fixture.terminal("moth")
+    const shown = await fixture.items.show(moth, { file: { path } })
+    expect(shown).toMatchObject({ ok: true, kind: "video", secret: true })
+    const itemId = shown.ok ? shown.id : ""
+    const held = await fixture.items.load(itemId, true)
+    const stamp = held.state === "ready" ? held.stamp : ""
+    await expect(fixture.items.part({ itemId, stamp, offset: 0 })).resolves.toEqual({
+      state: "unavailable",
+      reason: "secret",
+    })
+    await expect(
+      fixture.items.part({ itemId, stamp, offset: 0, reveal: path }),
+    ).resolves.toMatchObject({ state: "part" })
+  })
+
   it("holds a file that may hold secrets until revealed", async ({ fixture }) => {
     writeFileSync(join(fixture.directory, ".env"), "TOKEN=x\n")
     const moth = fixture.terminal("moth")
@@ -1663,6 +1767,89 @@ describe.skipIf(!gitInstalled)("the changes of a repository", () => {
     fixture.items.closeChangesAt(tree)
     expect(fixture.items.bar(owl.terminalId)).toEqual([])
     expect(fixture.items.bar(place.terminalId)).toMatchObject([{ name: "Changes · work" }])
+  })
+
+  it("is one item per compare beside the working tree's, read from its refs, and closed by them", async ({
+    fixture,
+  }) => {
+    const { root, git, place } = repository(fixture)
+    const main = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], { cwd: root })
+      .toString()
+      .trim()
+    git("stash", "--quiet")
+    git("checkout", "--quiet", "-b", "feature")
+    writeFileSync(join(root, "b.txt"), "b\n")
+    git("add", "-A")
+    git("commit", "--quiet", "-m", "Add b")
+    const added = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root }).toString().trim()
+    git("checkout", "--quiet", main)
+    git("stash", "pop", "--quiet")
+
+    await fixture.items.show(place, { changes: {} })
+    const shown = await fixture.items.show(place, { changes: { head: "feature" }, open: true })
+    expect(shown).toMatchObject({ ok: true, kind: "changes", again: false, opened: true })
+    expect(fixture.items.bar(place.terminalId)).toMatchObject([
+      { name: "Changes · work", detail: "1 file · +1 −0" },
+      { name: "Compare · work · feature", detail: "1 file · +1 −0" },
+    ])
+    // Its base is the repository's main branch, as it is named.
+    expect(fixture.store.item(shown.ok ? shown.id : "")?.compare).toEqual({
+      base: main,
+      head: "feature",
+    })
+    const watch = new AbortController()
+    const content = await next(fixture.items.content(shown.ok ? shown.id : "", {}, watch.signal))
+    watch.abort()
+    expect(content).toMatchObject({
+      state: "ready",
+      content: { kind: "changes", base: main, head: "feature", files: [{ path: "b.txt" }] },
+    })
+    expect(itemContent.parse(content)).toEqual(content)
+    expect(
+      content?.state === "ready" && content.content.kind === "changes"
+        ? content.content.layers.map(({ id }) => id)
+        : [],
+    ).toEqual([added])
+    const diff = await fixture.items.changeFile({
+      itemId: shown.ok ? shown.id : "",
+      path: "b.txt",
+      layers: [added],
+    })
+    expect(diff.run).toMatchObject({ layers: [added], before: null, after: "b\n" })
+    expect(fixture.items.listing(place.terminalId)).toContain(`compare: feature against ${main}`)
+
+    // The same refs again update it; a ref that isn't there shows nothing.
+    await expect(
+      fixture.items.show(place, { changes: { base: main, head: "feature" } }),
+    ).resolves.toMatchObject({ ok: true, again: true })
+    await expect(fixture.items.show(place, { changes: { head: "nope" } })).resolves.toMatchObject({
+      ok: false,
+      reason: 'Git can\'t find "nope" in this repository.',
+    })
+    expect(fixture.items.bar(place.terminalId)).toHaveLength(2)
+
+    // A file read in it reads as read there, and is no mark of the checkout's own.
+    const reading = new AbortController()
+    const stream = fixture.items.content(shown.ok ? shown.id : "", {}, reading.signal)
+    await next(stream)
+    await fixture.items.changeRead({ itemId: shown.ok ? shown.id : "", path: "b.txt" })
+    const marked = await next(stream)
+    reading.abort()
+    expect(
+      marked?.state === "ready" && marked.content.kind === "changes" ? marked.content.read : [],
+    ).toEqual(["b.txt"])
+    expect([...fixture.marks.values()].flatMap((each) => [...each.keys()])).toEqual([])
+
+    // Closed by its refs, leaving the working tree's.
+    await expect(
+      fixture.items.closeShown(place, { changes: { head: "feature" } }),
+    ).resolves.toMatchObject({ ok: true, kind: "changes" })
+    expect(fixture.items.bar(place.terminalId)).toMatchObject([{ name: "Changes · work" }])
+
+    // The repository's worktree gone, its compares go with its own change.
+    await fixture.items.show(place, { changes: { head: "feature" } })
+    fixture.items.closeChangesAt(root)
+    expect(fixture.items.bar(place.terminalId)).toEqual([])
   })
 
   it("gives one file's diff for a selection of layers, and refuses an item that is no change", async ({

@@ -8,8 +8,9 @@ import type { CompanionWindowMeta, WorkspaceTarget } from "./types"
 // files and hooks, and from what they present through Novadeck's MCP server.
 
 // The kinds an agent shows (with `show`) or the person attaches: each points at a file, a
-// page or a change. A plan is the one kind an agent writes rather than shows.
-export type ShownKind = "image" | "file" | "page" | "changes"
+// page or a change. A video or a recording (`audio`) is a file played rather than read. A plan is the one kind an
+// agent writes rather than shows.
+export type ShownKind = "image" | "video" | "audio" | "file" | "page" | "changes"
 
 // What an agent showed or the person attached, as the backend keeps it: a pointer to a
 // file or page, never a copy, held by exactly one terminal's bar or one undocked window.
@@ -88,6 +89,8 @@ type KindRule = {
 
 export const kindRules: Record<ItemKind, KindRule> = {
   image: { pointer: "file", follow: "shown", close: "remove" },
+  video: { pointer: "file", follow: "shown", close: "remove" },
+  audio: { pointer: "file", follow: "shown", close: "remove" },
   file: { pointer: "file", follow: "shown", close: "remove" },
   page: { pointer: "page", follow: "shown", close: "remove" },
   changes: { pointer: "changes", follow: "shown", close: "remove" },
@@ -145,6 +148,32 @@ export const shownItemWith = (
 
 // An image, by a URL the page can load.
 export type ImageContent = { readonly kind: "image"; readonly src: string }
+
+// A video, played from its bytes, which `Companions.part` reads in parts while the file is
+// as `stamp` (its content's) names it: its format as a MIME type and its size in bytes.
+// `shown` counts the agent's shows of it, as its item's version: each later one that gives
+// `at` starts it from that second.
+export type VideoContent = {
+  readonly kind: "video"
+  readonly mime: string
+  readonly size: number
+  readonly shown: number
+  readonly at?: number | undefined
+}
+
+// A recording (`.mp3`, `.wav`…), played as a video is, with nothing to see: the same facts.
+export type AudioContent = Omit<VideoContent, "kind"> & { readonly kind: "audio" }
+
+// A part of a video's or a recording's file, from the offset asked for (fewer bytes at its end, none past it);
+// `changed` when the file is no longer as the stamp named it, so it's read again from its new
+// content; or why it can't be read now.
+export type FilePart =
+  | { readonly state: "part"; readonly bytes: Uint8Array<ArrayBuffer> }
+  | { readonly state: "changed" }
+  | {
+      readonly state: "unavailable"
+      readonly reason: "missing" | "unreadable" | "not-a-file" | "too-large" | "secret"
+    }
 
 // A text file, with the lines it pointed at. `firstLine` numbers the first of `lines`.
 // Followed with `edit`, one that can't be edited whole says why in `uneditable`: it is past
@@ -252,6 +281,14 @@ export type ChangesContent = {
   readonly kind: "changes"
   readonly root: string
   readonly base: string
+  // The ref a compare an agent showed measures against `base`; absent for a checkout's own
+  // change, which is its work against main.
+  readonly head?: string | undefined
+  // For a compare that reads a remote-tracking ref: when the repository's origin was last fetched,
+  // in milliseconds since the epoch (absent if never), and why its last fetch failed, if it did.
+  readonly origin?:
+    | { readonly fetchedAt?: number | undefined; readonly failed?: string | undefined }
+    | undefined
   readonly layers: readonly ChangeLayer[]
   // The files the change as a whole differs from main by, as git lists the range from main to
   // the newest layer: its own counts, not its layers' added up.
@@ -260,7 +297,13 @@ export type ChangesContent = {
   readonly truncated: boolean
 }
 
-export type ShownContent = ImageContent | FileContent | PageContent | ChangesContent
+export type ShownContent =
+  | ImageContent
+  | VideoContent
+  | AudioContent
+  | FileContent
+  | PageContent
+  | ChangesContent
 
 // A text file followed with `edit` that can be edited whole: all of its text, its line breaks
 // as they are, without a byte-order mark, which `save` puts back. `path` is the path the
@@ -444,6 +487,16 @@ export type Companions = {
   // changes again. Absent where the backend can't keep it: the pane then grays it for as
   // long as the content stays as it was.
   readonly changeRead?: (target: WorkspaceTarget, itemId: ItemId, path: string) => Promise<void>
+  // An item's file from `offset`, for a kind read in parts (a video, a recording), while it
+  // is as `stamp` names it (see `FilePart`). One
+  // that may hold secrets is `secret` unless `reveal` is the path the item points at, as in
+  // `follow`. Rejects where the item is gone or of a kind not read in parts. Absent where the
+  // backend can't: a video or a recording then says it can't be played here.
+  readonly part?: (
+    target: WorkspaceTarget,
+    itemId: ItemId,
+    part: { readonly stamp: string; readonly offset: number; readonly reveal: string | undefined },
+  ) => Promise<FilePart>
   // Writes the person's edit to the plan, or to the file the project window holds, unless it
   // changed since `basedOn`. `path` is the path the edit was made on (a text file's `path`):
   // an item pointed at another file since is refused as `moved`. A plan's save may leave it
