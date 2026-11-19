@@ -43,7 +43,7 @@ import type { Mount, Viewer, ViewerState } from "./index.js"
 // browser.css's.
 
 export type { PageSize, Trouble }
-export { addressOf }
+export { addressOf, webAddress }
 
 /**
  * A page by its address, as its app shows it. `shown` counts the app's shows of it: a
@@ -59,6 +59,25 @@ export type BrowserContent = {
 
 /** Where the page is, and where it can go. */
 export type Place = { readonly url: string; readonly back: boolean; readonly forward: boolean }
+
+/**
+ * What the person asked a menu of, by a right-click or the menu key on the page: where, in
+ * the app page's window (CSS pixels from its top left, as a pointer event's client point),
+ * and what's there: the text selected, the link's address (any scheme: only an http(s) one
+ * is the browser's to open), and whether it's a field, with the edits it can take now. A
+ * snapshot has none of them.
+ */
+export type PageMenu = {
+  readonly x: number
+  readonly y: number
+  readonly selection: string
+  readonly link: string | undefined
+  readonly editable: boolean
+  readonly can: { readonly [edit in PageEdit]: boolean }
+}
+
+/** An edit a live page takes from its menu, as its own keys would do it. */
+export type PageEdit = "cut" | "copy" | "paste" | "selectAll"
 
 /** How the page's latest load went. */
 export type Load = "loading" | "ready" | "failed"
@@ -106,6 +125,8 @@ export type BrowserOptions = {
      * A document reports at most `maxTroubles`. Live pages only.
      */
     readonly trouble?: (trouble: Trouble, shown: number) => void
+    /** The person asked for a menu on the page, live or a snapshot, in place of the browser's own. */
+    readonly menu?: (menu: PageMenu) => void
   }
 }
 
@@ -113,6 +134,8 @@ export type BrowserViewer = Viewer<BrowserContent> & {
   readonly back: () => void
   readonly forward: () => void
   readonly reload: () => void
+  /** Does an edit on the live page, where its menu was asked for; nothing on a snapshot. */
+  readonly edit: (edit: PageEdit) => void
   /**
    * Goes to `url` as the person asked, as a link they followed would: an http(s) address
    * only. Resting, it goes there once woken. False where it can't, as a snapshot can't.
@@ -157,12 +180,17 @@ type Webview = HTMLElement & {
   goForward(): void
   reload(): void
   reloadIgnoringCache(): void
+  cut(): void
+  copy(): void
+  paste(): void
+  selectAll(): void
   loadURL(url: string): Promise<void>
   executeJavaScript(code: string): Promise<unknown>
   getURL(): string
   getWebContentsId(): number
   setAudioMuted(muted: boolean): void
   setZoomFactor(factor: number): void
+  getZoomFactor(): number
   insertCSS(css: string): Promise<string>
   removeInsertedCSS(key: string): Promise<void>
 }
@@ -233,6 +261,30 @@ const keptOf = (state: unknown, content: BrowserContent): BrowserState["browser"
     : undefined
 
 const nothing = (): void => undefined
+
+// A menu on what's no field, link or selection, as a snapshot is all over.
+const noMenu: Omit<PageMenu, "x" | "y"> = {
+  selection: "",
+  link: undefined,
+  editable: false,
+  can: { cut: false, copy: false, paste: false, selectAll: false },
+}
+
+// What Electron's <webview> tells of a menu asked for on its page: where, in the app page's
+// window, and what's there.
+type MenuParams = {
+  readonly x: number
+  readonly y: number
+  readonly selectionText: string
+  readonly linkURL: string
+  readonly isEditable: boolean
+  readonly editFlags: {
+    readonly canCut?: boolean
+    readonly canCopy?: boolean
+    readonly canPaste?: boolean
+    readonly canSelectAll?: boolean
+  }
+}
 
 // Each call into a page, once it's attached; until then dom-ready catches up.
 const attached = <T>(call: () => T): T | undefined => {
@@ -360,6 +412,12 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
       image.alt = snapshot.alt
       scroll.append(image)
       root.append(scroll)
+      // Its menu, not the browser's, as a live page's is.
+      if (on?.menu)
+        scroll.addEventListener("contextmenu", (event) => {
+          event.preventDefault()
+          on.menu?.({ ...noMenu, x: event.clientX, y: event.clientY })
+        })
     }
     report("ready")
     on?.navigate?.(place)
@@ -380,6 +438,7 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
       back: nothing,
       forward: nothing,
       reload: nothing,
+      edit: nothing,
       visit: () => false,
       muted: nothing,
       // A snapshot is its picture already.
@@ -854,6 +913,37 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
       on?.title?.(title)
     }
   }
+  // The app's own zoom, as the person has it (Ctrl+-): its page view is zoomed by its factor
+  // of it, so the view's own zoom over the factor is the app's. One the app doesn't zoom
+  // zooms by its factor alone.
+  const appZoom = (): number => {
+    const view = page
+    const own = zoomView && view ? attached(() => view.getZoomFactor()) : undefined
+    return own !== undefined && own > 0 && zoomed > 0 ? own / zoomed : 1
+  }
+  // The person asked for a menu on the live page. Electron gives where in the app's window,
+  // as drawn, whatever scales the view, in its pixels, not the app page's: the app's zoom
+  // makes each of those more than one.
+  const menu = (event: Event): void => {
+    const params = (event as Event & { params?: Partial<MenuParams> }).params
+    if (!on?.menu || !params) return
+    const { x = 0, y = 0 } = params
+    const flags = params.editFlags ?? {}
+    const zoomedBy = appZoom()
+    on.menu({
+      x: x / zoomedBy,
+      y: y / zoomedBy,
+      selection: params.selectionText ?? "",
+      link: params.linkURL || undefined,
+      editable: params.isEditable === true,
+      can: {
+        cut: flags.canCut === true,
+        copy: flags.canCopy === true,
+        paste: flags.canPaste === true,
+        selectAll: flags.canSelectAll === true,
+      },
+    })
+  }
   const listeners: readonly (readonly [string, (event: Event) => void])[] = [
     ["dom-ready", moved],
     ["dom-ready", painting],
@@ -871,6 +961,7 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
     ["console-message", logged],
     ["render-process-gone", gone],
     ["page-title-updated", titled],
+    ["context-menu", menu],
   ]
 
   // Made here, not by a framework that may leave `allowpopups` off: Electron reads the
@@ -1093,6 +1184,10 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
     focus: () => (page ?? still).focus({ preventScroll: true }),
     back: () => attached(() => page!.goBack()),
     forward: () => attached(() => page!.goForward()),
+    edit: (edit) => {
+      const view = page
+      if (view) attached(() => view[edit]())
+    },
     // At rest, or before it's attached, its next load goes afresh.
     reload: () => {
       const reloading = attached(() => {

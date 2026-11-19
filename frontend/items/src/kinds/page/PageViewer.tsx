@@ -1,8 +1,15 @@
 import { pageTroublesPerCall, type PageContent } from "@novadeck/core/items"
 import { pageSights } from "@novadeck/core/items/page-sights"
 import { pagesPartition } from "@novadeck/core/items/pages"
+import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
 import { useShown } from "@novadeck/toolkit/shown"
-import { mountBrowser, type Load, type Place, type Trouble } from "@novadeck/viewers/browser"
+import {
+  mountBrowser,
+  type Load,
+  type PageMenu,
+  type Place,
+  type Trouble,
+} from "@novadeck/viewers/browser"
 import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, Smartphone } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -11,6 +18,7 @@ import { useAwake } from "../../awake"
 import { PaneTools, usePaneNote, type PaneTool } from "../../pane-row"
 import { useViewerSlot } from "../../ViewerSlot"
 import { AddressField } from "./AddressField"
+import { pageMenuItems } from "./page-menu"
 
 /** Whether two addresses share an origin: scheme, host and port. */
 const sameOrigin = (a: string, b: string): boolean => {
@@ -72,6 +80,11 @@ const openOut = (url: string): void => {
   window.open(url, "_blank", "noreferrer")
 }
 
+// Puts text on the clipboard, as a menu's Copy does; one the app can't write goes nowhere.
+const copyText = (text: string): void => {
+  void navigator.clipboard?.writeText(text).catch(() => undefined)
+}
+
 // Opens the page in the person's browser, never in the pane.
 const openTool = (url: string): PaneTool => ({
   key: "open",
@@ -103,6 +116,17 @@ const ShownPage = ({
   const collect = useTroubles(trouble)
   const [place, setPlace] = useState<Place>({ url: page.url, back: false, forward: false })
   const [load, setLoad] = useState<Load>("loading")
+  // The menu the person asked for on the page, until it closes. It goes as the person goes
+  // back to the page, which the app's page hears only as its window losing focus to the
+  // page's view, as it does to another app, where a menu goes too.
+  const [menu, setMenu] = useState<PageMenu | undefined>(undefined)
+  const menuOpen = menu !== undefined
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (): void => setMenu(undefined)
+    window.addEventListener("blur", close)
+    return () => window.removeEventListener("blur", close)
+  }, [menuOpen])
   // The tab says where the page is now, which isn't always where it was shown.
   usePaneNote([], false, place.url)
   const [size, setSize] = useState(() => pageSights.layout(id))
@@ -129,7 +153,12 @@ const ShownPage = ({
     ...(zoom ? { zoom } : {}),
     awake,
     size,
-    on: { navigate: setPlace, load: setLoad, ...(page.live ? { trouble: collect } : {}) },
+    on: {
+      navigate: setPlace,
+      load: setLoad,
+      menu: setMenu,
+      ...(page.live ? { trouble: collect } : {}),
+    },
   })
   // Kept out of sight, the page goes quiet: it stops drawing on its own, but not playing.
   const shown = useShown()
@@ -226,6 +255,38 @@ const ShownPage = ({
       />
       <div className="artifact-page-frame">
         <div ref={ref} className="artifact-page-view" />
+        {/* The menu's keys are its own: its Escape closes it, not the pane around it. */}
+        <span
+          className="contents"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") event.stopPropagation()
+          }}
+        >
+          <ContextMenu
+            label="Page actions"
+            at={menu && { x: menu.x, y: menu.y }}
+            items={
+              menu
+                ? pageMenuItems({
+                    menu,
+                    live: page.live,
+                    place,
+                    actions: {
+                      edit: (edit) => viewer?.edit(edit),
+                      back: () => viewer?.back(),
+                      forward: () => viewer?.forward(),
+                      reload: () => viewer?.reload(),
+                      copy: copyText,
+                      open: openOut,
+                    },
+                  })
+                : []
+            }
+            onOpenChange={(open) => {
+              if (!open) setMenu(undefined)
+            }}
+          />
+        </span>
         {load === "failed" && (
           <div className="artifact-page-failed" role="alert">
             <p>This page didn't load.</p>
