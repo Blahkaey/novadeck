@@ -82,6 +82,7 @@ const setup = ({
       chatView: false,
       agentAvatars: false,
       onboardingTour: false,
+      appScale: 100,
     },
   })
   const ui = createUiStore({ ...initial, pageFocused: focused })

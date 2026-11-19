@@ -323,6 +323,7 @@ describe("key commands", () => {
           chatView: false,
           agentAvatars: false,
           onboardingTour: false,
+          appScale: 100,
         },
         workspace: workspaceFixture({ view: "canvas" }),
         url: "/projects/project/sessions/initial/canvas?terminal=01",
@@ -473,6 +474,7 @@ describe("key commands", () => {
           chatView: false,
           agentAvatars: false,
           onboardingTour: false,
+          appScale: 100,
         },
       })
       expect(app.keydown({ key: "Enter", ctrlKey: true, shiftKey: true })).toBe("passed")

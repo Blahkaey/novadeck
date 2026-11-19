@@ -3,7 +3,7 @@ import type { ForgeName } from "@novadeck/core/forges"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { NoticeSound } from "@novadeck/core/sounds"
 import { viewModes } from "@novadeck/core/state"
-import { screenReaderPreferences, type PreferencesValue } from "@novadeck/core/types"
+import { appScales, screenReaderPreferences, type PreferencesValue } from "@novadeck/core/types"
 import { Checkbox } from "@novadeck/toolkit/Checkbox"
 import { Dialog } from "@novadeck/toolkit/Dialog"
 import { SegmentGroup } from "@novadeck/toolkit/SegmentGroup"
@@ -59,6 +59,8 @@ const agentPresentations = [
   { chatView: true, label: "Chat", icon: MessagesSquare },
   { chatView: false, label: "Terminal", icon: SquareTerminal },
 ] as const
+
+const scaleItems = appScales.map((scale) => ({ label: `${scale}%`, value: String(scale) }))
 
 // Screen reader support's choices: Automatic only where the app can tell when one runs. Plain
 // words, as the menu is as wide as its button; the row's description says what they do.
@@ -185,6 +187,7 @@ export const Preferences = ({
   uninstall,
   notices = false,
   screenReaderKnown = false,
+  scalable = false,
   systemSounds = false,
   hearSound,
   chat = false,
@@ -242,6 +245,8 @@ export const Preferences = ({
   // Whether the app can tell when a screen reader runs, as the desktop app can: it offers
   // Automatic, which follows it, where a browser offers On and Off alone.
   screenReaderKnown?: boolean
+  // Whether the app can scale its windows, as the desktop app can; a browser has its own zoom.
+  scalable?: boolean
   // Whether the system's notifications play the sound themselves, at the system's alert
   // volume, as on macOS.
   systemSounds?: boolean
@@ -534,6 +539,25 @@ export const Preferences = ({
                 </fieldset>
               </div>
             </Section>
+            {scalable && (
+              <Section title="Scale">
+                <div className={settingsCardClasses}>
+                  <Select
+                    className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-36`}
+                    label="Scale"
+                    items={scaleItems}
+                    value={String(value.appScale)}
+                    onValueChange={(next) => {
+                      const appScale = appScales.find((scale) => String(scale) === next)
+                      if (appScale) onChange({ ...value, appScale })
+                    }}
+                    open={open && shown === "appearance" && openSelect === "scale"}
+                    onOpenChange={(expanded) => setOpenSelect(expanded ? "scale" : null)}
+                    portalContainer={dialog}
+                  />
+                </div>
+              </Section>
+            )}
             <Section title="Layout">
               <fieldset
                 className="view-preferences settings-fieldset m-0 min-w-0 p-0"

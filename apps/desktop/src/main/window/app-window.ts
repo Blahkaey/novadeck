@@ -91,15 +91,17 @@ export const watchAppPage = (contents: WebContents, log: Log): void => {
 
 /**
  * Opens a window on the app's page, hidden until its page is ready to show, on `ground`
- * so a dark theme never flashes white. `preloadArguments` reach its preload. It never
+ * so a dark theme never flashes white, and at the app's scale `zoomFactor`. `preloadArguments` reach its preload. It never
  * navigates away; links to the web open in the system's browser, and only page views of
  * the pages' partition attach.
  */
 export const openAppWindow = ({
   ground,
+  zoomFactor,
   preloadArguments,
 }: {
   readonly ground: string
+  readonly zoomFactor: number
   readonly preloadArguments: readonly string[]
 }): BrowserWindow => {
   const window = new BrowserWindow({
@@ -112,6 +114,8 @@ export const openAppWindow = ({
     backgroundColor: ground,
     webPreferences: {
       additionalArguments: [...preloadArguments],
+      // The app's scale, so the first paint is at it (scale.ts re-applies it as the page loads).
+      zoomFactor,
       contextIsolation: true,
       nodeIntegration: false,
       preload: join(currentDirectory, "../preload/index.cjs"),

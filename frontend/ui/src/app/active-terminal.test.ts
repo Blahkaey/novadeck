@@ -36,6 +36,7 @@ const setup = () => {
         chatView: false,
         agentAvatars: false,
         onboardingTour: false,
+        appScale: 100,
         sound: true,
         soundVolume: 0.6,
         soundChoice: "theme",

@@ -65,6 +65,7 @@ const initial = (): UiState =>
       chatView: false,
       agentAvatars: false,
       onboardingTour: false,
+      appScale: 100,
     },
   })
 
