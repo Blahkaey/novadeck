@@ -136,8 +136,8 @@ export const springMs = 400
 
 // What a dragged tab opens a view by: the choices of the switch beside the Terminals panel's
 // title, Sessions to drop it on a session and Terminals to go back, and the rail's Terminals
-// toggle, which goes back too.
-const springs = '[data-terminals-view] [data-part="item"], [id="terminals-toggle"]'
+// toggle, which goes back too. A choice is its label: its tooltip takes over its data-part.
+const springs = '[data-terminals-view] label, [id="terminals-toggle"]'
 
 // The view a spring opens: the switch's choice its input names, or the terminals.
 const springView = (spring: Element): "terminals" | "sessions" =>

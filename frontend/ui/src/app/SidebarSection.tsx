@@ -33,7 +33,7 @@ import { historyShown, filesShown, notesShown } from "./routing"
 import { currentState, currentTarget, sameItems, sameTarget } from "./selectors"
 import { SessionsSection } from "./SessionsSection"
 import { useReorderTiles } from "./team-fold"
-import { renderTerminalsView } from "./TerminalsViewSection"
+import { terminalsViewSwitch } from "./TerminalsViewSection"
 import { useWorktreesShown } from "./use-worktrees-shown"
 import { renderTab } from "./WorkspaceTab"
 
@@ -382,7 +382,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
       }
       sessionCount={sessionCount}
       sessionName={sessionName}
-      terminalsView={renderTerminalsView}
+      terminalsView={terminalsViewSwitch}
       orderedIds={ids}
       sidebarPanel={sidebarPanel}
       sidebarVisible={visible}
