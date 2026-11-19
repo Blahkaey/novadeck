@@ -81,6 +81,23 @@ export const windowFocusChannel = "novadeck:window-focus"
 /** Renderer-to-main request to be told, on `windowFocusChannel`, of the window's focus. */
 export const windowFocusRequestChannel = "novadeck:window-focus-request"
 
+/**
+ * Main-to-renderer report of whether a screen reader or other assistive technology is
+ * running, a boolean, sent on each change; see main/window/screen-reader.ts. A page that
+ * starts listening asks for the current one on `screenReaderRequestChannel`.
+ */
+export const screenReaderChannel = "novadeck:screen-reader"
+
+/** Renderer-to-main request to be told, on `screenReaderChannel`, whether one is running. */
+export const screenReaderRequestChannel = "novadeck:screen-reader-request"
+
+/**
+ * Whether the app can tell when a screen reader runs: Electron reports assistive technology
+ * on macOS and Windows alone. Elsewhere the page hears nothing and keeps a reader's text.
+ */
+export const tellsScreenReader = (platform: string): boolean =>
+  platform === "darwin" || platform === "win32"
+
 /** Main-to-renderer report of the terminal id of a notification the person clicked. */
 export const noticeClickChannel = "novadeck:notice-click"
 
