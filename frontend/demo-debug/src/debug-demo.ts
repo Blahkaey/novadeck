@@ -47,6 +47,7 @@ import { launchGroups } from "./launch"
 import { messageGroups } from "./messages"
 import { murmurGroups } from "./murmur"
 import { notesGroups } from "./notes"
+import { pdfGroups } from "./pdfs"
 import { planGroups } from "./plans"
 import { createDemoStates } from "./states"
 import { sessionTarget } from "./terminals"
@@ -316,6 +317,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...feedbackGroups(launch, isDemoFeedback(inner.feedback) ? inner.feedback : undefined),
           ...planGroups(inner.companions),
           ...videoGroups(inner.companions),
+          ...pdfGroups(inner.companions),
           ...babciaGroups(babciaCuesOf(inner)),
           ...launchGroups(launchCuesOf(inner)),
           ...doorbellGroups(inner.messages),

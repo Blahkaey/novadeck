@@ -1,7 +1,7 @@
 # @novadeck/viewers
 
-Content viewers behind one contract: code, image, markdown, data trees, web pages and a
-text editor, each mounted into an element, keeping its scroll and place across remounts
+Content viewers behind one contract: code, image, markdown, PDF, data trees, web pages
+and a text editor, each mounted into an element, keeping its scroll and place across remounts
 through state its app stores.
 
 A viewer doesn't know what it's shown for. Its app chooses which viewer shows what, gives
