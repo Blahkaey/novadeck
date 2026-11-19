@@ -6,7 +6,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { PreviewProps } from ".."
 import { usePaneNote } from "../../../../pane-row"
 import { columnWidths, rowOffsets, rowsWindow } from "./rows-window"
-import { nextSort, partText, sortRows, tableOf, type Sort } from "./table"
+import { cutAlone, nextSort, partText, sortRows, tableOf, type Sort } from "./table"
 
 // Where each table was left, by the item showing it, and in which file and lines pointed at:
 // scrolled, sorted, and its rows' heights as measured, so it opens again as it was when its
@@ -32,8 +32,7 @@ const spare = 12
 // A delimited file (CSV, TSV) as a table: its header held on top as it scrolls, each column
 // sortable from its header, numbers to the right, each row's line in the file at its start,
 // and the rows the agent pointed at marked. A long one draws the rows in view. What the runner
-// read of a long file is only part of it, and lines it cut short lose their ends: it says so
-// under the table.
+// read of a long file is only part of it: it says so under the table.
 export const TableView = ({ id, name, content }: PreviewProps): React.JSX.Element => {
   const lastLine = content.firstLine + content.lines.length - 1
   const whole =
@@ -160,7 +159,8 @@ export const TableView = ({ id, name, content }: PreviewProps): React.JSX.Elemen
     total: content.total,
     truncated: content.truncated,
     named: table.named,
-    cut: table.cut,
+    cut: cutAlone(content.lines, content.truncated),
+    columns: table.columns,
     clamped: content.clamped ? content.to : undefined,
   })
   return (
