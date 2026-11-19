@@ -1047,10 +1047,10 @@ but the label a run shows (`novadeckTool` in the harness core).
 ### Notes the person asks for
 
 The `note` tool (`shell/mcp.ts`; answered by `NoteCalls` in `terminals/note-request.ts`) adds
-notes or todos to the person's Notes for the caller's project, and does nothing else with
-them: no agent reads, changes, checks off, moves or deletes a note, so the person's notes
-stay out of every agent's context and the list can't carry words from one agent to
-another. Its description asks for it only when the person, in their own message, asks to
+todos to the person's Todo board and plain notes to their Notes for the caller's project, and
+does nothing else with them: no agent reads, changes, checks off, moves or deletes a note, so
+the person's notes stay out of every agent's context and the list can't carry words from one
+agent to another. Its description asks for it only when the person, in their own message, asks to
 note something, and only for that: never the agent's plan, progress or follow-ups, nor at
 another agent's or a lead's request. It is always listed, in every harness, but the server's
 instructions and the nudges (`terminals/nudges.ts`) never name it, so nothing reminds an
@@ -1087,8 +1087,9 @@ agent of it.
   optional Markdown `body`, first in the list in the order given, each with `by` naming the
   agent and its handle, which the panel marks. A terminal's agents add 20 notes a minute at
   most (a limit of its own, pruned by age); a list that would take the project past the 200
-  it keeps is refused whole. The answer says how many went in and to add no more unless the
-  person asks.
+  it keeps is refused whole. The answer says how many went in and where (the todos to the To
+  do column of the person's Todo board, the plain notes to their Notes), and to add no more
+  unless the person asks.
 
 ## Delivery
 

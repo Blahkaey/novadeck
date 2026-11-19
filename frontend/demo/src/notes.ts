@@ -3,6 +3,7 @@ import {
   changed,
   moved,
   noteLine,
+  placed,
   removed,
   type Note,
   type NoteAuthor,
@@ -25,6 +26,8 @@ type Sample = {
   readonly body?: string
   // A plain note where false: it has no checkbox.
   readonly todo?: boolean
+  // An open todo the person has in progress, on the board's In progress column.
+  readonly doing?: boolean
   // How long ago it was written and, for one checked off, how long ago that was.
   readonly ago: number
   readonly doneAgo?: number
@@ -33,8 +36,8 @@ type Sample = {
 }
 
 // The storefront's notes, in the person's order: todos still to do, one with more under its
-// line and one that Codex added as @pike (History's Tax rounding, closed since), a plain note,
-// and two checked off.
+// line that is in progress and one that Codex added as @pike (History's Tax rounding, closed
+// since), a plain note, and two checked off, so each column of the board has cards.
 const storefront: readonly Sample[] = [
   { text: "Ask @wren to cover expired coupon codes", ago: 25 * minute },
   {
@@ -45,6 +48,7 @@ const storefront: readonly Sample[] = [
       "- throttle to **Slow 4G** and add three items",
       "- watch `CartSummary` while the prices load",
     ].join("\n"),
+    doing: true,
     ago: 3 * hour,
   },
   { text: "Reply to the design review about the empty cart", ago: 5 * hour },
@@ -70,6 +74,7 @@ const notesOf = (projectId: string, samples: readonly Sample[], now: number): No
     text: sample.text,
     body: sample.body ?? "",
     todo: sample.todo ?? true,
+    ...(sample.doing && { doing: true }),
     doneAt: sample.doneAgo === undefined ? null : now - sample.doneAgo,
     createdAt: now - sample.ago,
     ...(sample.by && { by: sample.by }),
@@ -130,6 +135,7 @@ export const createDemoNotes = (
       ),
     change: (id, what) => change((notes) => changed(notes, id, what, clock())),
     move: (id, index) => change((notes) => moved(notes, id, index)),
+    place: (id, column, before) => change((notes) => placed(notes, id, column, before, clock())),
     remove: (ids) => change((notes) => removed(notes, ids)),
     set: (notes) => state.update(() => ({ notes, failed: false })),
     failNext: () => {

@@ -1863,12 +1863,13 @@ one from an earlier runner.
     five seconds, and when the agent leaves or the terminal exits, restarts or rests. The agents
     listing counts it as working. The field may be absent, which reads as null.
 
-- `notes.*` keeps the person's own notes on each project, for the Notes panel: todos, which
-  they check off, and plain notes, in their order. A note has the `id` its client gave it,
-  its `projectId`, `text` (one line, 1 to 500 characters, trimmed, `singleLine`), `body`
-  (Markdown, up to 8,000 characters, empty for none), `todo` (whether it has a checkbox),
-  `doneAt` (when it was checked off, in epoch milliseconds; null while it is open, and always
-  on a plain note), `createdAt` and, on a note an agent added, `by`: `{ agent, handle }`, the
+- `notes.*` keeps the person's own notes on each project, for the Notes panel and the Todo
+  board: todos, which they check off, and plain notes, in their order. A note has the `id`
+  its client gave it, its `projectId`, `text` (one line, 1 to 500 characters, trimmed,
+  `singleLine`), `body` (Markdown, up to 8,000 characters, empty for none), `todo` (whether
+  it has a checkbox), `doing` (true on an open todo in progress, absent on every other note,
+  never written false), `doneAt` (when it was checked off, in epoch milliseconds; null while
+  it is open, and always on a plain note), `createdAt` and, on a note an agent added, `by`: `{ agent, handle }`, the
   harness and its terminal's handle then, as a feedback draft names its author. A note the
   person wrote has no `by`, and no change of theirs adds, alters or removes one. A project
   keeps at most 200 (`noteLimits`). Agents only add, through the MCP `note` tool (below). The
@@ -1876,7 +1877,12 @@ one from an earlier runner.
   `notes.<project id>`, so they need no table and no schema change; each write goes through
   the store's `forget` (so `secure_delete` and the scrub apply to what it replaces), and
   removing a project deletes its row in the same transaction. A note is kept with `by` only
-  where it has one, so a row of the person's notes is the same text it was. A row that can't
+  where it has one, and `doing` only where it is true, so a row of the person's notes is the
+  same text it was; a row kept before `doing` reads as it did, every open todo in To do. A
+  build before it drops `doing` as a field it doesn't know, so its cards read as To do there.
+  The todos are the board's cards: a todo's column (`boardColumn`: `todo`, `doing` or `done`)
+  is `done` while `doneAt` is set, `doing` while `doing` is, and `todo` otherwise, and each
+  column's cards are the project's notes of that column in their order. A row that can't
   be read is logged and reads as no notes; a field the build doesn't know, as a later build
   writes, is dropped from what it reads rather than empty the row. Every change answers with
   the project's notes as it left them; a project the runner doesn't have is `NOT_FOUND`, and
@@ -1892,9 +1898,22 @@ one from an earlier runner.
   - `notes.update({ projectId, id, text?, body?, todo?, done? })` changes what is given. A
     todo checked off is done from then, and keeps that time if checked again; a plain note
     is never done, so `todo: false` opens it. A body keeps no white space at its end.
+    Checked off, a todo goes just before the first other card of its project's Done (where
+    it has none, it stays where it was); opened again, just before the first of To do. Each
+    of those, and `todo: false`, clears `doing`; any other change, `todo: true` on a plain
+    note among them (it lands in To do), leaves the note where it stands.
   - `notes.move({ projectId, id, index })` moves an open note to `index` among the project's
     open notes, within their ends; the done ones keep their places. One that is checked off
     is a `CONFLICT`.
+  - `notes.place({ projectId, id, column?, before? })` puts a note in its place in one write.
+    A todo needs a `column` and takes its state: `done` sets `doneAt` to now unless it is
+    already set (so a card moving within Done keeps its time), `todo` and `doing` clear it,
+    and only `doing` sets `doing`. A plain note takes no column and is reordered among the
+    plain notes. A column given a plain note, or none a todo, is a `CONFLICT`; an id the
+    project doesn't have is `NOT_FOUND`. The note is taken out, then put just before
+    `before` where that is another note of its project in the same column (or another plain
+    note), else just after the last of them, or back where it was when there is none; no
+    other note moves. A place that changes nothing writes nothing.
   - `notes.remove({ projectId, ids })` deletes 1 to 200 notes for good; an id the project
     doesn't have is skipped.
   - The UI's adapter shows each change at once, over what the runner last reported, and
@@ -1910,7 +1929,9 @@ one from an earlier runner.
     leased into it since, at its prompt, a tool call or a Stop Novadeck continued; the
     person's Inbox replies and Novadeck's notices don't count. A terminal's agents add 20
     notes a minute at most, and a list that would take the project past 200 is refused
-    whole. Its answer is how many todos and plain notes went in. The server's instructions
+    whole. Its answer is how many todos and plain notes went in, and where: the todos to the
+    To do column of the person's Todo board, the plain notes to their Notes. The server's
+    instructions
     and Novadeck's per-turn notices never mention it.
 
 - `companions.*` keeps what agents show and the person attaches beside terminals: items,

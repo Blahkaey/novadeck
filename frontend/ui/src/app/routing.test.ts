@@ -198,6 +198,7 @@ describe("route reconciliation", () => {
           add: () => {},
           change: () => {},
           move: () => {},
+          place: () => {},
           remove: () => {},
         },
       }),

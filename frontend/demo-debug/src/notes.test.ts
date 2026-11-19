@@ -50,10 +50,10 @@ const setup = () => {
 
 describe("the debug panel's Notes group", () => {
   it("offers nothing where the backend's notes aren't the demo's", () => {
-    const { state, add, change, move, remove } = createDemoNotes(0)
+    const { state, add, change, move, place, remove } = createDemoNotes(0)
 
     expect(notesGroups(undefined)).toEqual([])
-    expect(notesGroups({ state, add, change, move, remove })).toEqual([])
+    expect(notesGroups({ state, add, change, move, place, remove })).toEqual([])
   })
 
   it("makes the next change fail, once, with the notes kept", () => {
@@ -95,6 +95,8 @@ describe("the debug panel's Notes group", () => {
     run("Every todo done", "storefront")
     expect(openNotes(state().notes, "storefront")).toEqual([])
     expect(doneNotes(state().notes, "storefront")).toHaveLength(6)
+    // A todo checked off is in progress no more.
+    expect(state().notes.filter((note) => "doing" in note)).toEqual([])
   })
 
   it("shows a note at its longest, with details", () => {

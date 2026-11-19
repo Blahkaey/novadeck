@@ -103,6 +103,8 @@ export {
   maxHistoryRemoved,
 } from "./history.js"
 export {
+  type BoardColumn,
+  boardColumn,
   type Note,
   note,
   type NoteAuthor,

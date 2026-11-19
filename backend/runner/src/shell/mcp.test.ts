@@ -1466,7 +1466,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     })
   })
 
-  it("forwards the notes the user asked for, and says how many went in, in its words", async () => {
+  it("forwards the notes the user asked for, and says how many went in and where, in its words", async () => {
     const call = async (args: unknown, reply: unknown) => {
       calls.length = 0
       answer = reply
@@ -1482,16 +1482,20 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       content: [
         {
           type: "text",
-          text: "Added a todo to the user's Notes. Add no more unless they ask.",
+          text: "Added a todo to the To do column of the user's Todo board. Add no more unless they ask.",
         },
       ],
     })
     expect(calls).toEqual([expect.objectContaining({ type: "note", request: { notes } })])
     const text = async (todos: number, plain: number) =>
       JSON.stringify(await call({ notes }, { ok: true, todos, notes: plain }))
-    expect(await text(3, 0)).toContain("Added 3 todos to the user's Notes.")
+    expect(await text(3, 0)).toContain(
+      "Added 3 todos to the To do column of the user's Todo board.",
+    )
     expect(await text(0, 1)).toContain("Added a note to the user's Notes.")
-    expect(await text(1, 2)).toContain("Added a todo and 2 notes to the user's Notes.")
+    expect(await text(1, 2)).toContain(
+      "Added a todo to the To do column of the user's Todo board and 2 notes to the user's Notes.",
+    )
     // The runner's refusal is the agent's to act on: no nudge toward feedback.
     const refused = await call({ notes }, { ok: false, reason: "Say it in your reply." })
     expect(refused).toEqual({

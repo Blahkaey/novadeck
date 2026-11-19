@@ -595,11 +595,14 @@ describe("runner client notes", () => {
     for (const refused of [
       () => client.notes.add({ id: ship, projectId, text: "Again", todo: true }),
       () => client.notes.move({ projectId, id: ship, index: 0 }),
+      // A plain note goes in no column of the board.
+      () => client.notes.place({ projectId, id: flag, column: "todo" }),
     ])
       // eslint-disable-next-line no-await-in-loop -- One call at a time.
       await expect(refused()).rejects.toMatchObject({ code: "CONFLICT" })
     for (const missing of [
       () => client.notes.update({ projectId, id: crypto.randomUUID(), text: "x" }),
+      () => client.notes.place({ projectId, id: crypto.randomUUID(), column: "done" }),
       () => client.notes.list({ projectId: crypto.randomUUID() }),
     ])
       // eslint-disable-next-line no-await-in-loop -- One call at a time.

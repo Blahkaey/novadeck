@@ -292,6 +292,152 @@ describe("a project's notes", () => {
   })
 })
 
+describe("a project's Todo board", () => {
+  it("checks a card off first in Done, out of In progress, and opens one again first in To do", () => {
+    const { notes, fill } = setup()
+    fill(4, 3, 2, 1)
+    notes.update({ projectId: p, id: idOf(4), done: true })
+    notes.place({ projectId: p, id: idOf(2), column: "doing" })
+    // To do: 1, 3; In progress: 2; Done: 4.
+    const checked = notes.update({ projectId: p, id: idOf(2), done: true })
+    expect(texts(checked)).toEqual(["Note 1", "Note 3", "Note 2", "Note 4"])
+    expect(checked[2]).not.toHaveProperty("doing")
+    expect(checked[2]!.doneAt).not.toBeNull()
+
+    const opened = notes.update({ projectId: p, id: idOf(4), done: false })
+    expect(texts(opened)).toEqual(["Note 4", "Note 1", "Note 3", "Note 2"])
+    expect(opened[0]!.doneAt).toBeNull()
+  })
+
+  it("keeps a card in progress, where it stands, through a change of its words", () => {
+    const { notes, fill } = setup()
+    fill(3, 2, 1)
+    notes.place({ projectId: p, id: idOf(2), column: "doing" })
+    const after = notes.update({ projectId: p, id: idOf(2), text: "Busy", done: false })
+    expect(texts(after)).toEqual(["Note 1", "Busy", "Note 3"])
+    expect(after[1]).toMatchObject({ doing: true, doneAt: null })
+    // Without its checkbox it is a plain note where it stood, in progress no more.
+    const plain = notes.update({ projectId: p, id: idOf(2), todo: false })
+    expect(texts(plain)).toEqual(["Note 1", "Busy", "Note 3"])
+    expect(plain[1]).not.toHaveProperty("doing")
+  })
+
+  it("places a todo in a column, before the card it is dropped on, or after the column's last", () => {
+    const { notes, fill } = setup()
+    fill(4, 3, 2, 1)
+    notes.place({ projectId: p, id: idOf(3), column: "doing" })
+    const before = notes.place({ projectId: p, id: idOf(4), column: "doing", before: idOf(3) })
+    expect(texts(before)).toEqual(["Note 1", "Note 2", "Note 4", "Note 3"])
+    expect(before[2]).toMatchObject({ doing: true, doneAt: null })
+    // A card of another column, or none, is no place to stand before: it goes after the last.
+    expect(
+      texts(notes.place({ projectId: p, id: idOf(1), column: "doing", before: idOf(2) })),
+    ).toEqual(["Note 2", "Note 4", "Note 3", "Note 1"])
+    expect(texts(notes.place({ projectId: p, id: idOf(4), column: "doing" }))).toEqual([
+      "Note 2",
+      "Note 3",
+      "Note 1",
+      "Note 4",
+    ])
+  })
+
+  it("has a card done from when it enters Done, and keeps that time as it moves within", () => {
+    const { notes, fill } = setup()
+    fill(3, 2, 1)
+    const [entered] = notes.place({ projectId: p, id: idOf(1), column: "done" })
+    expect(entered).toMatchObject({ text: "Note 1", doneAt: 1040 })
+    expect(entered).not.toHaveProperty("doing")
+    notes.place({ projectId: p, id: idOf(3), column: "done", before: idOf(1) })
+    const within = notes.place({ projectId: p, id: idOf(1), column: "done", before: idOf(3) })
+    expect(texts(within)).toEqual(["Note 1", "Note 3", "Note 2"])
+    expect(within[0]!.doneAt).toBe(1040)
+    // Dropped in To do it is open again, after the column's last card.
+    const opened = notes.place({ projectId: p, id: idOf(1), column: "todo" })
+    expect(texts(opened)).toEqual(["Note 3", "Note 2", "Note 1"])
+    expect(opened[2]!.doneAt).toBeNull()
+  })
+
+  it("reorders a plain note among the plain notes, the todos keeping their places", () => {
+    const { notes, fill } = setup()
+    fill(2, 1)
+    for (const number of [4, 3])
+      notes.add({
+        projectId: p,
+        notes: [{ id: idOf(number), text: `Plain ${number}`, todo: false }],
+      })
+    // Plain 3, Plain 4, Note 1, Note 2.
+    expect(texts(notes.place({ projectId: p, id: idOf(3) }))).toEqual([
+      "Plain 4",
+      "Plain 3",
+      "Note 1",
+      "Note 2",
+    ])
+    expect(texts(notes.place({ projectId: p, id: idOf(3), before: idOf(4) }))).toEqual([
+      "Plain 3",
+      "Plain 4",
+      "Note 1",
+      "Note 2",
+    ])
+  })
+
+  it("refuses a column for a plain note, none for a todo, and a note the project doesn't have", () => {
+    const { notes, fill } = setup()
+    fill(1)
+    notes.add({ projectId: p, notes: [{ id: idOf(2), text: "Plain", todo: false }] })
+    expect(() => notes.place({ projectId: p, id: idOf(2), column: "todo" })).toThrow(
+      expect.objectContaining({ code: "CONFLICT" }),
+    )
+    expect(() => notes.place({ projectId: p, id: idOf(1) })).toThrow(
+      expect.objectContaining({ code: "CONFLICT" }),
+    )
+    expect(() => notes.place({ projectId: p, id: idOf(9), column: "todo" })).toThrow(
+      expect.objectContaining({ code: "NOT_FOUND" }),
+    )
+    expect(() => notes.place({ projectId: idOf(999), id: idOf(1), column: "todo" })).toThrow(
+      expect.objectContaining({ code: "NOT_FOUND" }),
+    )
+  })
+
+  it("keeps a card in progress as such, and writes `doing` on no other note", () => {
+    const { notes, records, fill } = setup()
+    fill(2, 1)
+    notes.place({ projectId: p, id: idOf(1), column: "doing" })
+
+    expect(new Notes(records).list(p)[0]).toMatchObject({ id: idOf(1), doing: true })
+    const saved = JSON.parse(records.savedNotesOf(p)!) as Record<string, unknown>[]
+    expect(saved.map((each) => Object.keys(each))).toEqual([
+      ["id", "text", "body", "todo", "doing", "doneAt", "createdAt"],
+      ["id", "text", "body", "todo", "doneAt", "createdAt"],
+    ])
+    notes.place({ projectId: p, id: idOf(1), column: "todo" })
+    expect(JSON.parse(records.savedNotesOf(p)!)[0]).not.toHaveProperty("doing")
+  })
+
+  it("reads a todo kept before cards could be in progress as one still to do", () => {
+    const { notes, records } = setup()
+    records.saveNotes(
+      p,
+      JSON.stringify([
+        { id: idOf(1), text: "Ship it", body: "", todo: true, doneAt: null, createdAt: 5 },
+      ]),
+    )
+    const [kept] = notes.list(p)
+    expect(kept).toEqual({
+      id: idOf(1),
+      projectId: p,
+      text: "Ship it",
+      body: "",
+      todo: true,
+      doneAt: null,
+      createdAt: 5,
+    })
+    // Dropped in In progress, it is in progress from then.
+    expect(notes.place({ projectId: p, id: idOf(1), column: "doing" })[0]).toMatchObject({
+      doing: true,
+    })
+  })
+})
+
 describe("following the notes", () => {
   it("tells of each project that has any, then synced, then each change whole", async () => {
     const { notes, fill } = setup()
@@ -317,6 +463,7 @@ describe("following the notes", () => {
     await watcher.settle()
     notes.update({ projectId: p, id: idOf(1), text: "Note 1", done: false })
     notes.move({ projectId: p, id: idOf(1), index: 0 })
+    notes.place({ projectId: p, id: idOf(1), column: "todo" })
     expect(await watcher.settle()).toHaveLength(2)
     await watcher.stop()
   })

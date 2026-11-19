@@ -302,6 +302,7 @@ export const scriptedRunner = ({
       add: api.notes.add.handler(unplayed("notes.add")),
       update: api.notes.update.handler(unplayed("notes.update")),
       move: api.notes.move.handler(unplayed("notes.move")),
+      place: api.notes.place.handler(unplayed("notes.place")),
       remove: api.notes.remove.handler(unplayed("notes.remove")),
     },
     works: {

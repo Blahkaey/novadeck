@@ -31,17 +31,22 @@ export const noteBody = z.string().max(noteLimits.body)
 // and its terminal's handle when it did, as a feedback draft names its author.
 export const noteAuthor = z.strictObject({ agent: agentName, handle })
 
+// The columns of a project's Todo board, in the order it shows them: To do, In progress
+// (`doing`) and Done. A plain note is on no board.
+export const boardColumn = z.enum(["todo", "doing", "done"])
+
 // One of the person's own notes on a project (`notes`): its line, a longer `body`, whether it
 // is a todo (it has a checkbox) and, once the person checked it off, when (`doneAt`, in
-// milliseconds since the epoch; null while it is open, and always on a plain note). `by`
-// names the agent that added it, and is absent on a note the person wrote; no change of the
-// person's alters it.
+// milliseconds since the epoch; null while it is open, and always on a plain note). `doing`
+// is true on an open todo the person has in progress, and absent on every other note. `by` names the agent that added it, and is absent on a note the person
+// wrote; no change of the person's alters it.
 export const note = z.strictObject({
   id,
   projectId: id,
   text: noteText,
   body: noteBody,
   todo: z.boolean(),
+  doing: z.boolean().optional(),
   doneAt: z.number().nullable(),
   createdAt: z.number(),
   by: noteAuthor.optional(),
@@ -56,6 +61,7 @@ export const notesChange = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("synced") }),
 ])
 
+export type BoardColumn = z.infer<typeof boardColumn>
 export type Note = z.infer<typeof note>
 export type NoteAuthor = z.infer<typeof noteAuthor>
 export type NotesChange = z.infer<typeof notesChange>

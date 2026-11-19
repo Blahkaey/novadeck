@@ -704,7 +704,8 @@ App:
 
 - **Notes:** only where the demo keeps the person's notes (`plain`, `agents`, `messages`,
   `inbox` and `welcome`; the showcase and the videos' demos have no Notes panel). Storefront
-  starts with four todos, one of them with details and one added by an agent, marked so (Codex's
+  starts with four todos, one of them with details and in progress (the Todo board's In progress
+  column) and one added by an agent, marked so (Codex's
   icon at the end of its line, whose tooltip reads "Added by Codex · @pike", History's Tax
   rounding agent), a plain note and two todos under Done; the other projects start with none.
   Adding, checking off, editing, moving, deleting and Clear done all work there, so they need
