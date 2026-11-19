@@ -19,6 +19,7 @@
     "poster:try": "pnpm --filter @novadeck/try poster",
     "build": "turbo run build",
     "bench:profile": "pnpm --filter @novadeck/desktop package && node scripts/bench/profile/main.ts",
+    "bench:files": "node scripts/bench/files/main.ts",
     "bench:timing": "turbo run build --filter=@novadeck/runner --filter=@novadeck/sandbox && pnpm --filter-prod \"@novadeck/ui^...\" build && node scripts/bench/timing/main.ts",
     "new:library": "node scripts/libraries/new.ts",
     "preview": "pnpm --filter @novadeck/runner start",
@@ -36,7 +37,7 @@
     "test:e2e:install": "pnpm --filter @novadeck/protocol... --filter @novadeck/relay build && node scripts/e2e/install/main.ts",
     "test:e2e:isolated": "pnpm test:e2e:install && node scripts/e2e/isolated/main.ts -- pnpm --filter @novadeck/runner test:e2e",
     "transcripts:shapes": "pnpm --filter @novadeck/harness-claude... --filter @novadeck/harness-codex... --filter @novadeck/harness-agy... build && node scripts/transcripts/main.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && turbo run typecheck",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/bench/files/page/tsconfig.json && turbo run typecheck",
     "lint": "oxlint --deny-warnings . && pnpm --filter @novadeck/relay lint && pnpm --filter @novadeck/atlas check",
     "format": "oxfmt && pnpm --filter @novadeck/relay format",
     "format:check": "oxfmt --check && pnpm --filter @novadeck/relay format:check"
