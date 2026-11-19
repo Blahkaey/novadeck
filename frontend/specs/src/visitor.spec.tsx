@@ -9,6 +9,7 @@ import {
   expectStaysAbsent,
   labelled,
   nextFrames,
+  openSessions,
   openWorkspace,
   press,
   sidebar,
@@ -84,7 +85,7 @@ describe("the visitor build", () => {
         await expect.element(page.getByRole("dialog", { name: "Preferences" })).toBeVisible()
       },
       "the sidebar, as a drawer": async () => {
-        await sidebarPanel("Sessions").click()
+        await openSessions()
         await expect.element(sidebar()).toBeVisible()
       },
       "the workspace switcher": async () => {

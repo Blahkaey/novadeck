@@ -208,8 +208,9 @@ export const chooseView = async (name: "Focus" | "Grid" | "Canvas"): Promise<voi
 
 export const sidebar = (): Locator => page.getByRole("complementary")
 
+/** A toggle on the rail. Terminals' is checked while either view of its panel shows. */
 export const sidebarPanel = (
-  name: "Terminals" | "Files" | "Sessions" | "History" | "Inbox" | "Worktrees" | "Notes" | "Todo",
+  name: "Terminals" | "Files" | "History" | "Inbox" | "Worktrees" | "Notes" | "Todo",
 ): Locator =>
   page
     .getByRole("radiogroup", { name: "Sidebar actions" })
@@ -217,6 +218,55 @@ export const sidebarPanel = (
     .getByRole("radio", {
       name: name === "Inbox" ? new RegExp(`^${name}(,|$)`) : name,
     })
+
+type TerminalsView = "Terminals" | "Sessions"
+
+/**
+ * A choice of the switch before the Terminals panel's title, between the open session's
+ * terminals and the project's sessions: the one in the view that shows.
+ */
+export const terminalsView = (name: TerminalsView): Locator =>
+  page.getByRole("radiogroup", { name: "Terminals panel view" }).getByRole("radio", { name })
+
+/**
+ * The icon a person sees for the switch's choice `name`: the label its radio wears, as the
+ * radio itself is hidden under it.
+ */
+export const terminalsViewChoice = (name: TerminalsView): Locator =>
+  page.elementLocator((terminalsView(name).element() as HTMLInputElement).labels![0]!)
+
+/** Presses the switch's choice `name`, as a person clicks its icon. */
+export const chooseTerminalsView = async (name: TerminalsView): Promise<void> => {
+  await terminalsViewChoice(name).click()
+}
+
+const isChecked = (choice: Locator): boolean => {
+  const element = choice.query()
+  return element instanceof HTMLInputElement
+    ? element.checked
+    : element?.getAttribute("aria-checked") === "true"
+}
+
+/** Waits until the Terminals panel shows `name`: the rail's Terminals and the switch's choice checked. */
+export const expectTerminalsView = async (name: TerminalsView): Promise<void> => {
+  await expect.element(sidebarPanel("Terminals")).toBeChecked()
+  await expect.element(terminalsView(name)).toBeChecked()
+}
+
+/**
+ * Shows the Terminals panel's view `name` as a person gets there: the rail's Terminals toggle
+ * when the panel doesn't show, which opens the view last seen, then the switch's choice when
+ * that view isn't `name`.
+ */
+export const openTerminalsView = async (name: TerminalsView): Promise<void> => {
+  if (!isChecked(sidebarPanel("Terminals"))) await sidebarPanel("Terminals").click()
+  await expect.element(terminalsView(name)).toBeInTheDocument()
+  if (!isChecked(terminalsView(name))) await chooseTerminalsView(name)
+  await expectTerminalsView(name)
+}
+
+/** Shows the project's sessions, the Terminals panel's second view. */
+export const openSessions = (): Promise<void> => openTerminalsView("Sessions")
 
 /** `text` as a regular expression that matches it as written. */
 export const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

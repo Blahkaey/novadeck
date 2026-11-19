@@ -9,8 +9,8 @@ import {
 import {
   chooseView,
   layoutSettled,
+  openSessions,
   openWorkspace,
-  sidebarPanel,
   terminal,
 } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
@@ -21,7 +21,7 @@ describe("Canvas across workspace sessions", () => {
   context("when switching session right after moving the camera", () => {
     it("frames every window afresh on returning, as on opening", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await chooseView("Canvas")
       await expect.element(terminal(name)).toBeVisible()
@@ -36,7 +36,7 @@ describe("Canvas across workspace sessions", () => {
       // No waiting for the gesture to end: Canvas would save the camera as it unmounts.
       await pressNewSession()
       await expect.element(emptyWorkspace()).toBeVisible()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await savedSession(original).click()
 
       await expectCurrentSession(original)

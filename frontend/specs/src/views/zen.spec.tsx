@@ -12,6 +12,8 @@ import {
   expectNothingSelected,
   expectSelected,
   expectStaysAbsent,
+  expectTerminalsView,
+  openSessions,
   openWorkspace,
   press,
   reloadWorkspace,
@@ -457,7 +459,7 @@ describe("Leaving Zen", () => {
   context("when choosing Exit Zen", () => {
     it("restores the sidebar panel that was open", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
       await enterZen().click()
       await expectInZen()
@@ -466,7 +468,7 @@ describe("Leaving Zen", () => {
 
       await expectOutOfZen()
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
       await expect.element(enterZen()).toHaveFocus()
     })
 
@@ -490,7 +492,7 @@ describe("Leaving Zen", () => {
   context("when pressing a sidebar shortcut", () => {
     it("leaves Zen showing Terminals for the terminal sidebar shortcut", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await enterZen().click()
       await expectInZen()
 
@@ -498,7 +500,7 @@ describe("Leaving Zen", () => {
 
       await expectOutOfZen()
       await expect.element(sidebar()).toHaveAccessibleName("Terminals")
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
     })
 
     it("leaves Zen showing Sessions for the session sidebar shortcut", async () => {

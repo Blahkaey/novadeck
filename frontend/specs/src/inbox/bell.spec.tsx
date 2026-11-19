@@ -1,6 +1,13 @@
 import { page } from "vitest/browser"
 
-import { expectStaysAbsent, openWorkspace, sidebar, sidebarPanel } from "../support/workspace"
+import {
+  expectStaysAbsent,
+  expectTerminalsView,
+  openSessions,
+  openWorkspace,
+  sidebar,
+  sidebarPanel,
+} from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The agents demo: its agents wait on plans, permissions and a question in several projects,
@@ -42,12 +49,15 @@ describe("The Inbox bell", () => {
   })
 
   context("when going Back and Forward between panels", () => {
-    it("restores the panel each step showed", async () => {
+    it("restores the panel and the Terminals panel's view each step showed", async () => {
       await openWorkspace(agents)
       await sidebarPanel("Inbox").click()
       await expect.element(sidebarPanel("Inbox")).toBeChecked()
-      await sidebarPanel("Sessions").click()
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      // The rail's Terminals shows the terminals, then the switch the sessions: two steps.
+      await openSessions()
+
+      history.back()
+      await expectTerminalsView("Terminals")
 
       history.back()
       await expect.element(sidebarPanel("Inbox")).toBeChecked()
@@ -57,7 +67,8 @@ describe("The Inbox bell", () => {
 
       history.forward()
       history.forward()
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      history.forward()
+      await expectTerminalsView("Sessions")
     })
   })
 

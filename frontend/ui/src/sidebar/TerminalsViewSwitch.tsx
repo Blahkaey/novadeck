@@ -5,9 +5,9 @@ import { Layers2, Terminal as TerminalIcon } from "lucide-react"
 import { panelLabels } from "./panel-labels"
 
 // The switch before the Terminals panel's title, between its two views: the open session's
-// terminals and the project's sessions. Each view's header draws one, in the same place, so a
-// pointer that pressed one choice is over the other's twin; the person's place is the one in
-// the view that shows. The Sessions choice carries a dot while another session asks
+// terminals and the project's sessions, the one that shows chosen. Each view's header draws
+// one, in the same place, so a pointer that pressed one choice is over the other's twin; the
+// person's place is the one in the view that shows. The Sessions choice carries a dot while another session asks
 // something of the person (`sessionsAsk`, in words), as the rail's Terminals toggle does; the
 // toggle says it to assistive technology.
 // A terminal's tab dragged over a choice, held there, opens that view (`data-terminals-view`,

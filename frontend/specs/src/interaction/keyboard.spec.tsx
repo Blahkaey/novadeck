@@ -24,6 +24,7 @@ import {
   expectNothingSelected,
   expectSelected,
   expectStaysAbsent,
+  expectTerminalsView,
   expectTypingIn,
   focusStage,
   focusTab,
@@ -519,26 +520,32 @@ describe("navigate mode", () => {
 
 describe("sidebar shortcuts", () => {
   context(`when pressing ${shortcut.sessions().label} and ${shortcut.terminals().label}`, () => {
-    it("switches to the requested panel, goes back on a repeat press, then hides", async () => {
+    it("switches to the requested view, goes back on a repeat press, then hides", async () => {
       await openWorkspace()
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
 
       await pressShortcut("sessions")
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
-      await expect.element(sidebar()).toBeVisible()
+      await expectTerminalsView("Sessions")
+      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
 
-      // Back one step, to the panel shown before.
+      // The two are views of one panel: a repeat press doesn't go back to the terminals, and
+      // with no panel before them it hides the sidebar.
       await pressShortcut("sessions")
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
-      await expect.element(terminalTab("Dev server")).toBeVisible()
-
-      await pressShortcut("terminals")
       await expect.element(sidebar()).not.toBeInTheDocument()
 
-      // Opened on Sessions, it has no step back: a repeat press hides it.
+      // From the Inbox, either key opens its view, the other key switches, and a repeat press
+      // goes back to the Inbox.
+      await pressShortcut("inbox")
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await pressShortcut("terminals")
+      await expectTerminalsView("Terminals")
+      await expect.element(terminalTab("Dev server")).toBeVisible()
       await pressShortcut("sessions")
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
       await pressShortcut("sessions")
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+
+      await pressShortcut("inbox")
       await expect.element(sidebar()).not.toBeInTheDocument()
     })
 
@@ -548,7 +555,7 @@ describe("sidebar shortcuts", () => {
 
       await pressShortcut("sessions")
 
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
       await expect.poll(() => draftOf("Checkout implementation")).toBe("")
     })
   })

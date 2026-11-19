@@ -2,7 +2,7 @@ import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { BoardColumn, Note, NoteChange } from "@novadeck/core/notes"
 import type { AgentConnection } from "@novadeck/core/port"
-import type { SidebarPanel as PanelId, TerminalsView } from "@novadeck/core/types"
+import type { SidebarPanel as PanelId } from "@novadeck/core/types"
 import type { Work, WorkClosing } from "@novadeck/core/works"
 import { Plus } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
@@ -27,8 +27,8 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "ids"> & {
   sessionCount: number
   sessionName: string | undefined
   // The switch before the title of each view of the Terminals panel, terminals and sessions,
-  // in the same place on both.
-  terminalsView: (view: TerminalsView) => ReactNode
+  // in the same place on both; it follows the view that shows.
+  terminalsView: ReactNode
   // The tiles' ids in sidebar order: each tab reads its own tile.
   orderedIds: readonly string[]
   sidebarPanel: PanelId
@@ -138,7 +138,7 @@ export const WorkspaceSidebar = ({
     <SidebarPanel
       id="sessions-panel"
       title={panelLabels.sessions}
-      titleLead={terminalsView("sessions")}
+      titleLead={terminalsView}
       count={sessionCount}
       active={sidebarPanel === "sessions"}
       onClose={onHide}
@@ -179,7 +179,7 @@ export const WorkspaceSidebar = ({
       count={orderedIds.length}
       // Which session's terminals these are, once the project has others to tell it from.
       scope={sessionName}
-      titleLead={terminalsView("terminals")}
+      titleLead={terminalsView}
       active={sidebarPanel === "terminals"}
       onClose={onHide}
     >
