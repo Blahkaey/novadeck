@@ -5,8 +5,8 @@ import { asked, tool } from "./model/script.js"
 import { own, result, sends, sent, start, through } from "./scenarios.js"
 
 // Notes the person asks an agent for (docs/agent-messaging.md, "Notes the person asks for"):
-// in a turn the person's own prompt started, the agent's `note` adds a todo first in the
-// project's Notes, marked as that agent's; in a turn another agent's message woke it for,
+// in a turn the person's own prompt started, the agent's `note` adds a todo first in the To do
+// column of the project's Todo board, marked as that agent's; in a turn another agent's message woke it for,
 // the runner refuses it and adds nothing. The same for every harness (see messaging.e2e.ts
 // for the rule on parity). The model here is a script, so this checks that each harness
 // offers `note` and that the runner's check holds, not what a real model makes of the
@@ -35,7 +35,7 @@ for (const setup of setups) {
         }),
         own((call) => {
           const text = result(call)
-          if (!text?.includes("Notes")) return undefined
+          if (!text?.includes("Todo board")) return undefined
           answered = text
           return { text: "Noted." }
         }),
@@ -47,7 +47,7 @@ for (const setup of setups) {
       await t1.until("Noted.")
       await through(t1, ["settled"], { after: mark })
 
-      expect(answered).toContain("Added a todo to the user's Notes.")
+      expect(answered).toContain("Added a todo to the To do column of the user's Todo board.")
       // The session's first prompt is theirs in every harness, where Codex and Antigravity
       // bind the session at that prompt too.
       expect(run.deck.store.terminal(t1.id)?.work).toMatchObject({

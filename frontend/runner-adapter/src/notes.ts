@@ -4,6 +4,7 @@ import {
   moved,
   noNotes,
   noteLine,
+  placed,
   removed,
   type Note,
   type NoteChange,
@@ -180,6 +181,22 @@ export const createRunnerNotes = (
         note.projectId,
         (current) => moved(current, id, index),
         () => calls.move({ projectId: note.projectId, id, index }),
+      )
+    },
+    place: (id, column, before) => {
+      const note = shown().find((each) => each.id === id)
+      const at = now()
+      if (!note || placed(shown(), id, column, before, at) === shown()) return
+      send(
+        note.projectId,
+        (current) => placed(current, id, column, before, at),
+        () =>
+          calls.place({
+            projectId: note.projectId,
+            id,
+            ...(column !== null && { column }),
+            ...(before !== null && { before }),
+          }),
       )
     },
     remove: (ids) => {

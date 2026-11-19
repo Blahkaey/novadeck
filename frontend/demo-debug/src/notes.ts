@@ -27,16 +27,19 @@ export const fullNotes = (projectId: string, now: number): Note[] =>
     todo(projectId, `full-${index + 1}`, `Todo ${index + 1}`, now - index * 60_000),
   )
 
-/** Only todos that are checked off, the one checked last first. */
+/** Only todos that are checked off, the one checked last first; none of them in progress. */
 export const doneOnly = (projectId: string, now: number): Note[] =>
   demoNotes(now)
     .filter((note) => note.todo)
-    .map((note, index) => ({
-      ...note,
-      id: `demo-note-${projectId}-done-${index + 1}`,
-      projectId,
-      doneAt: note.doneAt ?? now - (index + 1) * 60 * 60_000,
-    }))
+    .map((sample, index) => {
+      const { doing: _, ...note } = sample
+      return {
+        ...note,
+        id: `demo-note-${projectId}-done-${index + 1}`,
+        projectId,
+        doneAt: note.doneAt ?? now - (index + 1) * 60 * 60_000,
+      }
+    })
 
 /** One todo with a line at its longest and details that scroll, over a short one. */
 export const longNotes = (projectId: string, now: number): Note[] => [
@@ -119,7 +122,7 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
         },
         {
           label: "Sample notes",
-          hint: "The open project's Notes panel holds the storefront's samples: four todos, one with details and one with Codex's mark (added by @pike), a plain note, and two under Done",
+          hint: "The open project's Notes panel holds the storefront's samples: four todos, one with details that is in progress and one with Codex's mark (added by @pike), a plain note, and two under Done",
           run: ({ workspace }) => {
             const projectId = here(workspace)
             set(
