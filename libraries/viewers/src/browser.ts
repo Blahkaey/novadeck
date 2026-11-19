@@ -1,12 +1,14 @@
 import { addressOf, webAddress } from "./browser/address.js"
 import { framingOf, onPhone, type Framing, type PageSize } from "./browser/framing.js"
 import {
+  isMobileViewport,
   isScrolled,
   restoreWaitMs,
   revealing,
   scrolling,
   scrollRead,
   scrollReadMs,
+  viewportRead,
   type Scrolled,
 } from "./browser/in-page.js"
 import { chromeMajorOf, phoneStyle, phoneUserAgent } from "./browser/phone.js"
@@ -33,12 +35,12 @@ import type { Mount, Viewer, ViewerState } from "./index.js"
 // picture fades once it's there. While the page has a sign-in window open, which closes
 // with its view, it stays live instead, and rests once the last one closes. A live page lays
 // out as a desktop's window or a phone's screen, made to fit where the viewer is narrower
-// (see `framingOf`). A desktop's is zoomed out in a view the size it's drawn, not a bigger
-// view scaled down, as Chromium places what a page opens over itself, as a select's list, a
+// (see `framingOf`). Either is zoomed out in a view the size it's drawn, not a bigger view
+// scaled down, as Chromium places what a page opens over itself, as a select's list, a
 // date's picker or autofill, by its view's own box, scaled or not, and the page's zoom; the
 // desktop app keeps each view's zoom its own (`ownZoom` in ./browser/host.ts), not its
-// site's. A phone's is scaled down whole, as its emulated screen draws at its own size
-// whatever the zoom. Where live pages aren't available (a plain browser, a demo),
+// site's. A phone's view isn't emulated at a screen of its own size, which would draw at
+// that size whatever the zoom (see `phoneEmulation`). Where live pages aren't available (a plain browser, a demo),
 // it shows a snapshot of the page, or nothing, for the app to say why. Its looks are
 // browser.css's.
 
@@ -116,6 +118,12 @@ export type BrowserOptions = {
   readonly size?: PageSize
   readonly on?: {
     readonly navigate?: (place: Place) => void
+    /**
+     * Whether a page shown at a phone's size has no mobile viewport tag (`<meta name=viewport
+     * content="width=device-width">`), as each of its documents is ready: it lays out a screen
+     * wide here, where a phone would lay it out wider and shrink it. False at a desktop's size.
+     */
+    readonly unmobile?: (unmobile: boolean) => void
     readonly load?: (load: Load) => void
     readonly title?: (title: string) => void
     /**
@@ -514,17 +522,20 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
   }
   // Where its phone is, for a press on the stage around it, not on it.
   let framed: Framing | undefined
-  // How far the page is zoomed in its view, of the app's own zoom: a desktop's zoomed out as
-  // its framing says, unless further than a page zooms (`minZoom`), which browser.css then
-  // scales instead, as it does a phone's. The view is as wide as it's drawn, to the device
+  // How far the page is zoomed in its view, of the app's own zoom: zoomed out as its framing
+  // says, unless further than a page zooms (`minZoom`), which browser.css then scales
+  // instead. The view is as wide as it's drawn, to the device
   // pixel down, so the page lays out at least as wide as its framing, never a pixel short of
   // a breakpoint at its width; a hair under it, for the zoom's own rounding.
   let zoomed = 1
-  const zoomFor = (framing: Framing | undefined): number => {
-    if (size !== "desktop" || !framing || framing.scale < minZoom) return 1
+  // A length in whole device pixels, a hair down.
+  const wholeOf = (length: number): number => {
     const ratio = win?.devicePixelRatio || 1
-    const drawn = Math.floor(framing.width * framing.scale * ratio) / ratio
-    return (drawn / framing.width) * (1 - zoomRounding)
+    return Math.floor(length * ratio) / ratio
+  }
+  const zoomFor = (framing: Framing | undefined): number => {
+    if (!framing || framing.scale === 1 || framing.scale < minZoom) return 1
+    return (wholeOf(framing.width * framing.scale) / framing.width) * (1 - zoomRounding)
   }
   // Its view zoomed so, once attached, by the app where it can, else by itself; again as each
   // document commits and is ready, as Chromium can let a reload's go, and for a view
@@ -556,6 +567,19 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
       "--browser-scale": framing && `${framing.scale}`,
       "--browser-left": framing && `${framing.left}px`,
       "--browser-top": framing && `${framing.top}px`,
+    }
+    // A phone's view is its screen's size to the device pixel, not a pixel over, as the box it's
+    // drawn in is (a screen is a screen wide, to the pixel: a desktop's window only at least).
+    if (framing && size === "phone" && zoomed !== 1) {
+      const wide = wholeOf(framing.width * framing.scale)
+      values["--browser-view-width"] = `${wide}px`
+      // As tall as the zoom, which a screen's width sets, lays it out a screen tall, to the pixel.
+      const ratio = win?.devicePixelRatio || 1
+      const tall = Math.round(((framing.height * wide) / framing.width) * ratio) / ratio
+      values["--browser-view-height"] = `${tall}px`
+    } else {
+      values["--browser-view-width"] = undefined
+      values["--browser-view-height"] = undefined
     }
     for (const [name, value] of Object.entries(values)) {
       if (value === undefined) root.style.removeProperty(name)
@@ -701,6 +725,29 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
     if (!key) return
     if (dressed?.view !== view) dressed = { view, keys: [] }
     dressed.keys.push(key.catch(() => undefined))
+  }
+  // Whether the page's document asks for a phone's viewport, read as it's ready at a phone's
+  // size; one read answering after a later one was asked for, or after the size changed, is
+  // of what's gone.
+  let unmobile = false
+  let viewportReads = 0
+  const sayUnmobile = (now: boolean): void => {
+    if (now === unmobile) return
+    unmobile = now
+    on?.unmobile?.(now)
+  }
+  const mobile = (): void => {
+    const view = page
+    const asked = ++viewportReads
+    if (!view || size !== "phone") return sayUnmobile(false)
+    const read = attached(() => view.executeJavaScript(viewportRead))
+    if (!read) return
+    void read
+      .then((tag) => {
+        if (asked === viewportReads && page === view && size === "phone")
+          sayUnmobile(!isMobileViewport(tag))
+      })
+      .catch(nothing)
   }
   const undress = (): void => {
     const was = dressed
@@ -948,6 +995,7 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
     ["dom-ready", moved],
     ["dom-ready", painting],
     ["dom-ready", dress],
+    ["dom-ready", mobile],
     ["dom-ready", becomeSize],
     ["did-attach", zoom],
     ["did-navigate", zoom],
@@ -1254,6 +1302,7 @@ export const mountBrowser: Mount<BrowserContent, BrowserOptions, BrowserViewer> 
       frame()
       if (size === "phone") dress()
       else undress()
+      mobile()
       becomeSize()
       // Its picture, and one under way, are of the other size, as is where it was scrolled:
       // it rests as one of this once one is taken. Over a page that's there, or on its way
