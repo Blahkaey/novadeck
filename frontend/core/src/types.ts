@@ -7,7 +7,7 @@ import type { NoticeSound } from "./sounds"
 // What the person chose for the page: a scheme, or whatever the system uses.
 export type SchemePreference = "system" | "light" | "dark"
 export type ViewMode = "focus" | "grid" | "canvas"
-// The sidebar's panels, each with a toggle on the rail.
+// The sidebar's panels, each a place the route can name; the rail's toggles are `railPanels`.
 export const sidebarPanels = [
   "terminals",
   "inbox",
@@ -32,10 +32,10 @@ export const panelNamed = (name: string): SidebarPanel | undefined =>
   (Object.hasOwn(formerPanels, name) ? formerPanels[name] : undefined)
 // The rail's toggles: one per panel, but Terminals and Sessions share one, as two views of
 // the Terminals panel that a switch beside its title picks between.
-export const railPanels = sidebarPanels.filter(
-  (panel): panel is Exclude<SidebarPanel, "sessions"> => panel !== "sessions",
+export type RailPanel = Exclude<SidebarPanel, "sessions">
+export const railPanels: readonly RailPanel[] = sidebarPanels.filter(
+  (panel): panel is RailPanel => panel !== "sessions",
 )
-export type RailPanel = (typeof railPanels)[number]
 // The rail toggle a panel shows under: Terminals' for Sessions, its own for the rest.
 export const railPanelOf = (panel: SidebarPanel): RailPanel =>
   panel === "sessions" ? "terminals" : panel

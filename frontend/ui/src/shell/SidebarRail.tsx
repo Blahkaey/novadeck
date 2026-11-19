@@ -52,14 +52,17 @@ const panelShortcuts: Readonly<Record<RailPanel, ShortcutName>> = {
 }
 
 // A toggle's tooltip: its panel, what it holds for the person, and, while its panel is open,
-// where a click takes the sidebar: back to the panel shown before it, or hidden.
+// where a click takes the sidebar: back to the panel shown before it, or hidden; then the key
+// that does what the click does: while the sessions show (`view`), the Sessions key.
 export const railTooltip = ({
   panel,
+  view = panel,
   detail,
   open,
   back,
 }: {
   panel: RailPanel
+  view?: SidebarPanel
   detail?: string | undefined
   open: boolean
   back: SidebarPanel | null
@@ -70,7 +73,8 @@ export const railTooltip = ({
       : "hide sidebar"
     : undefined
   // Its keys joined by no-break spaces, so a wrapping tooltip keeps them on one line.
-  const keys = shortcutBindings()[panelShortcuts[panel]].display.join("\u00a0")
+  const key = open && view === "sessions" ? "sessions" : panelShortcuts[panel]
+  const keys = shortcutBindings()[key].display.join("\u00a0")
   return [panelLabels[panel], detail, action, keys].filter(Boolean).join(" · ")
 }
 
@@ -213,6 +217,7 @@ export const SidebarRail = ({
             index={index}
             count={shown.length}
             open={sidebarVisible && railPanelOf(sidebarPanel) === id}
+            view={sidebarPanel}
             back={stepBack(sidebarBack, id)}
             badge={id === "inbox" ? badge : undefined}
             bellRings={bellRings}
@@ -241,6 +246,7 @@ const RailToggle = ({
   index,
   count,
   open,
+  view,
   back,
   badge,
   bellRings,
@@ -259,6 +265,8 @@ const RailToggle = ({
   count: number
   // Its panel shows, so a click goes back to the panel before it or hides the sidebar.
   open: boolean
+  // The panel that shows, which picks the key its tooltip names while it is open.
+  view: SidebarPanel
   back: SidebarPanel | null
   // What the Inbox holds, on its toggle.
   badge: InboxBadge | undefined
@@ -316,6 +324,7 @@ const RailToggle = ({
               ? `${todosLeft} to do`
               : sessionsAsk,
         open,
+        view,
         back,
       })}
       tooltipDisabled={dragging}

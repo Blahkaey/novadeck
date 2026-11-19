@@ -74,6 +74,13 @@ describe("the rail's tooltips", () => {
     expect(railTooltip({ panel: "terminals", open: true, back: "inbox" })).toBe(
       `Terminals · back to Inbox · ${keys("E")}`,
     )
+    // While the sessions show, the Sessions key does what the click does.
+    expect(railTooltip({ panel: "terminals", view: "sessions", open: true, back: "inbox" })).toBe(
+      `Terminals · back to Inbox · ${keys("S")}`,
+    )
+    expect(railTooltip({ panel: "terminals", view: "sessions", open: false, back: null })).toBe(
+      `Terminals · ${keys("E")}`,
+    )
     expect(railTooltip({ panel: "inbox", open: true, back: "sessions" })).toBe(
       `Inbox · back to Sessions · ${keys("B")}`,
     )

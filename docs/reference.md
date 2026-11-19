@@ -1104,7 +1104,7 @@ A paste that fails, as of a copy over 32 MB or with the clipboard unreadable, sa
 terminal.
 
 The new-session shortcut creates and selects an empty session in the current project
-and opens the Sessions sidebar.
+and opens its terminals in the sidebar.
 
 A rail icon or sidebar shortcut opens or switches to its panel. Pressing it again on the open
 panel goes back one step, to the panel you were on just before, so a look at the Inbox or
