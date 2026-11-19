@@ -171,7 +171,7 @@ const picked = (args: Arguments, names: readonly string[]): Arguments =>
 const show: Tool<Shown> = {
   name: "show",
   description:
-    "Show the user an image, a video, an audio recording or a text file, a web page, or the working tree's changes, in Novadeck, " +
+    "Show the user an image, a video, an audio recording, a PDF or a text file, a web page, or the working tree's changes, in Novadeck, " +
     "beside the terminal they're talking to you in. Give one of file, page or changes. Show a " +
     "deliverable when it is done, not each file you touch: an image or screenshot, a " +
     "rendered video, recording or screen capture, a rendered page or a dev server's address, a report, mockup, diagram or generated " +
@@ -195,8 +195,8 @@ const show: Tool<Shown> = {
         description:
           "A file: an image (PNG, APNG, JPEG, JPEG XL, GIF, WebP, AVIF, BMP, ICO, SVG), a video (MP4, " +
           "M4V, WebM, MOV) or an audio recording (MP3, M4A, AAC, WAV, OGG, Opus, FLAC), which " +
-          "Novadeck plays, or a text file, and for a text file the lines to point at, or for a video or " +
-          "recording the second to start at.",
+          "Novadeck plays, a PDF, which it shows page by page, or a text file, and for a text " +
+          "file the lines to point at, or for a video or recording the second to start at.",
         properties: {
           path: {
             type: "string",
@@ -321,7 +321,9 @@ const show: Tool<Shown> = {
     (answer.tooLarge
       ? answer.kind === "video" || answer.kind === "audio"
         ? " It's too large to play (over 512 MB), so Novadeck lists it by its name only."
-        : " It's too large to preview, so Novadeck lists it by its name only."
+        : answer.kind === "pdf"
+          ? " It's too large to preview (over 128 MB), so Novadeck lists it by its name only."
+          : " It's too large to preview, so Novadeck lists it by its name only."
       : ""),
   failed: "Novadeck couldn't show it.",
 }
@@ -329,7 +331,7 @@ const show: Tool<Shown> = {
 const showing: Tool<Listing> = {
   name: "showing",
   description:
-    "List what is showing beside your terminal in Novadeck now: each image, video, recording, file, page, " +
+    "List what is showing beside your terminal in Novadeck now: each image, video, recording, PDF, file, page, " +
     "changes and plan, with where it points and whether you showed it, the user attached it, or " +
     "it was placed there from another terminal, and what you showed that the user moved " +
     "into a window or beside another terminal. Check it before showing after a while, " +

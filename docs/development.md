@@ -473,6 +473,22 @@ Agents:
   play" (garbage under a name), "...that may hold
   secrets" (a tab that opens when picked), "Show the recording again from 0:02", "Rewrite the
   recording" and "Rewrite the recording, caught mid-write".
+- **PDF:** only in the `showcase` variant, on the selected terminal's bar. The dev server's
+  terminal (`@fox`) already holds quarterly-report.pdf, a five-page Letter report written as
+  bytes in code (`frontend/demo/src/showcase/pdf.ts`), drawn by the pane's PDF viewer; opening
+  a `.pdf` from the Files panel shows the same report. "Show a PDF" shows it again;
+  "Show a PDF that loads slowly" reads it in 512-byte parts 0.6 s apart, so the pane says
+  "Loading" with its progress for about 3 s; "Show a PDF too large to preview" is the pane's
+  unavailable state, "Novadeck previews PDFs up to 128 MB."; "Show a PDF that may hold secrets"
+  joins the stack unopened until you pick its tab; "Show a PDF locked with a password" is a one-page PDF locked
+  by Ghostscript, which the viewer says "This PDF is locked with a password, which Novadeck doesn't
+  open."; "Show a PDF whose read fails" is the pane's "couldn't be loaded", as when the link to the runner
+  drops; "Stop the PDF viewer" sends the open PDF's frame to another page, as only a script in it
+  could, and the pane says "The PDF viewer stopped."; "Show a file that isn't a PDF" is text under
+  a PDF's name, which the viewer says "This file couldn't be read as a PDF."; "Rewrite the PDF"
+  shows the report under a new stamp, as if its file was rewritten, read in 512-byte parts 0.3 s
+  apart: the old one stays on screen under a Loading chip for about 2 s, then the new one swaps
+  in on the page you were on.
 - **Changes:** only in the `showcase` variant, no action needed: the dev server's terminal
   (`@fox`, the third) holds its items on the bar beside those that can't show, thirteen of them
   changes, one in each shape the changes pane draws: an ordinary change in layers (a refactor of
