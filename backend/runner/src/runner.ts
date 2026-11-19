@@ -23,6 +23,7 @@ import { codexConfig, installShellFiles } from "./shell/install.js"
 import { ActiveTerminals } from "./terminals/active.js"
 import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
+import { SeenTerminals } from "./terminals/seen.js"
 import { Uploads } from "./terminals/uploads.js"
 import { readAccount, readGitName } from "./tour/name.js"
 import { Tour } from "./tour/tour.js"
@@ -342,6 +343,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   const priority = terminalPriorities()
   // The terminal the person uses in each window keeps the normal share of both.
   const activity = new ActiveTerminals()
+  // The terminals in sight at each window, which the runner never moves the view of.
+  const seen = new SeenTerminals()
   started.push({ close: async () => activity.stop() })
   // Without a key from the app no transcript is saved or shown.
   const sealer = createTranscriptSealer(options.transcriptKey)
@@ -419,8 +422,13 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     ...((scopes || priority) && {
       pty: { ...(scopes && { scopes }), ...(priority && { priority }), activity },
     }),
-    ...(options.dialogs !== undefined && { answers: { saves: options.dialogs } }),
     ...options.terminals,
+    // Whatever a test says of the answers, the dialogs still see which terminals are in sight.
+    answers: {
+      ...(options.dialogs !== undefined && { saves: options.dialogs }),
+      ...options.terminals?.answers,
+      seen,
+    },
   })
   const projects = new Projects(store, terminals, items, worktrees)
   // In the person's home, where the agents are looked for too.
@@ -541,6 +549,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     rootFolder,
     tour,
     activity,
+    seen,
   }
 }
 
@@ -619,6 +628,7 @@ const startRunner = (options: RunnerOptions): Runner => {
     rootFolder,
     tour,
     activity,
+    seen,
   } = wire(options)
   let closing: Promise<void> | undefined
   return {
@@ -643,6 +653,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         settingsSaved: () => rootFolder.ensure(),
         tour,
         activity,
+        seen,
       }),
       error: apiError,
       failed: logFailure,
@@ -652,6 +663,7 @@ const startRunner = (options: RunnerOptions): Runner => {
       closed: (session) => {
         log.info("client.closed", "A client's session ended.", { data: { session: session.id } })
         activity.release(session.id)
+        seen.release(session.id)
         terminals.release(session.id)
         works.release(session.id)
         voice.release(session.id)

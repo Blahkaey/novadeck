@@ -1,4 +1,4 @@
-import { copyFileSync } from "node:fs"
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 
@@ -8,7 +8,7 @@ import { harnesses } from "../harnesses/registry.js"
 import type { Question } from "./agents/agent.js"
 import { setups } from "./agents/index.js"
 import type { DeckTerminal } from "./deck.js"
-import { describe, e2e, expect, gated, supported } from "./fixture.js"
+import { describe, e2e, expect, gated, supported, type E2E } from "./fixture.js"
 import { asked, text, type Rule } from "./model/script.js"
 import type { FakeModel } from "./model/server.js"
 import { picture } from "./pictures.js"
@@ -1163,6 +1163,185 @@ describe.skipIf(!supported || !codexSetup)("Codex's async question", () => {
     await dialogOf(t1, "questions")
     await t1.prompt("Never mind")
     await t1.until("OK.", 30_000)
+    await unrequested(t1)
+  })
+})
+
+// Claude Code's fullscreen renderer (`"tui": "fullscreen"`) keeps a dialog that comes while
+// the person has its transcript scrolled up out of sight, under a "Waiting for your answer
+// (ctrl+End) ↓" pill (`probes/fullscreen-scrolled.e2e.ts`). Codex hides one under its `/diff`
+// pager instead (below); Antigravity draws its dialogs over its views. A question reads from what its hook asked, and the
+// answer scrolls it into view first, leaving the screen alone until then.
+const claudeSetup = setups.find(({ agent }) => agent === "claude")
+describe.skipIf(!supported || !claudeSetup)("Claude Code's fullscreen view scrolled up", () => {
+  const it = e2e(claudeSetup!)
+
+  it("answers a question held below the view, scrolling it in only to answer", async ({
+    e2e: run,
+  }) => {
+    const settings = join(run.sandbox.home, ".claude", "settings.json")
+    writeFileSync(
+      settings,
+      JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), tui: "fullscreen" }),
+    )
+    const tall = Array.from({ length: 120 }, (_, n) => `Line ${n + 1}: as it stands.`).join("\n\n")
+    let waited = false
+    run.model.use(
+      // A wait after the reply, for the test to scroll up before the question comes.
+      answers("Show the plan", () => ({
+        text: tall,
+        calls: [{ name: "Bash", input: { command: "sleep 8", description: "Wait" } }],
+      })),
+      own((call) => {
+        if (result(call) === undefined || waited) return undefined
+        waited = true
+        return { calls: [{ name: "AskUserQuestion", input: { questions: [colour] } }] }
+      }),
+      noted,
+    )
+    const t1 = await start(run, claudeSetup!)
+    t1.resize(120, 33)
+    await sleep(800)
+    await t1.submit("Show the plan")
+    await t1.until(/Line 120:/, 30_000)
+    await sleep(800)
+    t1.press("\x1b[5~")
+    await sleep(300)
+    t1.press("\x1b[5~")
+
+    const request = await dialogOf(t1, "questions")
+    const dialog = questionsOf(request)
+    expect(dialog.questions[0]!.options.map(({ label }) => label)).toEqual(["Blue", "Green"])
+    // Read without moving the person's view.
+    expect(await t1.screen()).toContain("Waiting for your answer")
+    const calls = run.model.calls.length
+    await t1.answer(request.ref, {
+      dialog: idOf(request),
+      type: "questions",
+      answers: [
+        { question: dialog.questions[0]!.id, options: [dialog.questions[0]!.options[1]!.id] },
+      ],
+    })
+    await resulting(run.model, "Green", calls)
+    await unrequested(t1)
+  })
+
+  // A permission's options exist only on screen, so it can't be read from the pill. With no
+  // window looking at the terminal, Novadeck scrolls it into view itself (Ctrl+End).
+  const permissionBelowView = async (run: E2E) => {
+    const settings = join(run.sandbox.home, ".claude", "settings.json")
+    writeFileSync(
+      settings,
+      JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), tui: "fullscreen" }),
+    )
+    const tall = Array.from({ length: 120 }, (_, n) => `Line ${n + 1}: as it stands.`).join("\n\n")
+    let waited = false
+    run.model.use(
+      answers("Show the plan", () => ({
+        text: tall,
+        calls: [{ name: "Bash", input: { command: "sleep 8", description: "Wait" } }],
+      })),
+      own((call) => {
+        if (result(call) === undefined || waited) return undefined
+        waited = true
+        return {
+          calls: [
+            {
+              name: "Bash",
+              input: { command: "touch made-by-probe.txt", description: "Make a file" },
+            },
+          ],
+        }
+      }),
+      noted,
+    )
+    const t1 = await start(run, claudeSetup!)
+    t1.resize(120, 33)
+    await sleep(800)
+    await t1.submit("Show the plan")
+    await t1.until(/Line 120:/, 30_000)
+    await sleep(800)
+    t1.press("\x1b[5~")
+    await sleep(300)
+    t1.press("\x1b[5~")
+    return t1
+  }
+
+  it("scrolls a permission held below the view into view by itself, for a terminal nobody looks at", async ({
+    e2e: run,
+  }) => {
+    const t1 = await permissionBelowView(run)
+    const request = await dialogOf(t1, "choices")
+    expect(choices(request).detail).toContain("touch made-by-probe.txt")
+    const calls = run.model.calls.length
+    const yes = option(choices(request), /^Yes/, false)
+    await t1.answer(request.ref, { dialog: idOf(request), type: "choice", option: yes.id })
+    await run.model.waitFor((call) => result(call) !== undefined, { after: calls })
+    await unrequested(t1)
+  })
+
+  it("leaves a permission held below the view alone while a window has the terminal in sight", async ({
+    e2e: run,
+  }) => {
+    const t1 = await permissionBelowView(run)
+    run.deck.seen.report("e2e", [t1.id])
+    // Raw, once the screen has been still: the pill stays, and nothing scrolled the dialog in.
+    await dialogOf(t1, "raw")
+    await sleep(2_000)
+    expect((await t1.detail()).requests[0]?.dialog?.type).toBe("raw")
+    expect(await t1.screen()).toContain("Waiting for your answer")
+  })
+})
+
+// Codex's `/diff` pager takes the whole screen, and an approval asked while it is open is drawn
+// under it, with nothing on screen to say so; `q` closes the pager and shows the dialog, and
+// Escape would answer it (`probes/codex-hidden-dialog.e2e.ts`). With no window looking at the
+// terminal, Novadeck presses `q` itself. Claude Code's and Antigravity's dialogs need no such
+// key: Antigravity draws them over its own views.
+describe.skipIf(!supported || !codexSetup)("Codex's /diff pager over an approval", () => {
+  const it = e2e(codexSetup!)
+
+  it("closes the pager by itself for a terminal nobody looks at, and the approval answers", async ({
+    e2e: run,
+  }) => {
+    let waited = false
+    run.model.use(
+      // A wait after the first call, for the pager to be opened before the approval is asked.
+      answers("Run the thing", () => ({
+        calls: [
+          { name: "exec_command", input: { cmd: "sleep 8; echo slept", yield_time_ms: 30_000 } },
+        ],
+      })),
+      own((call) => {
+        if (result(call) === undefined || waited) return undefined
+        waited = true
+        return {
+          calls: [
+            {
+              name: "exec_command",
+              input: {
+                cmd: "echo approved > probe-out.txt",
+                sandbox_permissions: "require_escalated",
+                justification: "Echo outside the sandbox",
+              },
+            },
+          ],
+        }
+      }),
+      noted,
+    )
+    const t1 = await start(run, codexSetup!)
+    await t1.prompt("Run the thing")
+    await sleep(3_000)
+    await t1.submit("/diff")
+    await t1.until(/q close/, 20_000)
+
+    const request = await dialogOf(t1, "choices")
+    expect(choices(request).detail).toContain("echo approved > probe-out.txt")
+    const calls = run.model.calls.length
+    const yes = option(choices(request), /^Yes, proceed/, false)
+    await t1.answer(request.ref, { dialog: idOf(request), type: "choice", option: yes.id })
+    await run.model.waitFor((call) => result(call) !== undefined, { after: calls })
     await unrequested(t1)
   })
 })

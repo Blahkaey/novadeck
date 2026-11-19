@@ -1086,6 +1086,8 @@ export class Typing {
       },
       adapter: (agent) => harnesses[agent].dialogs,
       screen: (terminalId) => this.screenOf(terminalId),
+      busy: (terminalId) => this.inputs.busy(terminalId),
+      press: (terminalId, data) => this.pressed(terminalId, data),
       ask: (terminalId, request) => {
         const record = this.host.live(terminalId)
         const binding = record?.bound?.binding

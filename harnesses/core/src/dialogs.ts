@@ -93,6 +93,16 @@ export type DialogRead = {
    * Such dialogs never clash with each other on one screen: each prompt names its own.
    */
   readonly prompt?: (answer: RequestAnswer) => string | undefined
+  /**
+   * Set where this read comes from the request's facts alone, its dialog being held out of
+   * view (Claude Code's fullscreen view scrolled up): the keys that bring it into view,
+   * answering nothing. Such a read is not answered as it is. The driver presses these, waits
+   * until the adapter reads the same request without one, and answers by that read (its
+   * `keys`, its `answered`) or sets it aside; `keys` and `answered` of this one go unused.
+   * It names no dialog on screen, so it counts only for a request that is the terminal's
+   * only one, and its fingerprint differs from the same dialog's shown read.
+   */
+  readonly reveal?: string
 }
 
 /** A request the screen alone tells, as a prompt that fires no hook. */
@@ -114,6 +124,17 @@ export type DialogAdapter = {
    * the current screen asks, or undefined. Absent where hooks report them all.
    */
   readonly screenRequest?: (rows: readonly string[]) => ScreenRequest | undefined
+  /**
+   * The keys that bring a dialog held out of view into view, answering nothing: what the
+   * person would press to see a dialog their TUI drew where the screen doesn't show it
+   * (Claude Code's fullscreen view scrolled up, which leaves only a pill; Codex's `/diff`
+   * pager, which says nothing, closed with `q`); undefined when the screen holds none out of
+   * view. A screen that may hold one is judged strictly, for the keys are typed into the
+   * person's composer anywhere else. The runner presses them only for a terminal no client
+   * has in sight, so a person reading it is never moved. Absent for Antigravity, which draws
+   * its dialogs over its own views (`/help`, `/skills`).
+   */
+  readonly reveal?: (rows: readonly string[]) => string | undefined
 }
 
 /**

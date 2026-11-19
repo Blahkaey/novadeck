@@ -172,6 +172,8 @@ export type Deck = {
   /** What agents show beside the terminals, as the runner wired now keeps them. */
   readonly items: ReturnType<typeof wire>["items"]
   readonly sessionId: string
+  /** Which terminals the clients have in sight, as `terminals.seen` tells it: none unless a test says. */
+  readonly seen: ReturnType<typeof wire>["seen"]
   /** The runner's tour, as `tour.prepare` and `tour.brief` answer. */
   readonly tour: ReturnType<typeof wire>["tour"]
   /**
@@ -589,6 +591,7 @@ type Runner = {
   readonly items: ReturnType<typeof wire>["items"]
   readonly uploads: ReturnType<typeof wire>["uploads"]
   readonly tour: ReturnType<typeof wire>["tour"]
+  readonly seen: ReturnType<typeof wire>["seen"]
   /** Aborts as the runner closes, ending every watch of it. */
   readonly closing: AbortController
 }
@@ -657,7 +660,7 @@ const now = async <T>(stream: (signal: AbortSignal) => AsyncGenerator<T>): Promi
 export const createDeck = async (options: DeckOptions): Promise<Deck> => {
   const shellFolder = join(options.data, "shell")
   const start = async (): Promise<Runner> => {
-    const { store, shellFiles, agents, terminals, items, uploads, tour } = wire({
+    const { store, shellFiles, agents, terminals, items, uploads, tour, seen } = wire({
       database: join(options.data, "workspace.sqlite"),
       uploads: join(options.data, "uploads"),
       shell: shellFolder,
@@ -681,6 +684,8 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
         // Seconds, not the setting's minutes, once a scenario turns stopping idle agents on
         // (`hibernated`); off until then, so no other scenario's agent is stopped mid-test.
         hibernation: { windowMs: 5_000, sweepMs: 1_000 },
+        // No window reports what it looks at here: a held dialog is scrolled in after a moment.
+        answers: { graceMs: 300 },
       },
     })
     // The runner carries on without its shell files; a test can't, as no agent would report.
@@ -689,7 +694,7 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
       store.close()
       throw new Error("Novadeck's shell files could not be written")
     }
-    return { store, agents, terminals, items, uploads, tour, closing: new AbortController() }
+    return { store, agents, terminals, items, uploads, tour, seen, closing: new AbortController() }
   }
 
   let runner = await start()
@@ -994,6 +999,9 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
   return {
     get terminals() {
       return runner.terminals
+    },
+    get seen() {
+      return runner.seen
     },
     get store() {
       return runner.store
