@@ -149,7 +149,7 @@ const springView = (spring: Element): "terminals" | "sessions" =>
 // Undefined where the backend can't move terminals.
 export const useTabsAway = (): TabsAway | undefined => {
   const { backend, commands, ui, workspace } = useWorkspaceServices()
-  // The rail button held over, and the timer that opens its panel.
+  // The view's choice or rail button held over, and the timer that opens its view.
   const held = useRef<{ readonly button: Element; readonly cancel: () => void } | null>(null)
   // The tab being dragged, and whether the person has pulled it out of the list. Until then it
   // reorders the list and nothing else; it becomes a pick only once it reaches Sessions.

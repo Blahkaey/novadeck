@@ -41,9 +41,9 @@ export type ShellCommands = {
   // the view of the panel the person last saw, terminals or sessions, and goes back or hides
   // the sidebar from either.
   readonly toggleRail: (panel: RailPanel) => void
-  // Switches the Terminals panel to a view, from the switch beside its title, which keeps the
-  // focus it had.
-  readonly switchTerminalsView: (view: TerminalsView) => void
+  // Switches the Terminals panel to a view, from the switch before its title. Chosen by the
+  // keys, the switch keeps the focus; by a mouse, typing stays where the click leaves it.
+  readonly switchTerminalsView: (view: TerminalsView, byKeys: boolean) => void
   readonly enterZen: () => void
   readonly exitZen: () => void
   // Frames every window the view shows, as Canvas's 0 key does; no change elsewhere.
@@ -152,12 +152,12 @@ export const createShellCommands = (ctx: CommandContext): ShellCommands => {
         return toggleSidebar(open)
       show(entry === "terminals" ? shell.terminalsView : entry)
     },
-    switchTerminalsView: (view) => {
+    switchTerminalsView: (view, byKeys) => {
       if (panel() === view) return
       show(view)
       // The switch pressed is in the view that just hid; its twin in the one that shows takes
       // the focus, as the person's place.
-      effects.afterFrame(() => effects.focusTerminalsView(view))
+      if (byKeys) effects.afterFrame(() => effects.focusTerminalsView(view))
     },
     enterZen: () => {
       if (ui.getSnapshot().shell.zen) return

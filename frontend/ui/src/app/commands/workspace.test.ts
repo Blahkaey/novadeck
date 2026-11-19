@@ -785,7 +785,7 @@ describe("workspace commands", () => {
         const app = openCommands()
         app.commands.toggleSidebar("inbox")
         app.commands.toggleRail("terminals")
-        app.commands.switchTerminalsView("sessions")
+        app.commands.switchTerminalsView("sessions", true)
         expect(panel(app)).toBe("sessions")
         app.commands.toggleRail("terminals")
         expect(panel(app)).toBe("inbox")
@@ -822,7 +822,7 @@ describe("workspace commands", () => {
 
       it("opens on the view the person last saw, however they got there", () => {
         const app = openCommands()
-        app.commands.switchTerminalsView("sessions")
+        app.commands.switchTerminalsView("sessions", true)
         app.commands.toggleRail("inbox")
         app.commands.toggleRail("terminals")
         expect(panel(app)).toBe("sessions")
@@ -834,15 +834,23 @@ describe("workspace commands", () => {
         expect(panel(app)).toBe("terminals")
       })
 
-      it("hands the switch's focus to its twin in the view that shows", () => {
+      it("hands the switch's focus to its twin in the view that shows, by the keys", () => {
         const app = openCommands()
-        app.commands.switchTerminalsView("sessions")
+        app.commands.switchTerminalsView("sessions", true)
         app.flush()
         expect(app.effects).toContain("focus sessions view")
         const before = app.effects.length
-        app.commands.switchTerminalsView("sessions")
+        app.commands.switchTerminalsView("sessions", true)
         app.flush()
         expect(app.effects.length).toBe(before)
+      })
+
+      it("leaves the focus where a mouse's click leaves it", () => {
+        const app = openCommands()
+        app.commands.switchTerminalsView("sessions", false)
+        app.flush()
+        expect(panel(app)).toBe("sessions")
+        expect(app.effects).not.toContain("focus sessions view")
       })
     })
   })

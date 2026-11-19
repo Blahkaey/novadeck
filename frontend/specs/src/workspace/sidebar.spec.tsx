@@ -195,7 +195,7 @@ describe("sidebar settings", () => {
 
 describe("the Terminals panel's views", () => {
   context("when the switch beside the title is pressed", () => {
-    it("shows the sessions under the same rail toggle and keeps the focus on the switch", async () => {
+    it("shows the sessions under the same rail toggle, leaving typing in the terminal", async () => {
       await openWorkspace()
       await expectTerminalsView("Terminals")
 
@@ -204,13 +204,13 @@ describe("the Terminals panel's views", () => {
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
       await expect.element(sidebar().getByRole("heading", { name: /^Sessions/ })).toBeVisible()
       await expectTerminalsView("Sessions")
-      await expect.element(terminalsView("Sessions")).toHaveFocus()
+      await expect.element(commandInput("Checkout implementation")).toHaveFocus()
 
       await chooseTerminalsView("Terminals")
 
       await expect.element(sidebar()).toHaveAccessibleName("Terminals")
       await expectTerminalsView("Terminals")
-      await expect.element(terminalsView("Terminals")).toHaveFocus()
+      await expect.element(commandInput("Checkout implementation")).toHaveFocus()
     })
 
     it("changes the view by the arrow keys, keeping the focus on the switch", async () => {
