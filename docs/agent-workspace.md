@@ -337,7 +337,8 @@ back. A preview's own tools join the row before it (`usePreviewTools`); one that
 file says so in its body, the switch still there. The choice is the item's, for the file it
 shows: it holds while the pane is built again, as across Focus, Grid and Canvas, for the files
 lately switched, isn't saved past a reload, and another file the item is pointed at (as the
-project window's is) opens on its preview. A plan is its own kind and has no switch.
+project window's is) opens in that file's default view. A plan is its own kind and has no
+switch.
 
 JSON, JSONL/NDJSON and YAML files preview as a tree (`previews/data.tsx`, drawn by
 `@novadeck/viewers/tree`): objects and arrays open and close, a closed one shows its first
@@ -372,8 +373,9 @@ own to saving one. A backend that edits no files reports a file as without `edit
 save must name the `path` its edit was made on, and writes nothing where the item points at
 another file now (`moved`, as is a file's save that names none), so one that lands after
 another window pointed the project window at the next file never writes one file's text into
-another. Markdown remains editable in its document view and in its source. Data files with a
-preview open there first; switch to source to edit them when the window has them whole.
+another. Markdown remains editable in its document view and in its source. When the project window
+has a data file whole to edit, it opens in the source editor, with the preview available from the
+same switch.
 
 A change (the `changes` item kind) is read-only and has two views, in `frontend/items/src/kinds/changes/`,
 on the pane's own ground (`--pane-bg`). The **list view** is where it opens: a row for the work

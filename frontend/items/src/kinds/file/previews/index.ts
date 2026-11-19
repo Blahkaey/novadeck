@@ -7,8 +7,8 @@ import { markdown } from "./markdown"
 import { table } from "./table"
 
 // The file types that read as something other than their source: a Markdown file as a
-// document, and so on. A file of one shows its preview first, and the pane's row gets a
-// switch between it and its source, the bare file in the code viewer. A file of no type here
+// document, and so on. The pane's row gets a switch between the preview and the file's
+// source, shown in the code viewer or the project window's editor. A file of no type here
 // shows as code, with no switch. A type joins with a folder or module of its own here and one
 // line in `previews` below. A preview that can't read its file (as JSON that doesn't parse)
 // says so in its body: the switch to the source stays in the row. Its own tools go in the row

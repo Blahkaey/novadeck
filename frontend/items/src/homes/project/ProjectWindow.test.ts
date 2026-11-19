@@ -203,7 +203,7 @@ describe("the project window", () => {
       expect(saves).toEqual(["/p/cart.ts"])
     })
 
-    it("previews a data file and saves edits made in its source", async () => {
+    it("opens a data file ready to edit and can switch to its preview and back", async () => {
       const path = "/p/cart.json"
       const item = { ...source, name: "cart.json", path }
       const text = '{"total":1}'
@@ -212,9 +212,12 @@ describe("the project window", () => {
         ready({ kind: "text", path, text, writable: true }),
       )
       const viewed = () => container.querySelector(".artifact-file")?.getAttribute("data-view")
+      expect(viewed()).toBe("source")
+      expect(editorIn(container).state.doc.toString()).toBe(text)
+      const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Show source"]')!
+      act(() => toggle.click())
       expect(viewed()).toBe("preview")
       expect(container.querySelector(".artifact-editor")).toBeNull()
-      const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Show source"]')!
       await act(async () => {
         toggle.click()
         await vi.dynamicImportSettled()
@@ -225,8 +228,6 @@ describe("the project window", () => {
       press(editorIn(container).contentDOM, "s", { ctrlKey: true })
       expect(saves).toEqual([path])
       expect(sent).toEqual([text + "\n"])
-      act(() => toggle.click())
-      expect(viewed()).toBe("preview")
     })
 
     it("edits a Markdown file in its document", async () => {

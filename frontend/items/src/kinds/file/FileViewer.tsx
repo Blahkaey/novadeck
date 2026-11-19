@@ -115,8 +115,8 @@ const isSwitchKey = (event: KeyboardEvent): boolean =>
 // again; by load, so the pane built again, as across views, shows it the same.
 const sentToSource = new WeakMap<FileContent, { readonly note: string; readonly line?: number }>()
 
-// A file of a type with a preview: the preview first, or its source as the person last
-// switched it for this item and file, with the switch in the pane's row after the preview's
+// A file of a type with a preview: its default view or the one the person last chose for
+// this item and file, with the switch in the pane's row after the preview's
 // own tools. The file takes focus from a click anywhere in it, so its key works from there,
 // and keeps it as it switches, so the key switches it back: a region named for the file and
 // what it shows now, ringed when the keyboard moved focus there. A key held down switches once.
@@ -136,7 +136,9 @@ const PreviewedFile = ({
   preview: FilePreview
   editors?: FileEditors | undefined
 }): React.JSX.Element => {
-  const [view, choose] = useFileView(item.id, content.path)
+  // A project data file opens in its editor. Markdown can be edited in its document view.
+  const editSource = editors !== undefined && editors.documentEditor === undefined
+  const [view, choose] = useFileView(item.id, content.path, editSource ? "source" : "preview")
   const [tools, setTools] = useState<readonly PaneTool[]>([])
   const holder = useRef<HTMLDivElement>(null)
   const setPreviewTools = useCallback((next: readonly PaneTool[]) => setTools(next), [])
