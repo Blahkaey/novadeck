@@ -1,4 +1,9 @@
-import type { SidebarPanel } from "@novadeck/core/types"
+import {
+  railPanelOf,
+  type RailPanel,
+  type SidebarPanel,
+  type TerminalsView,
+} from "@novadeck/core/types"
 
 import {
   bumpNavigation,
@@ -32,6 +37,13 @@ export type ShellCommands = {
   // Shows the panel, leaving Zen; when it already shows, goes back to the panel shown just
   // before it, or hides the sidebar when there is none.
   readonly toggleSidebar: (panel: SidebarPanel) => void
+  // A rail toggle's press: as `toggleSidebar` for its panel, but the Terminals toggle opens
+  // the view of the panel the person last saw, terminals or sessions, and goes back or hides
+  // the sidebar from either.
+  readonly toggleRail: (panel: RailPanel) => void
+  // Switches the Terminals panel to a view, from the switch beside its title, which keeps the
+  // focus it had.
+  readonly switchTerminalsView: (view: TerminalsView) => void
   readonly enterZen: () => void
   readonly exitZen: () => void
   // Frames every window the view shows, as Canvas's 0 key does; no change elsewhere.
@@ -75,11 +87,12 @@ export const createShellCommands = (ctx: CommandContext): ShellCommands => {
     const { shell: before } = ui.getSnapshot()
     const inZen = Boolean(before.zen)
     // Switching from an open panel remembers it, for the new panel's toggle to go back to; a
-    // sidebar opening remembers none, and showing the open panel again keeps what it had.
+    // sidebar opening remembers none, and showing the open panel again, or another view of it
+    // under the same rail toggle, keeps what it had.
     const current = panel()
     const back = !sidebarVisible(before, effects.desktop())
       ? null
-      : current === next
+      : railPanelOf(current) === railPanelOf(next)
         ? before.sidebarBack
         : { on: next, to: current }
     change((shell) => ({ ...shell, zen: null, sidebarBack: back }))
@@ -109,6 +122,20 @@ export const createShellCommands = (ctx: CommandContext): ShellCommands => {
       })
     }
   }
+  const toggleSidebar = (next: SidebarPanel): void => {
+    // Visibility before this command: a panel hidden by Zen shows instead of hiding.
+    const { shell } = ui.getSnapshot()
+    const visible = sidebarVisible(shell, effects.desktop())
+    // The open panel's toggle goes back one step, to the panel the person was on before it,
+    // so a look at the Inbox or History returns to where they were; back there, or with no
+    // step to go back, it hides the sidebar.
+    const back = stepBack(shell.sidebarBack, next)
+    if (panel() !== next || !visible) show(next)
+    else if (back) {
+      change((edited) => ({ ...edited, sidebarBack: null }))
+      navigation.go({ panel: back })
+    } else hide()
+  }
   return {
     frameAll: () => pulse("fit-all"),
     showSessions: () => show("sessions"),
@@ -117,19 +144,20 @@ export const createShellCommands = (ctx: CommandContext): ShellCommands => {
     peek,
     peekInbox: () => peek("inbox"),
     hideSidebar: hide,
-    toggleSidebar: (next) => {
-      // Visibility before this command: a panel hidden by Zen shows instead of hiding.
+    toggleSidebar,
+    toggleRail: (entry) => {
       const { shell } = ui.getSnapshot()
-      const visible = sidebarVisible(shell, effects.desktop())
-      // The open panel's toggle goes back one step, to the panel the person was on before it,
-      // so a look at the Inbox or Sessions returns to where they were; back there, or with no
-      // step to go back, it hides the sidebar.
-      const back = stepBack(shell.sidebarBack, next)
-      if (panel() !== next || !visible) show(next)
-      else if (back) {
-        change((edited) => ({ ...edited, sidebarBack: null }))
-        navigation.go({ panel: back })
-      } else hide()
+      const open = panel()
+      if (sidebarVisible(shell, effects.desktop()) && railPanelOf(open) === entry)
+        return toggleSidebar(open)
+      show(entry === "terminals" ? shell.terminalsView : entry)
+    },
+    switchTerminalsView: (view) => {
+      if (panel() === view) return
+      show(view)
+      // The switch pressed is in the view that just hid; its twin in the one that shows takes
+      // the focus, as the person's place.
+      effects.afterFrame(() => effects.focusTerminalsView(view))
     },
     enterZen: () => {
       if (ui.getSnapshot().shell.zen) return

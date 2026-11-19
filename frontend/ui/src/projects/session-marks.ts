@@ -83,7 +83,7 @@ export const sessionNeedText = (mark: SessionMark | undefined): string | undefin
   return undefined
 }
 
-// What the other sessions than the open one ask of the person, in words for the rail's Sessions
+// What the other sessions than the open one ask of the person, in words for the rail's Terminals
 // toggle: how many terminals need them and how many ask. Undefined while none does.
 export const elsewhereSessionsText = (
   marks: Readonly<Record<string, SessionMark>>,

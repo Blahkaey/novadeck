@@ -1,4 +1,4 @@
-import type { SidebarPanel, WindowedView } from "@novadeck/core/types"
+import type { RailPanel, WindowedView } from "@novadeck/core/types"
 
 import { railOrder } from "./rail-order"
 
@@ -32,7 +32,7 @@ export const readSubscriptionOrder = (): readonly string[] => {
 
 // The order the person left the rail's panels in.
 const sidebarOrderStorageKey = "novadeck.sidebar-order"
-export const readSidebarOrder = (): readonly SidebarPanel[] => {
+export const readSidebarOrder = (): readonly RailPanel[] => {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(sidebarOrderStorageKey) ?? "[]")
     return railOrder(Array.isArray(stored) ? stored.filter((each) => typeof each === "string") : [])
@@ -76,7 +76,7 @@ export const writeSubscriptionOrder = (order: readonly string[]): void => {
   }
 }
 
-export const writeSidebarOrder = (order: readonly SidebarPanel[]): void => {
+export const writeSidebarOrder = (order: readonly RailPanel[]): void => {
   try {
     localStorage.setItem(sidebarOrderStorageKey, JSON.stringify(order))
   } catch {

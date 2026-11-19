@@ -29,6 +29,17 @@ const formerPanels: Readonly<Record<string, SidebarPanel>> = {
 export const panelNamed = (name: string): SidebarPanel | undefined =>
   sidebarPanels.find((panel) => panel === name) ??
   (Object.hasOwn(formerPanels, name) ? formerPanels[name] : undefined)
+// The rail's toggles: one per panel, but Terminals and Sessions share one, as two views of
+// the Terminals panel that a switch beside its title picks between.
+export const railPanels = sidebarPanels.filter(
+  (panel): panel is Exclude<SidebarPanel, "sessions"> => panel !== "sessions",
+)
+export type RailPanel = (typeof railPanels)[number]
+// The rail toggle a panel shows under: Terminals' for Sessions, its own for the rest.
+export const railPanelOf = (panel: SidebarPanel): RailPanel =>
+  panel === "sessions" ? "terminals" : panel
+// The views of the Terminals panel, which share its rail toggle.
+export type TerminalsView = Extract<SidebarPanel, "terminals" | "sessions">
 export type WindowedView = Exclude<ViewMode, "focus">
 export type PreferencesValue = {
   fontSize: number

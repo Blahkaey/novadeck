@@ -49,6 +49,7 @@ import {
   watchPresentation,
   watchClosing,
   watchMoving,
+  watchTerminalsView,
   watchCrashLoop,
   keepProjectArrangement,
   watchSwitcher,
@@ -199,6 +200,7 @@ export const WorkspaceProvider = ({
   useEffect(() => watchPortable(services.backend.portable, services.ui), [services])
   useEffect(() => watchClosing(services.workspace, services.ui), [services])
   useEffect(() => watchMoving(services.workspace, services.ui), [services])
+  useEffect(() => watchTerminalsView(services.ui), [services])
   useEffect(() => {
     const { history } = services.backend
     return history && historyShown(services.backend)

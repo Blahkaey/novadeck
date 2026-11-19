@@ -516,8 +516,16 @@ windows undocked from them, and its agents' messages, so it stays gone after a r
 answers or the app quits; quitting waits briefly for it. A reload before the runner
 answers leaves the project there, and it comes back.
 
-Sessions group a project's terminals, and the Sessions panel lists them in the order you
-put them in. Drag a session to move it, or focus it and press Space, the arrows, then Space
+Sessions group a project's terminals. The Terminals panel has two views, picked by the
+switch before its title: the open session's terminals, and the project's sessions in the
+order you put them in. Both share the rail's Terminals icon, which opens the view you last
+saw; Toggle Terminals (`Cmd+Shift+E`, `Ctrl+Shift+E` on Windows and Linux) opens the
+terminals and Toggle Sessions (`Cmd+Shift+S`, `Ctrl+Shift+S`) the sessions. While another
+session has an agent waiting on you, a dot shows on the rail's Terminals icon and on the
+switch's Sessions choice. To move a terminal to another session, drag its tab over the
+Sessions choice, hold it there until the sessions show, and drop it on one.
+
+In the sessions view, drag a session to move it, or focus it and press Space, the arrows, then Space
 again. A new session goes first. Rename one with its pencil or a double-click on it: Enter
 saves and Escape keeps the old name. Its trash icon deletes it, asking first when it has
 terminals. They close and go to History, and you can restore them into another session.
@@ -1076,8 +1084,8 @@ The new-session shortcut creates and selects an empty session in the current pro
 and opens the Sessions sidebar.
 
 A rail icon or sidebar shortcut opens or switches to its panel. Pressing it again on the open
-panel goes back one step, to the panel you were on just before, so a look at the Inbox, Sessions
-or History returns to where you were; back there, or on the panel the sidebar opened on, it hides
+panel goes back one step, to the panel you were on just before, so a look at the Inbox or
+History returns to where you were; back there, or on the panel the sidebar opened on, it hides
 the sidebar. A rail icon's tooltip says where the next press goes. Hiding the sidebar by its
 shortcut leaves typing in the terminal.
 

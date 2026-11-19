@@ -10,6 +10,7 @@ export const SidebarPanel = ({
   id,
   title,
   titleHint,
+  titleLead,
   titleExtra,
   count,
   scope,
@@ -21,6 +22,9 @@ export const SidebarPanel = ({
   id: string
   title: string
   titleHint?: string
+  // Before the title, where panels that share a header's place keep it still: the switch
+  // between the Terminals panel's views.
+  titleLead?: ReactNode
   // Beside the title, such as a pill that says something waits.
   titleExtra?: ReactNode
   // How many, or an element that says it; an element that renders nothing hides it.
@@ -56,8 +60,9 @@ export const SidebarPanel = ({
       inert={!active}
     >
       <header className="sidebar-panel-header flex h-[38px] shrink-0 items-center justify-between gap-3 px-0.5">
-        {titleExtra ? (
+        {titleExtra || titleLead ? (
           <div className="flex min-w-0 items-center gap-2">
+            {titleLead}
             {heading}
             {titleExtra}
           </div>

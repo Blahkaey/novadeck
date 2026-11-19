@@ -1,4 +1,4 @@
-import type { SidebarPanel } from "@novadeck/core/types"
+import { railPanelOf, type SidebarPanel, type TerminalsView } from "@novadeck/core/types"
 
 // DOM contracts for keyboard policy and focus restoration. Library-specific
 // overlay markup stays here so interaction owners do not depend on it. `data-own-keys`
@@ -135,8 +135,9 @@ export const classifyKeyTarget = (target: EventTarget | null): KeyTarget => ({
 export const terminalTabInteractionActive = (): boolean =>
   Boolean(document.querySelector(".terminal-tab.editing, .terminal-tab.dragging"))
 
+// A panel's toggle on the rail: Terminals' for Sessions, which shares it.
 export const sidebarToggle = (panel: SidebarPanel): HTMLElement | null =>
-  document.getElementById(`${panel}-toggle`)
+  document.getElementById(`${railPanelOf(panel)}-toggle`)
 // As the sidebar hides, its panel's toggle takes the focus the sidebar held, or none held;
 // focus elsewhere, as typing in a terminal that hid it by its key, stays where it is.
 export const focusSidebarToggle = (panel: SidebarPanel): void => {
@@ -171,11 +172,18 @@ export const focusZenCreate = (): void =>
   focusStranded("[data-workspace-zen-create]", "[data-workspace-zen-enter]")
 // The rail's toggle for a panel the Zen dock's bell just opened, when focus has nowhere else.
 export const focusSidebarToggleStranded = (panel: SidebarPanel): void =>
-  focusStranded(`#${panel}-toggle`, ".zen-inbox")
+  focusStranded(`#${railPanelOf(panel)}-toggle`, ".zen-inbox")
 export const focusZenEnter = (): void => focusStranded("[data-workspace-zen-enter]", ".zen-exit")
 // The Terminals panel's create button, once a new session leaves the Sessions panel behind.
 export const focusTerminalsCreate = (): void =>
   focusStranded("[data-terminals-create]", "[data-sessions-create]")
+// The switch beside the Terminals panel's title, on the view that shows, once the one pressed
+// on the other view hid with it.
+export const focusTerminalsView = (view: TerminalsView): void =>
+  focusStranded(
+    `#${view}-panel [data-terminals-view] input[value="${view}"]`,
+    "[data-terminals-view] input",
+  )
 
 // The first session a terminal can move to, or the pick's Cancel with none, once the Sessions
 // panel shows for a pick from a terminal's menu. The panel slides in, so for a few frames it

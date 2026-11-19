@@ -131,17 +131,22 @@ export const useMoving = (): SessionsMove | undefined => {
   }, [moving, name, moveTerminal, cancelPick])
 }
 
-// How long a dragged tab holds over a rail button before its panel opens.
+// How long a dragged tab holds over a view's choice or a rail button before it opens.
 export const springMs = 400
 
-// The rail's buttons a dragged tab opens a panel by: the Sessions panel to drop it on a
-// session, the Terminals panel to go back.
-const springs = '[id="sessions-toggle"], [id="terminals-toggle"]'
+// What a dragged tab opens a view by: the choices of the switch beside the Terminals panel's
+// title, Sessions to drop it on a session and Terminals to go back, and the rail's Terminals
+// toggle, which goes back too.
+const springs = '[data-terminals-view] [data-part="item"], [id="terminals-toggle"]'
 
-// Where a terminal's tab dragged out of the list goes: held over the rail's Sessions button
-// it opens the Sessions panel, and dropped on a session, or on the new session's button, it
-// moves the terminal there. It travels anywhere in the workspace's body. Undefined where the
-// backend can't move terminals.
+// The view a spring opens: the switch's choice its input names, or the terminals.
+const springView = (spring: Element): "terminals" | "sessions" =>
+  spring.querySelector("input")?.value === "sessions" ? "sessions" : "terminals"
+
+// Where a terminal's tab dragged out of the list goes: held over the Sessions choice beside the
+// Terminals panel's title it opens the sessions, and dropped on a session, or on the new
+// session's button, it moves the terminal there. It travels anywhere in the workspace's body.
+// Undefined where the backend can't move terminals.
 export const useTabsAway = (): TabsAway | undefined => {
   const { backend, commands, ui, workspace } = useWorkspaceServices()
   // The rail button held over, and the timer that opens its panel.
@@ -163,7 +168,7 @@ export const useTabsAway = (): TabsAway | undefined => {
       if (!button) return
       button.setAttribute("data-move-spring", "")
       const timer = setTimeout(() => {
-        if (button.id !== "sessions-toggle") return showTerminals()
+        if (springView(button) !== "sessions") return showTerminals()
         // The panel opens picking where the tab goes, so letting go anywhere else gives up.
         showSessions()
         if (dragged.current && !ui.getSnapshot().moving) pickSession(dragged.current.id, "drag")

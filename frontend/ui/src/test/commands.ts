@@ -19,6 +19,7 @@ import {
   watchPresentation,
   watchMoving,
   watchSwitcher,
+  watchTerminalsView,
 } from "../app/ui-store"
 import type { CanvasHandle } from "../layouts/canvas/types"
 
@@ -116,6 +117,7 @@ export const openCommands = ({
     focusZenCreate: () => effects.push("focus zen create"),
     focusZenEnter: () => effects.push("focus zen enter"),
     focusTerminalsCreate: () => effects.push("focus terminals create"),
+    focusTerminalsView: (view) => effects.push(`focus ${view} view`),
     focusMovePick: () => effects.push("focus move pick"),
     focusWorkspaceViewport: () => effects.push("focus viewport"),
     focusTerminalTab: (id) => effects.push(`focus tab ${id}`),
@@ -193,6 +195,7 @@ export const openCommands = ({
   for (const watch of [trackRecent, watchPresentation, watchSwitcher, watchClosing, watchMoving])
     watch(store, ui)
   watchCrashLoop(crashLoop?.crashes, ui)
+  watchTerminalsView(ui)
   return {
     context,
     workspace: store,

@@ -19,7 +19,7 @@ const rail = (badge: InboxBadge | undefined, bellRings: number, sessionsAsk?: st
     badge,
     bellRings,
     sessionsAsk,
-    toggleSidebar: () => {},
+    toggleRail: () => {},
   })
 
 describe("the rail's Inbox dot", () => {
@@ -42,16 +42,17 @@ describe("the rail's Inbox dot", () => {
   })
 })
 
-describe("the rail's Sessions dot", () => {
-  it("shows while another session asks, says so in the toggle's description, and never rings", () => {
+describe("the rail's dot for other sessions", () => {
+  it("shows on Terminals while another session asks, in its description, and never rings", () => {
     const { container, rerender, unmount } = render(rail(undefined, 0))
     unmounts.push(unmount)
-    const toggle = () => container.querySelector("#sessions-toggle")!
+    expect(container.querySelector("#sessions-toggle")).toBeNull()
+    const toggle = () => container.querySelector("#terminals-toggle")!
     expect(toggle().querySelector(".bell-dot")).toBeNull()
-    expect(toggle().getAttribute("aria-label")).toBe("Sessions")
+    expect(toggle().getAttribute("aria-label")).toBe("Terminals")
     rerender(rail(undefined, 0, "1 needs you"))
     expect(toggle().querySelector(".bell-dot")).not.toBeNull()
-    expect(toggle().getAttribute("aria-label")).toBe("Sessions")
+    expect(toggle().getAttribute("aria-label")).toBe("Terminals")
     expect(toggle().getAttribute("aria-description")).toBe("1 needs you")
     rerender(rail(undefined, 0, "3 need you · 1 question"))
     expect(toggle().getAttribute("aria-description")).toBe("3 need you · 1 question")
@@ -67,11 +68,14 @@ describe("the rail's tooltips", () => {
         ? ["⌘", "Shift", letter]
         : ["Ctrl", "Shift", letter]
       ).join("\u00a0")
-    expect(railTooltip({ panel: "sessions", open: false, back: "terminals" })).toBe(
-      `Sessions · ${keys("S")}`,
+    expect(railTooltip({ panel: "terminals", open: false, back: "inbox" })).toBe(
+      `Terminals · ${keys("E")}`,
     )
-    expect(railTooltip({ panel: "sessions", open: true, back: "terminals" })).toBe(
-      `Sessions · back to Terminals · ${keys("S")}`,
+    expect(railTooltip({ panel: "terminals", open: true, back: "inbox" })).toBe(
+      `Terminals · back to Inbox · ${keys("E")}`,
+    )
+    expect(railTooltip({ panel: "inbox", open: true, back: "sessions" })).toBe(
+      `Inbox · back to Sessions · ${keys("B")}`,
     )
     expect(railTooltip({ panel: "inbox", detail: "2 waiting", open: true, back: "inbox" })).toBe(
       `Inbox · 2 waiting · hide sidebar · ${keys("B")}`,
@@ -100,7 +104,7 @@ describe("the rail's History dot", () => {
       hasHistory: true,
       historyDrops,
       lastDrop: "Tests closed just now",
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("flares for a landing, but not while History shows, nor afterwards for that one", () => {
@@ -129,7 +133,7 @@ describe("the rail's Worktrees dot", () => {
       hasWorktrees: true,
       hasHistory: true,
       worksMade: { count, projectId },
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("flares for each worktree made, but not for the count at mount, nor while Worktrees shows", () => {
@@ -182,7 +186,7 @@ describe("the rail's Notes toggle", () => {
       bellRings: 0,
       hasNotes,
       todosLeft: 3,
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("shows only where the backend keeps the person's notes, and draws no dot for them", () => {
@@ -205,7 +209,7 @@ describe("the rail's Worktrees toggle", () => {
       badge: undefined,
       bellRings: 0,
       hasWorktrees,
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("shows only where the backend reports the terminals' work", () => {

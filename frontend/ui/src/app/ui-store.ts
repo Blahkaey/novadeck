@@ -19,7 +19,12 @@ import {
   forgetStoredProjectArrangement,
   readStoredProjectArrangement,
 } from "../projects/project-arrangement-storage"
-import { initialShell, resetPresentation, type ShellState } from "../shell/shell-state"
+import {
+  initialShell,
+  noteTerminalsView,
+  resetPresentation,
+  type ShellState,
+} from "../shell/shell-state"
 import { writeSidebarCollapsed, writeWindowedView } from "../shell/shell-storage"
 import type { LeaveAsk } from "../terminals/leave-edits"
 import type { MoveAsk, MoveNotice, MovePick } from "../terminals/move-state"
@@ -567,6 +572,18 @@ export const watchMoving = (workspace: Store<Workspace>, ui: UiStore): (() => vo
     }),
   ]
   return () => stops.forEach((stop) => stop())
+}
+
+// The Terminals panel's view the route shows, kept in the shell for its rail toggle to open
+// next, however the route got there: a switch, a shortcut, a link, Back or Forward.
+export const watchTerminalsView = (ui: UiStore): (() => void) => {
+  const note = (): void => {
+    const { location, shell } = ui.getSnapshot()
+    if (noteTerminalsView(shell, location.route.panel) !== shell)
+      updateShell(ui, (edited) => noteTerminalsView(edited, location.route.panel))
+  }
+  note()
+  return ui.subscribe(note)
 }
 
 const dropStaleMove = (workspace: Store<Workspace>, ui: UiStore): void => {

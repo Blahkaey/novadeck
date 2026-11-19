@@ -1,24 +1,15 @@
-import { describe, expect, it } from "../test"
+import { context, describe, expect, it } from "../test"
 import { movedPanel, railOrder } from "./rail-order"
 
 describe("the rail's order", () => {
   it("is the rail's own until the person moves a panel", () => {
-    expect(railOrder([])).toEqual([
-      "terminals",
-      "inbox",
-      "sessions",
-      "worktrees",
-      "files",
-      "notes",
-      "history",
-    ])
+    expect(railOrder([])).toEqual(["terminals", "inbox", "worktrees", "files", "notes", "history"])
   })
 
   it("keeps the panels the person placed, then any never placed, in the rail's order", () => {
     expect(railOrder(["inbox", "terminals"])).toEqual([
       "inbox",
       "terminals",
-      "sessions",
       "worktrees",
       "files",
       "notes",
@@ -27,21 +18,19 @@ describe("the rail's order", () => {
   })
 
   it("drops what isn't a panel, or is one twice", () => {
-    expect(railOrder(["inbox", "gone", "inbox", "sessions"])).toEqual([
+    expect(railOrder(["inbox", "gone", "inbox", "files"])).toEqual([
       "inbox",
-      "sessions",
+      "files",
       "terminals",
       "worktrees",
-      "files",
       "notes",
       "history",
     ])
   })
 
   it("puts the panels newer than a person's saved order after the ones they placed", () => {
-    expect(railOrder(["inbox", "sessions", "files", "terminals"])).toEqual([
+    expect(railOrder(["inbox", "files", "terminals"])).toEqual([
       "inbox",
-      "sessions",
       "files",
       "terminals",
       "worktrees",
@@ -50,9 +39,34 @@ describe("the rail's order", () => {
     ])
   })
 
-  it("keeps an order saved under the rail's former default as it was, Notes after it", () => {
-    const former = ["terminals", "files", "sessions", "history", "inbox", "worktrees"]
-    expect(railOrder(former)).toEqual([...former, "notes"])
+  context("with an order saved while Sessions had a toggle of its own", () => {
+    it("keeps Terminals where the person placed it, and Sessions' place goes", () => {
+      expect(railOrder(["inbox", "sessions", "files", "terminals"])).toEqual([
+        "inbox",
+        "files",
+        "terminals",
+        "worktrees",
+        "notes",
+        "history",
+      ])
+    })
+
+    it("puts Terminals in Sessions' place where only Sessions was placed", () => {
+      expect(railOrder(["inbox", "sessions", "files"])).toEqual([
+        "inbox",
+        "terminals",
+        "files",
+        "worktrees",
+        "notes",
+        "history",
+      ])
+    })
+
+    it("keeps an order saved under the rail's former default as it was, Notes after it", () => {
+      expect(
+        railOrder(["terminals", "files", "sessions", "history", "inbox", "worktrees"]),
+      ).toEqual(["terminals", "files", "history", "inbox", "worktrees", "notes"])
+    })
   })
 
   it("reads a panel stored under its former id in its place", () => {
@@ -61,7 +75,6 @@ describe("the rail's order", () => {
       "worktrees",
       "terminals",
       "files",
-      "sessions",
       "notes",
       "history",
     ])
@@ -72,7 +85,6 @@ describe("the rail's order", () => {
       "files",
       "inbox",
       "terminals",
-      "sessions",
       "worktrees",
       "notes",
       "history",
@@ -81,20 +93,18 @@ describe("the rail's order", () => {
 
   it("moves a panel among those shown", () => {
     const order = railOrder([])
-    expect(movedPanel(order, order, 4, 0)).toEqual([
+    expect(movedPanel(order, order, 3, 0)).toEqual([
       "files",
       "terminals",
       "inbox",
-      "sessions",
       "worktrees",
       "notes",
       "history",
     ])
     expect(movedPanel(order, order, 0, 2)).toEqual([
       "inbox",
-      "sessions",
-      "terminals",
       "worktrees",
+      "terminals",
       "files",
       "notes",
       "history",
@@ -103,14 +113,11 @@ describe("the rail's order", () => {
 
   it("leaves a panel the backend doesn't show where it was", () => {
     const order = railOrder([])
-    const shown = order.filter(
-      (panel) => panel !== "files" && panel !== "history" && panel !== "worktrees",
-    )
+    const shown = order.filter((panel) => panel !== "files" && panel !== "history")
     expect(movedPanel(order, shown, 2, 0)).toEqual([
-      "sessions",
+      "worktrees",
       "terminals",
       "inbox",
-      "worktrees",
       "files",
       "notes",
       "history",

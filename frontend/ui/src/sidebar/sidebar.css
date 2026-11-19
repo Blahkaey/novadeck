@@ -139,3 +139,22 @@
     opacity: 0;
   }
 }
+
+/* The dot on the Terminals panel's Sessions choice (TerminalsViewSwitch) while another session
+   asks something of the person: the rail's attention dot, smaller, over the icon's corner, cut
+   out of it by a ring of the segment's ground at rest, under the pointer, or chosen. */
+.terminals-view-dot {
+  --_dot-ground: var(--segmented-bg, var(--color-shell));
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+}
+@media (hover: hover) {
+  .segment:hover:not([data-disabled]) > .terminals-view-dot {
+    --_dot-ground: var(--segmented-hover-bg, var(--color-soft));
+  }
+}
+.segment:is([data-state="checked"], :has(> input:checked)) > .terminals-view-dot {
+  --_dot-ground: var(--segmented-active-bg, var(--color-paper));
+}

@@ -262,7 +262,7 @@ const ZenDockWithBadge = (
 export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX.Element => {
   const services = useWorkspaceServices()
   const { commands, canvas } = services
-  const { hideSidebar, toggleSidebar, exitZen, changeView, add } = commands
+  const { hideSidebar, toggleSidebar, toggleRail, exitZen, changeView, add } = commands
   const desktop = useDesktop()
   const shell = useUiState((state) => {
     const { zen, sidebar, sidebarCollapsed } = state.shell
@@ -309,7 +309,7 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
         setRailOrder(order)
         writeSidebarOrder(order)
       }}
-      toggleSidebar={toggleSidebar}
+      toggleRail={toggleRail}
     />
   )
   return (

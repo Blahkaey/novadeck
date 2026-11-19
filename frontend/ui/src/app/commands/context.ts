@@ -3,7 +3,7 @@ import type { Murmur } from "@novadeck/core/addons/murmur"
 import type { Rect } from "@novadeck/core/layout/spatial"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceStore } from "@novadeck/core/store"
-import type { SidebarPanel } from "@novadeck/core/types"
+import type { SidebarPanel, TerminalsView } from "@novadeck/core/types"
 import type { ItemStore } from "@novadeck/items/store"
 
 import type { CanvasHandle } from "../../layouts/canvas/types"
@@ -30,6 +30,9 @@ export type CommandEffects = {
   readonly focusZenCreate: () => void
   readonly focusZenEnter: () => void
   readonly focusTerminalsCreate: () => void
+  // Focuses the switch beside the Terminals panel's title, in the view that shows, once the
+  // switch pressed in the other view has hidden with it.
+  readonly focusTerminalsView: (view: TerminalsView) => void
   // Focuses the Sessions panel's first place to move a terminal to, once it shows for a pick.
   readonly focusMovePick: () => void
   readonly focusWorkspaceViewport: () => void
