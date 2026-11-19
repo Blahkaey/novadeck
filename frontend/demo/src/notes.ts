@@ -37,7 +37,8 @@ type Sample = {
 
 // The storefront's notes, in the person's order: todos still to do, one with more under its
 // line that is in progress and one that Codex added as @pike (History's Tax rounding, closed
-// since), a plain note, and two checked off, so each column of the board has cards.
+// since), two plain notes, and two checked off, so each column of the Todo board has cards and
+// the Notes panel has notes to put in order.
 const storefront: readonly Sample[] = [
   { text: "Ask @wren to cover expired coupon codes", ago: 25 * minute },
   {
@@ -63,6 +64,7 @@ const storefront: readonly Sample[] = [
     ago: 2 * hour,
     by: { agent: "codex", handle: "pike" },
   },
+  { text: "Coupon codes reset on the demo store every night", todo: false, ago: 4 * day },
   { text: "Rename the checkout route", ago: day, doneAgo: 2 * hour },
   { text: "Update the screenshots in the README", ago: 3 * day, doneAgo: day },
 ]

@@ -17,6 +17,7 @@ import {
   History,
   Inbox,
   ListTodo,
+  NotebookPen,
   Terminal as TerminalIcon,
 } from "lucide-react"
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps } from "react"
@@ -34,7 +35,8 @@ const panelIcons = {
   inbox: Inbox,
   worktrees: GitCompare,
   files: FolderGit2,
-  notes: ListTodo,
+  notes: NotebookPen,
+  todo: ListTodo,
   history: History,
 } as const satisfies Record<RailPanel, unknown>
 
@@ -45,6 +47,7 @@ const panelShortcuts: Readonly<Record<RailPanel, ShortcutName>> = {
   worktrees: "worktrees",
   files: "files",
   notes: "notes",
+  todo: "todo",
   history: "history",
 }
 
@@ -143,7 +146,7 @@ export const SidebarRail = ({
   // What the sessions other than the open one ask of the person, in words, while any does: the
   // Terminals toggle's dot, description and tooltip, as Sessions is a view of its panel.
   sessionsAsk?: string | undefined
-  // How many of the open project's todos are still to do, which the Notes toggle's tooltip
+  // How many of the open project's todos are still to do, which the Todo toggle's tooltip
   // says: a count for the person, not news, so it draws no dot.
   todosLeft?: number
   // Whether the backend has a Files panel to toggle.
@@ -152,7 +155,7 @@ export const SidebarRail = ({
   hasHistory?: boolean
   // Whether the backend reports each terminal's work against main, which the Worktrees panel lists.
   hasWorktrees?: boolean
-  // Whether the backend keeps the person's notes, which the Notes panel lists.
+  // Whether the backend keeps the person's notes, which the Notes panel and the Todo board list.
   hasNotes?: boolean
   // Every toggle, the ones this backend doesn't show included, in the person's order.
   order?: readonly RailPanel[]
@@ -164,7 +167,7 @@ export const SidebarRail = ({
       (hasFiles || id !== "files") &&
       (hasHistory || id !== "history") &&
       (hasWorktrees || id !== "worktrees") &&
-      (hasNotes || id !== "notes"),
+      (hasNotes || (id !== "notes" && id !== "todo")),
   )
   const toggleId = (id: RailPanel): string => `${mobile ? "mobile-" : ""}${id}-toggle`
   const [dragging, setDragging] = useState(false)
@@ -216,7 +219,7 @@ export const SidebarRail = ({
             drops={id === "history" ? { count: historyDrops, last: lastDrop } : undefined}
             flares={id === "worktrees" ? (worksMade ?? noneMadeIn) : undefined}
             sessionsAsk={id === "terminals" ? sessionsAsk : undefined}
-            todosLeft={id === "notes" ? todosLeft : 0}
+            todosLeft={id === "todo" ? todosLeft : 0}
             dragging={dragging}
             focusRequest={focusRequest}
             onFocused={focused}
@@ -268,7 +271,7 @@ const RailToggle = ({
   flares: WorksMadeIn | undefined
   // What the other sessions ask of the person, on the Terminals toggle.
   sessionsAsk: string | undefined
-  // On the Notes toggle, how many of the open project's todos are still to do.
+  // On the Todo toggle, how many of the open project's todos are still to do.
   todosLeft: number
   // Some toggle is being dragged, which leaves no tooltip open.
   dragging: boolean

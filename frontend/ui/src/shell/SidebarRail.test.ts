@@ -87,8 +87,9 @@ describe("the rail's tooltips", () => {
       `Worktrees · ${keys("G")}`,
     )
     expect(railTooltip({ panel: "files", open: false, back: null })).toBe(`Files · ${keys("F")}`)
-    expect(railTooltip({ panel: "notes", detail: "3 to do", open: false, back: null })).toBe(
-      `Notes · 3 to do · ${keys("L")}`,
+    expect(railTooltip({ panel: "notes", open: false, back: null })).toBe(`Notes · ${keys("L")}`)
+    expect(railTooltip({ panel: "todo", detail: "3 to do", open: false, back: null })).toBe(
+      `Todo · 3 to do · ${keys("D")}`,
     )
   })
 })
@@ -176,7 +177,7 @@ describe("the rail's Worktrees dot", () => {
   })
 })
 
-describe("the rail's Notes toggle", () => {
+describe("the rail's Notes and Todo toggles", () => {
   const notesRail = (hasNotes: boolean) =>
     createElement(SidebarRail, {
       sidebarVisible: false,
@@ -189,14 +190,21 @@ describe("the rail's Notes toggle", () => {
       toggleRail: () => {},
     })
 
-  it("shows only where the backend keeps the person's notes, and draws no dot for them", () => {
+  it("show only where the backend keeps the person's notes, Todo after Notes, with no dot", () => {
     const { container, rerender, unmount } = render(notesRail(false))
     unmounts.push(unmount)
     expect(container.querySelector("#notes-toggle")).toBeNull()
+    expect(container.querySelector("#todo-toggle")).toBeNull()
     rerender(notesRail(true))
-    const toggle = container.querySelector("#notes-toggle")
-    expect(toggle?.getAttribute("aria-label")).toBe("Notes")
-    expect(toggle?.querySelector("[class*='dot']")).toBeNull()
+    const labels = [...container.querySelectorAll("[id$='-toggle']")].map((toggle) =>
+      toggle.getAttribute("aria-label"),
+    )
+    expect(labels.slice(labels.indexOf("Notes"), labels.indexOf("Notes") + 2)).toEqual([
+      "Notes",
+      "Todo",
+    ])
+    for (const id of ["#notes-toggle", "#todo-toggle"])
+      expect(container.querySelector(id)?.querySelector("[class*='dot']")).toBeNull()
   })
 })
 

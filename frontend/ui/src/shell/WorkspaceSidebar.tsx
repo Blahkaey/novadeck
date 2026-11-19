@@ -1,6 +1,6 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
-import type { Note, NoteChange } from "@novadeck/core/notes"
+import type { BoardColumn, Note, NoteChange } from "@novadeck/core/notes"
 import type { AgentConnection } from "@novadeck/core/port"
 import type { SidebarPanel as PanelId, TerminalsView } from "@novadeck/core/types"
 import type { Work, WorkClosing } from "@novadeck/core/works"
@@ -13,6 +13,7 @@ import { HistoryPanel } from "../sidebar/HistoryPanel"
 import { NotesPanel } from "../sidebar/NotesPanel"
 import { panelLabels } from "../sidebar/panel-labels"
 import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
+import { TodoPanel } from "../sidebar/TodoPanel"
 import { WorktreesPanel } from "../sidebar/WorktreesPanel"
 import { programIcon } from "../terminals/processes/profiles"
 import { TerminalTabs } from "../terminals/TerminalTabs"
@@ -50,15 +51,27 @@ type Props = Omit<ComponentProps<typeof TerminalTabs>, "ids"> & {
       }
     | undefined
   // Where the backend keeps the person's notes: the open project's, whether their last
-  // change didn't take, and what adding, changing, moving and deleting one does. Left out,
-  // there is no Notes panel.
+  // change didn't take, and what adding a plain note, changing, placing and deleting one does.
+  // Left out, there is no Notes panel.
   notes:
     | {
         notes: readonly Note[]
         failed: boolean
-        onAdd: (note: { text: string; todo: boolean }) => void
+        onAdd: (text: string) => void
         onChange: (id: string, change: NoteChange) => void
-        onMove: (id: string, index: number) => void
+        onPlace: (id: string, column: null, before: string | null) => void
+        onRemove: (ids: readonly string[]) => void
+      }
+    | undefined
+  // The same notes for the Todo board, whose field adds a todo and whose cards are placed in
+  // its columns. Left out, there is no Todo panel.
+  todo:
+    | {
+        notes: readonly Note[]
+        failed: boolean
+        onAdd: (text: string) => void
+        onChange: (id: string, change: NoteChange) => void
+        onPlace: (id: string, column: BoardColumn, before: string | null) => void
         onRemove: (ids: readonly string[]) => void
       }
     | undefined
@@ -104,6 +117,7 @@ export const WorkspaceSidebar = ({
   files,
   history,
   notes,
+  todo,
   worktrees,
   onHide,
   onCreate,
@@ -137,6 +151,15 @@ export const WorkspaceSidebar = ({
         projectId={projectId}
         {...notes}
         active={sidebarPanel === "notes"}
+        onClose={onHide}
+      />
+    )}
+    {todo && (
+      <TodoPanel
+        key={`todo/${projectId}`}
+        projectId={projectId}
+        {...todo}
+        active={sidebarPanel === "todo"}
         onClose={onHide}
       />
     )}

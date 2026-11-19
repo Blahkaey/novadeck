@@ -237,7 +237,8 @@ export const SidebarSection = memo((): React.JSX.Element => {
         : undefined,
     [historyFeed, historyRows, readHistory, backend.agents, connections, commands, projectId],
   )
-  // The Notes panel shows where the backend keeps the person's notes; see `notesShown`.
+  // The Notes panel and the Todo board show where the backend keeps the person's notes; see
+  // `notesShown`.
   const notesFeed = notesShown(backend) ? backend.notes : undefined
   const projectNotes = useStoreSelector(
     notesFeed?.state ?? noneNoted,
@@ -251,9 +252,23 @@ export const SidebarSection = memo((): React.JSX.Element => {
         ? {
             notes: projectNotes,
             failed: notesFailed,
-            onAdd: (note: { text: string; todo: boolean }) => notesFeed.add(projectId, note),
+            onAdd: (text: string) => notesFeed.add(projectId, { text, todo: false }),
             onChange: notesFeed.change,
-            onMove: notesFeed.move,
+            onPlace: notesFeed.place,
+            onRemove: notesFeed.remove,
+          }
+        : undefined,
+    [notesFeed, projectNotes, notesFailed, projectId],
+  )
+  const todo = useMemo(
+    () =>
+      notesFeed
+        ? {
+            notes: projectNotes,
+            failed: notesFailed,
+            onAdd: (text: string) => notesFeed.add(projectId, { text, todo: true }),
+            onChange: notesFeed.change,
+            onPlace: notesFeed.place,
             onRemove: notesFeed.remove,
           }
         : undefined,
@@ -413,6 +428,7 @@ export const SidebarSection = memo((): React.JSX.Element => {
       }
       history={history}
       notes={notes}
+      todo={todo}
       worktrees={worktrees}
       onHide={hideSidebar}
       onCreate={() => add()}

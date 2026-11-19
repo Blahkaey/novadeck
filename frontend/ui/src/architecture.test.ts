@@ -130,7 +130,7 @@ const vendors: Record<string, readonly string[]> = {
   // Terminals' tabs, windows and taskbars, the footer's subscriptions, the rail's toggles and
   // the project switcher's projects and its pins, which reorder as the taskbar's icons do,
   // and the drag the switcher hands to the pins bar; Grid's tiles, which drag to reorder the
-  // tabs; and the Sessions panel's sessions and the Notes panel's notes.
+  // tabs; and the Sessions panel's sessions, the Notes panel's notes and the Todo board's cards.
   "@dnd-kit": [
     "terminals/",
     "layouts/grid/Grid.tsx",
@@ -143,6 +143,7 @@ const vendors: Record<string, readonly string[]> = {
     "projects/ProjectRow.tsx",
     "sidebar/SessionsPanel.tsx",
     "sidebar/NotesPanel.tsx",
+    "sidebar/TodoBoard.tsx",
   ],
   "react-router": ["app/", "shell/"],
   // The Files panel's patterns for hiding files, matched as globs.

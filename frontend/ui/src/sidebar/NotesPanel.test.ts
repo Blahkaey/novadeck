@@ -1,9 +1,9 @@
 import {
   added,
   changed,
-  moved,
   noteLimits,
   noteLine,
+  placed,
   removed,
   type Note,
   type NoteChange,
@@ -29,7 +29,7 @@ const note = (id: string, parts: Partial<Note> = {}): Note => ({
   projectId: "storefront",
   text: `Note ${id}`,
   body: "",
-  todo: true,
+  todo: false,
   doneAt: null,
   createdAt: 0,
   ...parts,
@@ -41,9 +41,9 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
   let notes = first
   let made = 0
   const calls = {
-    add: vi.fn<(added: { text: string; todo: boolean }) => void>(),
+    add: vi.fn<(text: string) => void>(),
     change: vi.fn<(id: string, change: NoteChange) => void>(),
-    move: vi.fn<(id: string, index: number) => void>(),
+    place: vi.fn<(id: string, column: null, before: string | null) => void>(),
     remove: vi.fn<(ids: readonly string[]) => void>(),
   }
   const props = () => ({
@@ -52,22 +52,17 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
     failed: options.failed ?? false,
     active: true,
     onClose: () => {},
-    onAdd: (adding: { text: string; todo: boolean }) => {
-      calls.add(adding)
-      keep(
-        added(
-          notes,
-          note(`new-${(made += 1)}`, { text: noteLine(adding.text), todo: adding.todo }),
-        ),
-      )
+    onAdd: (text: string) => {
+      calls.add(text)
+      keep(added(notes, note(`new-${(made += 1)}`, { text: noteLine(text) })))
     },
     onChange: (id: string, change: NoteChange) => {
       calls.change(id, change)
       keep(changed(notes, id, change, 500))
     },
-    onMove: (id: string, index: number) => {
-      calls.move(id, index)
-      keep(moved(notes, id, index))
+    onPlace: (id: string, column: null, before: string | null) => {
+      calls.place(id, column, before)
+      keep(placed(notes, id, column, before, 500))
     },
     onRemove: (ids: readonly string[]) => {
       calls.remove(ids)
@@ -92,10 +87,6 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
     name: string,
   ) =>
     [...page.container.querySelectorAll<Field>("input:not([type=checkbox]), textarea")].find(
-      (each) => each.getAttribute("aria-label") === name,
-    )!
-  const checkbox = (name: string) =>
-    [...page.container.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
       (each) => each.getAttribute("aria-label") === name,
     )!
   const type = (into: HTMLInputElement | HTMLTextAreaElement, text: string) =>
@@ -125,7 +116,6 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
     row,
     button,
     field,
-    checkbox,
     type,
     press,
     click,
@@ -136,28 +126,24 @@ const show = (first: readonly Note[], options: { failed?: boolean } = {}) => {
 }
 
 describe("The Notes panel", () => {
-  it("lists the open notes in the person's order, with how many todos are left", () => {
+  it("lists the project's plain notes in the person's order, and how many there are", () => {
     const { texts, count, row } = show([
       note("a"),
-      note("b", { todo: false }),
-      note("c", { doneAt: 90 }),
+      note("b", { todo: true }),
+      note("c", { todo: true, doneAt: 90 }),
       note("d"),
     ])
 
-    expect(texts()).toEqual(["Note a", "Note b", "Note d"])
+    expect(texts()).toEqual(["Note a", "Note d"])
     expect(count()).toBe("2")
-    expect(row("a").dataset.kind).toBe("todo")
-    expect(row("b").dataset.kind).toBe("note")
-    expect(row("b").querySelector("input[type=checkbox]")).toBeNull()
+    expect(row("a").querySelector("input[type=checkbox]")).toBeNull()
   })
 
-  it("says what it is for while the project has none, and that nothing is left once all are done", () => {
-    const { said, keep, count } = show([])
+  it("says what it is for while the project has no plain notes", () => {
+    const { said, count } = show([note("a", { todo: true })])
 
-    expect(said()).toEqual(["Todos and notes you write here stay with this project."])
+    expect(said()).toEqual(["Notes you write here stay with this project."])
     expect(count()).toBe("")
-    keep([note("a", { doneAt: 90 })])
-    expect(said()).toEqual(["Nothing left to do."])
   })
 
   it("says that the last change wasn't saved", () => {
@@ -168,60 +154,34 @@ describe("The Notes panel", () => {
 })
 
 describe("A note an agent added", () => {
-  const by = { agent: "codex", handle: "pike" } as const
-  // What a row's mark names, where it has one.
-  const markOf = (row: HTMLElement) =>
-    row.querySelector("[role=img]")?.getAttribute("aria-label") ?? null
-
   it("is marked with its agent's icon, which names the agent and its handle", () => {
-    const { row } = show([note("a", { by }), note("b")])
+    const { row } = show([note("a", { by: { agent: "codex", handle: "pike" } }), note("b")])
+    const markOf = (of: HTMLElement) =>
+      of.querySelector("[role=img]")?.getAttribute("aria-label") ?? null
 
     expect(markOf(row("a"))).toBe("Added by Codex · @pike")
     expect(row("a").querySelector("[role=img] svg")?.classList).toContain("lucide-codex")
     expect(markOf(row("b"))).toBeNull()
   })
-
-  it("keeps its mark once checked off", async () => {
-    const { checkbox, click, button, row } = show([note("a", { by })])
-
-    await click(checkbox("Note a"))
-    await click(button("Done1"))
-
-    expect(row("a").dataset.done).toBe("true")
-    expect(markOf(row("a"))).toBe("Added by Codex · @pike")
-  })
 })
 
 describe("Adding a note", () => {
-  it("adds a todo first on Enter, and empties the field for the next", async () => {
-    const { field, type, texts, calls } = show([note("a")])
-    const adding = field("Add a todo…")
+  it("adds a plain note first on Enter, and empties the field for the next", async () => {
+    const { field, type, texts, calls, row } = show([note("a")])
+    const adding = field("Add a note…")
 
     await type(adding, "Ship it")
     await act(() => adding.form!.requestSubmit())
 
-    expect(calls.add).toHaveBeenCalledWith({ text: "Ship it", todo: true })
+    expect(calls.add).toHaveBeenCalledWith("Ship it")
     expect(texts()).toEqual(["Ship it", "Note a"])
-    expect(field("Add a todo…").value).toBe("")
-  })
-
-  it("adds a plain note once its button is switched to notes", async () => {
-    const { field, type, button, click, calls, row } = show([])
-
-    expect(button("Add as todos").getAttribute("aria-pressed")).toBe("true")
-    await click(button("Add as todos"))
-    expect(button("Add as todos").getAttribute("aria-pressed")).toBe("false")
-    const adding = field("Add a note…")
-    await type(adding, "Staging deploys from release")
-    await act(() => adding.form!.requestSubmit())
-
-    expect(calls.add).toHaveBeenCalledWith({ text: "Staging deploys from release", todo: false })
-    expect(row("new-1").dataset.kind).toBe("note")
+    expect(row("new-1").querySelector("input[type=checkbox]")).toBeNull()
+    expect(field("Add a note…").value).toBe("")
   })
 
   it("adds nothing that says nothing", async () => {
     const { field, type, calls } = show([])
-    const adding = field("Add a todo…")
+    const adding = field("Add a note…")
 
     await type(adding, "   ")
     await act(() => adding.form!.requestSubmit())
@@ -229,53 +189,16 @@ describe("Adding a note", () => {
     expect(calls.add).not.toHaveBeenCalled()
   })
 
-  context("when the project holds as many notes as it keeps", () => {
+  context("when the project holds as many notes and todos as it keeps", () => {
     it("takes no more, and says why", () => {
       const full = Array.from({ length: noteLimits.perProject }, (_, index) =>
-        note(`n${index}`, { doneAt: 1 }),
+        note(`n${index}`, { todo: true }),
       )
       const { field, said } = show(full)
 
-      expect(field("Add a todo…").disabled).toBe(true)
+      expect(field("Add a note…").disabled).toBe(true)
       expect(said()[0]).toContain(`${noteLimits.perProject} notes`)
     })
-  })
-})
-
-describe("Checking a todo off", () => {
-  it("moves it under Done, folded until asked for, and counts one less to do", async () => {
-    const { checkbox, click, texts, count, button, calls } = show([note("a"), note("b")])
-
-    await click(checkbox("Note a"))
-
-    expect(calls.change).toHaveBeenCalledWith("a", { done: true })
-    expect(texts()).toEqual(["Note b"])
-    expect(count()).toBe("1")
-    const done = button("Done1")
-    expect(done.getAttribute("aria-expanded")).toBe("false")
-    expect(texts("Done")).toEqual([])
-    await click(done)
-    expect(texts("Done")).toEqual(["Note a"])
-    expect(checkbox("Note a").checked).toBe(true)
-  })
-
-  it("hands the keyboard to the next todo's checkbox, so several are ticked in a row", async () => {
-    const { checkbox, click } = show([note("a"), note("b")])
-
-    checkbox("Note a").focus()
-    await click(checkbox("Note a"))
-
-    expect(document.activeElement).toBe(checkbox("Note b"))
-  })
-
-  it("opens it again once unchecked under Done", async () => {
-    const { checkbox, click, button, texts, calls } = show([note("a", { doneAt: 90 })])
-
-    await click(button("Done1"))
-    await click(checkbox("Note a"))
-
-    expect(calls.change).toHaveBeenCalledWith("a", { done: false })
-    expect(texts()).toEqual(["Note a"])
   })
 })
 
@@ -342,15 +265,15 @@ describe("Changing a note", () => {
     expect(row("a").querySelector(".markdown")).toBeNull()
   })
 
-  it("takes a todo's checkbox away, and gives a plain note one", async () => {
-    const { button, click, row, calls } = show([note("a", { body: "More." })])
+  it("makes it a todo, which leaves the panel for the Todo board", async () => {
+    const { button, click, calls, texts, notes } = show([note("a", { body: "More." }), note("b")])
 
     await click(button("Details of Note a"))
-    await click(button("Make it a note"))
-    expect(calls.change).toHaveBeenCalledWith("a", { todo: false })
-    expect(row("a").dataset.kind).toBe("note")
     await click(button("Make it a todo"))
-    expect(row("a").dataset.kind).toBe("todo")
+
+    expect(calls.change).toHaveBeenCalledWith("a", { todo: true })
+    expect(texts()).toEqual(["Note b"])
+    expect(notes().find(({ id }) => id === "a")?.todo).toBe(true)
   })
 })
 
@@ -362,10 +285,23 @@ describe("Moving a note", () => {
     line.focus()
     await press(line, "ArrowDown", { altKey: true })
 
-    expect(calls.move).toHaveBeenCalledWith("a", 1)
+    expect(calls.place).toHaveBeenCalledWith("a", null, "c")
     expect(texts()).toEqual(["Note b", "Note a", "Note c"])
     expect(page.container.querySelector("[aria-live=polite]")?.textContent).toBe("Note a, 2 of 3")
     await eventually(() => expect(document.activeElement).toBe(button("Edit Note a")))
+
+    await press(button("Edit Note a"), "ArrowDown", { altKey: true })
+    expect(calls.place).toHaveBeenLastCalledWith("a", null, null)
+    expect(texts()).toEqual(["Note b", "Note c", "Note a"])
+  })
+
+  it("moves among the plain notes only, past the todos between them", async () => {
+    const { button, press, texts, notes } = show([note("a"), note("t", { todo: true }), note("b")])
+
+    await press(button("Edit Note b"), "ArrowUp", { altKey: true })
+
+    expect(texts()).toEqual(["Note b", "Note a"])
+    expect(notes().find(({ id }) => id === "t")?.todo).toBe(true)
   })
 
   it("stops at the ends of the list, and says which arrows move a row", async () => {
@@ -374,7 +310,7 @@ describe("Moving a note", () => {
     await press(button("Edit Note a"), "ArrowUp", { altKey: true })
     await press(button("Edit Note c"), "ArrowDown", { altKey: true })
 
-    expect(calls.move).not.toHaveBeenCalled()
+    expect(calls.place).not.toHaveBeenCalled()
     expect(button("Edit Note a").getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowDown")
     expect(button("Edit Note b").getAttribute("aria-keyshortcuts")).toBe(
       "Alt+ArrowUp Alt+ArrowDown",
@@ -388,12 +324,12 @@ describe("Moving a note", () => {
     await click(button("Edit Note a"))
     await press(field("Note text"), "ArrowDown", { altKey: true })
 
-    expect(calls.move).not.toHaveBeenCalled()
+    expect(calls.place).not.toHaveBeenCalled()
   })
 })
 
-describe("Deleting notes", () => {
-  it("deletes an open note from under its line, without asking", async () => {
+describe("Deleting a note", () => {
+  it("deletes it from under its line, without asking", async () => {
     const { button, click, texts, calls } = show([note("a", { body: "More." }), note("b")])
 
     await click(button("Details of Note a"))
@@ -401,47 +337,5 @@ describe("Deleting notes", () => {
 
     expect(calls.remove).toHaveBeenCalledWith(["a"])
     expect(texts()).toEqual(["Note b"])
-  })
-
-  it("deletes a done todo from its row", async () => {
-    const { button, click, calls, notes } = show([
-      note("a", { doneAt: 90 }),
-      note("b", { doneAt: 80 }),
-    ])
-
-    await click(button("Done2"))
-    await click(button("Delete Note a"))
-
-    expect(calls.remove).toHaveBeenCalledWith(["a"])
-    expect(notes().map(({ id }) => id)).toEqual(["b"])
-  })
-
-  it("clears every done todo once the question is confirmed, and none while it is not", async () => {
-    const { page, button, click, calls, texts } = show([
-      note("a", { doneAt: 90 }),
-      note("b"),
-      note("c", { doneAt: 80 }),
-    ])
-    const answer = (name: string) =>
-      [...document.querySelectorAll<HTMLButtonElement>("[role=alertdialog] button")].find(
-        (each) => each.textContent === name,
-      )!
-
-    await click(button("Clear done todos"))
-    await eventually(() =>
-      expect(document.querySelector("[role=alertdialog]")?.textContent).toContain(
-        "2 done todos are deleted for good.",
-      ),
-    )
-    await click(answer("Cancel"))
-    expect(calls.remove).not.toHaveBeenCalled()
-
-    await click(button("Clear done todos"))
-    await eventually(() => expect(answer("Clear done")).toBeDefined())
-    await click(answer("Clear done"))
-
-    expect(calls.remove).toHaveBeenCalledWith(["a", "c"])
-    expect(texts()).toEqual(["Note b"])
-    expect(page.container.querySelector(".notes-done")).toBeNull()
   })
 })

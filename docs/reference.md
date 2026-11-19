@@ -702,14 +702,15 @@ There are two lists:
   project's list is read again when the panel is shown and on **Refresh**, so a change made in
   another window shows then.
 
-## Notes
+## Notes and Todo
 
-**Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
-remember about it: one list per project, yours. Where a backend keeps no notes, the panel
-isn't there.
+**Notes** and **Todo** are two panels on the sidebar's rail for one project's list of what you
+want to remember about it and what you mean to do in it, yours: Notes holds the plain notes,
+and Todo is a board of the todos. Where a backend keeps no notes, neither panel is there.
 
 Ask an agent to note something ("add a todo to revisit the retry logic") and it adds it with
-Novadeck's `note` tool, first in the open project's list, in the order it gave, at once. That
+Novadeck's `note` tool, first in the open project's list, in the order it gave, at once: a
+todo goes first in the board's To do, a plain note first in Notes. That
 is all an agent can do with the list: it can't read your notes, change, check off, move or
 delete one, and it adds one only in a turn your own message started. Once Novadeck has
 delivered another agent's message into that turn (with your prompt, at a tool call, or as it
@@ -722,30 +723,51 @@ Novadeck can tell that you started the turn, not that you asked for a note in it
 told to fix a bug could still add one then, and what it reads of other agents on its own (their
 latest prompts in a listing, files they wrote) doesn't count as a message delivered.
 
-Type in the field at the top and press Enter to add a todo, first in the list; the field
-stays ready for the next. The button before the field switches it to plain notes, which
-have no checkbox, and back. A line is one line of up to 500 characters.
+### Notes
 
-Tick a todo's checkbox to check it off. It moves under **Done** at the foot of the list,
-folded until you open it, and unticking it there opens it again. The count beside the
-panel's title, and in the tooltip of its rail toggle, is how many todos are still to do;
-plain notes are never counted. Done's **Clear** button deletes every done todo for good,
-after asking; a done row's trash deletes that one without asking.
+Type in the field at the top of Notes and press Enter to add a plain note, first in the list;
+the field stays ready for the next. A line is one line of up to 500 characters. The count
+beside the panel's title is how many plain notes the project has.
 
 Click a line to change it where it stands: Enter saves, Escape keeps the old line, and
 clicking away saves. The chevron at the end of a row opens what is under the line: its
 details, written as Markdown (up to 8,000 characters) and shown formatted, with **Edit
-details**, **Make it a note** or **Make it a todo**, and **Delete**. Opening a note with no
-details starts writing some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and
-clicking away saves. A chevron that stands out marks a note with details.
+details**, **Make it a todo** and **Delete**. Opening a note with no details starts writing
+some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and clicking away saves. A
+chevron that stands out marks a note with details. **Make it a todo** turns the note into a
+card in the Todo board's To do, details and all.
 
-Drag a line to move its note among the open ones, or focus it and press Alt with the up or
-down arrow. The order is yours and is kept.
+Drag a line to move its note among the others, or focus it and press Alt with the up or down
+arrow. The order is yours and is kept.
 
-Notes are kept by the runner with the workspace, so they stay after a restart and show in
-every window, and they go with their project when you remove it. A project keeps up to 200.
-If a change can't be saved, the list goes back to what was saved and a line above it says
-so.
+### Todo
+
+The **Todo** board has three columns: **To do**, **In progress** and **Done**, each with how
+many cards it holds. The count beside the panel's title, and in the tooltip of its rail
+toggle, is how many todos are still to do, those in progress among them. The board lays
+itself out by its own width: under 520 pixels, as in the sidebar, it shows one column at a
+time, with a tab for each above it; wider, it shows the three side by side.
+
+Type in the field at the top and press Enter to add a card, first in To do. Tick a card's
+checkbox to check it off: it moves first in Done, which shows when it was checked off.
+Unticking a done card opens it again, first in To do. Its line and its details change as a
+note's do, and under its chevron **Make it a note** turns it into a plain note in Notes.
+Done's **Clear** button deletes every done card for good, after asking; **Delete** under a
+card's chevron deletes that one without asking.
+
+Move a card by dragging its line, within its column or onto another column's cards, the room
+under them, or, where the board shows one column, a column's tab (which puts it first there);
+Escape ends a drag where it began. From the keyboard, each card's **Move** button opens a menu
+with **Move up**, **Move down** and a choice of column, which puts the card first in it; or
+focus the card and press Alt with the up or down arrow to move it within its column, and with
+the left or right arrow to move it first into the column beside. Where the board shows one
+column, it follows a card you move to another. A screen reader hears where each card went.
+The order of every column is yours and is kept.
+
+Notes and todos are kept by the runner with the workspace, so they stay after a restart and
+show in every window, and they go with their project when you remove it. A project keeps up to
+200 of them together. If a change can't be saved, the list and the board go back to what was
+saved and a line above them says so.
 
 ## History
 
@@ -1009,6 +1031,7 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Toggle Worktrees (with agent worktrees on)        | `Cmd+Shift+G`      | `Ctrl+Shift+G`                   |
 | Toggle Files                                      | `Cmd+Shift+F`      | `Ctrl+Shift+F`                   |
 | Toggle Notes                                      | `Cmd+Shift+L`      | `Ctrl+Shift+L`                   |
+| Toggle Todo                                       | `Cmd+Shift+D`      | `Ctrl+Shift+D`                   |
 | Toggle History                                    | `Cmd+Shift+H`      | `Ctrl+Shift+H`                   |
 | Switch to pinned project 1 to 9                   | `Cmd+1` to `Cmd+9` | `Ctrl+Shift+1` to `Ctrl+Shift+9` |
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |

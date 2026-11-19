@@ -205,6 +205,23 @@ describe("route reconciliation", () => {
     ).toBe(true)
   })
 
+  it("shows the Todo board where the Notes panel shows, at its own address", () => {
+    const pathname = "/projects/project/sessions/initial/grid"
+    const location = { pathname, search: "?terminal=01&panel=todo" }
+    const at = (hasNotes: boolean) =>
+      resolveRoute(
+        fixture(),
+        location,
+        preferences,
+        1,
+        availablePanels(true, true, false, hasNotes),
+      )
+
+    expect(at(false).route.panel).toBe("terminals")
+    expect(at(true).route.panel).toBe("todo")
+    expect(routeUrl(at(true).route)).toContain("panel=todo")
+  })
+
   it("shows the History panel only where the backend keeps closed terminals", () => {
     const pathname = "/projects/project/sessions/initial/grid"
     const location = { pathname, search: "?terminal=01&panel=history" }

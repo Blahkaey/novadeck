@@ -69,7 +69,8 @@ export const filesShown = (backend: Pick<Backend, "files">): boolean => backend.
 export const historyShown = (backend: Pick<Backend, "history">): boolean =>
   backend.history !== undefined
 
-// Whether the app shows the Notes panel: where the backend keeps the person's notes.
+// Whether the app shows the Notes panel and the Todo board: where the backend keeps the
+// person's notes, which both list.
 export const notesShown = (backend: Pick<Backend, "notes">): boolean => backend.notes !== undefined
 
 // Whether the backend reports each tracked worktree's work, which the Worktrees panel lists.
@@ -78,7 +79,7 @@ export const reportsWorks = (backend: Pick<Backend, "works">): boolean =>
 
 // The panels a backend can show: Files only where it reads the projects' files, History only
 // where it keeps closed terminals, Worktrees only where it reports the worktrees' work, Notes
-// only where it keeps the person's notes.
+// and Todo only where it keeps the person's notes.
 export const availablePanels = (
   hasFiles: boolean,
   hasHistory = false,
@@ -90,7 +91,7 @@ export const availablePanels = (
       (hasFiles || panel !== "files") &&
       (hasHistory || panel !== "history") &&
       (hasWorktrees || panel !== "worktrees") &&
-      (hasNotes || panel !== "notes"),
+      (hasNotes || (panel !== "notes" && panel !== "todo")),
   )
 
 // Whether the rail shows the panel now: one the backend has, and Worktrees only while the person

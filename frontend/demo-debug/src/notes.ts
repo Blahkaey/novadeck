@@ -1,15 +1,16 @@
 import { isAgentName } from "@novadeck/core/harnesses"
-import { added, noteLimits, type Note, type NoteAuthor } from "@novadeck/core/notes"
+import { added, noteLimits, plainNotes, type Note, type NoteAuthor } from "@novadeck/core/notes"
 import type { Backend } from "@novadeck/core/port"
 import type { Workspace } from "@novadeck/core/types"
 import { demoNotes, isDemoNotes } from "@novadeck/demo/notes"
 
 import type { DemoActionGroup } from "./types"
 
-// The panel's group for the Notes panel's states that adding and checking off by hand reach
-// slowly or not at all: a change the backend doesn't save, a project that is full, one with
-// nothing left to do, a note long enough to wrap and scroll, and a todo an agent adds as the
-// person asked it to. Each acts on the project on screen and leaves the others' notes alone.
+// The panel's group for the states of the Notes panel and the Todo board that adding, checking
+// off and moving by hand reach slowly or not at all: a change the backend doesn't save, a
+// project that is full, a board with no cards, one with nothing left to do, a note long enough
+// to wrap and scroll, and a todo an agent adds as the person asked it to. Each acts on the
+// project on screen and leaves the others' notes alone.
 
 const todo = (projectId: string, id: string, text: string, now: number): Note => ({
   id: `demo-note-${projectId}-${id}`,
@@ -21,11 +22,22 @@ const todo = (projectId: string, id: string, text: string, now: number): Note =>
   createdAt: now,
 })
 
-/** As many todos as a project keeps, so the add field takes no more. */
+// What each of every four notes of a full project is: a plain note, then a todo in each of the
+// board's columns.
+const fullKinds: readonly { readonly word: string; readonly make: (note: Note) => Note }[] = [
+  { word: "Note", make: (note) => ({ ...note, todo: false }) },
+  { word: "Todo", make: (note) => note },
+  { word: "Doing", make: (note) => ({ ...note, doing: true }) },
+  { word: "Done", make: (note) => ({ ...note, doneAt: note.createdAt }) },
+]
+
+/** As many notes as a project keeps, so neither add field takes more: plain notes, and todos
+ * in each column of the board. */
 export const fullNotes = (projectId: string, now: number): Note[] =>
-  Array.from({ length: noteLimits.perProject }, (_, index) =>
-    todo(projectId, `full-${index + 1}`, `Todo ${index + 1}`, now - index * 60_000),
-  )
+  Array.from({ length: noteLimits.perProject }, (_, index) => {
+    const { word, make } = fullKinds[index % fullKinds.length]!
+    return make(todo(projectId, `full-${index + 1}`, `${word} ${index + 1}`, now - index * 60_000))
+  })
 
 /** Only todos that are checked off, the one checked last first; none of them in progress. */
 export const doneOnly = (projectId: string, now: number): Note[] =>
@@ -113,16 +125,16 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
   return [
     {
       section: "App",
-      title: "Notes",
+      title: "Notes and Todo",
       actions: [
         {
           label: "Next notes change fails",
-          hint: "Add, check off, edit, move or delete a note in the Notes panel: it stays as it was, and a line above the list says the change wasn't saved, until the next change takes",
+          hint: "Add, check off, edit, move or delete a note in the Notes panel or a card on the Todo board: it stays where the backend has it, and a line above the list or the columns says the change wasn't saved, until the next change takes",
           run: () => notes.failNext(),
         },
         {
           label: "Sample notes",
-          hint: "The open project's Notes panel holds the storefront's samples: four todos, one with details that is in progress and one with Codex's mark (added by @pike), a plain note, and two under Done",
+          hint: "The open project's Notes panel holds the storefront's two plain notes, and its Todo board a card in every column: three in To do (one with Codex's mark, added by @pike), one with details In progress, and two in Done",
           run: ({ workspace }) => {
             const projectId = here(workspace)
             set(
@@ -137,27 +149,35 @@ export const notesGroups = (notes: Backend["notes"]): readonly DemoActionGroup[]
         },
         {
           label: "No notes",
-          hint: "The open project's Notes panel is empty and says what it is for; its rail toggle's tooltip counts nothing to do",
+          hint: "The open project's Notes panel and Todo board are empty and say what they are for; the Todo toggle's tooltip counts nothing to do",
           run: ({ workspace }) => set(here(workspace), []),
         },
         {
+          label: "No todos",
+          hint: "The open project's Todo board is empty, its three columns with no cards, and says what it is for; the Notes panel keeps its plain notes",
+          run: ({ workspace }) => {
+            const projectId = here(workspace)
+            set(projectId, plainNotes(notes.state.getSnapshot().notes, projectId))
+          },
+        },
+        {
           label: "Every todo done",
-          hint: "The Notes panel says nothing is left to do, over a Done group of six with its Clear button",
+          hint: "The Todo board's To do and In progress columns say they are empty, and Done holds six cards with its Clear button",
           run: ({ workspace }) => set(here(workspace), doneOnly(here(workspace), Date.now())),
         },
         {
           label: "Project full of notes",
-          hint: `The Notes panel lists ${noteLimits.perProject} todos, its add field takes no more, and a line under it says why`,
+          hint: `The open project holds the ${noteLimits.perProject} notes it keeps, plain notes and cards in every column of the Todo board; neither add field takes more, and a line under each says why`,
           run: ({ workspace }) => set(here(workspace), fullNotes(here(workspace), Date.now())),
         },
         {
           label: "A long note",
-          hint: "A todo whose line is as long as one can be wraps in its row; open its details for a heading, a list, code and a link that scroll with the panel",
+          hint: "A card in To do whose line is as long as one can be wraps; open its details for a heading, a list, code and a link that scroll with the board",
           run: ({ workspace }) => set(here(workspace), longNotes(here(workspace), Date.now())),
         },
         {
           label: "An agent adds a todo",
-          hint: "A todo stands first in the open project's Notes panel with its agent's icon at the end of its line, whose tooltip names the agent: the first running in the session on screen, or Claude Code's @wren where none runs",
+          hint: "A card stands first in To do on the open project's Todo board with its agent's icon at the end of its line, whose tooltip names the agent: the first running in the session on screen, or Claude Code's @wren where none runs",
           run: ({ workspace }) => {
             const by = agentOnScreen(workspace())
             const theirs = agentTodo(here(workspace), by, `agent-${(made += 1)}`, Date.now())

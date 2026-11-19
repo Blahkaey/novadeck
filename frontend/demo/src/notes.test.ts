@@ -15,11 +15,11 @@ const setup = (withSamples = true) => {
 }
 
 describe("The demo's notes", () => {
-  it("start with the storefront's: todos, one an agent added, a plain note, one with a body, and some done", () => {
+  it("start with the storefront's: todos, one an agent added, plain notes, one with a body, and some done", () => {
     const notes = demoNotes(now)
 
     expect(todosLeft(notes, "storefront")).toBe(4)
-    expect(openNotes(notes, "storefront").filter((note) => !note.todo)).toHaveLength(1)
+    expect(openNotes(notes, "storefront").filter((note) => !note.todo)).toHaveLength(2)
     expect(openNotes(notes, "storefront").some((note) => note.body !== "")).toBe(true)
     // Codex added it as @pike, the storefront's Tax rounding agent in History.
     expect(notes.filter((note) => note.by).map(({ text, by }) => [text, by])).toEqual([
@@ -49,6 +49,7 @@ describe("The demo's notes", () => {
     ])
     expect(plainNotes(notes, "storefront").map(({ text }) => text)).toEqual([
       "Staging deploys from the release branch",
+      "Coupon codes reset on the demo store every night",
     ])
   })
 

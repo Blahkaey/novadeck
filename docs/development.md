@@ -702,23 +702,27 @@ Agents:
 
 App:
 
-- **Notes:** only where the demo keeps the person's notes (`plain`, `agents`, `messages`,
-  `inbox` and `welcome`; the showcase and the videos' demos have no Notes panel). Storefront
-  starts with four todos, one of them with details and in progress (the Todo board's In progress
-  column) and one added by an agent, marked so (Codex's
-  icon at the end of its line, whose tooltip reads "Added by Codex · @pike", History's Tax
-  rounding agent), a plain note and two todos under Done; the other projects start with none.
-  Adding, checking off, editing, moving, deleting and Clear done all work there, so they need
-  no action. Each action acts on the open project's notes and leaves the others': "Next
-  notes change fails" makes the next change fail once (the list stays as it was, and a line
-  above it says the change wasn't saved, until a change takes), "Sample notes" puts
-  storefront's samples in the open project, "No notes" empties it (the panel says what it is
-  for), "Every todo done" leaves nothing to do over a Done group of six, "Project full of
-  notes" fills it with the 200 a project keeps (the add field takes no more, and a line says
-  why), "A long note" adds a todo whose line is as long as one can be, with details that have
-  a heading, lists, code and a link, and "An agent adds a todo" puts a todo first in the list,
-  marked as added by the first agent running in the session on screen (Claude Code's @wren,
-  from History, where none runs), as an agent's `note` tool adds one.
+- **Notes and Todo:** only where the demo keeps the person's notes (`plain`, `agents`,
+  `messages`, `inbox` and `welcome`; the showcase and the videos' demos have neither the Notes
+  panel nor the Todo board). Storefront starts with two plain notes in the Notes panel and a
+  card in every column of the Todo board: three in To do, one of them added by an agent, marked
+  so (Codex's icon at the end of its line, whose tooltip reads "Added by Codex · @pike",
+  History's Tax rounding agent), one with details In progress, and two in Done; the other
+  projects start with none. Adding, checking off, editing, moving (by drag, the Move menu or Alt
+  and the arrows), deleting and Clear done all work there, so they need no action. The sidebar, at
+  most 400px wide, shows the board one column at a time; its three columns side by side need
+  520px, which no frame of the app gives it yet. Each action acts on the open project's
+  notes and leaves the others': "Next notes change fails" makes the next change fail once (the
+  list or the board stays as the backend has it, and a line above it says the change wasn't
+  saved, until a change takes), "Sample notes" puts storefront's samples in the open project,
+  "No notes" empties both (each says what it is for), "No todos" empties the board and keeps
+  the plain notes, "Every todo done" leaves To do and In progress empty over a Done column of
+  six, "Project full of notes" fills it with the 200 a project keeps, plain notes and cards in
+  every column (neither add field takes more, and a line says why), "A long note" adds a card
+  whose line is as long as one can be, with details that have a heading, lists, code and a link,
+  and "An agent adds a todo" puts a card first in To do, marked as added by the first agent
+  running in the session on screen (Claude Code's @wren, from History, where none runs), as an
+  agent's `note` tool adds one.
 - **Inbox:** each action adds one row of its kind to the Inbox, over what the agents wait on,
   waiting from now and in place of the one of its kind already there: a stuck agent, Codex's
   command permission, an unreadable dialog, a held message, a decision with options, a

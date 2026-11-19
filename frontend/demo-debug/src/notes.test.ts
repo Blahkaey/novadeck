@@ -1,4 +1,12 @@
-import { doneNotes, noteLimits, openNotes, todosLeft } from "@novadeck/core/notes"
+import {
+  boardCards,
+  boardColumns,
+  doneNotes,
+  noteLimits,
+  openNotes,
+  plainNotes,
+  todosLeft,
+} from "@novadeck/core/notes"
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoNotes } from "@novadeck/demo/notes"
 
@@ -48,7 +56,7 @@ const setup = () => {
   return { notes, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
 }
 
-describe("the debug panel's Notes group", () => {
+describe("the debug panel's Notes and Todo group", () => {
   it("offers nothing where the backend's notes aren't the demo's", () => {
     const { state, add, change, move, place, remove } = createDemoNotes(0)
 
@@ -73,13 +81,25 @@ describe("the debug panel's Notes group", () => {
     const storefront = state().notes
 
     run("Project full of notes", "infra")
-    expect(openNotes(state().notes, "infra")).toHaveLength(noteLimits.perProject)
+    expect(state().notes.filter((note) => note.projectId === "infra")).toHaveLength(
+      noteLimits.perProject,
+    )
     expect(state().notes.filter((note) => note.projectId === "storefront")).toEqual(storefront)
     run("No notes", "infra")
     expect(state().notes).toEqual(storefront)
     run("Sample notes", "infra")
     expect(todosLeft(state().notes, "infra")).toBe(todosLeft(storefront, "storefront"))
     expect(new Set(state().notes.map(({ id }) => id)).size).toBe(state().notes.length)
+  })
+
+  it("empties the board and keeps the plain notes", () => {
+    const { run, state } = setup()
+    const plain = plainNotes(state().notes, "storefront")
+
+    run("No todos", "storefront")
+    for (const column of boardColumns)
+      expect(boardCards(state().notes, "storefront", column)).toEqual([])
+    expect(plainNotes(state().notes, "storefront")).toEqual(plain)
   })
 
   it("acts on the storefront before a workspace is committed", () => {
@@ -149,6 +169,14 @@ describe("the debug panel's notes", () => {
 
     expect(notes).toHaveLength(noteLimits.perProject)
     expect(new Set(notes.map(({ id }) => id)).size).toBe(notes.length)
+  })
+
+  it("fill a project with plain notes and cards in every column of the board", () => {
+    const notes = fullNotes("p", 0)
+
+    expect(plainNotes(notes, "p")).toHaveLength(noteLimits.perProject / 4)
+    for (const column of boardColumns)
+      expect(boardCards(notes, "p", column)).toHaveLength(noteLimits.perProject / 4)
   })
 
   it("stay within a note's limits", () => {

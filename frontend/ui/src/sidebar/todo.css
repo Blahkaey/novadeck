@@ -1,0 +1,47 @@
+/* The Todo board (TodoBoard.tsx): a project's todos as cards in three columns. Its add field
+   and its cards are the Notes panel's (notes.css): a `.todo-card` is a `.notes-row` with a
+   checkbox, its `.todo-card-move` menu button and, on a done card, `.todo-card-date`. Each
+   column's `.todo-column-cards` holds its cards and scrolls on its own. `.todo-board`'s
+   data-layout="wide" sets the three side by side in `.todo-columns`, each a `.todo-column`
+   under its heading; "narrow" shows one at a time under `.todo-tabs`, a `.todo-tab` each.
+
+   Hooks: data-drop="before" on the card a dragged card would land in front of, "end" on the
+   column cards it would land last in, "start" on the tab of the column it would land first
+   in.
+
+   Tokens: none of its own; it reads the palette's (muted, line, strong) and the item recipe's
+   (--item-hover-bg). */
+.todo-tabs {
+  border-bottom: var(--border-width) solid var(--color-line);
+}
+.todo-tab {
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  cursor: pointer;
+}
+.todo-tab[data-drop="start"] {
+  background-color: var(--item-hover-bg, var(--color-soft));
+}
+
+.todo-card-date {
+  color: var(--color-muted);
+}
+
+/* Where a dragged card would land: a line just above the card it would stand before, or
+   under a column's last card. */
+.todo-card[data-drop="before"]::before,
+.todo-column-cards[data-drop="end"]::after {
+  content: "";
+  height: 2px;
+  border-radius: 1px;
+  background-color: var(--color-strong);
+  pointer-events: none;
+}
+.todo-card[data-drop="before"]::before {
+  position: absolute;
+  inset-inline: 4px;
+  top: -3px;
+}
+.todo-column-cards[data-drop="end"]::after {
+  flex: none;
+  margin-inline: 4px;
+}

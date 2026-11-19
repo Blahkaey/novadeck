@@ -15,6 +15,7 @@ export const sidebarPanels = [
   "worktrees",
   "files",
   "notes",
+  "todo",
   "history",
 ] as const
 export type SidebarPanel = (typeof sidebarPanels)[number]
