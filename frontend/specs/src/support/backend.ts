@@ -30,6 +30,7 @@ import { createShowcaseDemo } from "@novadeck/demo/showcase/demo"
 import { createDemo } from "@novadeck/demo/variants"
 import { babciaCuesOf, type BabciaCues } from "@novadeck/demo/videos/babcia"
 import { visitorDemo } from "@novadeck/demo/visitor/index"
+import { isDemoWorks } from "@novadeck/demo/works"
 import { pageTheme } from "@novadeck/ui/theme/source"
 
 // The demo's variants a spec asks for in its address, and the backend that offers them:
@@ -448,6 +449,24 @@ export const fileEdits = {
       .filter(isDemoFiles)
       .map((files) => files.edits()?.text({ projectId, path }))
       .find((text) => text !== undefined),
+}
+
+export const worktreeDiff = {
+  fault: (kind: "slow" | "failed"): Promise<void> => {
+    const works = started.at(-1)?.backend.works
+    if (!isDemoWorks(works)) throw new Error("The demo has no worktree diff.")
+    return works.nextPreview(kind)
+  },
+  closeWorks: (projectId: string): void => {
+    const works = started.at(-1)?.backend.works
+    if (!isDemoWorks(works)) throw new Error("The demo has no worktrees.")
+    works.removeAll(projectId)
+  },
+  clash: (): void => {
+    const works = started.at(-1)?.backend.works
+    if (!isDemoWorks(works)) throw new Error("The demo has no worktrees.")
+    works.previewOwl("clash")
+  },
 }
 
 /** The backend reports that the terminal named `name` now works for the one named `lead`, in

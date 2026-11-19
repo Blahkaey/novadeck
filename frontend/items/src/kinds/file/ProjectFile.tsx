@@ -1,7 +1,7 @@
 import type { FileContent, Item, ItemContent } from "@novadeck/core/items"
 import type { Lines } from "@novadeck/viewers/editor"
 import type { ClassedRange } from "@novadeck/viewers/markdown"
-import { lazy, Suspense, useMemo } from "react"
+import { lazy, Suspense, useMemo, type ReactNode } from "react"
 
 import { Unavailable } from "../../ArtifactViewer"
 import { blockedText, SaveNotice, stalledText, unreadableText } from "../../document/SaveNotice"
@@ -47,6 +47,22 @@ const savesNow = (event: React.KeyboardEvent): boolean =>
   !event.shiftKey &&
   event.key.toLowerCase() === "s"
 
+const listingOf = (path: string, text: string): FileContent => {
+  const lines = text.split(/\r\n|\r|\n/)
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop()
+  return {
+    kind: "file",
+    path,
+    lines,
+    firstLine: 1,
+    from: 1,
+    to: lines.length,
+    total: lines.length,
+    clamped: false,
+    truncated: false,
+  }
+}
+
 // A file the project window has whole, edited where it's read: in the code editor, or a
 // Markdown file in its document; read-only, with why, where a save would be refused. Above
 // it, how saving stands, and where the edits can't reach the file, why, with the ways out.
@@ -73,22 +89,10 @@ const TextFile = ({
   const block = fileBlockOf(doc, content) ?? (reason !== undefined && edited ? reason : null)
   const edits = fileText(doc)
   const ranges = useMemo(() => rangesOf(doc.text, doc.marks), [doc.text, doc.marks])
-  const listing = useMemo((): FileContent | undefined => {
-    if (!whole || !previewFor(doc.path)) return undefined
-    const lines = doc.text.split(/\r\n|\r|\n/)
-    if (lines.length > 1 && lines.at(-1) === "") lines.pop()
-    return {
-      kind: "file",
-      path: doc.path,
-      lines,
-      firstLine: 1,
-      from: 1,
-      to: lines.length,
-      total: lines.length,
-      clamped: false,
-      truncated: false,
-    }
-  }, [whole, doc.path, doc.text])
+  const listing = useMemo(
+    () => (whole && previewFor(doc.path) ? listingOf(doc.path, doc.text) : undefined),
+    [whole, doc.path, doc.text],
+  )
   const documentEditor = isMarkdown(doc.path) ? (
     <div className="pane-reader artifact-document">
       <MarkdownFile
@@ -164,17 +168,33 @@ const TextFile = ({
 // read once it comes whole; one the window can't have whole read-only, saying why; and what
 // can't show, or hasn't yet, as for any file. Edits not in the file stay in their editor
 // whatever the item holds meanwhile, with the ways out, but behind a secret's gate.
-export const ProjectFile = ({ item, itemStore, target }: ViewProps): React.JSX.Element => {
-  const load = useContent(itemStore, target, item, { edit: true })
+export const ProjectFile = ({
+  item,
+  itemStore,
+  target,
+  diff,
+  worktreeCopy,
+  notice,
+}: ViewProps & {
+  diff?: ReactNode
+  worktreeCopy: boolean
+  notice?: string | undefined
+}): React.JSX.Element => {
+  const load = useContent(itemStore, target, item, { edit: !worktreeCopy })
   const whole = load?.state === "ready" && load.content.kind === "text" ? load.content : undefined
-  const listing = load?.state === "ready" && load.content.kind === "file" ? load.content : undefined
+  const listing = useMemo(() => {
+    if (worktreeCopy && whole) return listingOf(whole.path, whole.text)
+    return load?.state === "ready" && load.content.kind === "file" ? load.content : undefined
+  }, [load, whole, worktreeCopy])
   // The file the edits are to: the one the item reports whole, else the one it points at.
   const path = whole?.path ?? item.path ?? ""
   const doc = useFileDoc(itemStore, fileKey(item.id, path))
   const file = itemStore.file(target, item.id, path)
   const secret = load?.state === "unavailable" && load.reason === "secret"
   const kept = doc !== undefined && doc.text !== doc.base && !secret
-  const editing = load !== undefined && doc !== undefined && (whole !== undefined || kept)
+  const editing =
+    !worktreeCopy && load !== undefined && doc !== undefined && (whole !== undefined || kept)
+  if (diff && !secret) return <>{diff}</>
   return (
     <div
       className="artifact-viewer"
@@ -186,6 +206,12 @@ export const ProjectFile = ({ item, itemStore, target }: ViewProps): React.JSX.E
         file.flush()
       }}
     >
+      {notice && (
+        <p className="pane-notice" role="status">
+          {notice}
+        </p>
+      )}
+      {worktreeCopy && <p className="pane-notice">Read-only copy from an agent worktree.</p>}
       {editing ? (
         <TextFile item={item} doc={doc} content={load} file={file} />
       ) : load?.state === "unavailable" ? (

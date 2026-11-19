@@ -102,18 +102,21 @@ export const createFileCommands = (
       const { [context]: _was, ...rest } = now.filePreviews
       return {
         ...now,
-        filePreviews: options?.preview
-          ? {
-              ...rest,
-              [context]: {
-                itemId: item.id,
-                projectId: target.projectId,
-                path,
-                backed,
-                opened: effects.newId(),
-              },
-            }
-          : rest,
+        filePreviews:
+          item.kind === "file"
+            ? {
+                ...rest,
+                [context]: {
+                  itemId: item.id,
+                  itemVersion: item.version,
+                  projectId: target.projectId,
+                  path,
+                  backed,
+                  opened: asked,
+                  showDiff: options?.preview === true,
+                },
+              }
+            : rest,
       }
     })
     // Made by this open, not by what the watch reported first: whichever came first, it is

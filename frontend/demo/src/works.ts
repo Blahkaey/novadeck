@@ -27,6 +27,7 @@ import {
   type OwlChange,
   type PreviewScenario,
 } from "./preview"
+import { directoryOf } from "./workspace"
 
 // The demo's works: each tracked worktree's work against main, from fixtures planned per demo
 // (`WorkPlan`) and kept by the demo's own store, standing in for the runner, which reads the
@@ -405,6 +406,8 @@ export type DemoWorksControl = {
   // src/checkout/PaymentStep.tsx to src/checkout/PaymentForm.tsx (which Moth modifies), or no
   // longer.
   readonly previewScenario: (which: PreviewScenario, on: boolean) => void
+  // The next diff read takes a moment, or fails.
+  readonly nextPreview: (fault: "slow" | "failed") => Promise<void>
   // The terminal's worktree differs from nothing but has `count` commits main lacks (and no
   // remote holds); it is not merged, so closing it asks.
   readonly commitsMainLacks: (at: Placed, count: number) => void
@@ -479,6 +482,7 @@ export const createDemoWorks = (
   // How many extra worktrees the debug panel made, to name each one apart.
   let extras = 0
   let refuse = false
+  let previewFault: { kind: "slow" | "failed"; finished: () => void } | undefined
   // The works `unreported` holds back, and when they come back.
   let held: { works: readonly Work[]; timer: ReturnType<typeof setTimeout> } | undefined
   // The commits main lacks of worktrees that differ from it in no file, by root.
@@ -572,10 +576,25 @@ export const createDemoWorks = (
         ),
       }))
     },
-    preview: async (projectId, path): Promise<WorkPreview> =>
-      preview
-        ? preview.read(state.getSnapshot().works, projectId, path)
-        : { main: null, works: [], renames: [] },
+    preview: async (projectId, path): Promise<WorkPreview> => {
+      const fault = previewFault
+      previewFault = undefined
+      try {
+        if (fault?.kind === "failed") throw new Error("The worktree diff couldn't be read.")
+        const answer = preview
+          ? preview.read(state.getSnapshot().works, projectId, path)
+          : { main: null, works: [], renames: [] }
+        if (fault?.kind === "slow") await new Promise((resolve) => setTimeout(resolve, 3_000))
+        return answer
+      } finally {
+        fault?.finished()
+      }
+    },
+    nextPreview: (kind) =>
+      new Promise((finished) => {
+        previewFault?.finished()
+        previewFault = { kind, finished }
+      }),
     touchFile,
     previewScenario: (which, on) => {
       if (!preview) return
@@ -854,9 +873,34 @@ export const withWorks = (
     works.gain({ projectId: key.projectId, terminalId: key.terminalId, root: own.root })
     works.setWorking(key.terminalId, true)
   })
+  const { companions } = backend
+  const open = companions?.openInProject
   return {
     ...backend,
     works,
+    ...(companions &&
+      open &&
+      files && {
+        companions: {
+          ...companions,
+          openInProject: async (target, path, windowId) => {
+            const directory = directoryOf(latest, target)
+            // These fixtures start in an agent's worktree. Opening their project path fails
+            // until the file exists there, so the window follows the agent's copy meanwhile.
+            if (
+              target.projectId === "storefront" &&
+              directory &&
+              [addedPath, renamedTo].some((file) => path === `${directory}/${file}`)
+            ) {
+              const { entries } = await files.list(target.projectId, "src/checkout")
+              const name = path.split("/").at(-1)
+              if (!entries.some((entry) => entry.name === name && !entry.folder))
+                throw new Error("The file isn't in the project's checkout.")
+            }
+            return open(target, path, windowId)
+          },
+        },
+      }),
     commit: (workspace, actions) => {
       latest = workspace
       backend.commit(workspace, actions)

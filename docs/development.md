@@ -666,7 +666,13 @@ Agents:
   picker on its right), the merge set in the summary line (each agent a toggle, everyone merged
   each time it is opened), and the lines Moth removed folded into "5 lines of main removed". It
   needs agent worktrees on (the App section's "Agent worktrees" group: "On, with
-  Worktrees"). The Files group's "Agent writes Checkout.tsx" (and the agents' own writes) grow the
+  Worktrees"). The **Worktree diff** button in the file's header switches between this preview
+  and the editor in the same window. Edits save before the diff opens, and a refused save
+  leaves the draft and its recovery controls in the editor. Use the File editing group's
+  "Next save refused: can't write" to try it. In file view, "Slow next diff read" and "Fail next diff read"
+  show what happens when the button starts a slow or failed read. In Grid, select a storefront
+  terminal and run "Close every worktree" to remove the diff and restore the file view.
+  The Files group's "Agent writes Checkout.tsx" (and the agents' own writes) grow the
   selected agent's change by a line, pulse it and put the agent's cursor after it, which becomes a
   trail once "Agent stops writing (Files only)" runs; a clash follows the agent that wrote last.
   The File preview group's "Third agent clashes with the others" adds `owl` over the same line (a
@@ -675,7 +681,8 @@ Agents:
   and "Third agent leaves the file preview" takes it away. Lighting an agent in the Files strip
   dims the others' changes in the preview. Two more files are previewed: `src/checkout/OrderSummary.tsx`,
   which main lacks and Moth adds (the whole file as added lines under Moth's head; "Crow adds
-  OrderSummary.tsx too" makes a whole-file clash, the last writer shown), and
+  OrderSummary.tsx too" makes a whole-file clash, the last writer shown). The file view opens
+  the backing worktree copy read-only. The other preview is
   `src/checkout/PaymentStep.tsx`: "Crow renames PaymentStep.tsx, moth edits it" puts a note at the
   top of PaymentStep.tsx saying crow renames it to `PaymentForm.tsx` (Open shows that file's
   preview: main's PaymentStep with crow's head "renamed from", crow's edit and Moth's change to

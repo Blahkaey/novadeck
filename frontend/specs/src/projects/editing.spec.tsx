@@ -147,3 +147,47 @@ describe("A file opened from Files", () => {
     await expect.element(terminal("index.html")).not.toBeInTheDocument()
   })
 })
+
+describe("An edited file with a worktree diff", () => {
+  const name = "Checkout.tsx"
+  const window = () => terminal(name)
+  const diff = () => window().getByRole("button", { name: "Worktree diff" })
+  const preview = () => window().getByTitle("Leave @moth's work out")
+  const openEditor = async (fault?: string): Promise<void> => {
+    await openWorkspace(`${storefront(fault)}&channel=experimental`)
+    await sidebarPanel("Files").click()
+    await row(name).dblClick()
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "true")
+    await diff().click()
+    await expect.element(editor(name)).toBeVisible()
+    editor(name).element().focus()
+    await userEvent.keyboard(mod("{Home}"))
+  }
+
+  it("saves the edits before opening the diff and shows them when the file view returns", async () => {
+    await openEditor()
+    await userEvent.keyboard("// local draft")
+
+    await diff().click()
+
+    await expect.element(preview()).toBeVisible()
+    expect(fileEdits.text("storefront", "src/checkout/Checkout.tsx")).toContain("// local draft")
+    await diff().click()
+    await expect.poll(() => editorText(name)).toContain("// local draft")
+  })
+
+  it("leaves refused edits and their recovery controls visible when the person asks for the diff", async () => {
+    await openEditor("refuse-folder")
+    await userEvent.keyboard("// keep this draft")
+
+    await diff().click()
+
+    await expect.element(window().getByRole("button", { name: "Try saving again" })).toBeVisible()
+    await expect.element(window().getByRole("button", { name: "Copy my edits" })).toBeVisible()
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "false")
+    await expect.poll(() => editorText(name)).toContain("// keep this draft")
+    await window().getByRole("button", { name: "Try saving again" }).click()
+    await diff().click()
+    await expect.element(preview()).toBeVisible()
+  })
+})

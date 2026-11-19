@@ -78,9 +78,10 @@ export const attachedArtifact = (path: string, directory?: string): AttachedArti
       content: pdfContent(quarterlyReport.length),
       file: { read: async () => quarterlyReport },
     }
-  const lines = stand(relative)
+  const lines = previewFileLines(path) ?? stand(relative)
   return {
     item: { kind: "file", name, detail: relative, path, url: null, lines: null, secret: held },
     content: ready(fileLines(relative, lines, { from: 1, to: lines.length })),
   }
 }
+import { previewFileLines } from "../preview"

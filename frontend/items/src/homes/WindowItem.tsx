@@ -1,10 +1,9 @@
 import { shellCounts } from "@novadeck/core/agents/shells"
 import type { Item } from "@novadeck/core/items"
 import type { WorkspaceTarget } from "@novadeck/core/types"
-import type { ComponentType } from "react"
+import type { ReactNode } from "react"
 
 import { PaneChrome, PaneTitle, tabTip } from "../pane-row"
-import type { ViewProps } from "../registration"
 import { itemLook, registrationOf } from "../registry"
 import type { ItemStore } from "../store/item-store"
 import { useContent, usePlans } from "../store/use-item-store"
@@ -16,15 +15,15 @@ export const WindowItem = ({
   item,
   itemStore,
   target,
-  view,
+  body,
 }: {
   item: Item
   itemStore: ItemStore
   target: WorkspaceTarget
-  view?: ComponentType<ViewProps> | undefined
+  body?: ReactNode
 }): React.JSX.Element => {
   const plans = usePlans(itemStore, item.kind === "plan" ? [item.id] : [])
-  const View = view ?? registrationOf(item).View
+  const { View } = registrationOf(item)
   // A shells item with a shell that failed tints its title, as a pane's tab.
   const load = useContent(itemStore, target, item)
   const failed =
@@ -47,7 +46,7 @@ export const WindowItem = ({
         />
       )}
     >
-      <View item={item} itemStore={itemStore} target={target} />
+      {body ?? <View item={item} itemStore={itemStore} target={target} />}
     </PaneChrome>
   )
 }

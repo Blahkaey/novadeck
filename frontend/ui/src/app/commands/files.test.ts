@@ -53,12 +53,20 @@ describe("files commands", () => {
       const app = open(reply)
       await app.commands.openProjectFile("README.md", { preview: true })
       const [first] = Object.values(app.ui.getSnapshot().filePreviews)
-      expect(first).toMatchObject({ itemId: readme.id, projectId: "project", path: "README.md" })
+      expect(first).toMatchObject({
+        itemId: readme.id,
+        projectId: "project",
+        path: "README.md",
+        showDiff: true,
+      })
       await app.commands.openProjectFile("README.md", { preview: true })
       // Each open starts the preview over.
       expect(Object.values(app.ui.getSnapshot().filePreviews)[0]!.opened).not.toBe(first!.opened)
       await app.commands.openProjectFile("README.md")
-      expect(app.ui.getSnapshot().filePreviews).toEqual({})
+      expect(Object.values(app.ui.getSnapshot().filePreviews)[0]).toMatchObject({
+        path: "README.md",
+        showDiff: false,
+      })
     })
 
     it("opens an agent's copy instead where main lacks the file", async () => {

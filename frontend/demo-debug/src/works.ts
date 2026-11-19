@@ -238,6 +238,16 @@ export const worksGroups = (works: Backend["works"]): readonly DemoActionGroup[]
           title: "File preview",
           actions: [
             {
+              label: "Slow next diff read",
+              hint: "With Checkout.tsx in file view, turn on Worktree diff: the window shows Reading worktree diff for three seconds",
+              run: () => void works.nextPreview("slow"),
+            },
+            {
+              label: "Fail next diff read",
+              hint: "With Checkout.tsx in file view, turn on Worktree diff: the editor stays available and says the diff couldn't be read",
+              run: () => void works.nextPreview("failed"),
+            },
+            {
               label: "Third agent clashes with the others",
               hint: "Open Files and double-click src/checkout/Checkout.tsx (storefront, agents demo): the preview's Clash head at submit() shows owl's version, the last writer, with moth and crow hidden, and a picker of each agent and main; owl joins the merge toggles",
               run: () => works.previewOwl("clash"),

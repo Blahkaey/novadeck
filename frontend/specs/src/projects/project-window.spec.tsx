@@ -1,20 +1,30 @@
 import { page, userEvent } from "vitest/browser"
 
+import { worktreeDiff } from "../support/backend"
 import { windowMenu } from "../support/companions"
-import { openWorkspace, sidebarPanel, terminal, terminalTab } from "../support/workspace"
+import {
+  chooseView,
+  openWorkspace,
+  sidebarPanel,
+  terminal,
+  terminalTab,
+} from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The agents demo has the storefront's files in a Files panel. A file opened there lands in
 // the session's project window: the person's, one at a time, named by the file.
-const storefront = (view: "focus" | "grid" | "canvas"): string =>
-  `/projects/storefront/sessions/initial/${view}?demo=agents`
+const storefront = (view: "focus" | "grid" | "canvas", experimental: boolean): string =>
+  `/projects/storefront/sessions/initial/${view}?demo=agents${experimental ? "&channel=experimental" : ""}`
 
 // A row's name is the file's, then who changed it when someone did.
 const row = (name: string) =>
   page.getByRole("treeitem", { name: new RegExp(`^${name.replace(".", "\\.")}(,|$)`) })
 
-const openFiles = async (view: "focus" | "grid" | "canvas" = "grid"): Promise<void> => {
-  await openWorkspace(storefront(view))
+const openFiles = async (
+  view: "focus" | "grid" | "canvas" = "grid",
+  experimental = false,
+): Promise<void> => {
+  await openWorkspace(storefront(view, experimental))
   await sidebarPanel("Files").click()
   await expect.element(page.getByRole("tree", { name: "Project files" })).toBeVisible()
 }
@@ -138,5 +148,113 @@ describe("The project window", () => {
     await expect.element(menu.getByRole("menuitem", { name: "Close" })).toBeVisible()
     await expect.element(menu.getByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument()
     await expect.element(menu.getByRole("menuitem", { name: /^Dock in/ })).not.toBeInTheDocument()
+  })
+})
+
+describe("Worktree diff in the project window", () => {
+  const checkout = () => terminal("Checkout.tsx")
+  const diff = () => checkout().getByRole("button", { name: "Worktree diff" })
+  const editor = () => checkout().getByRole("textbox", { name: "Checkout.tsx" })
+  const merge = (handle: string) => checkout().getByTitle(`Leave @${handle}'s work out`)
+  const openCheckout = async (): Promise<void> => {
+    await openFiles("grid", true)
+    await row("Checkout.tsx").dblClick()
+    await expect.element(merge("moth")).toBeVisible()
+  }
+
+  it("switches views in the same window with the mouse and keyboard, keeping the editor's selection", async () => {
+    await openCheckout()
+    const window = checkout().element()
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "true")
+    await diff().click()
+    await expect.element(editor()).toBeVisible()
+    editor().element().focus()
+    await userEvent.keyboard("{Home}{Shift>}{ArrowRight}{ArrowRight}{/Shift}")
+    await expect.poll(() => document.getSelection()?.toString()).toBe("im")
+
+    const toggle = diff().element() as HTMLElement
+    toggle.focus()
+    await userEvent.keyboard("{Enter}")
+    await expect.element(diff()).toHaveFocus()
+    await expect.element(merge("moth")).toBeVisible()
+    await userEvent.keyboard(" ")
+
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "false")
+    await expect.element(editor()).toBeVisible()
+    editor().element().focus()
+    await expect.poll(() => document.getSelection()?.toString()).toBe("im")
+    expect(checkout().element()).toBe(window)
+
+    await chooseView("Focus")
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "false")
+    await expect.element(editor()).toBeVisible()
+
+    await row("package.json").dblClick()
+    await expect
+      .element(terminal("package.json").getByRole("textbox", { name: "package.json" }))
+      .toBeVisible()
+    await expect
+      .element(page.getByRole("button", { name: "Worktree diff" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("refreshes open diffs and returns to the file when the worktrees close", async () => {
+    await openCheckout()
+    worktreeDiff.clash()
+    await expect.element(merge("owl")).toBeVisible()
+
+    const toggle = diff().element() as HTMLElement
+    toggle.focus()
+    worktreeDiff.closeWorks("storefront")
+
+    await expect.element(editor()).toBeVisible()
+    await expect.element(diff()).not.toBeInTheDocument()
+    expect(checkout().element().contains(document.activeElement)).toBe(true)
+  })
+
+  it("keeps the file available when a diff read fails and lets the person retry", async () => {
+    await openCheckout()
+    await diff().click()
+    const failed = worktreeDiff.fault("failed")
+    await diff().click()
+    await failed
+
+    await expect.element(checkout().getByText("Couldn't read the worktree diff.")).toBeVisible()
+    await expect.element(editor()).toBeVisible()
+    await expect.element(diff()).toHaveAttribute("aria-pressed", "false")
+    await diff().click()
+    await expect.element(merge("moth")).toBeVisible()
+  })
+
+  it("ignores a late diff after the project window opens another file", async () => {
+    await openCheckout()
+    await diff().click()
+    const read = worktreeDiff.fault("slow")
+    await diff().click()
+    await expect.element(checkout().getByText("Reading worktree diff…")).toBeVisible()
+
+    await row("package.json").dblClick()
+    await read
+
+    await expect
+      .element(terminal("package.json").getByRole("textbox", { name: "package.json" }))
+      .toBeVisible()
+    await expect
+      .element(page.getByRole("button", { name: "Worktree diff" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("opens a read-only file view when the file exists only in a worktree", async () => {
+    await openFiles("grid", true)
+    await row("OrderSummary.tsx").dblClick()
+    const window = terminal("OrderSummary.tsx")
+    const switcher = window.getByRole("button", { name: "Worktree diff" })
+    await expect.element(switcher).toHaveAttribute("aria-pressed", "true")
+    await switcher.click()
+    await expect.element(window.getByText("Read-only copy from an agent worktree.")).toBeVisible()
+    await expect
+      .element(window.getByText("type Props = { items: CartItem[]; total: number }"))
+      .toBeVisible()
+    await expect.element(window.getByRole("textbox")).not.toBeInTheDocument()
   })
 })

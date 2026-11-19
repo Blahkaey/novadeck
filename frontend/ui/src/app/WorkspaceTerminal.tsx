@@ -22,7 +22,6 @@ import { isWindow } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
 import type { CompanionWindowMeta, TerminalMetadata, Tile } from "@novadeck/core/types"
 import { Avatar } from "@novadeck/items/Avatar"
-import { ProjectWindow } from "@novadeck/items/ProjectWindow"
 import { shellTailsOf } from "@novadeck/items/shells"
 import { TerminalCompanion } from "@novadeck/items/TerminalCompanion"
 import { UndockedWindow } from "@novadeck/items/UndockedWindow"
@@ -76,7 +75,6 @@ import {
 import { useFoldTeam } from "./team-fold"
 import { useBarShells, useShellsHome, useTerminalBar } from "./terminal-bar"
 import { agentAvatarsOn, chatViewOn } from "./ui-store"
-import { useWorktreesShown } from "./use-worktrees-shown"
 import { useTerminalMarks } from "./useTerminalMarks"
 
 const noChatConversation = createStore(noConversation)
@@ -184,26 +182,12 @@ const WorkspaceWindow = memo(
       currentState(workspace).items.find((each) => each.id === window.itemId),
     )
     const { icon: Icon } = windowProfile(item)
-    // The file the person opened to preview what the agents' work merges to, while the window
-    // still shows it.
-    // Previews go with the works they show: turning agent worktrees off has the file as in main.
-    const worktreesShown = useWorktreesShown()
-    const previewing =
-      useUiState((state) => {
-        const request = state.filePreviews[`${target.projectId}/${target.workspaceSessionId}`]
-        return window.home === "project" && request !== undefined && request.itemId === item?.id
-      }) && worktreesShown
     // What it shows, where a terminal's content would be.
     return (
       <WindowShell {...frame} icon={<Icon size={14} strokeWidth={1.5} />}>
         {itemStore &&
           (window.home === "project" ? (
-            <ProjectWindow
-              itemStore={itemStore}
-              target={target}
-              item={item}
-              Preview={previewing ? FilePreviewHost : undefined}
-            />
+            <FilePreviewHost itemStore={itemStore} target={target} item={item} />
           ) : (
             <UndockedWindow itemStore={itemStore} target={target} item={item} />
           ))}

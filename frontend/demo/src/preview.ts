@@ -180,6 +180,20 @@ const stepMain =
 const stepMoth = hunk(10, 1, [`      {error && <p role="alert" className="error">{error}</p>}`])
 const stepCrow = hunk(11, 1, [`      <Button onClick={submit}>Pay now</Button>`])
 
+// The same files the diff compares, when opened normally from Files or from a worktree.
+export const previewFileLines = (path: string): readonly string[] | undefined => {
+  if (path === `~/projects/storefront/${previewPath}`) return previewMain.trimEnd().split("\n")
+  if (!path.startsWith("~/.novadeck/worktrees/storefront/")) return undefined
+  if (path.endsWith(`/storefront/${addedPath}`))
+    return path.includes("/agent-checkout-review/") ? orderCrow : orderMoth
+  if (path.endsWith(`/storefront/${renamedTo}`)) {
+    const lines = stepMain.trimEnd().split("\n")
+    lines.splice(stepCrow.at - 1, stepCrow.removed, ...stepCrow.lines)
+    return lines
+  }
+  return undefined
+}
+
 export type PreviewScenario = "added" | "rename"
 
 export type DemoPreview = {
