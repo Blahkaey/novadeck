@@ -16,6 +16,7 @@ import {
   draftOf,
   expectSelected,
   expectStaysAbsent,
+  expectTerminalsView,
   labelled,
   openWorkspace,
   reloadWorkspace,
@@ -53,7 +54,7 @@ describe("deep links", () => {
       await openWorkspace(`${apiCanvas}&panel=sessions`)
 
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
     })
 
     it("opens the Worktrees panel when the link names it", async () => {

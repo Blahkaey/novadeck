@@ -23,8 +23,11 @@ import {
   draftOf,
   expectSelected,
   expectStaysAbsent,
+  expectTerminalsView,
   isMac,
   labelled,
+  openSessions,
+  openTerminalsView,
   openWorkspace,
   press,
   sidebar,
@@ -266,7 +269,7 @@ describe("sessions sidebar", () => {
     it("lists the project's saved sessions with their terminal counts", async () => {
       await openWorkspace()
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
 
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
       await expect
@@ -287,16 +290,16 @@ describe("sessions sidebar", () => {
   context("when choosing New session", () => {
     it("creates and selects an empty session in the current project", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
 
       await page.getByRole("button", { name: "New session" }).click()
 
       await expect.element(emptyWorkspace()).toBeVisible()
       await expect.element(sidebar()).toHaveAccessibleName("Terminals")
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
       await expect.element(sidebar().getByRole("button", { name: "New terminal" })).toHaveFocus()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
       await expect.poll(() => savedSessions().getByRole("listitem").elements()).toHaveLength(2)
       await expect
@@ -319,10 +322,10 @@ describe("sessions sidebar", () => {
       await pressNewSession()
 
       await expect.element(emptyWorkspace()).toBeVisible()
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
       await expect.element(sidebar()).toHaveAccessibleName("Terminals")
       await expect.element(sidebar().getByRole("button", { name: "New terminal" })).toHaveFocus()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await expect.poll(() => savedSessions().getByRole("listitem").elements()).toHaveLength(2)
       await expect
         .element(savedSessions().getByRole("button").getByText("0 terminals", { exact: true }))
@@ -335,7 +338,7 @@ describe("sessions sidebar", () => {
     it("shows the shortcut on the New session control", async () => {
       await openWorkspace()
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
 
       await expect
         .element(
@@ -353,11 +356,11 @@ describe("sessions sidebar", () => {
       await terminalTab("Checkout review").click()
       await run("Checkout review", "echo saved output")
       await typeInto("Checkout review", "echo unfinished")
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
       await expect.element(emptyWorkspace()).toBeVisible()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
 
       await savedSession(original).click()
 
@@ -369,7 +372,7 @@ describe("sessions sidebar", () => {
 
     it("keeps a new session's terminals apart from the original session", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
       await expect.element(emptyWorkspace()).toBeVisible()
@@ -377,7 +380,7 @@ describe("sessions sidebar", () => {
       await expect.element(commandInput(newTerminalName)).toHaveFocus()
       await typeInto(newTerminalName, "new draft")
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
       await savedSession(original).click()
       await expect.element(terminal("Checkout implementation")).toBeVisible()
@@ -394,21 +397,21 @@ describe("sessions sidebar", () => {
       await openWorkspace()
       await chooseView("Grid")
       await terminalTab("Tests").click()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
       await expect.element(emptyWorkspace()).toBeVisible()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
       await chooseView("Canvas")
 
       await savedSession(original).click()
 
       await expect.element(view("Grid")).toBeChecked()
-      await sidebarPanel("Terminals").click()
+      await openTerminalsView("Terminals")
       await expectSelected("Tests")
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await savedSession(fresh).click()
 
       await expect.element(view("Canvas")).toBeChecked()
@@ -419,11 +422,11 @@ describe("sessions sidebar", () => {
   context("when switching projects after creating a session", () => {
     it("lists only that project's sessions and returns to the last active one", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
       await expect.element(emptyWorkspace()).toBeVisible()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
 
       await switchProject("api-service")
@@ -443,7 +446,7 @@ describe("sessions sidebar", () => {
   context("when renaming a session", () => {
     it("saves the name typed in its row on Enter", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
 
       await savedSessions()
@@ -460,7 +463,7 @@ describe("sessions sidebar", () => {
 
     it("keeps the old name on Escape", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
 
       await savedSession(original).dblClick()
@@ -476,10 +479,10 @@ describe("sessions sidebar", () => {
   context("when deleting a session", () => {
     it("deletes an empty one at once", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
 
       await savedSessions()
@@ -493,10 +496,10 @@ describe("sessions sidebar", () => {
 
     it("asks first when it has terminals, and closes them", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
 
       await savedSessions()
@@ -520,10 +523,10 @@ describe("sessions sidebar", () => {
 
     it("keeps it when the person cancels", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await newSessionName(original)
 
       await savedSessions()
@@ -546,10 +549,10 @@ describe("sessions sidebar", () => {
 
     it("moves the focused session with Space and the arrows, and keeps the focus on it", async () => {
       await openWorkspace()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const original = await currentSessionName()
       await page.getByRole("button", { name: "New session" }).click()
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       const fresh = await newSessionName(original)
       expect(listedSessions()).toEqual([fresh, original])
 
@@ -575,7 +578,7 @@ describe("sessions sidebar", () => {
       await page.getByRole("button", { name: "Browse sessions" }).click()
 
       await expect.element(sidebar()).toHaveAccessibleName("Sessions")
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
     })
   })
 })
@@ -683,7 +686,7 @@ describe("narrow screens", () => {
       await phone()
       await openWorkspace()
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
 
       const drawer = page.getByRole("dialog", { name: "Sessions" })
       await expect.element(drawer.getByRole("list", { name: "Saved sessions" })).toBeVisible()

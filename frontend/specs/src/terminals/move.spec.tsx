@@ -13,8 +13,13 @@ import {
 } from "../support/sessions"
 import {
   expectSelected,
+  expectTerminalsView,
   literal,
+  openSessions,
+  openTerminalsView,
+  sidebar,
   sidebarPanel,
+  terminalsViewChoice,
   terminalTab,
   terminalTabNames,
 } from "../support/workspace"
@@ -38,7 +43,7 @@ const listed = 8
 /** Opens the demo with `extra` empty sessions beside its own; returns their names, the open one first. */
 const openWithSessions = async (extra = 1): Promise<{ home: string; others: string[] }> => {
   await openMessagesDemo()
-  await sidebarPanel("Sessions").click()
+  await openSessions()
   const home = await currentSessionName()
   const others: string[] = []
   let latest = home
@@ -48,14 +53,14 @@ const openWithSessions = async (extra = 1): Promise<{ home: string; others: stri
     await pressNewSession()
     // A new session shows the Terminals panel.
     // eslint-disable-next-line no-await-in-loop -- As above.
-    await sidebarPanel("Sessions").click()
+    await openSessions()
     // eslint-disable-next-line no-await-in-loop -- As above.
     latest = await newSessionName(latest)
     others.push(latest)
   }
   await savedSession(home).click()
   await expectCurrentSession(home)
-  await sidebarPanel("Terminals").click()
+  await openTerminalsView("Terminals")
   return { home, others }
 }
 
@@ -110,7 +115,8 @@ const center = (element: Element) => {
 const atTab = (name: string) => center(terminalTab(name).element())
 // Free space in the view, well out of the list.
 const away = { x: 800, y: 450 }
-const atRail = () => center(document.getElementById("sessions-toggle")!)
+// The Sessions choice of the switch beside the Terminals panel's title.
+const atSessionsChoice = () => center(terminalsViewChoice("Sessions").element())
 // A session's button while the panel picks where a terminal goes.
 const pickRow = (name: string) =>
   page.getByRole("button", { name: `Move here: ${name}`, exact: true })
@@ -186,11 +192,11 @@ describe("Moving a terminal to another session", () => {
       await moveMenuByKeyboard("Dev server")
       await userEvent.keyboard("{End}{Enter}")
       await expect.element(strip("Dev server")).toBeVisible()
-      await expect.element(sidebarPanel("Sessions")).toBeChecked()
+      await expectTerminalsView("Sessions")
 
       await userEvent.keyboard("{Escape}")
       await expect.element(strip("Dev server")).not.toBeInTheDocument()
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
       await expect.element(terminalTab("Dev server")).toBeVisible()
       expect(toast().query()).toBeNull()
     })
@@ -206,7 +212,7 @@ describe("Moving a terminal to another session", () => {
       const button = row.element() as HTMLElement
       button.click()
       await expect.element(toast()).toBeInTheDocument()
-      await expect.element(sidebarPanel("Terminals")).toBeChecked()
+      await expectTerminalsView("Terminals")
       await expect.element(terminalTab("Dev server")).not.toBeInTheDocument()
     })
   })
@@ -216,16 +222,17 @@ describe("Moving a terminal to another session", () => {
     // moments can stall for many seconds after a drop, while the page itself is long settled.
     const present = (name: string): boolean => terminalTabNames().includes(name)
 
-    it("pulls it free, opens the Sessions panel over its button, and moves it to the row it drops on", async () => {
+    it("pulls it free, opens the sessions over the switch's Sessions choice, and moves it to the row it drops on", async () => {
       const { others } = await openWithSessions()
       try {
         await pinPointer("press", atTab("Dev server"))
-        // Out of the list far enough to break free, then over the rail's button.
+        // Out of the list far enough to break free, then over the switch's Sessions choice.
         await pinPointer("move", away)
-        await pinPointer("move", atRail())
+        const choice = atSessionsChoice()
+        await pinPointer("move", choice)
         // dnd-kit takes a move on the next frame, so the pointer is moved on to bring it.
-        await pinPointer("move", { x: atRail().x + 2, y: atRail().y + 1 })
-        // Held over the button, the panel opens to pick where it goes.
+        await pinPointer("move", { x: choice.x + 1, y: choice.y + 1 })
+        // Held over the choice, the sessions show to pick where it goes.
         await expect.element(strip("Dev server")).toBeVisible()
         await pinPointer("move", center(pickRow(others[0]!).element()))
         await expect
@@ -246,6 +253,7 @@ describe("Moving a terminal to another session", () => {
       await expect
         .poll(() => sidebarPanel("Terminals").element().getAttribute("aria-checked"))
         .toBe("true")
+      await expect.poll(() => sidebar().element().getAttribute("aria-label")).toBe("Terminals")
       await expect.poll(() => present("Dev server")).toBe(false)
     })
 
