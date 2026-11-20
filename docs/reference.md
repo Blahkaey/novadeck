@@ -428,7 +428,7 @@ the agent can keep working; your answer reaches that exact agent session later a
 Every row is open, resolved or withdrawn, and only a withdrawn one disappears: an ask its own
 agent withdrew. Everything else that ends stays, as history, in gray, saying how it ended: an
 ask answered here (with your answer), dismissed, or replied to by you writing in its terminal; a
-tell or `done` report once you opened it, saw its row in the list or looked at its terminal; a dialog answered here, in
+tell or `done` report once you opened it, or saw its row in the list and then left the list; a dialog answered here, in
 the chat (with your answer) or in the terminal, or closed in the terminal with no word of
 how (a No or Escape); a held message once you released it or stopped its thread; a failed turn or a usage
 limit once the agent works again, a failed turn too once you read it; messages held long once they
@@ -462,16 +462,17 @@ count it yet, as the agent is about to write the same question in the terminal y
 The hold ends at the first of the agent's next words in that terminal, the end of its turn and
 15 seconds (a turn that ended while background subagents run counts as ended); then it counts, quietly. If you look away first, it counts at once as a row that
 arrived elsewhere does, and rings after its two seconds. Permission requests, updates and asks
-from other terminals aren't held. Closing the asking terminal or switching session or project during a hold counts as looking away, and a row first seen late can be held up to 15 seconds past that. An update (a `done` report or a `tell`) is read once you have looked at its terminal
-for about a second, whether it arrived while you looked or before, and turns resolved; a glance
-while passing reads nothing. Its row in the Inbox list reads it the same way: in sight for about
-a second while Novadeck has your focus and no dialog covers it, it turns resolved, as its subject
-is often all you need. Opening it reads it too. This second applies to Inbox updates only: the
-tab's unread marks of replies and failed turns clear as soon as you look. On a narrow window,
-while the Inbox list covers the screen, no terminal counts as looked at. An item you open by its
-id, as Answer in Messages or a click on a notification does, isn't read by looking. If a read
-fails, looking doesn't try it again, so you can read the update by hand. The tabs' and windows'
-"!" and "?" read the same landed items, so a held ask makes none.
+from other terminals aren't held. Closing the asking terminal or switching session or project during a hold counts as looking away, and a row first seen late can be held up to 15 seconds past that. An update (a `done` report or a `tell`) is read in the Inbox, never by looking at
+its terminal. Its row counts as seen once it has been in sight in the list for about a second
+while Novadeck has your focus and no dialog covers it; a glance while scrolling past sees
+nothing. It stays as it came for as long as you look, and turns resolved when you then leave the
+list: you close the sidebar or turn it to another panel, Novadeck loses your focus, or a dialog
+opens over it. So what is new stays new while you read the list, and is history when you come
+back. Opening an update reads it at once. The tab's unread marks of replies and failed turns are
+apart from this: they clear as soon as you look at the terminal. On a narrow window, while the
+Inbox list covers the screen, no terminal counts as looked at. If a read fails it isn't tried
+again, so you can read the update by opening it. The tabs' and windows' "!" and "?" read the
+same landed items, so a held ask makes none.
 
 The rows that ask something of you keep the Inbox's own order (the row added last first) until
 you drag one: they drag among each other into your order, or move a place with Alt+↑/↓ on the
