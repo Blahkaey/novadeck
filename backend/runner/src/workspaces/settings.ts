@@ -1,6 +1,8 @@
 import type { SQLTagStore } from "node:sqlite"
 
 import {
+  agentMode,
+  defaultAgentMode,
   defaultHibernateMinutes,
   forgeName,
   murmurCheck,
@@ -8,6 +10,7 @@ import {
   voiceCheck,
   voiceLanguage,
   voiceModel,
+  type AgentMode,
   type ForgeName,
   type MurmurCheck,
   type MurmurSettings,
@@ -69,6 +72,25 @@ const hibernateOf = (text: string | undefined): RunnerSettings["hibernateAfterMi
     return defaultHibernateMinutes
   }
 }
+
+// How agents work with each other: Herd until the person picks another, or what can't be read
+// (as a mode a newer build saved).
+const agentModeOf = (text: string | undefined): AgentMode => {
+  if (text === undefined) return defaultAgentMode
+  try {
+    return agentMode.catch(defaultAgentMode).parse(JSON.parse(text))
+  } catch {
+    return defaultAgentMode
+  }
+}
+
+/**
+ * How agents work with each other now: the saved pick while the Experimental Agent modes
+ * switch is on, Herd while it is off. The saved pick is left as it is, so it returns with the switch.
+ */
+export const effectiveAgentMode = (
+  settings: Pick<RunnerSettings, "agentModes" | "agentMode">,
+): AgentMode => (settings.agentModes ? settings.agentMode : defaultAgentMode)
 
 /** What the person chose, kept in the store's settings table: the runner's, voice input's and murmur's. */
 export class Settings {
@@ -135,7 +157,8 @@ export class Settings {
     // Transcripts are kept unless turned off; the welcome dialog waits until seen; the Inbox
     // keeps its own order until the person drags its rows, and snoozes none until they do; idle
     // agents are stopped after the default wait until the person chooses another, or never;
-    // agents get no worktrees until the person turns them on.
+    // agents get no worktrees until the person turns them on, and work as a Herd until they turn
+    // Agent modes on and pick Solo or Swarm.
     return {
       transcripts: saved.get("transcripts") !== "false",
       welcomed: saved.get("welcomed") === "true",
@@ -144,6 +167,8 @@ export class Settings {
       inboxHistory: inboxHistoryOf(saved.get("inboxHistory")),
       hibernateAfterMinutes: hibernateOf(saved.get("hibernateAfterMinutes")),
       worktrees: saved.get("worktrees") === "true",
+      agentModes: saved.get("agentModes") === "true",
+      agentMode: agentModeOf(saved.get("agentMode")),
     }
   }
 

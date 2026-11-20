@@ -1,5 +1,6 @@
 import { resolve as resolvePath } from "node:path"
 
+import type { AgentMode } from "@novadeck/protocol"
 import { describe, expect, it } from "vitest"
 
 import { Approvals } from "./approvals.js"
@@ -77,7 +78,9 @@ describe("the open call", () => {
       summary: { id: string; ledBy: string | null }
     }
     const approvals = new Approvals()
+    let mode: AgentMode = "herd"
     const host = {
+      agentMode: () => mode,
       records: () => records,
       rows: () => rows,
       closedRows: () => [],
@@ -166,6 +169,7 @@ describe("the open call", () => {
       claims,
       opened,
       bar: (reason: string) => (barred = reason),
+      mode: (next: AgentMode) => (mode = next),
       open: (request: object) =>
         run.open({
           type: "open",
@@ -440,6 +444,25 @@ describe("the open call", () => {
       expect(run.asked.map(({ command }) => command)).toEqual(["npm run dev"])
       expect(run.asked[0]!.opener).toMatchObject({ by: "t1", handle: "moth", leads: false })
       expect(run.notices).toEqual([{ to: "t1", text: runNotice.opened("fox", "npm run dev") }])
+    })
+
+    it("asks the person in Swarm too, and opens only once they approve", async () => {
+      const run = setup()
+      run.person()
+      run.mode("swarm")
+      await run.open({ command: "npm run dev" })
+      await settle()
+      expect(run.asked).toEqual([])
+      expect(run.questions).toMatchObject([{ action: { type: "run", command: "npm run dev" } }])
+      run.approvals.answer({ requestId: run.questions[0]!.requestId, approved: true }, "person")
+      await settle()
+      expect(run.asked.map(({ command }) => command)).toEqual(["npm run dev"])
+    })
+
+    it("refuses a command in Swarm too when there is no one to ask", async () => {
+      const run = setup()
+      run.mode("swarm")
+      expect(await run.open({ command: "make" })).toEqual({ ok: false, reason: nobodyToRun })
     })
 
     it("opens nothing and says so when the person declines", async () => {

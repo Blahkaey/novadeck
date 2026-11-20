@@ -353,6 +353,8 @@ export const scripted = ({
     transcripts: true,
     transcriptsAvailable,
     hibernateAfterMinutes: 60,
+    agentModes: false,
+    agentMode: "herd",
     worktrees: false,
     ...(forges ? { forges } : {}),
     agents: [

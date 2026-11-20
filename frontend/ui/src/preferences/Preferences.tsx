@@ -1,6 +1,7 @@
 import { MURMUR_NAME } from "@novadeck/core/addons/murmur"
 import type { ForgeName } from "@novadeck/core/forges"
 import type { AgentName } from "@novadeck/core/harnesses"
+import type { AgentMode } from "@novadeck/core/port"
 import type { NoticeSound } from "@novadeck/core/sounds"
 import { viewModes } from "@novadeck/core/state"
 import { appScales, screenReaderPreferences, type PreferencesValue } from "@novadeck/core/types"
@@ -157,6 +158,28 @@ const TabInView = ({
   return null
 }
 
+// How agents may work with each other, in the order Preferences offers them.
+const modeChoices: readonly { mode: AgentMode; label: string; description: string }[] = [
+  {
+    mode: "solo",
+    label: "Solo",
+    description:
+      "Best when you run one or two agents and steer each yourself. Agents stick to their task and bring overlaps with other agents to you instead of handling them.",
+  },
+  {
+    mode: "herd",
+    label: "Herd",
+    description:
+      "Best when you run several agents side by side. They settle what they share, like files, ports, servers or CI, among themselves, so they don't block or undo each other. You set up the teams and make the calls.",
+  },
+  {
+    mode: "swarm",
+    label: "Swarm",
+    description:
+      "Best for a big goal you want split up and finished without managing it. Agents open, lead and close other agents and reshuffle teams with no confirmations from you. Expect more agents running and more of your usage.",
+  },
+]
+
 // The list's value for a wait; none for one the list lacks.
 const idleChoice = (minutes: number | null): string => {
   const value = minutes === null ? "off" : String(minutes)
@@ -175,6 +198,8 @@ export const Preferences = ({
   onFocusedAgent,
   transcripts,
   hibernation,
+  agentModes,
+  agentMode,
   tour = false,
   worktrees,
   forges,
@@ -217,6 +242,17 @@ export const Preferences = ({
   hibernation?: {
     readonly minutes: number | null
     readonly onChange: (minutes: number | null) => void
+  }
+  // Whether Solo and Swarm may be picked, an Experimental feature the backend keeps; absent
+  // where it has none. The picker below shows only while it is on.
+  agentModes?: {
+    readonly enabled: boolean
+    readonly onChange: (enabled: boolean) => void
+  }
+  // How agents work with each other; absent where the backend has no such setting.
+  agentMode?: {
+    readonly mode: AgentMode
+    readonly onChange: (mode: AgentMode) => void
   }
   // Whether the backend has a tour, which the Onboarding tour switch offers from the footer.
   tour?: boolean
@@ -334,7 +370,10 @@ export const Preferences = ({
   const hasExperimental = experimental?.on === true
   // Agents holds the agents and when to stop the idle ones; a backend with neither, as the
   // website's demo, has no tab for them.
-  const hasAgentsTab = hasAgents || hibernation !== undefined
+  // The mode picker is an Experimental feature: it shows only with its switch on, and only where
+  // the Experimental tab is there to turn it off.
+  const showAgentMode = agentMode !== undefined && agentModes?.enabled === true && hasExperimental
+  const hasAgentsTab = hasAgents || hibernation !== undefined || showAgentMode
   const hidden = (id: PreferencesTab): boolean =>
     (id === "agents" && !hasAgentsTab) ||
     (id === "addons" && !hasAddons) ||
@@ -380,6 +419,16 @@ export const Preferences = ({
       checked: worktrees?.enabled ?? false,
       onToggle: (enabled: boolean) => worktrees?.onChange(enabled),
       disabled: !worktrees,
+    },
+    {
+      id: "agent-modes",
+      label: "Agent modes",
+      description: agentModes
+        ? "Pick how agents work together, in the Agents tab: Solo for one or two agents you steer yourself, Herd for several side by side, Swarm for a big goal split across agents. While this is off, agents work as Herd."
+        : "Not available here.",
+      checked: agentModes?.enabled ?? false,
+      onToggle: (enabled: boolean) => agentModes?.onChange(enabled),
+      disabled: !agentModes,
     },
   ]
   const lastView = value.enabledViews.length === 1
@@ -453,7 +502,7 @@ export const Preferences = ({
         </div>
         <div ref={panels} className="preferences-panels grid min-h-0 flex-1 overflow-y-auto">
           <TabPanel value="agents" className={panelClasses}>
-            {(agents || hibernation) && (
+            {(agents || hibernation || showAgentMode) && (
               <Section title="Agents" {...(agents ? { description: agentsExplanation } : {})}>
                 {agents && (
                   <AgentSwitches
@@ -480,6 +529,43 @@ export const Preferences = ({
                       portalContainer={dialog}
                     />
                   </div>
+                )}
+                {showAgentMode && (
+                  <fieldset className="agent-mode-preferences settings-fieldset m-0 mt-2.5 flex min-w-0 flex-col p-0">
+                    <legend className="w-full p-0 px-0.5">
+                      <span className={`block ${groupTitleClasses}`}>Agents work as</span>
+                    </legend>
+                    <div className="mt-1.5 grid grid-cols-1 gap-2">
+                      {modeChoices.map(({ mode, label, description }) => {
+                        const checked = agentMode.mode === mode
+                        return (
+                          <label
+                            key={mode}
+                            className="choice-card solid relative flex min-w-0 cursor-pointer flex-col gap-1 p-3 pr-9 text-body"
+                            data-state={checked ? "checked" : "unchecked"}
+                          >
+                            <span>{label}</span>
+                            <span className="settings-description text-control leading-5">
+                              {description}
+                            </span>
+                            <span className="checkbox absolute top-3 right-3 flex size-4 shrink-0 items-center justify-center">
+                              <input
+                                type="radio"
+                                name="agent-mode"
+                                className="checkbox-input absolute inset-0 m-0 size-full cursor-pointer"
+                                checked={checked}
+                                onChange={() => agentMode.onChange(mode)}
+                              />
+                              <span
+                                aria-hidden="true"
+                                className="checkbox-dot pointer-events-none relative"
+                              />
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </fieldset>
                 )}
               </Section>
             )}
@@ -560,15 +646,15 @@ export const Preferences = ({
             )}
             <Section title="Layout">
               <fieldset
-                className="view-preferences settings-fieldset m-0 min-w-0 p-0"
+                className="view-preferences settings-fieldset m-0 flex min-w-0 flex-col p-0"
                 aria-describedby="view-modes-description"
               >
-                <legend className="float-left mb-1.5 w-full p-0 px-0.5">
+                <legend className="w-full p-0 px-0.5">
                   <span className={`block ${groupTitleClasses}`}>View modes</span>
                 </legend>
                 <p
                   id="view-modes-description"
-                  className={`clear-both px-0.5 ${sectionDescriptionClasses}`}
+                  className={`mt-1.5 px-0.5 ${sectionDescriptionClasses}`}
                 >
                   Layouts shown in the header. At least one stays on; with one, the header has no
                   switch.
@@ -608,15 +694,15 @@ export const Preferences = ({
               {/* Only where the backend reads agents' conversations. */}
               {chat && (
                 <fieldset
-                  className="agent-chat-preferences settings-fieldset m-0 mt-2.5 min-w-0 p-0"
+                  className="agent-chat-preferences settings-fieldset m-0 mt-2.5 flex min-w-0 flex-col p-0"
                   aria-describedby="agent-chat-description"
                 >
-                  <legend className="float-left mb-1.5 w-full p-0 px-0.5">
+                  <legend className="w-full p-0 px-0.5">
                     <span className={`block ${groupTitleClasses}`}>Show agents as</span>
                   </legend>
                   <p
                     id="agent-chat-description"
-                    className={`clear-both px-0.5 ${sectionDescriptionClasses}`}
+                    className={`mt-1.5 px-0.5 ${sectionDescriptionClasses}`}
                   >
                     Agent Chat: read and reply to agents in a chat instead of their terminal. When
                     the chat can't handle something, answer in the terminal.

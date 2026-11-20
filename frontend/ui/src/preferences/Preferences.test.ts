@@ -142,6 +142,96 @@ describe("the Agents tab", () => {
   })
 })
 
+const experimental = (on: boolean | undefined) => ({ on, onChange: () => {} })
+
+describe("the Agents work as choice", () => {
+  const panel = (): Element | null =>
+    document.querySelector('[role="tabpanel"][aria-labelledby$="agents"]')
+  const radio = (label: "Solo" | "Herd" | "Swarm"): HTMLInputElement | null =>
+    [...document.querySelectorAll<HTMLLabelElement>("label")]
+      .find((item) => item.querySelector("span")?.textContent === label)
+      ?.querySelector("input") ?? null
+
+  it("offers Solo, Herd and Swarm on the Agents tab, with Herd chosen", async () => {
+    await show({
+      tab: "agents",
+      experimental: experimental(true),
+      agentModes: { enabled: true, onChange: () => {} },
+      agentMode: { mode: "herd", onChange: () => {} },
+    })
+
+    expect(selected()).toBe("Agents")
+    expect(panel()?.textContent).toContain("Agents work as")
+    const labels = [...document.querySelectorAll('input[name="agent-mode"]')].map(
+      (input) => input.closest("label")?.querySelector("span")?.textContent,
+    )
+    expect(labels).toEqual(["Solo", "Herd", "Swarm"])
+    expect(radio("Herd")?.checked).toBe(true)
+    expect(radio("Solo")?.checked).toBe(false)
+    expect(radio("Swarm")?.checked).toBe(false)
+    expect(panel()?.textContent).toContain("bring overlaps with other agents to you")
+    expect(panel()?.textContent).toContain("with no confirmations from you")
+  })
+
+  it("saves the mode picked", async () => {
+    const changes: string[] = []
+    await show({
+      tab: "agents",
+      experimental: experimental(true),
+      agentModes: { enabled: true, onChange: () => {} },
+      agentMode: { mode: "herd", onChange: (mode) => changes.push(mode) },
+    })
+
+    radio("Solo")!.click()
+    radio("Swarm")!.click()
+
+    expect(changes).toEqual(["solo", "swarm"])
+  })
+
+  it("hides the choice while the Agent modes switch is off, or the Experimental tab is not there", async () => {
+    await show({
+      tab: "agents",
+      experimental: experimental(true),
+      agentModes: { enabled: false, onChange: () => {} },
+      agentMode: { mode: "solo", onChange: () => {} },
+    })
+    expect(document.querySelector('input[name="agent-mode"]')).toBeNull()
+    expect(document.body.textContent).not.toContain("Agents work as")
+    mounted.splice(0).forEach((page) => page.unmount())
+
+    await show({
+      tab: "agents",
+      agentModes: { enabled: true, onChange: () => {} },
+      agentMode: { mode: "solo", onChange: () => {} },
+    })
+    expect(document.querySelector('input[name="agent-mode"]')).toBeNull()
+  })
+
+  const modesSwitch = (): HTMLElement | null =>
+    document.querySelector('[role="switch"][aria-labelledby="agent-modes-label"]')
+
+  it("holds the Agent modes switch in the Experimental tab, which writes the backend's setting", async () => {
+    const changes: boolean[] = []
+    await show({
+      tab: "experimental",
+      experimental: experimental(true),
+      agentModes: { enabled: false, onChange: (enabled) => changes.push(enabled) },
+    })
+    expect(modesSwitch()?.getAttribute("aria-checked")).toBe("false")
+    modesSwitch()?.click()
+    expect(changes).toEqual([true])
+    expect(document.getElementById("agent-modes-description")?.textContent).toContain("Solo")
+  })
+
+  it("says the Agent modes are not available where the backend has none", async () => {
+    await show({ tab: "experimental", experimental: experimental(true) })
+    expect(modesSwitch()?.getAttribute("aria-checked")).toBe("false")
+    expect(document.getElementById("agent-modes-description")?.textContent).toBe(
+      "Not available here.",
+    )
+  })
+})
+
 describe("the tab Preferences opens on when none is named", () => {
   const agent = { agent: "claude" as const, available: true, connected: false, busy: false }
 
@@ -254,8 +344,6 @@ describe("the About tab", () => {
 })
 
 describe("the Experimental tab", () => {
-  const experimental = (on: boolean | undefined) => ({ on, onChange: () => {} })
-
   it("is absent while the Experimental switch is off, and a URL naming it opens General", async () => {
     await show({ tab: "experimental", experimental: experimental(false) })
 

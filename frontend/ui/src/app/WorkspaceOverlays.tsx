@@ -1,7 +1,7 @@
 import type { OfferedUninstall } from "@novadeck/core/desktop/uninstall"
 import type { ForgeConnection, ForgeName } from "@novadeck/core/forges"
 import type { AgentName } from "@novadeck/core/harnesses"
-import type { Backend } from "@novadeck/core/port"
+import type { AgentMode, Backend } from "@novadeck/core/port"
 import { orderedTiles, tileOf } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { SchemePreference, Tile } from "@novadeck/core/types"
@@ -112,6 +112,28 @@ const useHibernation = (
   return hibernation && { minutes, onChange: hibernation.set }
 }
 
+// How agents work with each other, for Preferences; undefined where the backend has no such setting.
+const useAgentMode = (
+  agentMode: Backend["agentMode"],
+): { readonly mode: AgentMode; readonly onChange: (mode: AgentMode) => void } | undefined => {
+  const mode = useSyncExternalStore(
+    agentMode?.mode.subscribe ?? always,
+    () => agentMode?.mode.getSnapshot() ?? "herd",
+  )
+  return agentMode && { mode, onChange: agentMode.set }
+}
+
+// Whether Solo and Swarm may be picked, for Preferences; undefined where the backend has none.
+const useAgentModes = (
+  agentModes: Backend["agentModes"],
+): { readonly enabled: boolean; readonly onChange: (enabled: boolean) => void } | undefined => {
+  const enabled = useSyncExternalStore(
+    agentModes?.enabled.subscribe ?? always,
+    () => agentModes?.enabled.getSnapshot() ?? false,
+  )
+  return agentModes && { enabled, onChange: agentModes.set }
+}
+
 // Whether agents get worktrees, for Preferences; undefined where the backend has none.
 const useWorktrees = (
   worktrees: Backend["worktrees"],
@@ -182,7 +204,7 @@ type ExperimentalSetting = {
 // Preferences' Experimental switch: whether the desktop app follows experimental builds, which is
 // the IS_EXPERIMENTAL flag, asked of it each time Preferences opens; undefined where the app
 // offers no choice. The switch and the flag change at once, as the app remembers the choice.
-// Turning it off turns agent worktrees and forge integrations off with it.
+// Turning it off turns agent worktrees, agent modes and forge integrations off with it.
 const useExperimental = (
   channel: NonNullable<Backend["updates"]>["channel"],
   features: ExperimentalFeatures,
@@ -334,6 +356,8 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const { backend, commands, navigation, ui, workspace: workspaceStore } = useWorkspaceServices()
   const transcripts = useTranscripts(backend.transcripts)
   const hibernation = useHibernation(backend.hibernation)
+  const agentModes = useAgentModes(backend.agentModes)
+  const agentMode = useAgentMode(backend.agentMode)
   const worktrees = useWorktrees(backend.worktrees)
   const agents = useAgents(backend.agents)
   const installs = useInstalls(backend.agents)
@@ -593,6 +617,8 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           onClose={closeDialog}
           {...(transcripts ? { transcripts } : {})}
           {...(hibernation ? { hibernation } : {})}
+          {...(agentModes ? { agentModes } : {})}
+          {...(agentMode ? { agentMode } : {})}
           {...(worktrees ? { worktrees } : {})}
           tour={tour !== undefined}
           notices={backend.notices !== undefined}

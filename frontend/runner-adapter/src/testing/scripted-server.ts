@@ -374,6 +374,8 @@ export const scriptedRunner = ({
         inboxSnoozed: [],
         inboxHistory: [],
         hibernateAfterMinutes: 60,
+        agentModes: false,
+        agentMode: "herd",
         worktrees: false,
       })),
       set: api.settings.set.handler(() => {}),
