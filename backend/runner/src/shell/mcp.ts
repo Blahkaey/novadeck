@@ -1372,6 +1372,8 @@ type Worktree = {
   readonly path: string
   readonly branch: string
   readonly existing?: boolean
+  readonly origin?: "current" | "unchecked" | "gone"
+  readonly tracking?: boolean
   readonly instructions?: readonly string[]
   readonly already?: true
   readonly asked?: true
@@ -1381,14 +1383,38 @@ type Worktree = {
   readonly branchDeleted?: boolean
 }
 
+/** Where a new branch came from when origin had one of its name, as `open_worktree` says it. */
+const originSaid = (answer: Worktree): string => {
+  const from = " from origin/" + answer.branch
+  const tracking =
+    answer.tracking === false
+      ? ", not tracking it (git couldn't set its upstream)"
+      : answer.tracking
+        ? ", tracking it"
+        : ""
+  if (answer.origin === "current") return from + tracking
+  if (answer.origin === "unchecked")
+    return (
+      from + " as last fetched" + tracking + " (origin couldn't be asked whether it still has it)"
+    )
+  if (answer.origin === "gone")
+    return (
+      " (origin no longer has a branch of that name; origin/" +
+      answer.branch +
+      " was left by an earlier fetch, so it wasn't used)"
+    )
+  return ""
+}
+
 const openWorktree: Tool<Worktree> = {
   needs: "worktrees",
   name: "open_worktree",
   description:
     "Make a git worktree for your work in Novadeck, on a branch you name, in a folder " +
     "Novadeck picks and tracks, and own it: change files there, not in the user's checkout. " +
-    "It starts from from (when left out: the remote's main if this checkout is on a main " +
-    "that is behind it, else this checkout's HEAD), or checks out the branch if it exists. Name the branch as the repository's conventions and instructions say. " +
+    "It checks out the branch if it exists here; otherwise it makes it from from (when left " +
+    "out: origin's branch of that name, tracking it, if origin has one; else the remote's main " +
+    "if this checkout is on a main that is behind it, else this checkout's HEAD). Name the branch as the repository's conventions and instructions say. " +
     "repo is a folder in the repository when your terminal isn't in it; give the same " +
     "group to the worktrees of several repositories for one piece of work, and they share " +
     "a folder. The answer lists the worktree's instruction files (AGENTS.md, CLAUDE.md, " +
@@ -1400,7 +1426,7 @@ const openWorktree: Tool<Worktree> = {
     properties: {
       branch: {
         type: "string",
-        description: "The branch: new, or an existing one to check out.",
+        description: "The branch: new, or an existing one here or on origin to check out.",
       },
       repo: {
         type: "string",
@@ -1411,7 +1437,7 @@ const openWorktree: Tool<Worktree> = {
       from: {
         type: "string",
         description:
-          "The commit, branch or tag a new branch starts from; when left out, the remote's main if the checkout is on a main behind it, else its HEAD.",
+          "The commit, branch or tag a new branch starts from; when left out, origin's branch of that name if origin has one, else the remote's main if the checkout is on a main behind it, else its HEAD.",
       },
       group: {
         type: "string",
@@ -1430,6 +1456,7 @@ const openWorktree: Tool<Worktree> = {
     " on " +
     (answer.existing ? "the existing branch " : "the new branch ") +
     answer.branch +
+    originSaid(answer) +
     ". You own it. Work there with absolute paths and git -C " +
     answer.path +
     ", never cd and then git. " +
@@ -1499,8 +1526,8 @@ const closeWorktree: Tool<Worktree> = {
     "uncommitted and untracked files are kept as a commit on a ref the answer names, but " +
     "ignored files (such as .env or generated data) are not kept and go with the folder, " +
     "and a branch with commits stays. A branch is deleted only if Novadeck made it and the " +
-    "main branch holds all of it. A worktree Novadeck can't read, or with submodules, is " +
-    "never closed. Only the owner may close a worktree. Refused while the user has agent " +
+    "main branch holds all of it. A worktree Novadeck can't read, with submodules, or with " +
+    "an untracked git repository of its own inside holding work no remote has, is never closed. Only the owner may close a worktree. Refused while the user has agent " +
     "worktrees off.",
   inputSchema: {
     type: "object",
