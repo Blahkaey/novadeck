@@ -540,13 +540,16 @@
       "id": "ui-agents-chat-screen-grid-tile-timeout",
       "jobs": ["^Test \\(macOS(?:, [1-3]/3)?\\)$"],
       "test": "src/agents/chat-screen.spec.tsx > The terminal behind a chat > keeps ",
-      "signature": "Test timed out in \\d+ms",
-      "status": "known",
-      "cause": "Unknown. The four Grid tile cases (Claude Code at 12 and 15px, Codex, Antigravity) share one body, so the entry names them all. Each retry ran out its 30 s test timeout on macOS. Two runs were far slower than the usual 17 to 27 min: about 40 min on #1002, and a test step of about 63 min on #1010, when other macOS runs that hour took 59 to 65 min. On #1002 the Antigravity retry passed in about 19.2 s, against 3.4 s locally (Linux). But on 44063445169 the test step took a usual 18 min, so slowness alone doesn't explain it: an attempt may stall. Not reproduced. The flake tally of 2026-11-16 counts one earlier retry (Claude Code at 12px), on 2026-11-13.",
+      "signature": "Test timed out in \\d+ms|TimeoutError: locator\\.click: Timeout \\d+ms exceeded",
+      "status": "fixed",
+      "cause": "Two spec workers starving each other of CPU on the slow macOS runners (3-vCPU Apple M1 (Virtual), see #1019 and #1057). Every retry ran in one of them: a whole-suite Test (macOS) job with two spec workers, of 57 to 68 min against a usual 17 to 27, where the cases beside it took 8.8 to 27.4 s against 2.5 s locally. Each case opens the whole app and switches its view three times, then turns the chat off from Preferences, so an attempt a little slower than its neighbours ran out the 30 s; the last ended in a click that got the 9.4 s left. This entry first read 44063445169 as a usual 18 min job, so as a stall; that was its second attempt, while the retry was in its first, whose test step timed out at 65 min. Locally at 6x CPU throttling (about such a runner's pace) the cases failed 3 of 4, and a profile shows the app's React rendering throughout, no one hot spot; at rest the page takes about 4.5% of a core. Fixed by #1057 (2026-11-19), which runs macOS's specs in two jobs of one worker each: there the four cases took 2.6 to 7.1 s (job 135590523426), and none was retried since.",
       "seen": [
+        "#900 run 43390960247 job 131775951537 (macOS), Claude Code at 12px, retried and passed",
         "#1002 run 44053570165 job 133946302766 (macOS), Antigravity at 13px, retried and passed, behaviour",
-        "feat/install-script-look run 44063445169 job 134014233533 (macOS), Claude Code at 15px, retried and passed",
-        "#1010 run 44076738880 job 134024642143 (macOS), Claude Code at 15px retried once and Antigravity at 13px twice, both passed"
+        "#1005 run 44063445169 attempt 1 job 133978514488 (macOS), Claude Code at 15px, retried and passed; its test step timed out at 65 min",
+        "#1010 run 44076738880 job 134024642143 (macOS), Claude Code at 15px retried once and Antigravity at 13px twice, both passed",
+        "fix/macos-spec-stalls (#1019) Nightly Quality run 44207200939 job 134476092692 (macOS), Claude Code at 15px, timed out waiting for a click, retried and passed",
+        "#1037 run 44413564950 job 135195523004 (macOS), Codex at 13px retried twice, locator.click timed out at 9397 ms, passed"
       ]
     },
     {
