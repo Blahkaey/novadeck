@@ -26,6 +26,7 @@ import {
   desktopVersion,
   desktopWhatsNew,
   desktopScreenReader,
+  desktopWindowControls,
   desktopWindowFocus,
   desktopNoticeOf,
   sandboxStateOf,
@@ -944,5 +945,57 @@ describe("what the desktop app gives the backend", () => {
     ])
     // The parts the app lacks are left off, not set to undefined.
     expect(Object.keys(options)).not.toContain("notices")
+  })
+})
+
+describe("the window's own controls", () => {
+  it("passes the page's placing to the app, and the app's room to the page, until it stops", () => {
+    let report: ((inset: unknown) => void) | undefined
+    const placed: unknown[] = []
+    const bridge = {
+      windowControlsSide: "start",
+      onWindowControls: (listener: (inset: unknown) => void) => {
+        report = listener
+        return () => {
+          report = undefined
+        }
+      },
+      placeWindowControls: (middle: unknown) => void placed.push(middle),
+    } as unknown as DesktopApp
+    const controls = desktopWindowControls(bridge)!
+    expect(controls.side).toBe("start")
+    const insets: number[] = []
+    const stop = controls.onInset((inset) => insets.push(inset))
+    controls.place(32)
+    controls.place(null)
+    controls.place(Number.NaN)
+    report?.(74)
+    report?.("74")
+    report?.(Number.POSITIVE_INFINITY)
+    report?.(0)
+    stop()
+    expect(placed).toEqual([32, null])
+    expect(insets).toEqual([74, 0])
+    expect(report).toBeUndefined()
+  })
+
+  it("is absent where the window has its own title bar, or an app that came before it", () => {
+    expect(desktopWindowControls(undefined)).toBeUndefined()
+    expect(desktopWindowControls({} as DesktopApp)).toBeUndefined()
+    expect(
+      desktopWindowControls({ onWindowControls: () => () => {} } as unknown as DesktopApp),
+    ).toBeUndefined()
+  })
+
+  it("is absent where the app names no side it knows", () => {
+    const bridge = (side: unknown) =>
+      ({
+        windowControlsSide: side,
+        onWindowControls: () => () => {},
+        placeWindowControls: () => {},
+      }) as unknown as DesktopApp
+    expect(desktopWindowControls(bridge(undefined))).toBeUndefined()
+    expect(desktopWindowControls(bridge("left"))).toBeUndefined()
+    expect(desktopWindowControls(bridge("end"))?.side).toBe("end")
   })
 })
