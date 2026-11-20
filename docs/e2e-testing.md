@@ -378,7 +378,12 @@ network:
   It looks again, up to five times, until it finds no process it hasn't seen, its waits
   ending within 15 seconds, inside the fixture's 20 for a cleanup; one it hasn't seen
   still running then is ended forcibly, unwaited, and named so. Should the test end
-  early, its teardown does the same, and fails the test for any process it had to end. On Windows, which has no `/proc`, a small lister (`reap/lister.cs`) finds
+  early, its teardown does the same, and fails the test for any process it had to end.
+  Before it, the sandbox's Claude Code background service (which its agents view starts,
+  and a terminal's close leaves running by design) is ended as the sandbox's logout would
+  end it, and named so in the log, not as a leak (`claude-service.ts`): only the process
+  its lock names, by pid and start, and of what runs under it only its background sessions
+  (`claude bg-pty-host`, `claude bg-spare`), so anything else still fails the test. On Windows, which has no `/proc`, a small lister (`reap/lister.cs`) finds
   them: compiled once by its source into the system's temporary folder with the .NET
   Framework's `csc.exe`, and named by its own hash too, checked before it runs, so a
   program there that isn't what its name says is compiled again. It lists the processes
@@ -1306,10 +1311,6 @@ reason to leave a harness out. These stand today:
 - **Codex on Windows drops a line break typed as a key of its own** (`losesLineBreakKeys`). It
   reads the console's keys, and adds no line to its box (0.167.0, 2026-11-07), so a test builds
   a draft of several lines there with a paste, as a burst of typing keeps its line breaks.
-- **Claude Code on Windows leaves a process behind once its agents view opens**
-  (`agentsViewOutlivesDeck`). A `claude.exe` under `WmiPrvSE` outlived the deck (2.1.316,
-  2026-11-07), so inbox.e2e.ts's view test runs on the other platforms, as what it reads is the
-  same there.
 
 `known-gaps.ts` names each one as a `Gap`, with the harnesses it affects (and the
 platforms, where only some have it), documented

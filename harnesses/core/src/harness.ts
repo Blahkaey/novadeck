@@ -413,7 +413,31 @@ export type Harness = {
    * subagent's aborts when the root closes it.
    */
   readonly watchesRunning?: true
+  /**
+   * What it runs apart from any one terminal's processes, shared with the person's other
+   * sessions, which a terminal's close leaves running though its agent started it, as Claude
+   * Code's background service.
+   */
+  readonly apart?: Apart
 }
+
+/**
+ * A process a harness runs apart from a terminal, named as the harness recorded it, so it
+ * is known only while its pid still names it: `start` as Linux's /proc/<pid>/stat holds it
+ * (clock ticks since boot) or as macOS's `ps -o lstart` gives it in UTC.
+ */
+export type ApartProcess = { readonly pid: number; readonly start: string }
+
+/**
+ * Read as a terminal closes, before its agent is hung up, from the harness's own files,
+ * never written: the processes the close leaves, with all they run, though the agent started
+ * them and they still lead back to it. `transcript` is the closed session's: it says where the
+ * harness kept its files for that terminal, which its shell may have moved from where the
+ * runner would look. Without it, none.
+ */
+export type Apart = (closed: {
+  readonly transcript?: string | undefined
+}) => Promise<readonly ApartProcess[]>
 
 /**
  * What a harness knows of agents' messaging (see docs/agent-messaging.md): what its hooks
