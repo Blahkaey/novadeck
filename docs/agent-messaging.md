@@ -835,7 +835,12 @@ the question too. Whatever the agent puts in the Inbox (an ask, a `tell`, a `don
 extra copy for when the person is elsewhere: its reply says it all as fully as it would
 without Novadeck, and never mentions the Inbox or what it put there, as someone reading the
 reply is already looking at it. `ask`, `tell` and `done` say so, as do their answers, the
-server's instructions and the prompt-time notice. They say what the Inbox is for and
+server's instructions and the prompt-time notice. `ask` and its answer add that what the agent
+gave the ask may not show where the person reads it (a terminal folds the tool call), so its
+reply, and whatever it writes to them about the question before then, even in a note while
+its turn goes on, asks it in full, with what they need to answer or act on it, such as an
+action's command: an agent that wrote "I've asked you to save the key (command below)"
+mid-turn left the person, reading the terminal, with no command until its turn ended. They say what the Inbox is for and
 nothing of how the agent works: whether it asks, waits for the answer or goes on, and what
 it ships, are its harness's and the person's setup, as without Novadeck. Texts that said
 "most decisions aren't blocking" and "the person rarely watches" made agents build with

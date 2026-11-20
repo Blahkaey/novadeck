@@ -655,7 +655,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     })
   })
 
-  it("says an ask is an extra copy, which the reply never mentions", async () => {
+  it("says an ask is an extra copy that may not show, which the reply and words before it ask in full", async () => {
     answer = { ok: true, id: "a1" }
     const [, asked] = await session(terminal(), [
       initialize,
@@ -666,9 +666,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       },
     ])
     const text = (asked!.result as { content: { text: string }[] }).content[0]!.text
-    expect(text).toContain("Ask a1 is in the user's Inbox, as an extra copy")
+    expect(text).toContain("Ask a1 is in the user's Inbox, as an extra copy that may not show here")
     expect(text).toContain(
-      "your reply still asks the question in full, and doesn't mention the Inbox. Their answer arrives later as a message",
+      "your reply, and whatever you write to them about it before then, asks the question in full, with all they need to answer or act on it, such as an action's command, and doesn't mention the Inbox or the ask. Their answer arrives later as a message",
     )
     for (const words of [...steering, "end your turn"]) expect(text).not.toContain(words)
   })
@@ -852,7 +852,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       "Always make one, whether or not they're here, for every question your turn ends waiting on, such as which option to take, unless it is already an open ask",
     )
     expect(ask.description).toContain(
-      "The ask is an extra copy, never the question itself: your reply asks it as fully as it would without Novadeck, and never mentions the Inbox or the ask.",
+      "The ask is an extra copy, never the question itself, and what you give it may not show here: your reply, and whatever you write to them about the question before then, asks it as fully as it would without Novadeck, with all they need to answer or act on it, such as an action's command, and never mentions the Inbox or the ask.",
     )
     expect(ask.description).toContain(
       "nor a question you ask with your harness's own question tool, as you normally would",
