@@ -245,7 +245,7 @@ for (const setup of setups) {
         received.turns.some(
           (entry) =>
             entry.role === "user" &&
-            /\[Novadeck Inbox reply, ([A-Za-z0-9]+)\] Re your ask "Which colour should the heading use\?": I picked "Green" and wrote: Use green, please: zażółć, ＠flint, ＄5\. \[\1\]/.test(
+            /<novadeck-reply>Re your ask "Which colour should the heading use\?": I picked "Green" and wrote: Use green, please: zażółć, ＠flint, ＄5\.<\/novadeck-reply><end ring="([A-Za-z0-9]+)"\/>/.test(
               entry.text,
             ),
         ),
@@ -313,7 +313,7 @@ for (const setup of setups) {
       call.turns.some(
         (entry) =>
           entry.role === "user" &&
-          /\[Novadeck Inbox reply, ([A-Za-z0-9]+)\] Re your ask "Merge the branch\?": I picked "Merge"\. \[\1\]/.test(
+          /<novadeck-reply>Re your ask "Merge the branch\?": I picked "Merge"\.<\/novadeck-reply><end ring="([A-Za-z0-9]+)"\/>/.test(
             entry.text,
           ),
       )
@@ -363,7 +363,9 @@ for (const setup of setups) {
         const calls = run.model.mark()
         const mark = terminal.mark()
         const ask = run.deck.terminals.inboxEntries().find((each) => each.content.kind === "ask")!
-        const words = `Merge it${" and say so in the changelog".repeat(7)}, thanks.`
+        // The longest reply that fits the 320 characters beside the tag's frame (53), and still
+        // more than the box shows.
+        const words = `Merge it${" and say so in the changelog".repeat(6)}, thanks.`
         run.deck.terminals.answerAsk(ask.id, { type: "reply", option: 0, text: words })
         const received = await run.model.waitFor((call) => !call.side && delivered(call, "you"), {
           after: calls,
@@ -372,7 +374,7 @@ for (const setup of setups) {
           (entry) => entry.role === "user" && entry.text.includes(words),
         )
         expect(typed?.text).toMatch(
-          /\[Novadeck Inbox reply, ([A-Za-z0-9]+)\] Re your ask .* \[\1\]/,
+          /<novadeck-reply>Re your ask .*<\/novadeck-reply><end ring="([A-Za-z0-9]+)"\/>/,
         )
         const states = terminal
           .history()
@@ -569,7 +571,7 @@ for (const setup of setups) {
       expect(lined(received)).toBe(false)
       const shown = await terminal.screen()
       expect(shown).toContain("half a thought")
-      expect(shown).not.toContain("[Novadeck")
+      expect(shown).not.toContain("<novadeck-doorbell")
     })
 
     it("shows its done as reported until the person's next prompt gives it more to do", async ({

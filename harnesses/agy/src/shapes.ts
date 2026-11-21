@@ -31,6 +31,8 @@ export const lists: ShapeLists = {
     // 2026-11-20, 1.5.13); text with none of its notices is read for nothing.
     "step:SYSTEM_SDK/EPHEMERAL_MESSAGE",
     "tag:USER_REQUEST",
+    // The Inbox reply tag, typed by the doorbell as the person's own prompt.
+    "tag:novadeck-reply",
     // An image the person gave, listed apart from the words and saved under the session
     // (probed 2026-10-31, 1.4.12).
     "media:USER_EXPLICIT/USER_INPUT",

@@ -562,7 +562,7 @@ for (const setup of setups) {
       expect(t1.messages().waits).toBe("draft")
       const shown = await t1.screen()
       expect(shown).toContain("Tell me")
-      expect(shown).not.toContain("[Novadeck")
+      expect(shown).not.toContain("<novadeck-doorbell")
 
       // They clear it: nothing is typed or pressed by them, and the agent is rung.
       t1.press(backspace.repeat("Tell me".length))
@@ -611,7 +611,7 @@ for (const setup of setups) {
         // Said with the screen: a box that reads as a dialog (seen once on Windows, 2026-11-08,
         // with nothing recorded of the screen) shows what it held.
         expect(t1.messages().waits, await t1.screen()).toBe("draft")
-        expect(await t1.screen()).not.toContain("[Novadeck")
+        expect(await t1.screen()).not.toContain("<novadeck-doorbell")
         // The words are where they were, out of sight on Claude Code's box until scrolled back to.
         t1.press(down.repeat(lines))
         await t1.until("MY DRAFT BELOW")
@@ -636,7 +636,7 @@ for (const setup of setups) {
       await sleep(unrung)
       expect(states(t1, mark)).not.toContain("ringing")
       expect(t1.messages().waits).toBe("draft")
-      expect(await t1.screen()).not.toContain("[Novadeck")
+      expect(await t1.screen()).not.toContain("<novadeck-doorbell")
     })
 
     it("rings an agent whose screen has a row ticking by itself, a status line's clock", async ({
@@ -701,7 +701,7 @@ for (const setup of setups) {
       const shown = await t1.screen()
       expect(shown).toContain("and more")
       expect(occurrences(shown, "Lft7Bb")).toBe(1)
-      expect(occurrences(shown, "[Novadeck")).toBe(1)
+      expect(occurrences(shown, "<novadeck-doorbell")).toBe(1)
     })
 
     it("takes the line a failed ring left out of the box for a prompt from the chat, and the message comes", async ({
@@ -771,7 +771,8 @@ for (const setup of setups) {
     })
 
     // Text that fills its row leaves Codex's cursor on the blank row under it, for the box to
-    // read as no box at all. The doorbell line is one length, so a pane of this width has it.
+    // read as no box at all. The line names the sender of the message waiting (t2's handle), so the
+    // pane is sized with the line this ring types, whose nonce is as long as any.
     it("rings a pane just wide enough for its line to fill a row", async ({ e2e: run }) => {
       run.model.use(
         replies("Warm up", "Warmed up."),
@@ -782,7 +783,7 @@ for (const setup of setups) {
       const t1 = await start(run, setup)
       const t2 = await start(run, setup)
       await turn(t1, "Warm up", "Warmed up.")
-      t1.resize(doorbellLine("nonce6").length + 3, 40)
+      t1.resize(doorbellLine("nonce6", [t2.handle]).length + 3, 40)
       await sleep(1_000)
       await t2.submit("Tell moth the news")
       await t1.reached(holds(t2.handle, t1.handle, "delivered"), { timeoutMs: 45_000 })
