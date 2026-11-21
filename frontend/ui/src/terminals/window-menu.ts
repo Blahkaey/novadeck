@@ -105,8 +105,9 @@ const moveItem = (moveTo: MoveTo): ContextMenuItem => ({
 // it, as a line to read rather than choose, then rename, hand a name the person gave back
 // to Novadeck, dock an undocked window back in its terminal, release a terminal from its
 // lead, fold a lead's teammates out of the list, and close. The project window is named by its file and has no terminal to dock in:
-// it offers Close alone. A panel's window, which its panel names, offers only to return the panel
-// to the sidebar, which is how it closes. A window running an agent, on a backend that takes
+// it offers Close alone. A panel's window, which its panel names, offers to open the panel in a
+// window of its own, where one can open, and to return the panel to the sidebar, which is how it
+// closes. A window running an agent, on a backend that takes
 // feedback, can ask it to write some. The menu takes only text
 // for a label, so the handle is plain `@handle` there, not the chip.
 export const windowMenu = ({
@@ -118,6 +119,7 @@ export const windowMenu = ({
   releaseLead,
   foldTeam,
   moveTo,
+  ownWindow,
   onClose,
 }: {
   terminal: Tile
@@ -135,10 +137,17 @@ export const windowMenu = ({
   foldTeam?: FoldTeam | undefined
   // Present where the backend moves terminals between sessions, on a terminal, not a window.
   moveTo?: MoveTo | undefined
+  // Present on a panel's window where its panel can open in a window of its own.
+  ownWindow?: (() => void) | undefined
   onClose: () => void
 }): ContextMenuItem[] =>
   isPanel(terminal)
-    ? [{ value: "return", label: "Return to sidebar", onSelect: onClose }]
+    ? [
+        ...(ownWindow
+          ? [{ value: "own-window", label: "Open in its own window", onSelect: ownWindow }]
+          : []),
+        { value: "return", label: "Return to sidebar", onSelect: onClose },
+      ]
     : isProjectWindow(terminal)
       ? [{ value: "close", label: "Close", onSelect: onClose }]
       : [

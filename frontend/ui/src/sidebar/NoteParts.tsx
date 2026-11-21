@@ -4,6 +4,7 @@ import { AntigravityIcon } from "@novadeck/toolkit/icons/AntigravityIcon"
 import { ClaudeIcon } from "@novadeck/toolkit/icons/ClaudeIcon"
 import { CodexIcon } from "@novadeck/toolkit/icons/CodexIcon"
 import { Markdown } from "@novadeck/toolkit/Markdown"
+import { viewOf } from "@novadeck/toolkit/realm"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 import { useLayoutEffect, useRef, useState, type RefObject } from "react"
@@ -263,11 +264,12 @@ const partOf = (row: HTMLElement | undefined, part: Part): HTMLElement | null =>
   row?.querySelector<HTMLElement>("[data-part]") ??
   null
 
-// Whether the control that has the focus got it from the keyboard: a press of the pointer
-// leaves the focus where the app puts it, and nothing here moves it on.
-export const keyboardHeld = (): boolean => {
+// Whether the control that has the focus in `page`, the document the panel is in, got it from the
+// keyboard: a press of the pointer leaves the focus where the app puts it, and nothing here moves
+// it on.
+const keyboardHeld = (page: Document): boolean => {
   try {
-    return document.activeElement?.matches(":focus-visible") ?? false
+    return page.activeElement?.matches(":focus-visible") ?? false
   } catch {
     // An engine that doesn't know the selector: the focus is followed, as the keyboard's.
     return true
@@ -289,15 +291,18 @@ export const useRowFocus = (
     if (!asked) return undefined
     const take = (): void => partOf(rowOf(root.current, asked.id), asked.part)?.focus()
     take()
-    const frame = requestAnimationFrame(() => {
+    // The frames of the window the list is drawn in, the page's or the panel's own.
+    const view = viewOf(root.current ?? document)
+    const frame = view.requestAnimationFrame(() => {
       take()
       setAsked(null)
     })
-    return () => cancelAnimationFrame(frame)
+    return () => view.cancelAnimationFrame(frame)
   }, [asked, root])
   const beside = (id: string, part: Part, fallback: () => HTMLElement | null): void => {
     const row = rowOf(root.current, id)
-    if (!row?.contains(document.activeElement) || !keyboardHeld()) return
+    const page = row?.ownerDocument
+    if (!page || !row.contains(page.activeElement) || !keyboardHeld(page)) return
     const rows = Array.from(row.parentElement?.querySelectorAll<HTMLElement>("[data-note]") ?? [])
     const at = rows.indexOf(row)
     ;(partOf(rows[at + 1] ?? rows[at - 1], part) ?? fallback())?.focus()

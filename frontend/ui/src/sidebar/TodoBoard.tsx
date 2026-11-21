@@ -1,10 +1,4 @@
-import {
-  Accessibility,
-  Cursor,
-  Feedback,
-  PointerActivationConstraints,
-  PointerSensor,
-} from "@dnd-kit/dom"
+import { Accessibility, Cursor, Feedback, PointerActivationConstraints } from "@dnd-kit/dom"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider, useDroppable, type DragEndEvent } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
@@ -38,6 +32,8 @@ import {
   type Part,
 } from "./NoteParts"
 import { boardUnsavedWords, clearDoneWords, doneCount, fullWords, notesFull } from "./notes-rows"
+import { PanelPointerSensor } from "./panel-drag"
+import { usePanelView } from "./panel-host"
 import {
   boardLayout,
   byColumn,
@@ -55,13 +51,13 @@ import {
   type DropTarget,
 } from "./todo-board"
 
-// A card follows the pointer once it has moved a few pixels, so a click still edits it; the
-// keyboard moves cards with Alt and the arrows and the Move menu instead, so dnd-kit adds no
-// keyboard sensor and none of its screen reader markup. Cards stay where they are while one is
+// A card follows the pointer once it has moved a few pixels, in whichever window the board is, so
+// a click still edits it; the keyboard moves cards with Alt and the arrows and the Move menu
+// instead, so dnd-kit adds no keyboard sensor and none of its screen reader markup. Cards stay where they are while one is
 // dragged (no sortable plugins), and a line shows where it would land; the drop puts it there,
 // at once, as its drop animation would only show it going back.
 const sensors = [
-  PointerSensor.configure({
+  PanelPointerSensor.configure({
     activationConstraints: (event) =>
       event.pointerType === "touch"
         ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
@@ -406,18 +402,20 @@ export const TodoBoard = ({
   const full = notesFull(notes.filter((note) => note.projectId === projectId).length)
   const root = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  // The window the board is drawn in, the page's or its own, whose observer follows it.
+  const view = usePanelView()
   // Measured only while the board is in a document: parked out of one, as while the phone's
   // drawer is closed, it measures nothing, and keeps the width it had for when it shows again.
   useLayoutEffect(() => {
     const board = root.current
     if (!board) return undefined
     if (board.isConnected) setWidth(board.getBoundingClientRect().width)
-    const observer = new ResizeObserver(([entry]) => {
+    const observer = new view.ResizeObserver(([entry]) => {
       if (entry && board.isConnected) setWidth(entry.contentRect.width)
     })
     observer.observe(board)
     return () => observer.disconnect()
-  }, [])
+  }, [view])
   const layout = boardLayout(width)
   // The column shown where the board shows one at a time.
   const [shown, setShown] = useState<BoardColumn>("todo")
@@ -593,7 +591,8 @@ export const TodoBoard = ({
               if (!isSortable(source)) return
               const from = find(String(source.id))
               if (!from) return
-              const held = source.element?.contains(document.activeElement) ?? false
+              const held =
+                source.element?.contains(source.element.ownerDocument.activeElement) ?? false
               const to = event.canceled ? undefined : dropOf(target?.data)
               const spot = to && dropSpot(ids, from.note.id, from.column, to)
               if (spot) place(from.note, spot, held ? "line" : null)

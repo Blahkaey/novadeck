@@ -1,10 +1,4 @@
-import {
-  Accessibility,
-  Cursor,
-  Feedback,
-  PointerActivationConstraints,
-  PointerSensor,
-} from "@dnd-kit/dom"
+import { Accessibility, Cursor, Feedback, PointerActivationConstraints } from "@dnd-kit/dom"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
@@ -26,13 +20,14 @@ import {
   type Part,
 } from "./NoteParts"
 import { fullWords, movedWords, notesFull, unsavedWords } from "./notes-rows"
+import { PanelPointerSensor } from "./panel-drag"
 import { SidebarPanel } from "./SidebarPanel"
 
-// A row follows the pointer once it has moved a few pixels, so a click still edits it; the
-// keyboard moves rows with Alt and the arrows instead, so dnd-kit adds no keyboard sensor and
-// none of its screen reader markup.
+// A row follows the pointer once it has moved a few pixels, in whichever window the panel is, so
+// a click still edits it; the keyboard moves rows with Alt and the arrows instead, so dnd-kit adds
+// no keyboard sensor and none of its screen reader markup.
 const sensors = [
-  PointerSensor.configure({
+  PanelPointerSensor.configure({
     activationConstraints: (event) =>
       event.pointerType === "touch"
         ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
@@ -264,7 +259,8 @@ export const NotesPanel = ({
                 if (!isSortable(source)) return
                 const note = plain.find((each) => each.id === source.id)
                 if (!note) return
-                const held = source.element?.contains(document.activeElement) ?? false
+                const held =
+                  source.element?.contains(source.element.ownerDocument.activeElement) ?? false
                 const spot = event.canceled ? undefined : indexSpot(ids, note.id, source.index)
                 if (!spot) {
                   if (held) focus.request(note.id, "line")

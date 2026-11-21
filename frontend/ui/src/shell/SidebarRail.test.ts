@@ -134,9 +134,33 @@ describe("a panel in a window", () => {
     const keys = (
       navigator.platform.includes("Mac") ? ["⌘", "Shift", "L"] : ["Ctrl", "Shift", "L"]
     ).join("\u00a0")
-    expect(railTooltip({ panel: "notes", open: false, back: null, detached: true })).toBe(
+    expect(railTooltip({ panel: "notes", open: false, back: null, away: "stage" })).toBe(
       `Notes · in a window: go to it · ${keys}`,
     )
+    expect(railTooltip({ panel: "notes", open: false, back: null, away: "window" })).toBe(
+      `Notes · in its own window: go to it · ${keys}`,
+    )
+  })
+
+  it("says so where its window is its own", () => {
+    const { container, unmount } = render(
+      createElement(SidebarRail, {
+        sidebarVisible: true,
+        sidebarPanel: "terminals",
+        zen: false,
+        badge: undefined,
+        bellRings: 0,
+        hasNotes: true,
+        detached: ["notes", "todo"],
+        ownWindows: ["notes"],
+        toggleRail: () => {},
+      }),
+    )
+    unmounts.push(unmount)
+    const toggle = (panel: string) => container.querySelector(`#${panel}-toggle`)!
+    expect(toggle("notes").getAttribute("data-detached")).toBe("true")
+    expect(toggle("notes").getAttribute("aria-description")).toBe("In its own window")
+    expect(toggle("todo").getAttribute("aria-description")).toBe("In a window")
   })
 })
 

@@ -454,7 +454,8 @@ const everyState = (
   run: ({ addTerminal, openPanels, dispatch, workspace, harness }) => {
     if (!dispatch) return
     // Two panels' windows beside them, opened before the terminals and without the focus, so the
-    // person looks at the last terminal, not at a window.
+    // person looks at the last terminal, not at a window. Not in windows of their own: a browser
+    // opens one only from the person's click on it (a window's "Open in its own window").
     openPanels(["notes", "todo"], { focus: false })
     // Added first, so each finish lands while the person looks at the last one.
     const keys = gallery.map(() => addTerminal())

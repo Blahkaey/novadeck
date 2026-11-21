@@ -30,6 +30,7 @@ const run = (inbox: ReturnType<typeof createDemoInbox>, label: string, notes: st
     },
     startFresh: () => undefined,
     openPanels: () => {},
+    refuseNextWindow: () => {},
     dispatch: undefined,
     workspace: () => undefined,
     note: (text) => notes.push(text),

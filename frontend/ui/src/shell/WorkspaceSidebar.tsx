@@ -3,10 +3,11 @@ import { panelLabels, type RailPanel, type SidebarPanel as PanelId } from "@nova
 import { PanelElsewhere } from "../sidebar/PanelElsewhere"
 import { PanelSlot } from "./PanelSlot"
 
-// The panel the sidebar is open on while it is in a window on the stage, and what its note
-// offers.
+// The panel the sidebar is open on while it is in a window, on the stage or of its own (`own`),
+// and what its note offers.
 export type ElsewherePanel = {
   readonly panel: RailPanel
+  readonly own: boolean
   readonly onShow: () => void
   readonly onReturn: () => void
   readonly onHide: () => void
@@ -43,6 +44,7 @@ export const WorkspaceSidebar = ({
         key={elsewhere.panel}
         id={`${elsewhere.panel}-elsewhere`}
         title={panelLabels[elsewhere.panel]}
+        own={elsewhere.own}
         onShow={elsewhere.onShow}
         onReturn={elsewhere.onReturn}
         onHide={elsewhere.onHide}

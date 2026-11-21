@@ -4,7 +4,7 @@ import { panelGroups, windowPanels } from "./panels"
 import { describe, expect, it } from "./test"
 import type { DemoActionContext } from "./types"
 
-const context = (opened: RailPanel[]): DemoActionContext => ({
+const context = (opened: RailPanel[], refused: string[] = []): DemoActionContext => ({
   target: "selected",
   harness: "claude",
   selected: () => undefined,
@@ -17,6 +17,7 @@ const context = (opened: RailPanel[]): DemoActionContext => ({
   },
   startFresh: () => undefined,
   openPanels: (panels) => void opened.push(...panels),
+  refuseNextWindow: () => void refused.push("next"),
   dispatch: undefined,
   workspace: () => undefined,
   note: () => undefined,
@@ -38,5 +39,14 @@ describe("panel windows", () => {
       .run(context(opened))
     expect(opened).toEqual(["notes", "todo", "history", "files"])
     expect(windowPanels).toEqual(opened)
+  })
+
+  it("has the next window of a panel's own refused, as a popup blocker would", async () => {
+    const refused: string[] = []
+    const [group] = panelGroups
+    await group!.actions
+      .find((action) => action.label === "Next own window is blocked")!
+      .run(context([], refused))
+    expect(refused).toEqual(["next"])
   })
 })

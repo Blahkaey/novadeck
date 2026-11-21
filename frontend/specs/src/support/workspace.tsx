@@ -1,4 +1,4 @@
-import { App } from "@novadeck/ui/app/App"
+import { App, type AppProps } from "@novadeck/ui/app/App"
 import { StrictMode } from "react"
 import { expect } from "vitest"
 import { cleanup, render } from "vitest-browser-react"
@@ -34,11 +34,15 @@ export const nextFrames = (count: number): Promise<void> =>
 
 /**
  * Opens the app, optionally at a deep link such as `/projects/storefront/sessions/initial/grid`,
- * and `embedded` as another page frames it.
+ * `embedded` as another page frames it, and with `panel` beside it, as the content preview's
+ * debug panel is.
  */
 export const openWorkspace = async (
   route?: string,
-  { embedded = false }: { readonly embedded?: boolean } = {},
+  {
+    embedded = false,
+    panel,
+  }: { readonly embedded?: boolean; readonly panel?: AppProps["panel"] } = {},
 ): Promise<void> => {
   forgetEarlierPages()
   // A same-page history entry below the app keeps an extra Back inside the test page.
@@ -46,7 +50,7 @@ export const openWorkspace = async (
   window.history.pushState(null, "", route === undefined ? "/" : `/#${route}`)
   await render(
     <StrictMode>
-      <App createBackend={createSpecBackend} embedded={embedded} />
+      <App createBackend={createSpecBackend} embedded={embedded} panel={panel} />
     </StrictMode>,
   )
   // A link may open with a modal dialog, which hides the rest of the app.

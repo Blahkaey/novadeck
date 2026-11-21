@@ -4,33 +4,35 @@ import { memo, useMemo } from "react"
 import { useDesktop } from "../shell/desktop"
 import { sidebarVisible } from "../shell/shell-state"
 import { WorkspaceSidebar, type ElsewherePanel } from "../shell/WorkspaceSidebar"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
-import { usePanelsShown } from "./panels-shown"
-import { panelsOnStage, sameItems } from "./selectors"
+import { useUiState, useWorkspaceServices } from "./controller/context"
+import { usePanelsAway, usePanelsShown } from "./panels-shown"
 
 // The sidebar wired to the workspace: it holds every panel the app shows (PanelInstances.tsx)
-// but those in a window on the stage of the session on screen, open on the one the route names.
+// but those in a window, on the stage of the session on screen or of their own, open on the one
+// the route names.
 export const SidebarSection = memo((): React.JSX.Element => {
   const desktop = useDesktop()
   const { commands } = useWorkspaceServices()
   const panels = usePanelsShown()
-  const staged = useWorkspaceState(panelsOnStage, sameItems)
-  const docked = useMemo(() => panels.filter((panel) => !staged.includes(panel)), [panels, staged])
+  const away = usePanelsAway()
+  const ownWindows = useUiState((state) => state.ownWindows)
+  const docked = useMemo(() => panels.filter((panel) => !away.includes(panel)), [panels, away])
   const sidebarPanel = useUiState((state) => state.location.route.panel)
   const visible = useUiState((state) => sidebarVisible(state.shell, desktop))
   const open = railPanelOf(sidebarPanel)
   const { revealPanel, returnPanel, hideSidebar } = commands
   const elsewhere = useMemo(
     (): ElsewherePanel | undefined =>
-      staged.includes(open)
+      away.includes(open)
         ? {
             panel: open,
+            own: ownWindows.includes(open),
             onShow: () => revealPanel(open),
             onReturn: () => returnPanel(open),
             onHide: hideSidebar,
           }
         : undefined,
-    [staged, open, revealPanel, returnPanel, hideSidebar],
+    [away, ownWindows, open, revealPanel, returnPanel, hideSidebar],
   )
   return (
     <WorkspaceSidebar

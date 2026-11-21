@@ -13,6 +13,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { inNextFrame } from "./frames"
 import { MentionedText, MentionSpan } from "./Mentioned"
 import { mentionInCode, type Mention } from "./mentions"
+import { clipboardOf } from "./realm"
 import { Tooltip } from "./Tooltip"
 
 const InlineNodes = ({
@@ -155,8 +156,9 @@ const CodeBlock = ({
   const [copied, setCopied] = useState(false)
   const timer = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(timer.current), [])
-  const copy = (): void => {
-    navigator.clipboard
+  // Through the clipboard of the window the block is in: a panel's window of its own has its own.
+  const copy = (button: HTMLElement): void => {
+    clipboardOf(button)
       ?.writeText(text)
       .then(() => {
         setCopied(true)
@@ -175,7 +177,7 @@ const CodeBlock = ({
             type="button"
             className="icon-button small dim nodrag nopan"
             aria-label="Copy code"
-            onClick={copy}
+            onClick={(event) => copy(event.currentTarget)}
           >
             {copied ? <Check size={12} /> : <Copy size={12} />}
           </button>

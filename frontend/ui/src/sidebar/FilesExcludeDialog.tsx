@@ -3,6 +3,7 @@ import { Dialog, DialogDescription, DialogTitle } from "@novadeck/toolkit/Dialog
 import { useId, useState } from "react"
 
 import { FilesExcludeList } from "./FilesExcludeList"
+import { usePanelView } from "./panel-host"
 
 // Where a save stands: being made, or refused and why; null while nothing is under way.
 type Saving = { readonly state: "saving" } | { readonly state: "failed"; readonly why: string }
@@ -39,6 +40,8 @@ export const FilesExcludeDialog = ({
   readonly onSettings: () => void
 }): React.JSX.Element => {
   const id = useId()
+  // The document the panel, and so the dialog, is drawn in.
+  const page = usePanelView().document
   const [draft, setDraft] = useState(patterns)
   // What is typed in the field that adds a pattern.
   const [typed, setTyped] = useState("")
@@ -84,7 +87,7 @@ export const FilesExcludeDialog = ({
         if (!next && !busy) onClose()
       }}
       label="Hidden files"
-      initialFocusEl={() => document.getElementById(`${id}-add`)}
+      initialFocusEl={() => page.getElementById(`${id}-add`)}
       backdropClassName="overlay fixed inset-0 z-50"
       positionerClassName="fixed inset-0 z-50 flex items-center justify-center px-5"
       className="modal files-exclude-dialog flex max-h-[calc(100dvh-48px)] w-[min(480px,calc(100vw-32px))] flex-col gap-3 overflow-y-auto p-5"

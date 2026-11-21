@@ -225,6 +225,7 @@ const panel = (
       if (options?.focus === false) unfocused.push(...panels)
       for (const each of panels) workspace.dispatch({ type: "panel/open", target, panel: each })
     },
+    refuseNextWindow: () => {},
     dispatch: (actions: readonly BackendAction[]) => void workspace.transact(actions),
     workspace: () => workspace.getSnapshot(),
     note: (text) => void notes.push(text),
@@ -744,6 +745,7 @@ describe("demo states", () => {
         addInBackground: () => key("04"),
         startFresh: () => {},
         openPanels: () => {},
+        refuseNextWindow: () => {},
         dispatch: () => {},
         workspace: () => only,
         note: (text) => void notes.push(text),
@@ -921,6 +923,7 @@ const openOver = (variant: "plain" | "agents" | "inbox", harness: AgentName = "c
     startFresh: () => {},
     // The gallery's panel windows are the app's, which this backend doesn't draw.
     openPanels: () => {},
+    refuseNextWindow: () => {},
     dispatch: (batch) => void workspace.transact(batch as never),
     workspace: () => workspace.getSnapshot(),
     note: () => {},

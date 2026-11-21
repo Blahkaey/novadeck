@@ -114,10 +114,13 @@ export const openCommands = ({
     desktop: boolean
     tiles: { id: string; rect: Rect }[]
     railOrder: readonly RailPanel[]
+    // Whether a window of a panel's own opens, or the browser refuses it.
+    windowsOpen: boolean
   } = {
     desktop,
     tiles: [],
     railOrder: railPanels,
+    windowsOpen: true,
   }
   let ids = 0
   const record: CommandEffects = {
@@ -137,6 +140,12 @@ export const openCommands = ({
     focusTerminalTab: (id) => effects.push(`focus tab ${id}`),
     focusTerminalInput: (id) => (effects.push(`focus input ${id}`), true),
     focusPanel: (panel) => effects.push(`focus ${panel} panel`),
+    openOwnWindow: (panel) => {
+      effects.push(`open ${panel} window`)
+      return screen.windowsOpen
+    },
+    focusOwnWindow: (panel) => effects.push(`focus ${panel} window`),
+    closeOwnWindow: (panel) => effects.push(`close ${panel} window`),
     railOrder: () => screen.railOrder,
     tileRects: () => screen.tiles,
     refocus: (element) => {

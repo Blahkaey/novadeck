@@ -42,6 +42,8 @@ export type DemoActionContext = {
     panels: readonly RailPanel[],
     options?: { readonly focus?: boolean },
   ) => void
+  // Has the next window a panel opens in of its own refused, as a browser's popup blocker would.
+  readonly refuseNextWindow: () => void
   // The backend's sink; undefined before start or after stop.
   readonly dispatch: BackendSink["dispatch"] | undefined
   // The workspace as last committed.

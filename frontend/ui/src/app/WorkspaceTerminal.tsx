@@ -20,7 +20,13 @@ import {
 } from "@novadeck/core/derivations"
 import { isPanel, isWindow } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
-import type { CompanionWindowMeta, PanelTile, TerminalMetadata, Tile } from "@novadeck/core/types"
+import {
+  panelLabels,
+  type CompanionWindowMeta,
+  type PanelTile,
+  type TerminalMetadata,
+  type Tile,
+} from "@novadeck/core/types"
 import { Avatar } from "@novadeck/items/Avatar"
 import { shellTailsOf } from "@novadeck/items/shells"
 import { TerminalCompanion } from "@novadeck/items/TerminalCompanion"
@@ -38,7 +44,9 @@ import {
 } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
+import { useDesktop } from "../shell/desktop"
 import { PanelCountSlot, PanelSlot } from "../shell/PanelSlot"
+import { PanelAwayNote } from "../sidebar/PanelElsewhere"
 import { panelIcons } from "../terminals/panel-icons"
 import { presentedProgram, terminalProfile, windowProfile } from "../terminals/processes/profiles"
 import { renameView } from "../terminals/rename-state"
@@ -64,6 +72,7 @@ import { MountedTerminal } from "./MountedTerminal"
 import { useMoveTo } from "./move-to"
 import { plainTitle } from "./murmur-offer"
 import { NameChip } from "./NameChip"
+import { detachablePanels, usePanelPlace } from "./panels-shown"
 import { ChatWithPeers } from "./peer-looks"
 import { useReleaseLead } from "./release-lead"
 import {
@@ -82,10 +91,12 @@ import { useTerminalMarks } from "./useTerminalMarks"
 const noChatConversation = createStore(noConversation)
 
 // What every window in the current view takes from the workspace, a terminal's, one undocked
-// from a companion or a panel's: its header, its menu, and the controls its layout offers.
+// from a companion or a panel's: its header, its menu, and the controls its layout offers. A
+// panel's window that can open its panel in a window of its own offers it (`ownWindow`).
 const useWindowFrame = (
   tile: Tile,
   { onFlyTo }: TerminalLayoutControls,
+  ownWindow?: () => void,
 ): Omit<WindowShellProps, "children" | "icon"> => {
   const { backend, commands } = useWorkspaceServices()
   const { openWindowed, openFocus, close, startRename, openSwitcher } = commands
@@ -147,8 +158,10 @@ const useWindowFrame = (
       releaseLead,
       foldTeam,
       moveTo,
+      ownWindow,
       onClose: () => close(id),
     }),
+    onOwnWindow: ownWindow,
     compact,
     switcher: { onOpen: (button) => openSwitcher(id, button) },
     onClose: () => close(id),
@@ -202,7 +215,9 @@ const WorkspaceWindow = memo(
 // panel's name and icon, with the panel's count beside the name: its body is the panel itself,
 // drawn once by the app, which this window holds while the panel is on the stage (PanelSlot).
 // Its body takes its own pointer and wheel on Canvas, and its own keys, as a companion's pane
-// does; the header still moves the window.
+// does; the header still moves the window, and, on a wide screen, opens the panel in a window
+// of its own. While the panel is in one, opened from another session, this window says so in its
+// place, with a way to that window and a way to bring the panel here.
 const WorkspacePanelWindow = memo(
   ({
     tile,
@@ -211,19 +226,38 @@ const WorkspacePanelWindow = memo(
     readonly tile: PanelTile
     readonly controls: TerminalLayoutControls
   }): React.JSX.Element => {
-    const frame = useWindowFrame(tile, controls)
-    const Icon = panelIcons[tile.panel]
+    const { commands } = useWorkspaceServices()
+    const { panel } = tile
+    const own = usePanelPlace(panel) === "window"
+    const ownWindow =
+      useDesktop() && detachablePanels.has(panel) && !own
+        ? () => commands.openOwnWindow(panel)
+        : undefined
+    const frame = useWindowFrame(tile, controls, ownWindow)
+    const Icon = panelIcons[panel]
     return (
       <WindowShell
         {...frame}
         icon={<Icon size={14} strokeWidth={1.5} />}
-        titleExtra={<PanelCountSlot panel={tile.panel} />}
+        titleExtra={<PanelCountSlot panel={panel} />}
       >
         <div
           className="flex min-h-0 min-w-0 flex-1 flex-col nodrag nopan nowheel"
           data-workspace-companion
         >
-          <PanelSlot panel={tile.panel} />
+          {own ? (
+            <div className="px-3">
+              <PanelAwayNote
+                text={`${panelLabels[panel]} is in its own window`}
+                actions={[
+                  { label: "Show it", onClick: () => commands.revealPanel(panel) },
+                  { label: "Bring it here", onClick: () => commands.bringPanelHere(panel) },
+                ]}
+              />
+            </div>
+          ) : (
+            <PanelSlot panel={panel} />
+          )}
         </div>
       </WindowShell>
     )

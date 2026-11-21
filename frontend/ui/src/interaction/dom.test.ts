@@ -32,6 +32,18 @@ describe("key targets", () => {
     })
   })
 
+  context("in a panel's window of its own", () => {
+    it("knows a field there for a field, though that window's elements are its own", () => {
+      const frame = document.createElement("iframe")
+      document.body.append(frame)
+      const other = frame.contentDocument!
+      other.body.innerHTML = '<textarea aria-label="Add a note…"></textarea>'
+      const field = other.querySelector("textarea")!
+      expect(field instanceof Element).toBe(false)
+      expect(classifyKeyTarget(field)).toMatchObject({ editing: true, textEntry: true })
+    })
+  })
+
   context("on a plain button in the page's chrome", () => {
     it("lets the workspace take its keys", () => {
       const target = mount('<header><button data-target type="button">Go</button></header>')
@@ -235,6 +247,15 @@ describe("focusing a panel as it comes to the sidebar or opens in a window", () 
     mount(panel("", "<textarea data-target></textarea>"))
     frame()
     expect(document.activeElement).toBe(document.querySelector("[data-target]"))
+  })
+
+  it("focuses it in the document it is in, as its window of its own", () => {
+    const frame = document.createElement("iframe")
+    document.body.append(frame)
+    const other = frame.contentDocument!
+    other.body.innerHTML = panel("", "<textarea data-target></textarea>")
+    focusPanel("notes", other)
+    expect(other.activeElement).toBe(other.querySelector("[data-target]"))
   })
 
   it("gives up once the person moves the focus meanwhile", () => {

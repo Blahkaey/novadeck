@@ -5,9 +5,11 @@ import { forgetWidths, fontsOf, noFonts, sameFonts, type Fonts } from "./files-f
 // The tree's width and the fonts, which decide how many chips a row has room for; the sidebar is
 // resizable, so a ResizeObserver follows the width. Unknown (nothing folds) until measured, and
 // while the panel is hidden (a width of zero). Out of a document, as a parked panel is, nothing is
-// measured, and the tree keeps what it had for when it shows again.
+// measured, and the tree keeps what it had for when it shows again. `view` is the window the
+// panel is drawn in, the page's or its own, whose observers, frames, fonts and theme it follows.
 export const useTreeMeasure = (
   tree: HTMLElement | null,
+  view: Window & typeof globalThis,
 ): { readonly width: number | undefined; readonly fonts: Fonts } => {
   const [width, setWidth] = useState<number | undefined>()
   const [fonts, setFonts] = useState<Fonts>(noFonts)
@@ -32,34 +34,35 @@ export const useTreeMeasure = (
     // A theme sets its own fonts (a mono sans in phosphor) on the root element. Its style also
     // changes for other reasons, as a view's transition, so the measuring waits for the next
     // frame and runs once however many changes came before it.
-    const root = typeof document === "undefined" ? undefined : document.documentElement
+    const root = view.document.documentElement
     let frame: number | undefined
     const themed =
-      typeof MutationObserver === "undefined"
+      typeof view.MutationObserver === "undefined"
         ? undefined
-        : new MutationObserver(() => {
+        : new view.MutationObserver(() => {
             if (!current || frame !== undefined) return
-            frame = requestAnimationFrame(() => {
+            frame = view.requestAnimationFrame(() => {
               frame = undefined
               if (current) measure()
             })
           })
-    themed?.observe(root!, {
+    themed?.observe(root, {
       attributes: true,
       attributeFilter: ["data-theme", "data-scheme", "class", "style"],
     })
-    const faces = typeof document === "undefined" ? undefined : document.fonts
+    const faces = view.document.fonts
     void faces?.ready.then(fontsChanged)
     faces?.addEventListener?.("loadingdone", fontsChanged)
-    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure)
+    const observer =
+      typeof view.ResizeObserver === "undefined" ? undefined : new view.ResizeObserver(measure)
     observer?.observe(element)
     return () => {
       current = false
-      if (frame !== undefined) cancelAnimationFrame(frame)
+      if (frame !== undefined) view.cancelAnimationFrame(frame)
       themed?.disconnect()
       faces?.removeEventListener?.("loadingdone", fontsChanged)
       observer?.disconnect()
     }
-  }, [tree])
+  }, [tree, view])
   return { width, fonts }
 }

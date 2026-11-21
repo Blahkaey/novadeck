@@ -2,6 +2,7 @@ import { Portal } from "@ark-ui/react/portal"
 import { Tooltip as ArkTooltip } from "@ark-ui/react/tooltip"
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
 
+import { useClosesWithItsWindow } from "./closes-with-window"
 import { useRestingPointer } from "./resting-pointer"
 import { useShown } from "./shown"
 
@@ -33,6 +34,7 @@ export const Tooltip = ({
   // stays shut.
   const shown = useShown()
   if (!shown && open) setOpen(false)
+  useClosesWithItsWindow(open, () => setOpen(false))
   const onScreen = useRef(shown)
   useEffect(() => {
     onScreen.current = shown

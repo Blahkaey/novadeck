@@ -11,7 +11,7 @@ import type { Backend } from "@novadeck/core/port"
 import { orderedTiles } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import { createStore, type MutableStore, type Store } from "@novadeck/core/store"
-import type { PreferencesValue, Workspace } from "@novadeck/core/types"
+import type { PreferencesValue, RailPanel, Workspace } from "@novadeck/core/types"
 
 import { writePreferences } from "../preferences/preferences-storage"
 import { noArrangement, type ProjectArrangement } from "../projects/project-arrangement"
@@ -67,6 +67,13 @@ export type UiState = {
   readonly leaving: LeaveAsk | null
   // The last move, for its toast; never persisted.
   readonly moved: MoveNotice | null
+  // The panels of the rail in a window of their own, in the order they opened: this run's, in
+  // every session, and never persisted, as a window can't open again without the person's click
+  // (shell/own-windows.ts holds the windows themselves).
+  readonly ownWindows: readonly RailPanel[]
+  // The last panel whose window of its own couldn't open, refused by the browser or the desktop
+  // app, for its toast; never persisted.
+  readonly windowRefused: { readonly id: string; readonly panel: RailPanel } | null
   // The agent whose switch Preferences should bring into view when it opens, until it has.
   readonly agentFocus: AgentName | null
   // Preferences should bring the patterns for hiding files in view when it opens, until it has.
@@ -197,6 +204,8 @@ export const initialUi = ({
   moveAsk: null,
   leaving: null,
   moved: null,
+  ownWindows: [],
+  windowRefused: null,
   agentFocus: null,
   filesExcludeFocus: false,
   crashLoopDismissed: false,

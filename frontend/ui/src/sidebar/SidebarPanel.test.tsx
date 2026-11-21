@@ -95,11 +95,45 @@ describe("a panel's frame", () => {
     })
   })
 
+  context("in a window of its own", () => {
+    // The panel's own window, and whether its way back was taken.
+    const own = () => {
+      const returned: string[] = []
+      const host: PanelHost = {
+        place: "window",
+        view: window,
+        onReturn: () => returned.push("notes"),
+      }
+      return { host, returned }
+    }
+
+    it("shows its heading and count, with a way back to the sidebar in place of Hide", () => {
+      const { host, returned } = own()
+      const page = show(host)
+      expect(page.header().contains(page.heading())).toBe(true)
+      expect(page.heading().textContent).toBe("Notes2")
+      expect(page.button("Hide notes")).toBeNull()
+      expect(page.button("Open Notes in a window")).toBeNull()
+      act(() => (page.button("Return Notes to the sidebar") as HTMLButtonElement).click())
+      expect(returned).toEqual(["notes"])
+    })
+
+    it("is always in reach, as the window is the panel's", () => {
+      const page = show(own().host)
+      const section = page.container.querySelector("section")!
+      expect(section.dataset["place"]).toBe("window")
+      expect(section.hasAttribute("inert")).toBe(false)
+      expect(section.getAttribute("aria-hidden")).toBeNull()
+    })
+  })
+
   it("keeps what the person had in its body as it moves to a window and back", () => {
     const page = show(docked)
     const body = page.container.querySelector<HTMLButtonElement>("[data-body]")!
     act(() => body.click())
     page.rerender(frame(inWindow()))
+    expect(page.container.querySelector("[data-body]")).toBe(body)
+    page.rerender(frame({ place: "window", view: window, onReturn: () => {} }))
     expect(page.container.querySelector("[data-body]")).toBe(body)
     page.rerender(frame(docked))
     expect(page.container.querySelector("[data-body]")).toBe(body)

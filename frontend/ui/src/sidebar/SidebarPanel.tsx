@@ -1,6 +1,6 @@
 import { PortalInto } from "@novadeck/toolkit/PortalInto"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { AppWindow, X } from "lucide-react"
+import { AppWindow, PanelLeftOpen, X } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { usePanelHost } from "./panel-host"
@@ -44,9 +44,12 @@ export const SidebarPanel = ({
   // In a window on the stage, which it fills, always in sight while the window is, with no Hide:
   // the window's header names it, shows its count and returns it to the sidebar. Its heading
   // stays for assistive technology, by the same ids, out of its own row, which shows only its
-  // actions, and only while it has any. Both places draw the same elements in the same order,
-  // so moving between them keeps what the person had in the panel.
+  // actions, and only while it has any. In a window of its own, which it fills too, it shows its
+  // heading and its actions as in the sidebar, with a way back to the sidebar in place of Hide.
+  // Every place draws the same elements in the same order, so moving between them keeps what
+  // the person had in the panel.
   const stage = host.place === "stage" ? host : undefined
+  const own = host.place === "window" ? host : undefined
   const heading = (
     <Tooltip content={titleHint} disabled={!titleHint}>
       <h2
@@ -64,12 +67,12 @@ export const SidebarPanel = ({
     <section
       id={id}
       className={
-        stage
-          ? "sidebar-panel relative flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-1"
+        stage || own
+          ? `sidebar-panel relative flex min-h-0 min-w-0 flex-1 flex-col px-3 ${own ? "pt-2" : "pt-1"}`
           : "sidebar-panel absolute inset-x-3 top-3 bottom-0 flex min-h-0 min-w-0 flex-col opacity-100 visible [transform:translateX(0)] data-[active=false]:pointer-events-none data-[active=false]:invisible data-[active=false]:[transform:translateX(-6px)] data-[active=false]:opacity-0"
       }
-      {...(stage
-        ? { "data-place": "stage" }
+      {...(stage || own
+        ? { "data-place": host.place }
         : { "data-active": active, "aria-hidden": !active, inert: !active })}
       aria-labelledby={`${id}-title`}
     >
@@ -102,6 +105,18 @@ export const SidebarPanel = ({
                 onClick={host.detach}
               >
                 <AppWindow size={14} strokeWidth={1.6} />
+              </button>
+            </Tooltip>
+          )}
+          {own && (
+            <Tooltip content="Return to sidebar">
+              <button
+                className="icon-button dim sidebar-return size-7"
+                type="button"
+                aria-label={`Return ${title} to the sidebar`}
+                onClick={own.onReturn}
+              >
+                <PanelLeftOpen size={14} strokeWidth={1.6} />
               </button>
             </Tooltip>
           )}

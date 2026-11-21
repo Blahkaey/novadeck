@@ -7,9 +7,11 @@
    panel couldn't do is a `.sidebar-refusal` line, red-edged, its `p` beside a dismiss button;
    each panel sets its margin.
 
-   Hooks: on a panel, data-active="true" | "false" in the sidebar, and data-place="stage" in a
+   Hooks: on a panel, data-active="true" | "false" in the sidebar; data-place="stage" in a
    window on the stage, which it fills, its heading heard but not shown (the window's names it
-   and shows its count), its own row showing only its actions, and gone while it has none.
+   and shows its count), its own row showing only its actions, and gone while it has none; and
+   data-place="window" in a window of its own, which it fills, its header as in the sidebar
+   with a `.sidebar-return` button in place of `.sidebar-close`.
 
    Tokens, each optional (its fallback in brackets):
    --sidebar-create-border-color (line): the create button's edge, at rest and hovered. */

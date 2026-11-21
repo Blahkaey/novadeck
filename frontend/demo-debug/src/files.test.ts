@@ -20,6 +20,7 @@ const context = (selected?: DemoActionContext["selected"]): DemoActionContext =>
   },
   startFresh: () => undefined,
   openPanels: () => {},
+  refuseNextWindow: () => {},
   dispatch: undefined,
   workspace: () => undefined,
   note: () => undefined,

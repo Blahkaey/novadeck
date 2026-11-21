@@ -137,6 +137,19 @@ describe("a window's menu", () => {
         ),
       ).toEqual(["Return to sidebar"])
     })
+
+    it("offers to open it in a window of its own first, where one can open", () => {
+      const opened: string[] = []
+      const menu = windowMenu({
+        terminal: panelTile("notes"),
+        onRename: ignore,
+        ownWindow: () => opened.push("notes"),
+        onClose: ignore,
+      })
+      expect(labels(menu)).toEqual(["Open in its own window", "Return to sidebar"])
+      action(menu, "own-window").onSelect()
+      expect(opened).toEqual(["notes"])
+    })
   })
 
   it("offers a lead to fold its teammates, or show them again, above Close", () => {

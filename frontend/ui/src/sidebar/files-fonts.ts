@@ -1,3 +1,5 @@
+import { viewOf } from "@novadeck/toolkit/realm"
+
 // Measuring the Files panel's texts in the fonts the page sets them in, so the tree can tell how
 // many chips a row has room for.
 
@@ -45,10 +47,11 @@ export const fontsOf = (tree: Element): Fonts => {
 export const sameFonts = (a: Fonts, b: Fonts): boolean =>
   a.name === b.name && a.chip === b.chip && a.more === b.more
 
-// The canvas font of an element, from its computed longhands: the `font` shorthand reads empty
-// in Chromium when the page sets font-feature-settings or font-variant-numeric on a parent.
+// The canvas font of an element, from its computed longhands, in the window it is drawn in: the
+// `font` shorthand reads empty in Chromium when the page sets font-feature-settings or
+// font-variant-numeric on a parent.
 const fontOf = (element: Element): string | undefined => {
-  const { fontStyle, fontWeight, fontSize, fontFamily } = getComputedStyle(element)
+  const { fontStyle, fontWeight, fontSize, fontFamily } = viewOf(element).getComputedStyle(element)
   return fontSize && fontFamily
     ? [fontStyle, fontWeight, fontSize, fontFamily].filter(Boolean).join(" ")
     : undefined

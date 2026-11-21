@@ -31,6 +31,24 @@ describe("a fenced code block", () => {
     await expect.poll(() => coloured(view.container), loaded).toBeGreaterThan(0)
   })
 
+  it("copies through the clipboard of the window it is drawn in", async () => {
+    // Another window of the page, as a panel's window of its own is, with a clipboard of its own.
+    const frame = document.createElement("iframe")
+    document.body.append(frame)
+    const other = frame.contentWindow!
+    const written: string[] = []
+    Object.defineProperty(other.navigator, "clipboard", {
+      value: { writeText: async (text: string) => void written.push(text) },
+    })
+    const view = mount(fenced("ts"))
+    other.document.body.append(view.container)
+
+    view.container.querySelector<HTMLElement>('[aria-label="Copy code"]')!.click()
+
+    await expect.poll(() => written).toEqual(["const answer = 42"])
+    frame.remove()
+  })
+
   it("shows coloured at once when drawn again, as a chat is when its view changes", async () => {
     const text = "```ts\nconst again = 7\n```"
     const first = mount(text)

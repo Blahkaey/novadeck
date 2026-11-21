@@ -377,7 +377,7 @@ demo (`?demo=messages`) has every state, entries to you and the pause.
 
 Right-click a window's header for the same menu as its sidebar tab: Rename, Reset to
 automatic for a name you gave, Dock in for an undocked window, and Close. A panel's window
-offers only Return to sidebar.
+offers Open in its own window, on a wide window, and Return to sidebar.
 
 Use the eye on a terminal tab to hide it from Grid and Canvas without closing it.
 Hidden tabs stay in the list with a faded label. While selected, a hidden terminal
@@ -1142,6 +1142,32 @@ the sidebar in the others, so switching sessions moves it, and the session remem
 windows with the rest of how it is laid out. A link or Back that opens the sidebar on a panel in
 a window shows "Notes is in a window" with **Show it**, which goes to the window, and **Return
 to sidebar**.
+
+From its window on the workspace, a panel can go on to a window of its own, which you can move
+anywhere, onto another screen too: **Open in its own window** in the window's header (or its
+right-click menu), on a wide window, not on a phone. The window opens where that panel's last
+one was, at its size, or about a sidebar's width the first time; Novadeck remembers where each
+panel's own window was. The panel moves out of the workspace into it, as you left it, with the
+keyboard in it, and the window's title names the panel and the open project. There it fills the
+window, under its name, its count and its own buttons, with **Return to sidebar** where the
+sidebar has Hide. It stays in its own window whichever session you switch to. Its rail icon keeps
+its window mark, its tooltip says it is in its own window, and the icon and the panel's shortcut
+bring that window to the front. Closing the window, with its own close button or **Return to
+sidebar**, puts the panel back in the sidebar, open on it, with the keyboard there, and closes its
+window on the session on screen too, if that session has one; a question or a menu the panel had
+open there closes with it. Closing Novadeck closes them all.
+A session that had the panel in a window on its workspace keeps that window: switching to it shows
+"Notes is in its own window" there, with **Show it**, which brings the window to the front, and
+**Bring it here**, which closes the window of its own and puts the panel back in this one. A link
+or Back that opens the sidebar on it shows the same note, with **Show it** and **Return to
+sidebar**. Windows of their own aren't opened again at the next launch: a browser opens one only
+from your click, so the panels are back in the sidebar. Where the browser blocks the window (a
+popup blocker), the panel stays where it was and a note says so. The workspace's shortcuts stay
+with Novadeck's main window: in a panel's own window only the panel's own keys work, as Esc, the
+arrows and typing in its fields. In a browser, keep Novadeck's own tab showing while you use a
+panel in its own window: the panel runs in that tab, so while its window is minimized or
+another tab is in front of it, dragging a note or a card stalls, and code blocks wait to be
+highlighted. The desktop app has no such limit.
 
 Hold Ctrl while pressing Tab to choose a terminal, then release Ctrl to switch.
 While navigating Grid and Canvas, the arrow keys select the nearest terminal on that

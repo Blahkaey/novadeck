@@ -1,10 +1,11 @@
-import type { RailPanel } from "@novadeck/core/types"
-import { useCallback, useMemo, useSyncExternalStore } from "react"
+import type { RailPanel, Workspace } from "@novadeck/core/types"
+import { useCallback, useMemo, useRef, useSyncExternalStore } from "react"
 
 import { useDesktop } from "../shell/desktop"
-import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { useWorkspaceServices } from "./controller/context"
 import { filesShown, historyShown, notesShown } from "./routing"
-import { panelPlace, panelShowing, type PanelPlace } from "./selectors"
+import { panelPlace, panelsAway, panelShowing, sameItems, type PanelPlace } from "./selectors"
+import type { UiState } from "./ui-store"
 import { useWorktreesShown } from "./use-worktrees-shown"
 
 // The panels of the rail the app shows with this backend and these settings, in the order the
@@ -29,10 +30,17 @@ export const usePanelsShown = (): readonly RailPanel[] => {
   )
 }
 
-// Whether the panel is in sight (`panelShowing`), which both stores decide: the sidebar's state
-// is the UI store's, and the window's the session's.
-export const usePanelShowing = (panel: RailPanel): boolean => {
-  const desktop = useDesktop()
+// The panels that open in a window, on the stage and from there in a window of their own.
+export const detachablePanels: ReadonlySet<RailPanel> = new Set([
+  "notes",
+  "todo",
+  "history",
+  "files",
+])
+
+// A value both stores decide, as where a panel is: a window of its own is the UI store's, a
+// window on the stage the session's. `read` returns a value `Object.is` can compare.
+const useBothStores = <T>(read: (ui: UiState, workspace: Workspace) => T): T => {
   const { ui, workspace } = useWorkspaceServices()
   const subscribe = useCallback(
     (notify: () => void) => {
@@ -45,13 +53,39 @@ export const usePanelShowing = (panel: RailPanel): boolean => {
     },
     [ui, workspace],
   )
-  const read = useCallback(
-    () => panelShowing(ui.getSnapshot(), workspace.getSnapshot(), panel, () => desktop),
-    [ui, workspace, panel, desktop],
+  const snapshot = useCallback(
+    () => read(ui.getSnapshot(), workspace.getSnapshot()),
+    [ui, workspace, read],
   )
-  return useSyncExternalStore(subscribe, read)
+  return useSyncExternalStore(subscribe, snapshot)
+}
+
+// Whether the panel is in sight (`panelShowing`), which both stores decide: the sidebar's state
+// is the UI store's, and the window's the session's.
+export const usePanelShowing = (panel: RailPanel): boolean => {
+  const desktop = useDesktop()
+  return useBothStores(
+    useCallback(
+      (ui: UiState, workspace: Workspace) => panelShowing(ui, workspace, panel, () => desktop),
+      [panel, desktop],
+    ),
+  )
 }
 
 // Where the panel is in the session on screen (`panelPlace`).
 export const usePanelPlace = (panel: RailPanel): PanelPlace =>
-  useWorkspaceState((workspace) => panelPlace(workspace, panel))
+  useBothStores(
+    useCallback((ui: UiState, workspace: Workspace) => panelPlace(ui, workspace, panel), [panel]),
+  )
+
+// The panels out of the sidebar (`panelsAway`), the same list while they stay the same.
+export const usePanelsAway = (): readonly RailPanel[] => {
+  const last = useRef<readonly RailPanel[]>([])
+  return useBothStores(
+    useCallback((ui: UiState, workspace: Workspace) => {
+      const away = panelsAway(ui, workspace)
+      if (!sameItems(away, last.current)) last.current = away
+      return last.current
+    }, []),
+  )
+}

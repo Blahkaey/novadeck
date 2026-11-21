@@ -38,27 +38,36 @@ const panelShortcuts: Readonly<Record<RailPanel, ShortcutName>> = {
   history: "history",
 }
 
+// Where a panel out of the sidebar is: in a window on the stage, or in a window of its own.
+export type PanelAway = "stage" | "window"
+
+// What a toggle says of where its panel is, out of the sidebar.
+const awayWords: Readonly<Record<PanelAway, string>> = {
+  stage: "in a window",
+  window: "in its own window",
+}
+
 // A toggle's tooltip: its panel, what it holds for the person, and where a click takes it: to
-// the panel's window, while the panel is in one on the stage (`detached`); while its panel is
-// open in the sidebar, back to the panel shown before it, or hidden; then the key that does what
-// the click does: while the sessions show (`view`), the Sessions key.
+// the panel's window, while the panel is in one on the stage or of its own (`away`); while its
+// panel is open in the sidebar, back to the panel shown before it, or hidden; then the key that
+// does what the click does: while the sessions show (`view`), the Sessions key.
 export const railTooltip = ({
   panel,
   view = panel,
   detail,
   open,
   back,
-  detached = false,
+  away,
 }: {
   panel: RailPanel
   view?: SidebarPanel
   detail?: string | undefined
   open: boolean
   back: SidebarPanel | null
-  detached?: boolean
+  away?: PanelAway | undefined
 }): string => {
-  const action = detached
-    ? "in a window: go to it"
+  const action = away
+    ? `${awayWords[away]}: go to it`
     : open
       ? back && railPanelOf(back) !== panel
         ? `back to ${panelLabels[back]}`
@@ -95,6 +104,8 @@ const modifiers = [
   }),
 ]
 
+const capitalized = (words: string): string => words.charAt(0).toUpperCase() + words.slice(1)
+
 // No panel in a window, the same each render.
 const noneDetached: readonly RailPanel[] = []
 
@@ -119,6 +130,7 @@ export const SidebarRail = ({
   sessionsAsk,
   todosLeft = 0,
   detached = noneDetached,
+  ownWindows = noneDetached,
   historyInWindow = false,
   hasFiles = false,
   hasHistory = false,
@@ -150,9 +162,12 @@ export const SidebarRail = ({
   // How many of the open project's todos are still to do, which the Todo toggle's tooltip
   // says: a count for the person, not news, so it draws no dot.
   todosLeft?: number
-  // The panels in a window on the stage of the session on screen: their toggles stay in place,
-  // marked, and take the person to the window; none shows as the sidebar's open panel.
+  // The panels out of the sidebar, in a window on the stage of the session on screen or of their
+  // own: their toggles stay in place, marked, and take the person to the window; none shows as
+  // the sidebar's open panel.
   detached?: readonly RailPanel[]
+  // Those of them in a window of their own, which their toggles say.
+  ownWindows?: readonly RailPanel[]
   // History's window is in sight on the stage, where a landing shows as in the open panel.
   historyInWindow?: boolean
   // Whether the backend has a Files panel to toggle.
@@ -224,7 +239,7 @@ export const SidebarRail = ({
             index={index}
             count={shown.length}
             open={open === id}
-            detached={detached.includes(id)}
+            away={ownWindows.includes(id) ? "window" : detached.includes(id) ? "stage" : undefined}
             view={sidebarPanel}
             back={stepBack(sidebarBack, id)}
             badge={id === "inbox" ? badge : undefined}
@@ -258,7 +273,7 @@ const RailToggle = ({
   index,
   count,
   open,
-  detached,
+  away,
   view,
   back,
   badge,
@@ -278,8 +293,8 @@ const RailToggle = ({
   count: number
   // Its panel shows, so a click goes back to the panel before it or hides the sidebar.
   open: boolean
-  // Its panel is in a window on the stage, which a click goes to.
-  detached: boolean
+  // Where its panel is out of the sidebar, in a window a click goes to.
+  away: PanelAway | undefined
   // The panel that shows, which picks the key its tooltip names while it is open.
   view: SidebarPanel
   back: SidebarPanel | null
@@ -344,7 +359,7 @@ const RailToggle = ({
         open,
         view,
         back,
-        detached,
+        away,
       })}
       tooltipDisabled={dragging}
       value={value}
@@ -354,9 +369,9 @@ const RailToggle = ({
       // The Terminals toggle keeps its name, so it is found by it; what the other sessions ask
       // is its description, as is a panel's being in a window.
       aria-description={
-        [detached ? "In a window" : undefined, sessionsAsk].filter(Boolean).join(". ") || undefined
+        [away && capitalized(awayWords[away]), sessionsAsk].filter(Boolean).join(". ") || undefined
       }
-      data-detached={detached || undefined}
+      data-detached={away ? true : undefined}
       aria-keyshortcuts={[
         ...(index > 0 ? ["Alt+ArrowUp"] : []),
         ...(index < count - 1 ? ["Alt+ArrowDown"] : []),
@@ -373,7 +388,7 @@ const RailToggle = ({
       }}
     >
       <Icon size={16} />
-      {detached && <span aria-hidden="true" className="rail-detached-mark" />}
+      {away && <span aria-hidden="true" className="rail-detached-mark" />}
       {badge && <BellDot rings={bellRings} />}
       {sessionsAsk && <BellDot rings={0} />}
       {drops && !dropsShown && <FlareDot drops={drops.count} />}

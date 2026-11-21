@@ -146,8 +146,11 @@
 
 /* A move's toast (`.move-toast`, data-failed="true" when the move was refused): the move's
    `.move-toast-icon`, its `.move-toast-words`, and under them `.move-toast-actions` with the
-   Undo button and the "Go there" the whole toast does. */
-.move-toast {
+   Undo button and the "Go there" the whole toast does. A window of a panel's own that couldn't
+   open says so the same way (`.window-toast`, its `.window-toast-icon` and `.window-toast-words`),
+   as a failed move does. */
+.move-toast,
+.window-toast {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   gap: 6px 10px;
@@ -156,15 +159,18 @@
   line-height: 19px;
   text-align: left;
 }
-.move-toast-icon {
+.move-toast-icon,
+.window-toast-icon {
   display: grid;
   padding-top: 2px;
   color: var(--color-muted);
 }
-.move-toast[data-failed="true"] .move-toast-icon {
+.move-toast[data-failed="true"] .move-toast-icon,
+.window-toast-icon {
   color: var(--color-danger-fg);
 }
-.move-toast-words {
+.move-toast-words,
+.window-toast-words {
   min-width: 0;
   overflow-wrap: anywhere;
 }

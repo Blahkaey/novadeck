@@ -33,8 +33,13 @@ export const modalDialogOpen = (): boolean =>
       dialog.getAttribute("data-state") !== "closed",
   )
 
+// Whether an event's target is an element, of whichever window: a panel in a window of its own
+// is drawn into that window's document, whose elements `instanceof Element` doesn't recognise.
+const isElement = (target: EventTarget | null): target is Element =>
+  target !== null && (target as Partial<Node>).nodeType === 1
+
 export const workspaceShortcutTarget = (target: EventTarget | null): boolean =>
-  !(target instanceof Element && target.closest(editingOrOverlay))
+  !(isElement(target) && target.closest(editingOrOverlay))
 
 const overlays = [
   '[role="dialog"]:not([aria-hidden="true"])',
@@ -53,7 +58,7 @@ export const blockingOverlayOpen = (): boolean =>
   Boolean(document.querySelector(overlays.map((each) => `${each}:not(.peek)`).join(", ")))
 
 const within = (target: EventTarget | null, selector: string): boolean =>
-  target instanceof Element && Boolean(target.closest(selector))
+  isElement(target) && Boolean(target.closest(selector))
 const insideOpenZenDock = (target: EventTarget | null): boolean =>
   within(target, '[data-workspace-zen-dock][data-open="true"]')
 // The footer's notices, a portable copy's install, Murmur's and the sandbox's, which close
@@ -74,7 +79,7 @@ const insideSwitcherClose = (target: EventTarget | null): boolean =>
   within(target, '[aria-label="Close terminal switcher"]')
 // Where keys move around the workspace while navigating: a view itself, or a Canvas node.
 export const navigateHome = (target: EventTarget | null): boolean =>
-  target instanceof Element &&
+  isElement(target) &&
   target.matches("[data-workspace-viewport], [data-workspace-canvas-node], .react-flow__node")
 // A region that takes its own keys and clicks (see `editingOrOverlay`).
 export const insideOwnKeys = (target: EventTarget | null): boolean =>
@@ -88,7 +93,7 @@ const insideChat = (target: EventTarget | null): boolean => within(target, "[dat
 // where typing would reach it: not while the agent's own rows there take the keys, nor while a
 // pane covers the terminal (see cover-keys.ts), which a key typed there would uncover.
 export const chatBoxBeside = (target: EventTarget | null): HTMLElement | null => {
-  const frame = target instanceof Element ? target.closest("[data-terminal]") : null
+  const frame = isElement(target) ? target.closest("[data-terminal]") : null
   const chat = frame?.querySelector("[data-workspace-chat]")
   if (!frame || !chat || chat.querySelector("[data-takes-keys]")) return null
   const split = frame.querySelector(".pane-split")
@@ -214,21 +219,22 @@ const panelControls =
 // window: on its first control in its body, else in its header, else on its heading. It may
 // still be on its way into view (sliding into the sidebar, Focus mounting its window, Canvas
 // flying to it), so it tries again for a few frames, unless the person moves the focus
-// meanwhile.
-export const focusPanel = (panel: RailPanel): void => {
-  const from = document.activeElement
+// meanwhile. `page` is the document the panel is in: the page's own, or that of its window of
+// its own, whose frames it waits on.
+export const focusPanel = (panel: RailPanel, page: Document = document): void => {
+  const from = page.activeElement
   const attempt = (framesLeft: number): void => {
-    if (document.activeElement !== from) return
-    const section = document.getElementById(`${panel}-panel`)
+    if (page.activeElement !== from) return
+    const section = page.getElementById(`${panel}-panel`)
     const first = (selector: string): HTMLElement | undefined =>
       [...(section?.querySelectorAll<HTMLElement>(selector) ?? [])].find(usable)
     const target =
       first(`.sidebar-panel-content :is(${panelControls})`) ??
       first(`.sidebar-panel-header :is(${panelControls})`) ??
-      document.getElementById(`${panel}-panel-title`)
+      page.getElementById(`${panel}-panel-title`)
     if (target && section && usable(section)) target.focus({ preventScroll: true })
-    if (document.activeElement !== from || framesLeft === 0) return
-    requestAnimationFrame(() => attempt(framesLeft - 1))
+    if (page.activeElement !== from || framesLeft === 0) return
+    ;(page.defaultView ?? window).requestAnimationFrame(() => attempt(framesLeft - 1))
   }
   attempt(12)
 }

@@ -39,6 +39,15 @@ export type CommandEffects = {
   readonly focusTerminalTab: (id: string) => void
   // Puts keyboard focus in the panel, in the sidebar or its window, once it can take it.
   readonly focusPanel: (panel: RailPanel) => void
+  // Opens a window of the panel's own, named for it, where it was last or at a default size, in
+  // front: called in the person's click, as a browser opens a window from nothing else. False
+  // where it didn't open, as a browser's popup blocker or the desktop app refused it.
+  readonly openOwnWindow: (panel: RailPanel) => boolean
+  // Brings the panel's window of its own to the front, keyboard focus in the panel there.
+  readonly focusOwnWindow: (panel: RailPanel) => void
+  // Closes the panel's window of its own, remembering where it was, and gives the page its
+  // focus back; nothing where it has none open.
+  readonly closeOwnWindow: (panel: RailPanel) => void
   // The rail's toggles in the order the person left them.
   readonly railOrder: () => readonly RailPanel[]
   // Focuses the terminal's input now; false when it has none that can take focus.

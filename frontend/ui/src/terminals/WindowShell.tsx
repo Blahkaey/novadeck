@@ -11,7 +11,15 @@ import type { Tile } from "@novadeck/core/types"
 import { ContextMenu, type ContextMenuItem } from "@novadeck/toolkit/ContextMenu"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { BellOff, Minimize2, Maximize2, Mic, PanelLeftOpen, X } from "lucide-react"
+import {
+  BellOff,
+  Minimize2,
+  Maximize2,
+  Mic,
+  PanelLeftOpen,
+  SquareArrowOutUpRight,
+  X,
+} from "lucide-react"
 import { lazy, Suspense, useMemo, useRef, type ReactNode } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
@@ -59,6 +67,8 @@ export type WindowShellProps = {
   switcher?: { onOpen: (button: HTMLButtonElement) => void }
   onFlyTo?: () => void
   windowed?: { destination: string; onOpen: () => void }
+  // A panel's window opens the panel in a window of its own, where one can open.
+  onOwnWindow?: (() => void) | undefined
   // A panel's window closes by returning its panel to the sidebar, which its button says.
   onClose?: () => void
   // The close button's tooltip, which says where a closed terminal goes.
@@ -103,6 +113,7 @@ export const WindowShell = ({
   onFocus,
   switcher,
   onFlyTo,
+  onOwnWindow,
   onClose,
   closeTip = "Close",
   windowed,
@@ -404,6 +415,20 @@ export const WindowShell = ({
               onClick={windowed.onOpen}
             >
               <Minimize2 size={12} />
+            </button>
+          </Tooltip>
+        )}
+        {onOwnWindow && (
+          <Tooltip content="Open in its own window">
+            <button
+              className={`${headerActionClasses} terminal-own-window nodrag nopan`}
+              aria-label={`Open ${name} in its own window`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOwnWindow()
+              }}
+            >
+              <SquareArrowOutUpRight size={12} />
             </button>
           </Tooltip>
         )}

@@ -14,6 +14,7 @@ import {
 } from "../../interaction/dom"
 import { cancelTerminalTransition, transitionTerminal } from "../../layouts/transition"
 import { isDesktop } from "../../shell/desktop"
+import { closeOwnWindow, focusOwnWindow, openOwnWindow } from "../../shell/own-windows"
 import { readSidebarOrder } from "../../shell/shell-storage"
 import type { CommandEffects } from "../commands/context"
 
@@ -32,6 +33,9 @@ export const domEffects: CommandEffects = {
   focusTerminalTab,
   focusTerminalInput,
   focusPanel,
+  openOwnWindow,
+  focusOwnWindow,
+  closeOwnWindow,
   railOrder: readSidebarOrder,
   tileRects,
   refocus: (element) => {

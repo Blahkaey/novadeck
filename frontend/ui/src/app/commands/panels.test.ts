@@ -182,3 +182,125 @@ describe("panel windows by session", () => {
     expect(staged(app)).toEqual(["notes"])
   })
 })
+
+// The panels in a window of their own.
+const own = (app: ReturnType<typeof openCommands>): readonly RailPanel[] =>
+  app.ui.getSnapshot().ownWindows
+
+describe("a panel in a window of its own", () => {
+  context("as it opens from its window on the stage", () => {
+    it("moves into the window, out of the stage, with keyboard focus there once it holds it", () => {
+      const app = open("inbox")
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      expect(app.effects).toContain("open notes window")
+      expect(own(app)).toEqual(["notes"])
+      expect(staged(app)).toEqual([])
+      expect(app.state().selected).not.toBe("panel:notes")
+      expect(app.effects).not.toContain("focus notes window")
+      app.flush()
+      expect(app.effects.at(-1)).toBe("focus notes window")
+      expect(sidebar(app)).toEqual({ panel: "inbox", visible: true })
+    })
+
+    it("stays where it was, and says why, where the window is refused", () => {
+      const app = open("inbox")
+      app.commands.detachPanel("notes")
+      app.screen.windowsOpen = false
+      app.commands.openOwnWindow("notes")
+      expect(own(app)).toEqual([])
+      expect(staged(app)).toEqual(["notes"])
+      expect(app.ui.getSnapshot().windowRefused).toMatchObject({ panel: "notes" })
+    })
+  })
+
+  context("from the rail and the panel's key", () => {
+    it("brings its window to the front, leaving the sidebar as it was", () => {
+      const app = open("inbox")
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      app.commands.toggleRail("notes")
+      expect(app.effects.at(-1)).toBe("focus notes window")
+      app.commands.toggleSidebar("notes")
+      expect(app.effects.at(-1)).toBe("focus notes window")
+      expect(sidebar(app)).toEqual({ panel: "inbox", visible: true })
+    })
+  })
+
+  context("as it returns", () => {
+    it("closes its window and opens the sidebar on it, with keyboard focus there", () => {
+      const app = open("inbox")
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      app.commands.returnPanel("notes")
+      expect(app.effects).toContain("close notes window")
+      expect(own(app)).toEqual([])
+      expect(sidebar(app)).toEqual({ panel: "notes", visible: true })
+      app.flush()
+      expect(app.effects.at(-1)).toBe("focus notes panel")
+    })
+
+    it("closes the window on the stage of the session on screen that said where it was", () => {
+      const app = open(null)
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      app.commands.detachPanel("notes")
+      expect(staged(app)).toEqual(["notes"])
+      app.commands.returnPanel("notes")
+      expect(staged(app)).toEqual([])
+      expect(sidebar(app)).toEqual({ panel: "notes", visible: true })
+    })
+  })
+
+  context("as the workspace around it goes", () => {
+    it("closes every window of their own, each panel back where the session has it", () => {
+      const app = open("inbox")
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      app.commands.detachPanel("todo")
+      app.commands.openOwnWindow("todo")
+      app.commands.detachPanel("files")
+      app.commands.forgetOwnWindows()
+      expect(app.effects).toEqual(
+        expect.arrayContaining(["close notes window", "close todo window"]),
+      )
+      expect(own(app)).toEqual([])
+      expect(staged(app)).toEqual(["files"])
+      expect(sidebar(app)).toEqual({ panel: "inbox", visible: true })
+    })
+  })
+
+  context("in another session whose stage has its window", () => {
+    // Notes opens in a window of its own from one session, and another session on screen still
+    // has its window on the stage.
+    const elsewhere = () => {
+      const app = open(null)
+      app.commands.detachPanel("notes")
+      const first = app.workspace.getSnapshot().projects[0]!.activeSessionId
+      app.commands.startFresh()
+      app.commands.detachPanel("notes")
+      const second = app.workspace.getSnapshot().projects[0]!.activeSessionId
+      app.commands.switchSession(first)
+      app.commands.openOwnWindow("notes")
+      app.commands.switchSession(second)
+      return app
+    }
+
+    it("leaves that session's window on the stage as it was", () => {
+      const app = elsewhere()
+      expect(staged(app)).toEqual(["notes"])
+      expect(own(app)).toEqual(["notes"])
+    })
+
+    it("brings the panel into that window, closing its own", () => {
+      const app = elsewhere()
+      app.commands.select("01")
+      app.commands.bringPanelHere("notes")
+      expect(app.effects).toContain("close notes window")
+      expect(own(app)).toEqual([])
+      expect(app.state().selected).toBe("panel:notes")
+      app.flush()
+      expect(app.effects.at(-1)).toBe("focus notes panel")
+    })
+  })
+})

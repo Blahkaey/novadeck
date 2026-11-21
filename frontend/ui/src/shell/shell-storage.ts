@@ -1,5 +1,6 @@
 import type { RailPanel, WindowedView } from "@novadeck/core/types"
 
+import { keptBoundsOf, ownWindowDefault, type OwnWindowBounds } from "./own-window-bounds"
 import { railOrder } from "./rail-order"
 
 const collapsedStorageKey = "novadeck.sidebar-collapsed"
@@ -108,5 +109,31 @@ export const writeFoldedRestart = (version: string): void => {
     localStorage.setItem(foldedRestartStorageKey, version)
   } catch {
     /* The chip folds for this session when storage is unavailable. */
+  }
+}
+
+// Where each panel's window of its own was when it last closed or moved, for the next one.
+const ownWindowsStorageKey = "novadeck.panel-windows"
+const readKeptBounds = (): ReturnType<typeof keptBoundsOf> => {
+  try {
+    return keptBoundsOf(JSON.parse(localStorage.getItem(ownWindowsStorageKey) ?? "{}"))
+  } catch {
+    return {}
+  }
+}
+
+// The panel's last window of its own, or the first's size where it had none or what was kept
+// makes none.
+export const readOwnWindowBounds = (panel: RailPanel): OwnWindowBounds =>
+  readKeptBounds()[panel] ?? ownWindowDefault
+
+export const writeOwnWindowBounds = (panel: RailPanel, bounds: OwnWindowBounds): void => {
+  try {
+    localStorage.setItem(
+      ownWindowsStorageKey,
+      JSON.stringify({ ...readKeptBounds(), [panel]: bounds }),
+    )
+  } catch {
+    /* The next window opens at the default size when storage is unavailable. */
   }
 }

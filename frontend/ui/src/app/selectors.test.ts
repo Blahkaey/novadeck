@@ -2,7 +2,7 @@ import type { RailPanel } from "@novadeck/core/types"
 
 import { context, describe, expect, it } from "../test"
 import { openCommands } from "../test/commands"
-import { currentTarget, panelPlace, panelShowing } from "./selectors"
+import { currentTarget, panelPlace, panelsAway, panelShowing } from "./selectors"
 
 // Which of these panels are in sight on the app's screen, wide or a phone's.
 const inSight = (app: ReturnType<typeof openCommands>, desktop: boolean): RailPanel[] =>
@@ -13,7 +13,7 @@ const inSight = (app: ReturnType<typeof openCommands>, desktop: boolean): RailPa
 describe("panelPlace", () => {
   it("has each panel in the sidebar until it opens in a window, and there again once returned", () => {
     const app = openCommands()
-    const place = () => panelPlace(app.workspace.getSnapshot(), "notes")
+    const place = () => panelPlace(app.ui.getSnapshot(), app.workspace.getSnapshot(), "notes")
     expect(place()).toBe("sidebar")
     app.commands.detachPanel("notes")
     expect(place()).toBe("stage")
@@ -25,7 +25,28 @@ describe("panelPlace", () => {
     const app = openCommands()
     app.commands.detachPanel("notes")
     app.commands.startFresh()
-    expect(panelPlace(app.workspace.getSnapshot(), "notes")).toBe("sidebar")
+    expect(panelPlace(app.ui.getSnapshot(), app.workspace.getSnapshot(), "notes")).toBe("sidebar")
+  })
+
+  it("has a panel in its own window there in every session, until that window closes", () => {
+    const app = openCommands()
+    const place = () => panelPlace(app.ui.getSnapshot(), app.workspace.getSnapshot(), "notes")
+    app.commands.detachPanel("notes")
+    app.commands.openOwnWindow("notes")
+    expect(place()).toBe("window")
+    app.commands.startFresh()
+    expect(place()).toBe("window")
+    app.commands.returnPanel("notes")
+    expect(place()).toBe("sidebar")
+  })
+
+  it("lists the panels out of the sidebar, those in their own windows first", () => {
+    const app = openCommands()
+    app.commands.detachPanel("todo")
+    app.commands.detachPanel("notes")
+    app.commands.openOwnWindow("notes")
+    app.commands.detachPanel("notes")
+    expect(panelsAway(app.ui.getSnapshot(), app.workspace.getSnapshot())).toEqual(["notes", "todo"])
   })
 })
 
@@ -91,6 +112,15 @@ describe("panelShowing", () => {
       app.commands.setVisibility(currentTarget(app.workspace.getSnapshot()), "panel:notes", true)
       expect(inSight(app, true)).toEqual([])
       app.commands.select("panel:notes")
+      expect(inSight(app, true)).toEqual(["notes"])
+    })
+
+    it("has it in sight in a window of its own, whatever the stage shows", () => {
+      const app = openCommands({ url: "/projects/project/sessions/initial/focus?terminal=01" })
+      app.commands.hideSidebar()
+      app.commands.detachPanel("notes")
+      app.commands.openOwnWindow("notes")
+      app.commands.select("01")
       expect(inSight(app, true)).toEqual(["notes"])
     })
 

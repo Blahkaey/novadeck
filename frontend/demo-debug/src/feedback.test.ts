@@ -25,6 +25,7 @@ const context = (over: Partial<DemoActionContext> = {}): DemoActionContext => ({
   },
   startFresh: () => undefined,
   openPanels: () => {},
+  refuseNextWindow: () => {},
   dispatch: undefined,
   workspace: () => undefined,
   note: () => undefined,

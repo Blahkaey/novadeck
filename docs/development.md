@@ -306,7 +306,15 @@ Terminals:
   selected: each is listed in the Terminals panel under its own icon, its rail toggle keeps its
   place with a window mark, and the sidebar moves to the first panel left in it. The
   rest is normal use: a window's **Return to sidebar**, the rail toggle that goes to the window,
-  and the sidebar's "Notes is in a window" note, which a `?panel=notes` link or Back reaches.
+  and the sidebar's "Notes is in a window" note, which a `?panel=notes` link or Back reaches. A
+  window's **Open in its own window** opens a real browser window, so a panel in a window of its
+  own, its rail toggle, its **Return to sidebar** and closing it, the sidebar's "Notes is in its
+  own window" note, and the note in its window on another session's workspace (open it there
+  first, then in its own window from another session, and switch back) with **Bring it here**,
+  are normal use too. "Next own window is blocked" has the next one refused, as a popup blocker
+  would: the toast that says so shows, and the panel stays in its window on the workspace. The
+  "Every state at once" gallery opens no window of a panel's own, as a browser opens one only
+  from a click on it.
 - **Worktrees:** acts on the selected terminal's first worktree in the Worktrees panel, which lists the
   open project's worktrees (every demo seeds a few from its own terminals, in several projects, so
   switching projects switches the list: one in conflict with main, two with each other, one

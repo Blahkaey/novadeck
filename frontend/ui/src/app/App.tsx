@@ -23,6 +23,7 @@ import { cancelTerminalTransition } from "../layouts/transition"
 import { elsewhereSessionsText } from "../projects/session-marks"
 import { useDesktop } from "../shell/desktop"
 import { HistoryDropNotice } from "../shell/HistoryDot"
+import { refuseNextOwnWindow } from "../shell/own-windows"
 import { createPanelNodes, PanelNodesContext } from "../shell/panel-nodes"
 import { sidebarVisible } from "../shell/shell-state"
 import { readSidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
@@ -45,18 +46,11 @@ import { HeaderSection } from "./HeaderSection"
 import { dropWords } from "./history-drops"
 import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
+import { OwnWindows } from "./OwnWindows"
 import { PanelInstances } from "./PanelInstances"
-import { usePanelShowing } from "./panels-shown"
+import { usePanelPlace, usePanelsAway, usePanelShowing } from "./panels-shown"
 import { historyShown, filesShown, notesShown, panelShownOn } from "./routing"
-import {
-  currentContext,
-  currentState,
-  currentTarget,
-  panelPlace,
-  panelsOnStage,
-  sameItems,
-  shallowEqual,
-} from "./selectors"
+import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
 import { TourProvider } from "./TourProvider"
@@ -82,6 +76,8 @@ export type WorkspacePanel = ComponentType<{
     panels: readonly RailPanel[],
     options?: { readonly focus?: boolean },
   ) => void
+  // Has the next window of a panel's own refused, as a browser's popup blocker would.
+  readonly refuseNextWindow: () => void
 }>
 
 export type AppProps = (
@@ -164,6 +160,7 @@ const PanelSection = ({ panel }: Pick<AppProps, "panel">): React.JSX.Element | n
       openPanels={(panels, options) =>
         panels.filter(panelShownOn(backend)).forEach((each) => commands.detachPanel(each, options))
       }
+      refuseNextWindow={refuseNextOwnWindow}
     />
   )
 }
@@ -247,6 +244,7 @@ const RailWithBadge = (
     | "worksMade"
     | "todosLeft"
     | "detached"
+    | "ownWindows"
     | "historyInWindow"
   >,
 ): React.JSX.Element => {
@@ -260,7 +258,8 @@ const RailWithBadge = (
   const worksMade = useMemo(() => ({ count: made, projectId }), [made, projectId])
   const left = useCallback((state: NotesState) => todosLeft(state.notes, projectId), [projectId])
   const toDo = useStoreSelector(backend.notes?.state ?? noneNoted, left)
-  const detached = useWorkspaceState(panelsOnStage, sameItems)
+  const detached = usePanelsAway()
+  const ownWindows = useUiState((state) => state.ownWindows)
   const historyShowing = usePanelShowing("history")
   return (
     <SidebarRail
@@ -273,6 +272,7 @@ const RailWithBadge = (
       worksMade={worksMade}
       todosLeft={toDo}
       detached={detached}
+      ownWindows={ownWindows}
       historyInWindow={historyShowing && detached.includes("history")}
     />
   )
@@ -312,10 +312,8 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   }, shallowEqual)
   const { zen, sidebar, sidebarCollapsed, sidebarPanel, fontSize, enabledViews } = shell
   const view = useWorkspaceState((workspace) => currentState(workspace).view)
-  // Whether the sidebar's panel is in it, not in a window on the stage.
-  const sidebarDocked = useWorkspaceState(
-    (workspace) => panelPlace(workspace, railPanelOf(sidebarPanel)) === "sidebar",
-  )
+  // Whether the sidebar's panel is in it, not in a window.
+  const sidebarDocked = usePanelPlace(railPanelOf(sidebarPanel)) === "sidebar"
   // The Terminals list on screen, which the team wire draws beside.
   const [tabList] = useState(createTabListStore)
   // Where each panel is drawn once and shown from, by the sidebar.
@@ -402,6 +400,9 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
                     >
                       <WorkspaceStage canvas={canvas} />
                     </WorkspacePanels>
+                    {/* Before the panels, so a window of its own holds its panel before the
+                        panel's own effects ask which window it is in. */}
+                    <OwnWindows />
                     <PanelInstances />
                     {zen && (
                       <ZenDockWithBadge

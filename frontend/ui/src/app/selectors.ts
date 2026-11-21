@@ -131,17 +131,37 @@ export const modalOpen = (ui: UiState): boolean =>
   ui.leaving !== null ||
   ui.recent.switcher?.mode === "click"
 
-// Where a panel of the rail is in the session on screen: on its stage, as a window, while its
-// roster holds the panel's tile; else in the sidebar. Each session keeps its own places.
-export type PanelPlace = "sidebar" | "stage"
+// Where a panel of the rail is in the session on screen: in a window of its own, whatever the
+// session, while it has one open; else on the session's stage, as a window, while its roster
+// holds the panel's tile; else in the sidebar. Each session keeps its own stage; a window of its
+// own is this run's.
+export type PanelPlace = "sidebar" | "stage" | "window"
 
-export const panelPlace = (workspace: Workspace, panel: RailPanel): PanelPlace =>
-  hasPanel(currentState(workspace).roster, panelTile(panel).id) ? "stage" : "sidebar"
+export const panelPlace = (
+  ui: Pick<UiState, "ownWindows">,
+  workspace: Workspace,
+  panel: RailPanel,
+): PanelPlace =>
+  ui.ownWindows.includes(panel)
+    ? "window"
+    : hasPanel(currentState(workspace).roster, panelTile(panel).id)
+      ? "stage"
+      : "sidebar"
 
 // The panels in a window on the stage of the session on screen, in the order they opened; a new
 // list each time, for `sameItems` to compare.
 export const panelsOnStage = (workspace: Workspace): readonly RailPanel[] =>
   currentState(workspace).roster.panels.map(({ panel }) => panel)
+
+// The panels out of the sidebar: in a window of their own, then on the stage of the session on
+// screen, each once; a new list each time, for `sameItems` to compare.
+export const panelsAway = (
+  ui: Pick<UiState, "ownWindows">,
+  workspace: Workspace,
+): readonly RailPanel[] => [
+  ...ui.ownWindows,
+  ...panelsOnStage(workspace).filter((panel) => !ui.ownWindows.includes(panel)),
+]
 
 // Whether the panel's window is in sight on the stage: in Focus, the tile Focus shows; in Grid
 // and Canvas, one the person hasn't hidden, or hidden and selected, which they show for a look.
@@ -155,17 +175,20 @@ const windowInSight = (ui: UiState, workspace: Workspace, panel: RailPanel): boo
 
 // Whether a panel of the rail is in sight, which is when it reads, follows and ticks, and when
 // what it lists counts as seen. In the sidebar: while the sidebar shows, open on it (on either
-// view of the Terminals panel for its toggle). In a window: while the window is in sight.
-// `desktop` is asked only when the route names a panel in the sidebar.
+// view of the Terminals panel for its toggle). In a window on the stage: while the window is in
+// sight. In a window of its own: while it is open. `desktop` is asked only when the route names
+// a panel in the sidebar.
 export const panelShowing = (
   ui: UiState,
   workspace: Workspace,
   panel: RailPanel,
   desktop: () => boolean,
-): boolean =>
-  panelPlace(workspace, panel) === "stage"
-    ? windowInSight(ui, workspace, panel)
-    : railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
+): boolean => {
+  const place = panelPlace(ui, workspace, panel)
+  if (place === "window") return true
+  if (place === "stage") return windowInSight(ui, workspace, panel)
+  return railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
+}
 
 // Whether the Inbox's panel is in sight.
 export const inboxShown = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>

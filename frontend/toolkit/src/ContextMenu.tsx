@@ -11,6 +11,8 @@ import {
   type RefObject,
 } from "react"
 
+import { useClosesWithItsWindow } from "./closes-with-window"
+import { isHTMLElement, viewOf } from "./realm"
 import { Tooltip } from "./Tooltip"
 
 export type ContextMenuAction = {
@@ -121,9 +123,11 @@ const restore = (
   chosen: RefObject<(() => void) | undefined>,
   frames: number,
 ): void => {
-  requestAnimationFrame(() => {
-    const active = document.activeElement
-    if (!active || active === document.body) {
+  // The document the menu's opener is in: a panel's window of its own has its own focus.
+  const page = opener.current?.ownerDocument ?? document
+  viewOf(page).requestAnimationFrame(() => {
+    const active = page.activeElement
+    if (!active || active === page.body) {
       if (opener.current?.isConnected) opener.current.focus({ preventScroll: true })
     } else if (frames > 0 && active.closest('[data-scope="menu"]')) {
       restore(opener, chosen, frames - 1)
@@ -178,6 +182,10 @@ export const ContextMenu = ({
   // Once the menu has closed, focus goes back where it was and what was chosen runs. The
   // closing menu keeps focus for a frame or two before letting it go.
   const closed = (): void => restore(opener, chosen, 3)
+  useClosesWithItsWindow(open, () => {
+    setOpen(false)
+    onOpenChange?.(false)
+  })
   return (
     <ArkMenu.Root
       open={open}
@@ -210,9 +218,9 @@ export const ContextMenu = ({
       ) : (
         <ArkMenu.ContextTrigger
           asChild
-          onContextMenu={() => {
-            opener.current =
-              document.activeElement instanceof HTMLElement ? document.activeElement : null
+          onContextMenu={(event) => {
+            const active = event.currentTarget.ownerDocument.activeElement
+            opener.current = isHTMLElement(active) ? active : null
           }}
         >
           {trigger}

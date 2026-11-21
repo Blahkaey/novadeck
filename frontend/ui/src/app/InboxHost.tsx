@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { AgentContextProvider } from "../inbox/agent-context"
 import { InboxProvider, useInboxOpener } from "../inbox/InboxProvider"
 import { InboxSheet } from "../inbox/InboxSheet"
-import { InboxToasts, type MoveBoard, type ShowBoard, type ToastBoard } from "../inbox/InboxToasts"
+import {
+  InboxToasts,
+  type MoveBoard,
+  type RefusedBoard,
+  type ShowBoard,
+  type ToastBoard,
+} from "../inbox/InboxToasts"
 import { PlanTextProvider } from "../inbox/plan-text"
 import { focusTerminalInput } from "../interaction/dom"
 import { anyAgentWorking } from "../projects/project-status"
@@ -15,6 +21,7 @@ import { watchInboxToasts } from "./inbox-toasts"
 import { watchMoveToasts } from "./move-toasts"
 import { currentState, modalOpen } from "./selectors"
 import { focusWhenReady, watchShowToasts } from "./show-toasts"
+import { watchRefusedWindows } from "./window-toasts"
 
 // The Inbox: the backend's, as it lands (see `inbox-landing.ts`), or, where the backend has
 // none, one that lists nothing.
@@ -87,6 +94,8 @@ export const InboxHost = ({
     (board: MoveBoard) => watchMoveToasts(ui, board, commands),
     [ui, commands],
   )
+  // A panel's window of its own the person asked for that couldn't open.
+  const followRefused = useCallback((board: RefusedBoard) => watchRefusedWindows(ui, board), [ui])
   // Brings the terminal a row waits on into view, as its sidebar row does where the session
   // is on screen, else as a click on a notification about it does.
   const showTerminal = useCallback(
@@ -131,6 +140,7 @@ export const InboxHost = ({
           follow={follow}
           followShows={followShows}
           followMoves={followMoves}
+          followRefused={followRefused}
           showInbox={showInbox}
           peekInbox={peekInbox}
           showTerminal={showTerminal}

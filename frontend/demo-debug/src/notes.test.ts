@@ -26,6 +26,7 @@ const context = (activeProjectId?: string): DemoActionContext => ({
   },
   startFresh: () => undefined,
   openPanels: () => {},
+  refuseNextWindow: () => {},
   dispatch: undefined,
   workspace: () => (activeProjectId ? ({ activeProjectId } as Workspace) : undefined),
   note: () => undefined,

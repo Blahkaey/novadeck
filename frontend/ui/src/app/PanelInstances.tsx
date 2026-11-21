@@ -3,6 +3,7 @@ import type { RailPanel } from "@novadeck/core/types"
 import { PortalInto } from "@novadeck/toolkit/PortalInto"
 import { memo, useMemo } from "react"
 
+import { ownWindowOf } from "../shell/own-windows"
 import { usePanelNodes } from "../shell/panel-nodes"
 import { PanelHostContext, type PanelHost } from "../sidebar/panel-host"
 import { useWorkspaceServices } from "./controller/context"
@@ -10,7 +11,7 @@ import { FilesSection } from "./FilesSection"
 import { HistorySection } from "./HistorySection"
 import { InboxSection } from "./InboxSection"
 import { NotesSection, TodoSection } from "./NotesSection"
-import { usePanelPlace, usePanelsShown } from "./panels-shown"
+import { detachablePanels, usePanelPlace, usePanelsShown } from "./panels-shown"
 import { TerminalsSection } from "./TerminalsSection"
 import { WorktreesSection } from "./WorktreesSection"
 
@@ -34,11 +35,9 @@ const bodyOf = (panel: RailPanel, backend: Backend): React.JSX.Element | undefin
   }
 }
 
-// The panels that open in a window on the stage from their header.
-const detachable: ReadonlySet<RailPanel> = new Set(["notes", "todo", "history", "files"])
-
-// One panel, drawn into its element, told where it is: in the sidebar, or in a window on the
-// stage of the session on screen, whose header shows the element it draws its count into.
+// One panel, drawn into its element, told where it is: in the sidebar; in a window on the stage
+// of the session on screen, whose header shows the element it draws its count into; or in a
+// window of its own, which its header returns it from.
 const PanelInstance = memo(
   ({
     panel,
@@ -51,14 +50,16 @@ const PanelInstance = memo(
   }): React.JSX.Element => {
     const { backend, commands } = useWorkspaceServices()
     const place = usePanelPlace(panel)
-    const { detachPanel } = commands
-    const host = useMemo(
-      (): PanelHost =>
-        place === "stage"
-          ? { place, count }
-          : { place, detach: detachable.has(panel) ? () => detachPanel(panel) : undefined },
-      [place, panel, count, detachPanel],
-    )
+    const { detachPanel, returnPanel } = commands
+    const host = useMemo((): PanelHost => {
+      if (place === "stage") return { place, count }
+      const view = place === "window" ? ownWindowOf(panel) : undefined
+      if (view) return { place: "window", view, onReturn: () => returnPanel(panel) }
+      return {
+        place: "sidebar",
+        detach: detachablePanels.has(panel) ? () => detachPanel(panel) : undefined,
+      }
+    }, [place, panel, count, detachPanel, returnPanel])
     return (
       <PortalInto node={node}>
         <PanelHostContext value={host}>{bodyOf(panel, backend)}</PanelHostContext>
