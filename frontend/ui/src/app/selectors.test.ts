@@ -2,7 +2,14 @@ import type { RailPanel } from "@novadeck/core/types"
 
 import { context, describe, expect, it } from "../test"
 import { openCommands } from "../test/commands"
-import { currentTarget, panelPlace, panelsAway, panelShowing } from "./selectors"
+import {
+  currentTarget,
+  panelOpen,
+  panelPlace,
+  panelsAway,
+  panelShowing,
+  terminalsViewShown,
+} from "./selectors"
 
 // Which of these panels are in sight on the app's screen, wide or a phone's.
 const inSight = (app: ReturnType<typeof openCommands>, desktop: boolean): RailPanel[] =>
@@ -47,6 +54,37 @@ describe("panelPlace", () => {
     app.commands.openOwnWindow("notes")
     app.commands.detachPanel("notes")
     expect(panelsAway(app.ui.getSnapshot(), app.workspace.getSnapshot())).toEqual(["notes", "todo"])
+  })
+})
+
+describe("panelOpen", () => {
+  // Which panels and views their places show.
+  const open = (app: ReturnType<typeof openCommands>) =>
+    (["terminals", "sessions", "inbox", "notes"] as const).filter((panel) =>
+      panelOpen(app.ui.getSnapshot(), app.workspace.getSnapshot(), panel),
+    )
+
+  it("has the sidebar show the panel the route names", () => {
+    const app = openCommands()
+    app.commands.toggleSidebar("sessions")
+    expect(open(app)).toEqual(["sessions"])
+    expect(terminalsViewShown(app.ui.getSnapshot(), app.workspace.getSnapshot())).toBe("sessions")
+  })
+
+  it("has a window show its panel, and of the Terminals panel the view chosen there", () => {
+    const app = openCommands()
+    app.commands.toggleSidebar("inbox")
+    app.commands.detachPanel("notes")
+    app.commands.detachPanel("terminals")
+    expect(open(app)).toEqual(["terminals", "inbox", "notes"])
+    app.commands.switchTerminalsView("sessions", false)
+    expect(open(app)).toEqual(["sessions", "inbox", "notes"])
+  })
+
+  it("has no view of the Terminals panel shown while the sidebar shows another panel", () => {
+    const app = openCommands()
+    app.commands.toggleSidebar("inbox")
+    expect(terminalsViewShown(app.ui.getSnapshot(), app.workspace.getSnapshot())).toBeNull()
   })
 })
 

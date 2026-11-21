@@ -1,3 +1,5 @@
+import { isHTMLElement } from "@novadeck/toolkit/realm"
+
 // Marks each tab of a Terminals list scrolled out of its sight (data-offscreen), so its
 // spinners and blinks rest there (tabs.css): a long list of working agents otherwise keeps
 // every one of them ticking, which the engine pays for in style work on each frame, scrolled
@@ -7,17 +9,20 @@
 const wakeMargin = "64px 0px"
 
 const tabsIn = (node: Node): readonly HTMLElement[] =>
-  node instanceof HTMLElement
+  isHTMLElement(node)
     ? [
         ...(node.matches("[data-terminal-tab-id]") ? [node] : []),
         ...node.querySelectorAll<HTMLElement>("[data-terminal-tab-id]"),
       ]
     : []
 
-export const restOffscreenTabs = (list: HTMLElement): (() => void) => {
-  if (typeof IntersectionObserver === "undefined" || typeof MutationObserver === "undefined")
-    return () => {}
-  const sight = new IntersectionObserver(
+// `view` is the window the list is drawn in, the page's or the Terminals panel's own, whose
+// observers alone see its tabs.
+export const restOffscreenTabs = (list: HTMLElement, view: Window): (() => void) => {
+  const { IntersectionObserver: Sight, MutationObserver: Joined } = view as Window &
+    typeof globalThis
+  if (typeof Sight === "undefined" || typeof Joined === "undefined") return () => {}
+  const sight = new Sight(
     (entries) => {
       for (const { target, isIntersecting } of entries) {
         if (isIntersecting) target.removeAttribute("data-offscreen")
@@ -28,7 +33,7 @@ export const restOffscreenTabs = (list: HTMLElement): (() => void) => {
   )
   const watch = (node: Node) => tabsIn(node).forEach((tab) => sight.observe(tab))
   const forget = (node: Node) => tabsIn(node).forEach((tab) => sight.unobserve(tab))
-  const joined = new MutationObserver((records) =>
+  const joined = new Joined((records) =>
     records.forEach((record) => {
       record.removedNodes.forEach(forget)
       record.addedNodes.forEach(watch)

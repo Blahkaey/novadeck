@@ -1,5 +1,6 @@
 import { inboxType, rowKey, type InboxRow } from "@novadeck/core/inbox"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
+import { isElement } from "@novadeck/toolkit/realm"
 import { Sheet } from "@novadeck/toolkit/Sheet"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { ArrowLeft, Bell, BellOff, Check, Terminal, X } from "lucide-react"
@@ -13,9 +14,11 @@ import { tagOf } from "./inbox-tag"
 import { useInboxContext, type Receipt } from "./InboxProvider"
 import { Text } from "./sheet-parts"
 
-// What the sheet sits within: the whole workspace, the sidebar with it, so the sheet starts
-// over the sidebar's gutter, clear of a window's border beside it.
-const workspace = (): HTMLElement | null => document.querySelector<HTMLElement>(".workspace-panels")
+// What the sheet sits within, in `page`, the document the Inbox is in: the whole workspace, the
+// sidebar with it, so the sheet starts over the sidebar's gutter, clear of a window's border
+// beside it; in the Inbox's window of its own, that window.
+const within = (page: Document): HTMLElement =>
+  page.querySelector<HTMLElement>(".workspace-panels") ?? page.body
 
 // What the workspace behind the sheet is, which steps back while it is read.
 const behind = (): HTMLElement | null => document.querySelector<HTMLElement>(".workspace-main-pane")
@@ -60,7 +63,8 @@ const ReceiptLine = ({ receipt }: { readonly receipt: Receipt }): React.JSX.Elem
 
 // One row's sheet: its head, then its page.
 const SheetBody = ({ row }: { readonly row: InboxRow }): React.JSX.Element => {
-  const { state, sent, phone, receipt, close, submit, change, reveal, snooze } = useInboxContext()
+  const { state, sent, phone, receipt, close, submit, change, reveal, snooze, page } =
+    useInboxContext()
   const answered = sent[row.id]
   const failed = state.failed[row.id]
   const present = state.items.some((each) => each.id === row.id)
@@ -89,21 +93,21 @@ const SheetBody = ({ row }: { readonly row: InboxRow }): React.JSX.Element => {
       // to the row after it from the last, so keyboard focus never falls out to the workspace.
       onKeyDown={(event) => {
         if (event.key !== "Tab" || phone) return
-        const page = sheetControls(event.currentTarget)
+        const controls = sheetControls(event.currentTarget)
         const head = Array.from(
           event.currentTarget.querySelectorAll<HTMLElement>(".inbox-sheet-head button"),
         )
         // Tab order inside the sheet is the head, then its page.
-        const order = [...head, ...page]
-        const active = document.activeElement
+        const order = [...head, ...controls]
+        const active = event.currentTarget.ownerDocument.activeElement
         if (
           event.shiftKey &&
           (active === order[0] || active?.classList.contains("inbox-sheet-title"))
         ) {
           event.preventDefault()
-          rowOf(row.id)?.querySelector<HTMLElement>(".inbox-row-select")?.focus()
+          rowOf(row.id, page)?.querySelector<HTMLElement>(".inbox-row-select")?.focus()
         } else if (!event.shiftKey && active === order.at(-1)) {
-          const following = nextRowButton(row.id)
+          const following = nextRowButton(row.id, page)
           // With no row after it, Tab goes on past the list and the sheet closes.
           if (following) {
             event.preventDefault()
@@ -168,10 +172,18 @@ const SheetBody = ({ row }: { readonly row: InboxRow }): React.JSX.Element => {
   )
 }
 
-// The open row's sheet: beside its row over the workspace, or on a screen of its own.
-// `active` is whether the Inbox is the panel the sidebar shows.
-export const InboxSheet = ({ active }: { readonly active: boolean }): React.JSX.Element | null => {
-  const { view, current, phone, close, shown } = useInboxContext()
+// The open row's sheet: beside its row, in the window the Inbox is in, or on a screen of its own.
+// `active` is whether the Inbox's panel is in sight; `over` whether the sheet opens over the
+// workspace, from the Inbox in the sidebar, which steps back behind it: from a window on the
+// stage it would step back with the Inbox's own window, and from one of its own it is elsewhere.
+export const InboxSheet = ({
+  active,
+  over,
+}: {
+  readonly active: boolean
+  readonly over: boolean
+}): React.JSX.Element | null => {
+  const { view, current, phone, close, shown, page } = useInboxContext()
   // What it last showed, which it keeps while it closes.
   const [last, setLast] = useState(current)
   if (current && current !== last) setLast(current)
@@ -184,8 +196,8 @@ export const InboxSheet = ({ active }: { readonly active: boolean }): React.JSX.
   // The workspace steps back while a sheet is read over it, and is still live: a click in
   // it closes the sheet.
   useEffect(() => {
-    behind()?.setAttribute("data-inbox-reading", String(open && !phone))
-  }, [open, phone])
+    behind()?.setAttribute("data-inbox-reading", String(open && !phone && over))
+  }, [open, phone, over])
   useEffect(() => () => behind()?.removeAttribute("data-inbox-reading"), [])
   // On a screen of its own, focus goes into it as it opens.
   const screen = useRef<HTMLDivElement>(null)
@@ -193,11 +205,11 @@ export const InboxSheet = ({ active }: { readonly active: boolean }): React.JSX.
   useEffect(() => {
     if (!opened) return
     // The page behind goes inert, so focus stays in the sheet; it comes back on closing.
-    const page = document.querySelector<HTMLElement>("main.workspace")
-    if (page) page.inert = true
+    const workspace = document.querySelector<HTMLElement>("main.workspace")
+    if (workspace) workspace.inert = true
     screen.current?.focus()
     return () => {
-      if (page) page.inert = false
+      if (workspace) workspace.inert = false
     }
   }, [opened])
   if (!row) return null
@@ -218,22 +230,26 @@ export const InboxSheet = ({ active }: { readonly active: boolean }): React.JSX.
     <Sheet
       label={row.source.title}
       open={open}
-      anchor={() => rowOf(row.id)}
-      boundary={workspace}
+      page={page}
+      anchor={() => rowOf(row.id, page)}
+      boundary={() => within(page)}
+      // Out of the sidebar its rows may span the window, with no room beside them.
+      overlap={!over}
       anchorKey={row.id}
       placeKey={String(shown.findIndex(({ id }) => id === row.id))}
       onDismiss={close}
       // A press on one of the list's buttons is the list's own: a row opens its row, or closes
-      // the sheet when it is the open one. So is one on a list that scrolls, which is its
-      // scrollbar being dragged. Anywhere else in the sidebar closes it, as outside does. The
-      // demo's debug drawer is where rows arrive from, and is not the workspace.
+      // the sheet when it is the open one. So is one on the held pill, which a window on the
+      // stage draws in its header (`.panel-window-extra`), and one on a list that scrolls, which
+      // is its scrollbar being dragged. Anywhere else in the sidebar closes it, as outside does.
+      // The demo's debug drawer is where rows arrive from, and is not the workspace.
       onInteractOutside={(event) => {
         const { target } = event
-        if (!(target instanceof Element)) return
+        if (!isElement(target)) return
         const scrolling =
           target.matches("#inbox-panel .inbox-list") && target.scrollHeight > target.clientHeight
-        if (scrolling || target.closest("#inbox-panel button, .debug-drawer"))
-          event.preventDefault()
+        const ours = "#inbox-panel button, .panel-window-extra button, .debug-drawer"
+        if (scrolling || target.closest(ours)) event.preventDefault()
       }}
     >
       <SheetBody key={rowKey(row)} row={row} />

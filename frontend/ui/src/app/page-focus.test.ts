@@ -1,7 +1,7 @@
 import { appearance, workspaceFixture } from "@novadeck/core/testing"
 
 import { describe, expect, it } from "../test"
-import { watchPageFocus } from "./page-focus"
+import { watchOwnWindowFocus, watchPageFocus, watchWindowFocus } from "./page-focus"
 import { createUiStore, initialUi } from "./ui-store"
 
 // A window as the watch sees it: whether its document has focus and shows, the events
@@ -159,5 +159,45 @@ describe("the page's focus where the desktop app reports its window's", () => {
     const { listen, listeners } = windowApp(true)
     watchPageFocus(store, view, listen)()
     expect(listeners.size).toBe(0)
+  })
+})
+
+describe("a window of the page's own focus", () => {
+  // As the Inbox's window of its own, whose focus the page's own doesn't count in a browser.
+  it("tells its listener as it changes, once a blur settles", () => {
+    const { view, document, settle } = page()
+    const heard: boolean[] = []
+    const stop = watchWindowFocus(view, (focused) => heard.push(focused))
+    document.focused = false
+    view.dispatchEvent(new Event("blur"))
+    settle()
+    document.focused = true
+    view.dispatchEvent(new Event("focus"))
+    document.visibilityState = "hidden"
+    document.dispatchEvent(new Event("visibilitychange"))
+    stop()
+    document.visibilityState = "visible"
+    document.dispatchEvent(new Event("visibilitychange"))
+    expect(heard).toEqual([true, false, true, false])
+  })
+})
+
+describe("a panel's window of its own as it has the person's focus", () => {
+  it("is the one the app says has it, until it loses it or closes", () => {
+    const store = ui()
+    const { view, document, settle } = page()
+    const stop = watchOwnWindowFocus(store, "inbox", view)
+    expect(store.getSnapshot().ownWindowFocused).toBe("inbox")
+
+    document.focused = false
+    view.dispatchEvent(new Event("blur"))
+    settle()
+    expect(store.getSnapshot().ownWindowFocused).toBeNull()
+
+    document.focused = true
+    view.dispatchEvent(new Event("focus"))
+    expect(store.getSnapshot().ownWindowFocused).toBe("inbox")
+    stop()
+    expect(store.getSnapshot().ownWindowFocused).toBeNull()
   })
 })

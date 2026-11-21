@@ -4,10 +4,13 @@ import { panelLabels } from "@novadeck/core/types"
 import { Plus } from "lucide-react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
+import { PanelPointerSensor } from "../sidebar/panel-drag"
+import { usePanelView } from "../sidebar/panel-host"
 import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
 import { TerminalTabs } from "../terminals/TerminalTabs"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useTabsAway } from "./move-to"
+import { usePanelOpen, usePanelPlace } from "./panels-shown"
 import { historyShown } from "./routing"
 import { currentState, currentTarget, sameItems, sameTarget } from "./selectors"
 import { SessionsSection } from "./SessionsSection"
@@ -16,8 +19,8 @@ import { terminalsViewSwitch } from "./TerminalsViewSection"
 import { renderTab } from "./WorkspaceTab"
 
 // The Terminals panel's two views, wired to the workspace: the open session's terminals, and
-// the project's sessions. They share its rail toggle, and a switch beside each view's title goes
-// between them.
+// the project's sessions. They share its rail toggle and its window, and a switch beside each
+// view's title goes between them.
 export const TerminalsSection = (): React.JSX.Element => {
   const { commands, backend } = useWorkspaceServices()
   const { hideSidebar, add } = commands
@@ -40,11 +43,15 @@ export const TerminalsSection = (): React.JSX.Element => {
     (workspace) => orderedIds(currentState(workspace).roster),
     sameItems,
   )
-  // Which view the sidebar is open on, if either.
-  const view = useUiState((state) => {
-    const { panel } = state.location.route
-    return panel === "terminals" || panel === "sessions" ? panel : null
-  })
+  // Which view its place shows: the one the sidebar is open on, if either, or the one chosen in
+  // its window.
+  const sessionsOpen = usePanelOpen("sessions")
+  const terminalsOpen = usePanelOpen("terminals")
+  // A tab dragged out of the list goes to another session over the page; in a window of its own,
+  // whose drag ends at its edge, it only reorders the list.
+  const own = usePanelPlace("terminals") === "window"
+  // The window the list is drawn in, whose observers follow its tabs.
+  const view = usePanelView()
   return (
     <>
       <SidebarPanel
@@ -52,7 +59,7 @@ export const TerminalsSection = (): React.JSX.Element => {
         title={panelLabels.sessions}
         titleLead={terminalsViewSwitch}
         count={sessionCount}
-        active={view === "sessions"}
+        active={sessionsOpen}
         onClose={hideSidebar}
       >
         <SessionsSection
@@ -69,7 +76,7 @@ export const TerminalsSection = (): React.JSX.Element => {
         // Which session's terminals these are, once the project has others to tell it from.
         scope={sessionName}
         titleLead={terminalsViewSwitch}
-        active={view === "terminals"}
+        active={terminalsOpen}
         onClose={hideSidebar}
       >
         <button
@@ -89,7 +96,9 @@ export const TerminalsSection = (): React.JSX.Element => {
           ids={ids}
           renderTab={renderTab}
           onReorder={reorderTiles}
-          away={away}
+          away={own ? undefined : away}
+          sensor={PanelPointerSensor}
+          view={view}
         />
       </SidebarPanel>
     </>

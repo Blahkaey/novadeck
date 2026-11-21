@@ -14,7 +14,7 @@ import {
 } from "../../interaction/dom"
 import { cancelTerminalTransition, transitionTerminal } from "../../layouts/transition"
 import { isDesktop } from "../../shell/desktop"
-import { closeOwnWindow, focusOwnWindow, openOwnWindow } from "../../shell/own-windows"
+import { closeOwnWindow, focusOwnWindow, openOwnWindow, panelPage } from "../../shell/own-windows"
 import { readSidebarOrder } from "../../shell/shell-storage"
 import type { CommandEffects } from "../commands/context"
 
@@ -26,11 +26,12 @@ export const domEffects: CommandEffects = {
   focusSidebarToggleStranded,
   focusZenCreate,
   focusZenEnter,
-  focusTerminalsCreate,
-  focusTerminalsView,
-  focusMovePick,
+  // The Terminals panel's controls, in the document it is drawn in.
+  focusTerminalsCreate: () => focusTerminalsCreate(panelPage("terminals")),
+  focusTerminalsView: (view) => focusTerminalsView(view, panelPage("terminals")),
+  focusMovePick: () => focusMovePick(panelPage("terminals")),
   focusWorkspaceViewport,
-  focusTerminalTab,
+  focusTerminalTab: (id) => focusTerminalTab(id, panelPage("terminals")),
   focusTerminalInput,
   focusPanel,
   openOwnWindow,

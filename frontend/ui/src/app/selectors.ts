@@ -5,7 +5,9 @@ import { activeProject, activeSession } from "@novadeck/core/state"
 import {
   railPanelOf,
   type RailPanel,
+  type SidebarPanel,
   type TerminalMetadata,
+  type TerminalsView,
   type Tile,
   type ViewMode,
   type WindowedView,
@@ -163,6 +165,25 @@ export const panelsAway = (
   ...panelsOnStage(workspace).filter((panel) => !ui.ownWindows.includes(panel)),
 ]
 
+// Whether a panel, or a view of the Terminals panel, is the one its place shows: in the sidebar,
+// the one the route names; in a window, the panel itself, and of the Terminals panel the view the
+// person last chose (`terminalsView`), as the route names the sidebar's panel, not the window's.
+export const panelOpen = (
+  ui: Pick<UiState, "ownWindows" | "location" | "shell">,
+  workspace: Workspace,
+  panel: SidebarPanel,
+): boolean =>
+  panelPlace(ui, workspace, railPanelOf(panel)) === "sidebar"
+    ? ui.location.route.panel === panel
+    : railPanelOf(panel) !== "terminals" || ui.shell.terminalsView === panel
+
+// The view the Terminals panel shows (`panelOpen`), where it is in a window or the route names it.
+export const terminalsViewShown = (
+  ui: Pick<UiState, "ownWindows" | "location" | "shell">,
+  workspace: Workspace,
+): TerminalsView | null =>
+  (["terminals", "sessions"] as const).find((view) => panelOpen(ui, workspace, view)) ?? null
+
 // Whether the panel's window is in sight on the stage: in Focus, the tile Focus shows; in Grid
 // and Canvas, one the person hasn't hidden, or hidden and selected, which they show for a look.
 const windowInSight = (ui: UiState, workspace: Workspace, panel: RailPanel): boolean => {
@@ -194,12 +215,26 @@ export const panelShowing = (
 export const inboxShown = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
   panelShowing(ui, workspace, "inbox", desktop)
 
+// Whether the app's own window has the person's focus: the page's, and none of the panels'
+// windows of their own, which the desktop app counts as its focus too and a browser doesn't.
+export const mainWindowFocused = (ui: Pick<UiState, "pageFocused" | "ownWindowFocused">): boolean =>
+  ui.pageFocused && ui.ownWindowFocused === null
+
+// Whether the person looks at the Inbox, for its toasts and pings to hold back: as it shows
+// (`inboxShown`), but on the stage only while its window is in the view's sight, not panned or
+// scrolled away (`offScreenPanels`), and in its window of its own only while that window has
+// their focus, as whether it shows behind another can't be told.
+export const inboxInSight = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  panelPlace(ui, workspace, "inbox") === "window"
+    ? ui.ownWindowFocused === "inbox"
+    : !ui.offScreenPanels.includes("inbox") && inboxShown(ui, workspace, desktop)
+
 // Whether a toast may show now: the page has the person's focus, they want to hear what
 // needs them, and the Inbox isn't what they look at. (The toasts also skip an item of the
 // terminal they've come back to, see inbox-toasts.ts.) `desktop` is asked only when the
 // sidebar matters.
 export const mayToast = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
-  ui.pageFocused && ui.preferences.notifyNeeds && !inboxShown(ui, workspace, desktop)
+  mainWindowFocused(ui) && ui.preferences.notifyNeeds && !inboxInSight(ui, workspace, desktop)
 
 // Whether a toast for the item waits behind a modal dialog: it would show but for the dialog.
 // The OS ping defers the same items, so that one never rings for what no toast waits for.

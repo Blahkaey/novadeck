@@ -3,9 +3,9 @@ import { useCallback } from "react"
 
 import { NotesPanel } from "../sidebar/NotesPanel"
 import { TodoPanel } from "../sidebar/TodoPanel"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useStoreSelector } from "./controller/useStoreSelector"
-import { usePanelShowing } from "./panels-shown"
+import { usePanelOpen, usePanelShowing } from "./panels-shown"
 
 const sameNotes = (a: readonly Note[], b: readonly Note[]): boolean =>
   a.length === b.length && a.every((note, index) => Object.is(note, b[index]))
@@ -43,7 +43,7 @@ export const NotesSection = ({ notes }: { readonly notes: Notes }): React.JSX.El
         : notes.move(id, plainIndex(notes.state.getSnapshot().notes, projectId, id, before)),
     [notes, projectId],
   )
-  const active = useUiState((state) => state.location.route.panel === "notes")
+  const active = usePanelOpen("notes")
   return (
     <NotesPanel
       key={projectId}
@@ -68,7 +68,7 @@ export const TodoSection = ({ notes }: { readonly notes: Notes }): React.JSX.Ele
     (text: string) => notes.add(projectId, { text, todo: true }),
     [notes, projectId],
   )
-  const active = useUiState((state) => state.location.route.panel === "todo")
+  const active = usePanelOpen("todo")
   const showing = usePanelShowing("todo")
   return (
     <TodoPanel

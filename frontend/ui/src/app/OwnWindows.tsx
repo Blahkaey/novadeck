@@ -11,6 +11,7 @@ import {
 } from "../shell/own-windows"
 import { usePanelNodes } from "../shell/panel-nodes"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { watchOwnWindowFocus } from "./page-focus"
 
 // How often a window of its own is asked where it is, as moving a window tells its page nothing.
 const boundsEvery = 1000
@@ -27,7 +28,8 @@ const OwnWindowHost = ({
   readonly view: Window
 }): null => {
   const nodes = usePanelNodes()
-  const { returnPanel } = useWorkspaceServices().commands
+  const { commands, ui } = useWorkspaceServices()
+  const { returnPanel } = commands
   const project = useWorkspaceState((workspace) => activeProject(workspace)?.name)
   // Named first, so its title is in its head before the sheets' copies come after it.
   useLayoutEffect(
@@ -39,6 +41,7 @@ const OwnWindowHost = ({
     [view, panel, project],
   )
   useLayoutEffect(() => dressOwnWindow(document, view.document), [view])
+  useEffect(() => watchOwnWindowFocus(ui, panel, view), [ui, panel, view])
   useLayoutEffect(() => {
     const page = view.document
     const holder = page.createElement("div")

@@ -2,6 +2,7 @@ import type { ToolChange } from "@novadeck/core/conversation"
 import type { ToolEntry } from "@novadeck/core/conversation/turns"
 import { counted } from "@novadeck/core/units"
 import { shownControls } from "@novadeck/requests/shown-controls"
+import { isHTMLElement, viewOf } from "@novadeck/toolkit/realm"
 import { useId, useLayoutEffect, useRef, useState } from "react"
 
 import { Fact, Since, TimeFact } from "./Fact"
@@ -229,7 +230,7 @@ const outOfView = (element: HTMLElement, calls: readonly number[]): OutOfView =>
 
 // How much taller than a line each its lines are drawn, together: what the person opened of them.
 const openedHeight = (list: HTMLElement, rows: number): number => {
-  const line = parseFloat(getComputedStyle(list).lineHeight)
+  const line = parseFloat(viewOf(list).getComputedStyle(list).lineHeight)
   return line > 0 ? Math.max(0, list.offsetHeight - rows * line) : 0
 }
 
@@ -278,11 +279,13 @@ const RunBox = ({
   useLayoutEffect(() => {
     const element = box.current
     const list = element?.firstElementChild
-    if (!element || !(list instanceof HTMLElement) || !capped) return
+    if (!element || !isHTMLElement(list) || !capped) return
     const measure = (): void => setOpened(openedHeight(list, list.children.length))
     measure()
-    if (typeof ResizeObserver === "undefined") return
-    const watch = new ResizeObserver(measure)
+    // The observer of the window the run is drawn in: the page's, or an Inbox's window of its own.
+    const Observer = viewOf(list).ResizeObserver
+    if (typeof Observer === "undefined") return
+    const watch = new Observer(measure)
     watch.observe(list)
     return () => watch.disconnect()
   }, [capped])

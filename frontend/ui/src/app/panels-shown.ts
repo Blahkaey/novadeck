@@ -1,10 +1,18 @@
-import type { RailPanel, Workspace } from "@novadeck/core/types"
+import type { RailPanel, SidebarPanel, Workspace } from "@novadeck/core/types"
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react"
 
 import { useDesktop } from "../shell/desktop"
+import { ownWindowOf } from "../shell/own-windows"
 import { useWorkspaceServices } from "./controller/context"
 import { filesShown, historyShown, notesShown } from "./routing"
-import { panelPlace, panelsAway, panelShowing, sameItems, type PanelPlace } from "./selectors"
+import {
+  panelOpen,
+  panelPlace,
+  panelsAway,
+  panelShowing,
+  sameItems,
+  type PanelPlace,
+} from "./selectors"
 import type { UiState } from "./ui-store"
 import { useWorktreesShown } from "./use-worktrees-shown"
 
@@ -29,14 +37,6 @@ export const usePanelsShown = (): readonly RailPanel[] => {
     [files, notes, history, worktrees],
   )
 }
-
-// The panels that open in a window, on the stage and from there in a window of their own.
-export const detachablePanels: ReadonlySet<RailPanel> = new Set([
-  "notes",
-  "todo",
-  "history",
-  "files",
-])
 
 // A value both stores decide, as where a panel is: a window of its own is the UI store's, a
 // window on the stage the session's. `read` returns a value `Object.is` can compare.
@@ -88,4 +88,17 @@ export const usePanelsAway = (): readonly RailPanel[] => {
       return last.current
     }, []),
   )
+}
+
+// Whether the panel, or this view of the Terminals panel, is the one its place shows
+// (`panelOpen`).
+export const usePanelOpen = (panel: SidebarPanel): boolean =>
+  useBothStores(
+    useCallback((ui: UiState, workspace: Workspace) => panelOpen(ui, workspace, panel), [panel]),
+  )
+
+// The document the panel is drawn in: its window's of its own, or the page's.
+export const usePanelPage = (panel: RailPanel): Document => {
+  const own = usePanelPlace(panel) === "window"
+  return (own && ownWindowOf(panel)?.document) || document
 }

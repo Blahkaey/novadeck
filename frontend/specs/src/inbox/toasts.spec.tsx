@@ -4,7 +4,14 @@ import { page, userEvent } from "vitest/browser"
 import { desktopWindow } from "../support/backend"
 import { preferencesDialog } from "../support/keyboard"
 import { pressableToasts } from "../support/toasts"
-import { appearsAt, expectStaysAbsent, openWorkspace, sidebarPanel } from "../support/workspace"
+import {
+  appearsAt,
+  detachPanel,
+  expectStaysAbsent,
+  openWorkspace,
+  panelWindow,
+  sidebarPanel,
+} from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
 // The Inbox's toasts: a new Inbox entry that needs the person rings as a toast while the app has
@@ -190,6 +197,16 @@ describe("The Inbox's toasts", () => {
       await open()
       await sidebarPanel("Inbox").click()
       await expect.element(sidebarPanel("Inbox")).toBeChecked()
+
+      desktopWindow.arrive(demoInboxIds.webhook)
+
+      await nothingToasts()
+    })
+
+    it("rings nothing while the Inbox's window on the workspace is in sight", async () => {
+      await open()
+      await detachPanel("Inbox")
+      await expect.element(panelWindow("Inbox")).toBeVisible()
 
       desktopWindow.arrive(demoInboxIds.webhook)
 

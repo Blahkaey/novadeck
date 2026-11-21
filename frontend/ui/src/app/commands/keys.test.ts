@@ -535,6 +535,22 @@ describe("key commands", () => {
     })
   })
 
+  context("when renaming with the Terminals panel out of the sidebar", () => {
+    it("renames in the list on the stage, and in the header with the list in its own window", () => {
+      const app = navigating()
+      app.commands.detachPanel("terminals", { focus: false })
+      app.commands.select("01")
+      // Grid shows the Terminals window beside the terminal.
+      expect(app.keydown({ key: "F2" })).toBe("handled")
+      expect(app.ui.getSnapshot().rename).toMatchObject({ id: "01", origin: "sidebar" })
+      app.commands.cancelRename("01")
+      app.commands.openOwnWindow("terminals")
+      app.commands.select("01")
+      expect(app.keydown({ key: "F2" })).toBe("handled")
+      expect(app.ui.getSnapshot().rename).toMatchObject({ id: "01", origin: "header" })
+    })
+  })
+
   context("when renaming or closing a panel's window from the keyboard", () => {
     it("renames nothing, and closes the window alone", () => {
       const app = navigating({

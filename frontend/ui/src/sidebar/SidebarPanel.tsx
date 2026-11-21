@@ -26,7 +26,7 @@ export const SidebarPanel = ({
   title: string
   titleHint?: string
   // Before the title, where panels that share a header's place keep it still: the switch
-  // between the Terminals panel's views.
+  // between the Terminals panel's views. In a window on the stage, on the panel's own row.
   titleLead?: ReactNode
   // Beside the title, such as a pill that says something waits.
   titleExtra?: ReactNode
@@ -34,6 +34,8 @@ export const SidebarPanel = ({
   count?: ReactNode
   // What the list is of, where the heading alone can't say: the open session over its terminals.
   scope?: string | undefined
+  // Whether its place shows it: the panel the sidebar is open on, or in a window, the panel, or
+  // the Terminals panel's view the person chose.
   active: boolean
   onClose: () => void
   // Quiet buttons beside the close button.
@@ -41,13 +43,15 @@ export const SidebarPanel = ({
   children: ReactNode
 }): React.JSX.Element => {
   const host = usePanelHost()
-  // In a window on the stage, which it fills, always in sight while the window is, with no Hide:
-  // the window's header names it, shows its count and returns it to the sidebar. Its heading
-  // stays for assistive technology, by the same ids, out of its own row, which shows only its
-  // actions, and only while it has any. In a window of its own, which it fills too, it shows its
-  // heading and its actions as in the sidebar, with a way back to the sidebar in place of Hide.
-  // Every place draws the same elements in the same order, so moving between them keeps what
-  // the person had in the panel.
+  // In a window on the stage, which it fills, in sight while the window is, with no Hide: the
+  // window's header names it and shows its count, its scope and what its title has beside it, and
+  // returns it to the sidebar. Its heading stays for assistive technology, by the same ids, out
+  // of its own row, which shows only what comes before its title and its actions, and only while
+  // it has any. In a window of its own, which it fills too, it shows its heading and its actions
+  // as in the sidebar, with a way back to the sidebar in place of Hide. Every place draws the same
+  // elements in the same order, so moving between them keeps what the person had in the panel.
+  // Of two panels that share a place, as the Terminals panel's views do, the one not `active`
+  // stays laid out under the other, unseen, as in the sidebar, so a drag from it lives on.
   const stage = host.place === "stage" ? host : undefined
   const own = host.place === "window" ? host : undefined
   const heading = (
@@ -68,24 +72,28 @@ export const SidebarPanel = ({
       id={id}
       className={
         stage || own
-          ? `sidebar-panel relative flex min-h-0 min-w-0 flex-1 flex-col px-3 ${own ? "pt-2" : "pt-1"}`
+          ? `sidebar-panel relative flex min-h-0 min-w-0 flex-1 flex-col px-3 ${own ? "pt-2" : "pt-1"} data-[active=false]:pointer-events-none data-[active=false]:invisible data-[active=false]:absolute data-[active=false]:inset-0`
           : "sidebar-panel absolute inset-x-3 top-3 bottom-0 flex min-h-0 min-w-0 flex-col opacity-100 visible [transform:translateX(0)] data-[active=false]:pointer-events-none data-[active=false]:invisible data-[active=false]:[transform:translateX(-6px)] data-[active=false]:opacity-0"
       }
-      {...(stage || own
-        ? { "data-place": host.place }
-        : { "data-active": active, "aria-hidden": !active, inert: !active })}
+      data-place={stage || own ? host.place : undefined}
+      data-active={active}
+      aria-hidden={!active}
+      inert={!active}
       aria-labelledby={`${id}-title`}
     >
       {stage ? (
         <h2 id={`${id}-title`} className="sr-only" tabIndex={-1}>
           {title} {count}
+          {scope && ` ${scope}`}
         </h2>
       ) : null}
       <header
         className="sidebar-panel-header flex h-[38px] shrink-0 items-center justify-between gap-3 px-0.5"
-        hidden={stage && !actions}
+        hidden={stage && !actions && !titleLead}
       >
-        {stage ? null : titleExtra || titleLead ? (
+        {stage ? (
+          titleLead
+        ) : titleExtra || titleLead ? (
           <div className="flex min-w-0 items-center gap-2">
             {titleLead}
             {heading}
@@ -135,7 +143,15 @@ export const SidebarPanel = ({
         </div>
       </header>
       <div className="sidebar-panel-content flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-      {stage ? <PortalInto node={stage.count}>{count}</PortalInto> : null}
+      {stage && active ? (
+        <>
+          <PortalInto node={stage.count}>
+            {count}
+            {scope && <span className="sidebar-panel-scope min-w-0 truncate">{scope}</span>}
+          </PortalInto>
+          <PortalInto node={stage.extra}>{titleExtra}</PortalInto>
+        </>
+      ) : null}
     </section>
   )
 }

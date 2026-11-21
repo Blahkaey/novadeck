@@ -438,11 +438,16 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       while (project.history.some((session) => session.name === next.name))
         next.name = `${name} (${suffix++})`
       set("freshSession", next.id)
-      set("sidebarCollapsed", false)
-      // The new session's own terminal tabs, where its first terminal is made.
-      navigateWorkspace([{ type: "session/add", projectId: project.id, session: next }], {
-        panel: "terminals",
-      })
+      // The new session's own terminal tabs, where its first terminal is made: in the sidebar,
+      // or in the Terminals panel's window of its own, which every session shares. A window on
+      // the stage is the session's, so the new one has the panel in the sidebar.
+      const own = ui.getSnapshot().ownWindows.includes("terminals")
+      if (own) set("terminalsView", "terminals")
+      else set("sidebarCollapsed", false)
+      navigateWorkspace(
+        [{ type: "session/add", projectId: project.id, session: next }],
+        own ? {} : { panel: "terminals" },
+      )
       effects.afterFrame(effects.focusTerminalsCreate)
     },
     switchProject,

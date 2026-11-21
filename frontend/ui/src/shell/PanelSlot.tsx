@@ -12,23 +12,32 @@ export const PanelSlot = ({ panel }: { readonly panel: RailPanel }): React.JSX.E
   return <div ref={hold} className="contents" />
 }
 
-// Where a panel's window shows the panel's count, beside its title, in the sidebar heading's
-// voice: the element the panel draws its count into while it is in a window (panel-nodes.ts).
-// The panel's heading says the count to assistive technology, so this one is only seen.
-export const PanelCountSlot = ({ panel }: { readonly panel: RailPanel }): React.JSX.Element => {
-  const nodes = usePanelNodes()
-  const hold = useCallback(
+// Holds `part`, an element of the header's a panel draws into, while mounted.
+const useHeaderPart = (part: HTMLElement): ((slot: HTMLSpanElement) => () => void) =>
+  useCallback(
     (slot: HTMLSpanElement) => {
-      const count = nodes.count(panel)
-      slot.append(count)
+      slot.append(part)
       // A window still animating away may let go after the next one took it.
       return () => {
-        if (count.parentElement === slot) count.remove()
+        if (part.parentElement === slot) part.remove()
       }
     },
-    [nodes, panel],
+    [part],
   )
+
+// Where a panel's window shows the panel's count, and its scope after it, beside its title, in
+// the sidebar heading's voice: the element the panel draws them into while it is in a window
+// (panel-nodes.ts). The panel's heading says them to assistive technology, so this is only seen.
+export const PanelCountSlot = ({ panel }: { readonly panel: RailPanel }): React.JSX.Element => {
+  const hold = useHeaderPart(usePanelNodes().count(panel))
   return (
     <span ref={hold} aria-hidden="true" className="panel-window-count text-label font-medium" />
   )
+}
+
+// Where a panel's window shows what the panel's title has beside it, after the count, as the
+// Inbox's pill of rows waiting to join, which the person reads and presses as in the sidebar.
+export const PanelExtraSlot = ({ panel }: { readonly panel: RailPanel }): React.JSX.Element => {
+  const hold = useHeaderPart(usePanelNodes().extra(panel))
+  return <span ref={hold} className="panel-window-extra flex min-w-0 items-center" />
 }

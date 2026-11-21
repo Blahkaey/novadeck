@@ -1,9 +1,4 @@
-import {
-  railPanelOf,
-  type RailPanel,
-  type SidebarPanel,
-  type TerminalsView,
-} from "@novadeck/core/types"
+import { railPanelOf, type SidebarPanel, type TerminalsView } from "@novadeck/core/types"
 
 // DOM contracts for keyboard policy and focus restoration. Library-specific
 // overlay markup stays here so interaction owners do not depend on it. `data-own-keys`
@@ -156,8 +151,10 @@ export const focusSidebarToggle = (panel: SidebarPanel): void => {
   if (active && active !== document.body && !active.closest(sidebar)) return
   sidebarToggle(panel)?.focus()
 }
-export const focusTerminalTab = (id: string): void =>
-  document
+// `page` is the document the Terminals panel is in: the page's own, or that of its window of its
+// own.
+export const focusTerminalTab = (id: string, page: Document): void =>
+  page
     .querySelector<HTMLElement>(`[data-terminal-tab-id="${CSS.escape(id)}"] .sidebar-item-select`)
     ?.focus({ preventScroll: true })
 export const focusWorkspaceViewport = (): void =>
@@ -172,11 +169,11 @@ const usable = (element: Element): boolean =>
 // Focus that waits a frame for a control to mount, taken only while focus is still where
 // the control it replaces left it: on the page itself, on that control as it unmounts, or
 // on one the change hides or disables, which can no longer hold it. A key pressed in
-// between wins.
-const focusStranded = (selector: string, leftFrom: string): void => {
-  const active = document.activeElement
-  if (active && active !== document.body && !active.matches(leftFrom) && usable(active)) return
-  document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true })
+// between wins. `page` is the document the control is in.
+const focusStranded = (selector: string, leftFrom: string, page: Document = document): void => {
+  const active = page.activeElement
+  if (active && active !== page.body && !active.matches(leftFrom) && usable(active)) return
+  page.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true })
 }
 export const focusZenCreate = (): void =>
   focusStranded("[data-workspace-zen-create]", "[data-workspace-zen-enter]")
@@ -185,21 +182,23 @@ export const focusSidebarToggleStranded = (panel: SidebarPanel): void =>
   focusStranded(`#${railPanelOf(panel)}-toggle`, ".zen-inbox")
 export const focusZenEnter = (): void => focusStranded("[data-workspace-zen-enter]", ".zen-exit")
 // The Terminals panel's create button, once a new session leaves the Sessions panel behind.
-export const focusTerminalsCreate = (): void =>
-  focusStranded("[data-terminals-create]", "[data-sessions-create]")
+// `page` is the document the Terminals panel is in, as for the two below.
+export const focusTerminalsCreate = (page: Document): void =>
+  focusStranded("[data-terminals-create]", "[data-sessions-create]", page)
 // The switch beside the Terminals panel's title, on the view that shows, once the one pressed
 // on the other view hid with it.
-export const focusTerminalsView = (view: TerminalsView): void =>
+export const focusTerminalsView = (view: TerminalsView, page: Document): void =>
   focusStranded(
     `#${view}-panel [data-terminals-view] input[value="${view}"]`,
     "[data-terminals-view] input",
+    page,
   )
 
 // The first session a terminal can move to, or the pick's Cancel with none, once the Sessions
 // panel shows for a pick from a terminal's menu. The panel slides in, so for a few frames it
 // can't hold focus yet.
-export const focusMovePick = (framesLeft = 12): void => {
-  const panel = document.querySelector<HTMLElement>(".sessions-panel[data-moving]")
+export const focusMovePick = (page: Document, framesLeft = 12): void => {
+  const panel = page.querySelector<HTMLElement>(".sessions-panel[data-moving]")
   const target =
     panel?.querySelector<HTMLElement>('[data-move-target="yes"] .sidebar-item-select') ??
     panel?.querySelector<HTMLElement>(".session-move-cancel")
@@ -207,21 +206,21 @@ export const focusMovePick = (framesLeft = 12): void => {
   if (usable(target)) target.focus({ preventScroll: true })
   // It may not hold yet: the panel is still sliding in, or the menu that chose it still has
   // the focus on its way out.
-  if (document.activeElement !== target && framesLeft > 0)
-    requestAnimationFrame(() => focusMovePick(framesLeft - 1))
+  if (page.activeElement !== target && framesLeft > 0)
+    (page.defaultView ?? window).requestAnimationFrame(() => focusMovePick(page, framesLeft - 1))
 }
 
 // What can take the focus in a panel, in the order Tab reaches it.
 const panelControls =
   'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])'
 
-// Puts keyboard focus in a panel, wherever it shows, as it comes to the sidebar or opens in a
+// Puts keyboard focus in a panel, or a view of the Terminals panel, wherever it shows, as it comes to the sidebar or opens in a
 // window: on its first control in its body, else in its header, else on its heading. It may
 // still be on its way into view (sliding into the sidebar, Focus mounting its window, Canvas
 // flying to it), so it tries again for a few frames, unless the person moves the focus
 // meanwhile. `page` is the document the panel is in: the page's own, or that of its window of
 // its own, whose frames it waits on.
-export const focusPanel = (panel: RailPanel, page: Document = document): void => {
+export const focusPanel = (panel: SidebarPanel, page: Document = document): void => {
   const from = page.activeElement
   const attempt = (framesLeft: number): void => {
     if (page.activeElement !== from) return

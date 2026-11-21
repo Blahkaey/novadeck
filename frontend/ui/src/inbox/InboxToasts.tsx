@@ -221,7 +221,7 @@ export const InboxToasts = ({
   // Brings the terminal into view, selected, which opens what waits on it.
   readonly showTerminal: (terminalId: string) => void
 }): React.JSX.Element => {
-  const { open, now } = useInboxContext()
+  const { open, now, page } = useInboxContext()
   const toasts = useMemo(() => createToasts<Toast>(), [])
   useEffect(() => {
     // The row each terminal's toast shows.
@@ -270,7 +270,7 @@ export const InboxToasts = ({
         if (toast.kind === "refused") return
         open(toast.row.id, { once: true, after: peekInbox() })
         // From the keyboard, on to the sheet that opens, as from a row.
-        if (keyboard) focusSheetSoon()
+        if (keyboard) focusSheetSoon(page)
       }}
       onMore={showInbox}
       spreadLabel={(count) => {

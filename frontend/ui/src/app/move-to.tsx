@@ -9,7 +9,7 @@ import { moveSessions, type MoveTarget } from "../terminals/move-state"
 import type { TabsAway } from "../terminals/TerminalTabs"
 import type { MoveTo } from "../terminals/window-menu"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
-import { currentContext, currentState, currentTarget } from "./selectors"
+import { currentContext, currentState, currentTarget, terminalsViewShown } from "./selectors"
 import { useSessionMarks } from "./useSessionMarks"
 
 // How many sessions a terminal's menu lists before "All sessions…".
@@ -145,8 +145,9 @@ const springView = (spring: Element): "terminals" | "sessions" =>
 
 // Where a terminal's tab dragged out of the list goes: held over the Sessions choice beside the
 // Terminals panel's title it opens the sessions, and dropped on a session, or on the new
-// session's button, it moves the terminal there. It travels anywhere in the workspace's body.
-// Undefined where the backend can't move terminals.
+// session's button, it moves the terminal there. It travels anywhere in the workspace's body,
+// the Terminals panel's window on the stage among it. Undefined where the backend can't move
+// terminals.
 export const useTabsAway = (): TabsAway | undefined => {
   const { backend, commands, ui, workspace } = useWorkspaceServices()
   // The view's choice or rail button held over, and the timer that opens its view.
@@ -190,8 +191,9 @@ export const useTabsAway = (): TabsAway | undefined => {
         const find = (selector: string): Element | null =>
           hits.map((hit) => hit.closest(selector)).find((each) => each !== null) ?? null
         spring(find(springs))
-        const { location, moving } = ui.getSnapshot()
-        if (location.route.panel !== "sessions") return overMove(null)
+        const now = ui.getSnapshot()
+        const { moving } = now
+        if (terminalsViewShown(now, workspace.getSnapshot()) !== "sessions") return overMove(null)
         if (!moving) pickSession(dragged.current.id, "drag")
         if (find("[data-sessions-create]")) return overMove({ fresh: true })
         const id = find("[data-workspace-session]")?.getAttribute("data-workspace-session")

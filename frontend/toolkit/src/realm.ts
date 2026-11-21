@@ -14,6 +14,10 @@ export const isElement = (value: unknown): value is Element =>
 export const isHTMLElement = (value: unknown): value is HTMLElement =>
   isElement(value) && value.namespaceURI === html
 
+// Whether `event` is a keyboard event, of whichever window, as the press a drag started from.
+export const isKeyboardEvent = (event: Event | null | undefined): event is KeyboardEvent =>
+  event?.type.startsWith("key") ?? false
+
 // The window a node is drawn in, whose observers, frames, focus and clipboard are the ones that
 // follow it; the page's own while it is in no window's document.
 export const viewOf = (node: Node): Window & typeof globalThis =>

@@ -16,24 +16,34 @@ const Pressed = (): React.JSX.Element => {
   )
 }
 
-// The Notes panel's frame where `host` draws it, with two notes and `actions` in its header.
-const frame = (host: PanelHost, actions?: ReactNode): React.JSX.Element => (
+// What the frame has beyond its title and count: actions in its header, before its title, beside
+// it and what its list is of; and whether its place shows it.
+type Parts = {
+  readonly actions?: ReactNode
+  readonly titleLead?: ReactNode
+  readonly titleExtra?: ReactNode
+  readonly scope?: string
+  readonly active?: boolean
+}
+
+// The Notes panel's frame where `host` draws it, with two notes and `parts`.
+const frame = (host: PanelHost, { active = true, ...parts }: Parts = {}): React.JSX.Element => (
   <PanelHostContext value={host}>
     <SidebarPanel
       id="notes-panel"
       title="Notes"
       count={2}
-      active
+      active={active}
       onClose={() => {}}
-      {...(actions ? { actions } : {})}
+      {...parts}
     >
       <Pressed />
     </SidebarPanel>
   </PanelHostContext>
 )
 
-const show = (host: PanelHost, actions?: ReactNode) => {
-  const { container, rerender } = render(frame(host, actions))
+const show = (host: PanelHost, parts?: Parts) => {
+  const { container, rerender } = render(frame(host, parts))
   return {
     container,
     rerender,
@@ -44,9 +54,10 @@ const show = (host: PanelHost, actions?: ReactNode) => {
 }
 
 const docked: PanelHost = { place: "sidebar", detach: () => {} }
-const inWindow = (): PanelHost & { readonly count: HTMLElement } => ({
+const inWindow = (): PanelHost & { readonly count: HTMLElement; readonly extra: HTMLElement } => ({
   place: "stage",
   count: document.createElement("span"),
+  extra: document.createElement("span"),
 })
 
 describe("a panel's frame", () => {
@@ -59,7 +70,7 @@ describe("a panel's frame", () => {
       expect(page.heading().textContent).toBe("Notes2")
     })
 
-    it("offers no window to a panel that can't open in one", () => {
+    it("offers no window where there is nothing to open, as on the note of a panel elsewhere", () => {
       const page = show({ place: "sidebar" })
       expect(page.button("Open Notes in a window")).toBeNull()
     })
@@ -82,16 +93,45 @@ describe("a panel's frame", () => {
       expect(host.count.textContent).toBe("2")
     })
 
-    it("shows its own row only for its actions", () => {
-      const page = show(
-        inWindow(),
-        <button type="button" aria-label="Sort">
-          Sort
-        </button>,
-      )
+    it("shows its own row only for its actions and what comes before its title", () => {
+      const page = show(inWindow(), {
+        actions: (
+          <button type="button" aria-label="Sort">
+            Sort
+          </button>
+        ),
+      })
       expect(page.header().hidden).toBe(false)
       expect(page.header().textContent).toBe("Sort")
       expect(show(inWindow()).header().hidden).toBe(true)
+      const led = show(inWindow(), { titleLead: <span>Views</span> })
+      expect(led.header().hidden).toBe(false)
+      expect(led.header().textContent).toBe("Views")
+    })
+
+    it("draws its scope after the count, and what its title has beside it, for the window's header", () => {
+      const host = inWindow()
+      const page = show(host, {
+        scope: "Release",
+        titleExtra: (
+          <button type="button" aria-label="Show waiting">
+            1 new
+          </button>
+        ),
+      })
+      expect(host.count.textContent).toBe("2Release")
+      expect(host.extra.querySelector('[aria-label="Show waiting"]')).not.toBeNull()
+      expect(page.heading().textContent).toBe("Notes 2 Release")
+    })
+
+    it("draws nothing for the header, unseen and out of reach, where its place shows another", () => {
+      const host = inWindow()
+      const page = show(host, { active: false, titleExtra: <span>1 new</span> })
+      const section = page.container.querySelector("section")!
+      expect(section.dataset["active"]).toBe("false")
+      expect(section.hasAttribute("inert")).toBe(true)
+      expect(host.count.textContent).toBe("")
+      expect(host.extra.textContent).toBe("")
     })
   })
 
@@ -123,7 +163,7 @@ describe("a panel's frame", () => {
       const section = page.container.querySelector("section")!
       expect(section.dataset["place"]).toBe("window")
       expect(section.hasAttribute("inert")).toBe(false)
-      expect(section.getAttribute("aria-hidden")).toBeNull()
+      expect(section.getAttribute("aria-hidden")).not.toBe("true")
     })
   })
 

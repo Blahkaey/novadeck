@@ -6,7 +6,7 @@ import { needing } from "../inbox/inbox-state"
 import type { ToastBoard } from "../inbox/InboxToasts"
 import { isDesktop } from "../shell/desktop"
 import { followNeeds, needGraceMs, type NeedsInbox } from "./inbox-pings"
-import { inboxShown, mayToast, modalOpen } from "./selectors"
+import { inboxInSight, mainWindowFocused, mayToast, modalOpen } from "./selectors"
 import type { UiState, UiStore } from "./ui-store"
 
 // Follows the Inbox and rings toasts on `board` per the rules; returns the stop. It rings
@@ -54,10 +54,11 @@ export const watchInboxToasts = (
     board.show(row)
   }
   const release = (state: UiState): void => {
-    // Leaving the app with a row held hands it to the OS ping (see `watchInboxPings`),
-    // where there is one; else it waits for the person to come back.
-    if (!state.pageFocused && pings) return held.clear()
-    if (!state.pageFocused || modalOpen(state) || held.size === 0) return
+    // Leaving the app's own window with a row held, for another app or a panel's window of its
+    // own, hands it to the OS ping (see `watchInboxPings`), where there is one; else it waits
+    // for the person to come back.
+    if (!mainWindowFocused(state) && pings) return held.clear()
+    if (!mainWindowFocused(state) || modalOpen(state) || held.size === 0) return
     const standing = new Set(needing(inbox.state.getSnapshot().items).map(rowKey))
     const rows = [...held.values()]
     held.clear()
@@ -69,7 +70,7 @@ export const watchInboxToasts = (
   // standing over a dialog is out of reach and would time out unseen; their rows stay in the
   // Inbox.
   const arrive = (state: UiState): void => {
-    const all = inboxShown(state, workspace.getSnapshot(), desktop) || modalOpen(state)
+    const all = inboxInSight(state, workspace.getSnapshot(), desktop) || modalOpen(state)
     const gone = all
       ? [...shown.values()]
       : [shown.get(state.location.route.terminal)].filter((row) => row !== undefined)
@@ -101,13 +102,16 @@ export const watchInboxToasts = (
       board.close(terminalId, row.id)
     },
   })
-  const stopHolding = ui.subscribe(() => {
+  // Whether the Inbox shows is both stores': its window on the stage coming into sight is the
+  // session's change alone.
+  const follow = (): void => {
     const state = ui.getSnapshot()
     arrive(state)
     release(state)
-  })
+  }
+  const stops = [ui.subscribe(follow), workspace.subscribe(follow)]
   return () => {
     stopFollowing()
-    stopHolding()
+    stops.forEach((stop) => stop())
   }
 }

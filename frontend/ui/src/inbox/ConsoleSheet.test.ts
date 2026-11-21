@@ -258,9 +258,9 @@ const mount = (
   }
   const page = createElement(
     InboxProvider,
-    { inbox, reveal: (terminal: string) => revealed.push(terminal) },
+    { inbox, reveal: (terminal: string) => revealed.push(terminal), page: document },
     createElement("div", { id: "inbox-panel" }, createElement(InboxList)),
-    createElement(InboxSheet, { active: true }),
+    createElement(InboxSheet, { active: true, over: true }),
   )
   const view = render(
     conversations ? createElement(AgentContextProvider, { conversations, openLogs }, page) : page,

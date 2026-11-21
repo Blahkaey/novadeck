@@ -11,7 +11,7 @@ import { FilesSection } from "./FilesSection"
 import { HistorySection } from "./HistorySection"
 import { InboxSection } from "./InboxSection"
 import { NotesSection, TodoSection } from "./NotesSection"
-import { detachablePanels, usePanelPlace, usePanelsShown } from "./panels-shown"
+import { usePanelPlace, usePanelsShown } from "./panels-shown"
 import { TerminalsSection } from "./TerminalsSection"
 import { WorktreesSection } from "./WorktreesSection"
 
@@ -36,30 +36,29 @@ const bodyOf = (panel: RailPanel, backend: Backend): React.JSX.Element | undefin
 }
 
 // One panel, drawn into its element, told where it is: in the sidebar; in a window on the stage
-// of the session on screen, whose header shows the element it draws its count into; or in a
-// window of its own, which its header returns it from.
+// of the session on screen, whose header shows the elements it draws its count and its title's
+// extra into; or in a window of its own, which its header returns it from.
 const PanelInstance = memo(
   ({
     panel,
     node,
     count,
+    extra,
   }: {
     readonly panel: RailPanel
     readonly node: Element
     readonly count: Element
+    readonly extra: Element
   }): React.JSX.Element => {
     const { backend, commands } = useWorkspaceServices()
     const place = usePanelPlace(panel)
     const { detachPanel, returnPanel } = commands
     const host = useMemo((): PanelHost => {
-      if (place === "stage") return { place, count }
+      if (place === "stage") return { place, count, extra }
       const view = place === "window" ? ownWindowOf(panel) : undefined
       if (view) return { place: "window", view, onReturn: () => returnPanel(panel) }
-      return {
-        place: "sidebar",
-        detach: detachablePanels.has(panel) ? () => detachPanel(panel) : undefined,
-      }
-    }, [place, panel, count, detachPanel, returnPanel])
+      return { place: "sidebar", detach: () => detachPanel(panel) }
+    }, [place, panel, count, extra, detachPanel, returnPanel])
     return (
       <PortalInto node={node}>
         <PanelHostContext value={host}>{bodyOf(panel, backend)}</PanelHostContext>
@@ -83,6 +82,7 @@ export const PanelInstances = memo((): React.JSX.Element => {
           panel={panel}
           node={nodes.node(panel)}
           count={nodes.count(panel)}
+          extra={nodes.extra(panel)}
         />
       ))}
     </>

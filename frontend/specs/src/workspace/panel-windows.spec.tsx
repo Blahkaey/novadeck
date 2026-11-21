@@ -2,16 +2,27 @@ import { afterEach } from "vitest"
 import { page, userEvent, type Locator } from "vitest/browser"
 
 import { boxOf, scrollOver, settled } from "../support/canvas"
-import { expectSearchReady, findDialog, recentOption, recentSwitcher } from "../support/keyboard"
+import {
+  closePreferences,
+  expectSearchReady,
+  findDialog,
+  openPreferencesOn,
+  preferencesDialog,
+  pressShortcut,
+  recentOption,
+  recentSwitcher,
+} from "../support/keyboard"
 import {
   currentRoute,
   currentSessionName,
   newSessionName,
   savedSession,
+  savedSessions,
   visit,
 } from "../support/sessions"
 import { visibilityToggle } from "../support/terminals"
 import {
+  chooseTerminalsView,
   chooseView,
   detachButton,
   detachPanel,
@@ -23,6 +34,7 @@ import {
   sidebar,
   sidebarPanel,
   expectSelected,
+  terminalsView,
   terminalTab,
   terminalTabNames,
 } from "../support/workspace"
@@ -440,6 +452,168 @@ describe("a sidebar panel in a window", () => {
       await expect.element(drawer).not.toBeInTheDocument()
       await expect.element(panelWindow("Notes")).toBeVisible()
       await expect.element(notes(panelWindow("Notes"))).toBeVisible()
+    })
+  })
+
+  context("for the Terminals panel", () => {
+    it("opens in a window on the view it showed, switches there, and returns on that view", async () => {
+      await openWorkspace(agents)
+      await openSessions()
+
+      await page.getByRole("button", { name: "Open Sessions in a window" }).click()
+
+      const window = panelWindow("Terminals")
+      await expect.element(savedSessions()).toBeVisible()
+      expect(window.element().contains(savedSessions().element())).toBe(true)
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await chooseTerminalsView("Terminals")
+      await expect.element(terminalsView("Terminals")).toBeChecked()
+      await expect.element(terminalTab("Checkout review")).toBeVisible()
+      // The sidebar stays where it was.
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+
+      // The window's header's, before its list's row for the window.
+      await returnButton("Terminals").first().click()
+
+      await expect.element(panelWindow("Terminals")).not.toBeInTheDocument()
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+      await expect.element(terminalsView("Terminals")).toBeChecked()
+    })
+
+    it("is shown on the sessions by the Sessions key, the sidebar as it was", async () => {
+      await openWorkspace(agents)
+      await detachPanel("Terminals")
+      await terminalTab("Checkout review").click()
+
+      await pressShortcut("sessions")
+
+      await expect.element(terminalsView("Sessions")).toBeChecked()
+      await expect.element(savedSessions()).toBeVisible()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await expect.poll(() => hasFocusIn(panelWindow("Terminals"))).toBe(true)
+    })
+
+    it("switches its view in a session that has it in a window, the sidebar on the sessions", async () => {
+      await openWorkspace(agents)
+      await detachPanel("Terminals")
+      await chooseTerminalsView("Sessions")
+      const original = await currentSessionName()
+      await panelWindow("Terminals").getByRole("button", { name: "New session" }).click()
+      // The new session has the panel in the sidebar; its sessions there name the first.
+      await openSessions()
+      await newSessionName(original)
+      await savedSession(original).click()
+      await expect.element(panelWindow("Terminals")).toBeVisible()
+
+      await chooseTerminalsView("Terminals")
+
+      await expect.element(terminalsView("Terminals")).toBeChecked()
+      await expect.element(terminalTab("Checkout review")).toBeVisible()
+      await pressShortcut("sessions")
+      await expect.element(terminalsView("Sessions")).toBeChecked()
+    })
+
+    it("lists its own window, whose row goes to it and returns it", async () => {
+      await openWorkspace(agents)
+      await chooseView("Grid")
+      await detachPanel("Terminals")
+      await terminalTab("Checkout review").click()
+
+      await windowRow("Terminals").click()
+
+      await expectSelected("Terminals")
+      // The row's, in the list after the window's header and its own.
+      await panelWindow("Terminals")
+        .getByRole("button", { name: "Return Terminals to the sidebar" })
+        .last()
+        .click()
+      await expect.element(panelWindow("Terminals")).not.toBeInTheDocument()
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+    })
+  })
+
+  context("for the Inbox", () => {
+    it("opens in a window and returns to the sidebar", async () => {
+      await openWorkspace(agents)
+
+      await detachPanel("Inbox")
+
+      const window = panelWindow("Inbox")
+      await expect
+        .element(window.getByRole("list", { name: "Messages from your agents" }))
+        .toBeVisible()
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+
+      await returnButton("Inbox").click()
+
+      await expect.element(panelWindow("Inbox")).not.toBeInTheDocument()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+    })
+  })
+
+  context("for Worktrees", () => {
+    // Agent worktrees, which bring the panel, are turned on and off in Preferences' Experimental
+    // tab, which an app with updates has (`?update=ready`, a stable launch, has them off).
+    const agentWorktrees = async (): Promise<void> => {
+      await openPreferencesOn("About")
+      await preferencesDialog().getByRole("switch", { name: "Experimental" }).click()
+      await preferencesDialog().getByRole("tab", { name: "Experimental" }).click()
+      await preferencesDialog().getByRole("switch", { name: "Agent worktrees" }).click()
+      await closePreferences()
+    }
+
+    it("opens in a window and returns to the sidebar", async () => {
+      await openWorkspace(agents)
+
+      await detachPanel("Worktrees")
+
+      await expect
+        .element(panelWindow("Worktrees").getByRole("region", { name: /^Worktrees( \d+)?$/ }))
+        .toBeVisible()
+      await returnButton("Worktrees").click()
+      await expect.element(panelWindow("Worktrees")).not.toBeInTheDocument()
+      await expect.element(sidebar()).toHaveAccessibleName("Worktrees")
+    })
+
+    it("closes its window as agent worktrees turn off", async () => {
+      await openWorkspace("/?update=ready")
+      await agentWorktrees()
+      await detachPanel("Worktrees")
+      await sidebarPanel("Inbox").click()
+
+      // Experimental off turns agent worktrees off with it.
+      await openPreferencesOn("About")
+      await preferencesDialog().getByRole("switch", { name: "Experimental" }).click()
+      // Preferences stays open as the window goes.
+      await expect.element(panelWindow("Worktrees")).not.toBeInTheDocument()
+      await closePreferences()
+
+      await expect.element(panelWindow("Worktrees")).not.toBeInTheDocument()
+      await expect.element(sidebarPanel("Worktrees")).not.toBeInTheDocument()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+    })
+  })
+
+  context("when every panel of the rail is in a window", () => {
+    it("hides the sidebar, and returning one opens it on that one", async () => {
+      await openWorkspace(agents)
+      await chooseView("Grid")
+      const rail = page.getByRole("radiogroup", { name: "Sidebar actions" }).getByRole("radio")
+      const names = rail.elements().map((radio) => radio.getAttribute("aria-label")!)
+      expect(names).toEqual(
+        expect.arrayContaining(["Terminals", "Files", "Worktrees", "Notes", "Todo", "History"]),
+      )
+
+      const all = ["Terminals", "Inbox", "Worktrees", "Files", "Notes", "Todo", "History"] as const
+      for (const name of all) {
+        // One after another, each from the sidebar the last one left.
+        // eslint-disable-next-line no-await-in-loop -- As above.
+        await detachPanel(name)
+      }
+
+      await expect.element(sidebar()).not.toBeInTheDocument()
+      await returnButton("Todo").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Todo")
     })
   })
 })

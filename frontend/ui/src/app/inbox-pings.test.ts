@@ -147,7 +147,18 @@ const setup = (
   })
   const set = (next: InboxRow[]) => inbox.update((state) => ({ ...state, items: next }))
   const focus = (pageFocused: boolean) => ui.update((state) => ({ ...state, pageFocused }))
-  return { set, focus, shown, closed, badges, images, board, stop }
+  // The person goes to the Inbox's window of its own, or leaves it.
+  const inInbox = (inside: boolean) =>
+    ui.update((state) => ({
+      ...state,
+      ownWindows: ["inbox"],
+      ownWindowFocused: inside ? "inbox" : null,
+    }))
+  // The person is in the Notes panel's window of its own, which the desktop app counts as its
+  // focus too.
+  const inOther = () =>
+    ui.update((state) => ({ ...state, ownWindows: ["notes"], ownWindowFocused: "notes" }))
+  return { set, focus, inInbox, inOther, shown, closed, badges, images, board, stop }
 }
 
 beforeEach(() => {
@@ -173,6 +184,30 @@ describe("pings for what needs the person", () => {
         },
       ])
       stop()
+    })
+
+    it("sends none while the person is in the Inbox's window of its own, and one once they leave it", () => {
+      const app = setup()
+      app.inInbox(true)
+      const seen = ask("a")
+      app.set([seen])
+      vi.advanceTimersByTime(5000)
+      expect(app.shown).toEqual([])
+      app.inInbox(false)
+      app.set([seen, request("b", "Bash", "pnpm test")])
+      vi.advanceTimersByTime(5000)
+      expect(app.shown.map((notice) => notice.body)).toEqual(["Run pnpm test?"])
+      app.stop()
+    })
+
+    it("sends one while the person is in another panel's window of its own", () => {
+      const app = setup()
+      app.focus(true)
+      app.inOther()
+      app.set([ask("a")])
+      vi.advanceTimersByTime(2000)
+      expect(app.shown).toHaveLength(1)
+      app.stop()
     })
 
     it("sends none for a row that is answered or withdrawn within the grace", () => {

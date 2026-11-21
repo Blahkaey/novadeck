@@ -4,12 +4,13 @@ import {
   Feedback,
   KeyboardSensor,
   PointerActivationConstraints,
-  PointerSensor,
+  type PointerSensor,
 } from "@dnd-kit/dom"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider, useDragDropManager } from "@dnd-kit/react"
 import { isSortable } from "@dnd-kit/react/sortable"
 import { PullOut } from "@novadeck/toolkit/drag-pull"
+import { isKeyboardEvent } from "@novadeck/toolkit/realm"
 import { sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
 import {
   Fragment,
@@ -26,8 +27,12 @@ import {
 import { TabListContext } from "./tab-list"
 import { restOffscreenTabs } from "./tab-sight"
 
-const sensors = [
-  PointerSensor.configure({
+// The pointer sensor the tabs drag with: one that follows a drag in whichever window the list
+// is drawn in, as the Terminals panel's window of its own (the app's, `PanelPointerSensor`).
+export type TabSensor = typeof PointerSensor
+
+const sensorsOf = (Sensor: TabSensor) => [
+  Sensor.configure({
     activationConstraints: (event) =>
       event.pointerType === "touch"
         ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
@@ -98,6 +103,8 @@ const TerminalTabsView = ({
   renderTab,
   onReorder,
   away,
+  sensor,
+  view,
 }: {
   ids: readonly string[]
   // Renders one sortable tab, usually a TerminalTab, at its position in the list.
@@ -106,7 +113,11 @@ const TerminalTabsView = ({
   onReorder: (ids: string[]) => void
   // Where a tab may be dragged beyond the list; without it, it stays in the list.
   away?: TabsAway | undefined
+  sensor: TabSensor
+  // The window the list is drawn in, whose observers watch which tabs are in sight.
+  view: Window
 }): React.JSX.Element => {
+  const sensors = useMemo(() => sensorsOf(sensor), [sensor])
   const [list, setList] = useState<HTMLDivElement | null>(null)
   // Bumped when a drag ends: the drag library moves a tab's element next to the one it passes,
   // into that tab's wrapper, which React's next update can't follow (a tab closed later would
@@ -124,14 +135,14 @@ const TerminalTabsView = ({
     (node: HTMLDivElement) => {
       setList(node)
       tabList?.update(() => node)
-      const stopResting = restOffscreenTabs(node)
+      const stopResting = restOffscreenTabs(node, view)
       return () => {
         stopResting()
         setList(null)
         tabList?.update((current) => (current === node ? null : current))
       }
     },
-    [tabList],
+    [tabList, view],
   )
   // After each remount (each drag is a new state), as one tab dragged twice running is focused
   // twice.
@@ -161,15 +172,14 @@ const TerminalTabsView = ({
       onDragStart={(event) => {
         const { source, activatorEvent } = event.operation
         // The keyboard reorders only; a tab goes elsewhere from its menu.
-        if (isSortable(source) && !(activatorEvent instanceof KeyboardEvent))
-          away?.start(String(source.id))
+        if (isSortable(source) && !isKeyboardEvent(activatorEvent)) away?.start(String(source.id))
       }}
       onDragMove={(event) => away?.move(event.operation.position.current)}
       onDragEnd={(event) => {
         const { source } = event.operation
         if (!isSortable(source)) return
         const taken = away?.end(String(source.id), event.canceled) ?? false
-        const held = document.activeElement
+        const held = list?.ownerDocument.activeElement
         const focused = held && list?.contains(held) ? held.closest("[data-terminal-tab-id]") : null
         setDrag((current) => ({
           generation: current.generation + 1,

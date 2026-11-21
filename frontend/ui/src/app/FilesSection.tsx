@@ -17,7 +17,7 @@ import {
   sameWorks,
   savingFirst,
 } from "./files-feed"
-import { usePanelShowing } from "./panels-shown"
+import { usePanelOpen, usePanelShowing } from "./panels-shown"
 import { currentState, sameItems } from "./selectors"
 import { useWorktreesShown } from "./use-worktrees-shown"
 
@@ -138,7 +138,7 @@ export const FilesSection = ({ files }: { readonly files: ProjectFiles }): React
       ui.update((state) => (state.filesLit === lit ? state : { ...state, filesLit: lit })),
     [ui],
   )
-  const active = useUiState((state) => state.location.route.panel === "files")
+  const active = usePanelOpen("files")
   const showing = usePanelShowing("files")
   return (
     <FilesPanel

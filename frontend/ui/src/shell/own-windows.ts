@@ -1,4 +1,4 @@
-import type { RailPanel } from "@novadeck/core/types"
+import { railPanelOf, type RailPanel, type SidebarPanel } from "@novadeck/core/types"
 
 import { focusPanel } from "../interaction/dom"
 import {
@@ -51,6 +51,9 @@ export const openOwnWindow = (panel: RailPanel): boolean => {
 // The panel's window of its own, while it has one open.
 export const ownWindowOf = (panel: RailPanel): Window | undefined => opened.get(panel)?.view
 
+// The document the panel is drawn in: its window's of its own, while it has one, or the page's.
+export const panelPage = (panel: RailPanel): Document => ownWindowOf(panel)?.document ?? document
+
 // Keeps where the panel's window of its own is and how big, where that changed, for the next:
 // not before it is laid out, nor while it is minimized, when Windows says it is a strip far off
 // every screen.
@@ -71,10 +74,11 @@ export const forgetOwnWindow = (panel: RailPanel): void => {
   opened.delete(panel)
 }
 
-// Brings the panel's window of its own to the front, keyboard focus in the panel there, where
-// it was somewhere else in the window: the person working in the panel keeps their place.
-export const focusOwnWindow = (panel: RailPanel): void => {
-  const view = ownWindowOf(panel)
+// Brings the panel's window of its own to the front, keyboard focus in the panel there, on the
+// view of the Terminals panel it names, where it was somewhere else in the window: the person
+// working in the panel keeps their place.
+export const focusOwnWindow = (panel: SidebarPanel): void => {
+  const view = ownWindowOf(railPanelOf(panel))
   if (!view) return
   view.focus()
   const page = view.document

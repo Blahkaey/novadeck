@@ -2,8 +2,17 @@ import type { RailPanel } from "@novadeck/core/types"
 
 import type { DemoActionGroup } from "./types"
 
-// The panels "Panels in windows" opens on the stage: every one that opens there from its header.
-export const windowPanels: readonly RailPanel[] = ["notes", "todo", "history", "files"]
+// The panels "Panels in windows" opens on the stage: every one of the rail, Files last, which keeps
+// the keyboard and stays selected.
+export const windowPanels: readonly RailPanel[] = [
+  "terminals",
+  "inbox",
+  "worktrees",
+  "notes",
+  "todo",
+  "history",
+  "files",
+]
 
 // The panel's group for sidebar panels in windows on the stage, which their headers' buttons open
 // one at a time: here several at once, beside the session's terminals; and for a window of a
@@ -15,7 +24,7 @@ export const panelGroups: readonly DemoActionGroup[] = [
     actions: [
       {
         label: "Panels in windows",
-        hint: "Notes, Todo, History and Files open as windows beside the session's terminals, Files selected, each listed in the Terminals panel with its own icon; their rail toggles stay in place with a small window mark, and the sidebar moves to the first panel left in it",
+        hint: "Every panel of the rail (Terminals, the Inbox, Worktrees where it shows, Notes, Todo, History and Files) opens as a window beside the session's terminals, Files selected, each listed in the Terminals window with its own icon, the Terminals window too; their rail toggles stay in place with a small window mark, and with none left in it the sidebar hides",
         run: ({ openPanels }) => openPanels(windowPanels),
       },
       {

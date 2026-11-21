@@ -14,9 +14,12 @@ export type PanelNodes = {
   // stay mounted a moment after the next one's mounts (the phone drawer's closing animation);
   // the other's park then leaves it where it is.
   readonly hold: (panel: RailPanel, holder: HTMLElement) => () => void
-  // The element a panel in a window draws its count into, made the first time it is asked for,
-  // which the window's header shows beside its title (PanelCountSlot in PanelSlot.tsx).
+  // The element a panel in a window draws its count and scope into, made the first time it is
+  // asked for, which the window's header shows beside its title (PanelCountSlot in PanelSlot.tsx).
   readonly count: (panel: RailPanel) => HTMLElement
+  // The element it draws what its title has beside it into, as the Inbox's pill of rows waiting
+  // to join, which the header shows after the count (PanelExtraSlot).
+  readonly extra: (panel: RailPanel) => HTMLElement
 }
 
 // An element scrolled away from its start, and how far.
@@ -37,9 +40,23 @@ const scrollBack = (scrolled: readonly Scrolled[]): void => {
   }
 }
 
+// An element of a panel's window's header, made once per panel in `made`, which lays out as part
+// of the header.
+const headerPart =
+  (made: Map<RailPanel, HTMLElement>) =>
+  (panel: RailPanel): HTMLElement => {
+    const kept = made.get(panel)
+    if (kept) return kept
+    const fresh = document.createElement("span")
+    fresh.style.display = "contents"
+    made.set(panel, fresh)
+    return fresh
+  }
+
 export const createPanelNodes = (): PanelNodes => {
   const nodes = new Map<RailPanel, HTMLElement>()
   const counts = new Map<RailPanel, HTMLElement>()
+  const extras = new Map<RailPanel, HTMLElement>()
   const parked = new Map<RailPanel, readonly Scrolled[]>()
   const node = (panel: RailPanel): HTMLElement => {
     const made = nodes.get(panel)
@@ -63,16 +80,7 @@ export const createPanelNodes = (): PanelNodes => {
       element.remove()
     }
   }
-  const count = (panel: RailPanel): HTMLElement => {
-    const made = counts.get(panel)
-    if (made) return made
-    const fresh = document.createElement("span")
-    // Its count lays out in the header's own element.
-    fresh.style.display = "contents"
-    counts.set(panel, fresh)
-    return fresh
-  }
-  return { node, hold, count }
+  return { node, hold, count: headerPart(counts), extra: headerPart(extras) }
 }
 
 // The workspace's panel elements, which the app makes once.

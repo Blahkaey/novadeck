@@ -45,7 +45,7 @@ import {
 
 import { shortcutBindings } from "../interaction/shortcuts"
 import { useDesktop } from "../shell/desktop"
-import { PanelCountSlot, PanelSlot } from "../shell/PanelSlot"
+import { PanelCountSlot, PanelExtraSlot, PanelSlot } from "../shell/PanelSlot"
 import { PanelAwayNote } from "../sidebar/PanelElsewhere"
 import { panelIcons } from "../terminals/panel-icons"
 import { presentedProgram, terminalProfile, windowProfile } from "../terminals/processes/profiles"
@@ -72,7 +72,7 @@ import { MountedTerminal } from "./MountedTerminal"
 import { useMoveTo } from "./move-to"
 import { plainTitle } from "./murmur-offer"
 import { NameChip } from "./NameChip"
-import { detachablePanels, usePanelPlace } from "./panels-shown"
+import { usePanelPlace } from "./panels-shown"
 import { ChatWithPeers } from "./peer-looks"
 import { useReleaseLead } from "./release-lead"
 import {
@@ -85,7 +85,7 @@ import {
 } from "./selectors"
 import { useFoldTeam } from "./team-fold"
 import { useBarShells, useShellsHome, useTerminalBar } from "./terminal-bar"
-import { agentAvatarsOn, chatViewOn } from "./ui-store"
+import { agentAvatarsOn, chatViewOn, type UiState } from "./ui-store"
 import { useTerminalMarks } from "./useTerminalMarks"
 
 const noChatConversation = createStore(noConversation)
@@ -212,7 +212,8 @@ const WorkspaceWindow = memo(
 )
 
 // A panel of the rail in a window on the stage, in the same frame as a terminal's, under its
-// panel's name and icon, with the panel's count beside the name: its body is the panel itself,
+// panel's name and icon, with the panel's count, its scope and its title's extra beside the name,
+// as the Inbox's pill of rows waiting to join: its body is the panel itself,
 // drawn once by the app, which this window holds while the panel is on the stage (PanelSlot).
 // Its body takes its own pointer and wheel on Canvas, and its own keys, as a companion's pane
 // does; the header still moves the window, and, on a wide screen, opens the panel in a window
@@ -226,23 +227,40 @@ const WorkspacePanelWindow = memo(
     readonly tile: PanelTile
     readonly controls: TerminalLayoutControls
   }): React.JSX.Element => {
-    const { commands } = useWorkspaceServices()
+    const { commands, ui } = useWorkspaceServices()
     const { panel } = tile
     const own = usePanelPlace(panel) === "window"
-    const ownWindow =
-      useDesktop() && detachablePanels.has(panel) && !own
-        ? () => commands.openOwnWindow(panel)
-        : undefined
+    // The view says when the window is out of sight: off the camera's view on Canvas, scrolled
+    // away in Grid; Focus says nothing, as it shows the window it lays out.
+    const offScreen = controls.onScreen === false
+    useEffect(() => {
+      if (!offScreen) return
+      const without = (state: UiState): UiState => ({
+        ...state,
+        offScreenPanels: state.offScreenPanels.filter((each) => each !== panel),
+      })
+      ui.update((state) => {
+        const rest = without(state)
+        return { ...rest, offScreenPanels: [...rest.offScreenPanels, panel] }
+      })
+      return () => void ui.update(without)
+    }, [offScreen, panel, ui])
+    const ownWindow = useDesktop() && !own ? () => commands.openOwnWindow(panel) : undefined
     const frame = useWindowFrame(tile, controls, ownWindow)
     const Icon = panelIcons[panel]
     return (
       <WindowShell
         {...frame}
         icon={<Icon size={14} strokeWidth={1.5} />}
-        titleExtra={<PanelCountSlot panel={panel} />}
+        titleExtra={
+          <>
+            <PanelCountSlot panel={panel} />
+            <PanelExtraSlot panel={panel} />
+          </>
+        }
       >
         <div
-          className="flex min-h-0 min-w-0 flex-1 flex-col nodrag nopan nowheel"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col nodrag nopan nowheel"
           data-workspace-companion
         >
           {own ? (

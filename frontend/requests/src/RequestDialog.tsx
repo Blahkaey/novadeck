@@ -27,6 +27,7 @@ import {
   promptHint,
   type Refused,
 } from "@novadeck/core/conversation/prompt-refusal"
+import { isElement } from "@novadeck/toolkit/realm"
 import {
   useEffect,
   useId,
@@ -427,8 +428,10 @@ const focusPage = (pages: HTMLElement | null, page: number): void =>
 // Whether focus is free for a dialog that appears in `within`: on nothing, or in its host's area
 // on what holds no words of the person's.
 const askedFree = (within: Element | null, place: RequestPlace): boolean => {
-  const active = document.activeElement
-  if (!active || active === document.body) return true
+  // The document the dialog is in: the page's, or an Inbox's window of its own.
+  const page = within?.ownerDocument ?? document
+  const active = page.activeElement
+  if (!active || active === page.body) return true
   if (!within || !place.area(within)?.contains(active)) return false
   return !holdsWords(active)
 }
@@ -561,7 +564,8 @@ const Questions = ({
     focus: (arming) => {
       if (arming) guard.holdKeys()
       focusPage(pages.current, Math.min(turned, dialog.questions.length))
-      return Boolean(shownPage()?.contains(document.activeElement))
+      const shown = shownPage()
+      return Boolean(shown?.contains(shown.ownerDocument.activeElement))
     },
   }))
   const { questions } = dialog
@@ -593,7 +597,7 @@ const Questions = ({
   useEffect(() => {
     // A dialog read again leaves the person where they are in it.
     const form = pages.current?.closest("form")
-    if (now.current.held || form?.contains(document.activeElement)) return
+    if (now.current.held || form?.contains(form.ownerDocument.activeElement)) return
     if (askedFree(pages.current, now.current.place)) focusPage(pages.current, now.current.page)
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only as the dialog comes.
   }, [dialog.id])
@@ -614,7 +618,7 @@ const Questions = ({
   // Left and right turn the pages from anywhere in them, as a harness's tabs do.
   const turnKeys = (event: React.KeyboardEvent): void => {
     // Down from a tab goes into its page.
-    const onTab = event.target instanceof Element && event.target.closest('[role="tab"]') !== null
+    const onTab = isElement(event.target) && event.target.closest('[role="tab"]') !== null
     if (event.key === "ArrowDown" && onTab && !hasModifier(event)) {
       event.preventDefault()
       focusPage(pages.current, page)
@@ -627,7 +631,7 @@ const Questions = ({
     const to = (page + (event.key === "ArrowRight" ? 1 : count - 1)) % count
     if (onTab) {
       setTurned(to)
-      document.getElementById(tabId(to))?.focus()
+      event.currentTarget.ownerDocument.getElementById(tabId(to))?.focus()
     } else turnTo(to)
   }
   return (
@@ -856,7 +860,7 @@ const Form = ({
       if (!to) return false
       if (arming) guard.holdKeys()
       to.focus({ preventScroll: true })
-      return document.activeElement === to
+      return to.ownerDocument.activeElement === to
     },
   }))
   // Moved on to from an answer, the keyboard comes to its first field, as a menu's first row.
@@ -867,9 +871,10 @@ const Form = ({
   useEffect(() => {
     const form = root.current
     if (!arrived || !form) return
-    const active = document.activeElement
+    const page = form.ownerDocument
+    const active = page.activeElement
     const before = placeNow.current.area(form)
-    if (!active || active === document.body || (before?.contains(active) && !holdsWords(active)))
+    if (!active || active === page.body || (before?.contains(active) && !holdsWords(active)))
       form.querySelector<HTMLElement>("input:not([tabindex='-1'])")?.focus({ preventScroll: true })
   }, [arrived])
   const { fields } = dialog

@@ -3,9 +3,9 @@ import { useCallback, useSyncExternalStore } from "react"
 
 import { HistoryPanel } from "../sidebar/HistoryPanel"
 import { programIcon } from "../terminals/processes/profiles"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useStoreSelector } from "./controller/useStoreSelector"
-import { usePanelShowing } from "./panels-shown"
+import { usePanelOpen, usePanelShowing } from "./panels-shown"
 
 const noAgents: readonly never[] = []
 const always = (): (() => void) => () => {}
@@ -44,7 +44,7 @@ export const HistorySection = ({ history }: { readonly history: History }): Reac
     (terminalId: string) => commands.revealTerminal(terminalId, projectId),
     [commands, projectId],
   )
-  const active = useUiState((state) => state.location.route.panel === "history")
+  const active = usePanelOpen("history")
   const showing = usePanelShowing("history")
   return (
     <HistoryPanel

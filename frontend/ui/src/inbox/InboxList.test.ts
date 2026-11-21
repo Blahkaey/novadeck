@@ -12,7 +12,7 @@ import { act, createElement, useLayoutEffect } from "react"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
-import { HeldPill, InboxClear, InboxCount, InboxList } from "./InboxList"
+import { HeldPill, InboxClear, InboxCount, InboxList, useInboxClear } from "./InboxList"
 import { InboxProvider, useInboxContext, type InboxContextValue } from "./InboxProvider"
 import { InboxSheet } from "./InboxSheet"
 import { sightDwellMs } from "./read-on-sight"
@@ -74,6 +74,12 @@ const told = (id: string, at: number): InboxRow => ({
   kind: "update",
   update: { type: "told", subject: id, body: "" },
 })
+
+// The panel's Clear, while there is something to clear, as the panel's header wires it.
+const Clear = () => {
+  const clear = useInboxClear()
+  return clear ? createElement(InboxClear, { clear }) : null
+}
 
 // An Inbox whose rows the test changes, with the list, the held pill and the sheets as the
 // sidebar and the workspace wire them.
@@ -149,18 +155,19 @@ const mount = (
         working,
         active,
         looking,
+        page: document,
       },
       createElement(
         "div",
         { id: "inbox-panel" },
         snoozing ? createElement("span", { className: "count" }, createElement(InboxCount)) : null,
         createElement(HeldPill),
-        createElement(InboxClear),
+        createElement(Clear),
         // The panel's Hide button, where the keyboard goes once Clear has gone.
         createElement("button", { className: "sidebar-close" }),
         createElement(InboxList),
       ),
-      createElement(InboxSheet, { active: true }),
+      createElement(InboxSheet, { active: true, over: true }),
       createElement(Handlers),
     ),
   )

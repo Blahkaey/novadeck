@@ -11,7 +11,7 @@ import type { Backend } from "@novadeck/core/port"
 import { orderedTiles } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import { createStore, type MutableStore, type Store } from "@novadeck/core/store"
-import type { PreferencesValue, RailPanel, Workspace } from "@novadeck/core/types"
+import type { PreferencesValue, RailPanel, SidebarPanel, Workspace } from "@novadeck/core/types"
 
 import { writePreferences } from "../preferences/preferences-storage"
 import { noArrangement, type ProjectArrangement } from "../projects/project-arrangement"
@@ -34,7 +34,13 @@ import { noFoldedTeams, writeFoldedTeams, type FoldedTeams } from "../terminals/
 import { noUnread, type Unread, type Viewing } from "../terminals/unread-state"
 import { noFeatureFlags, type FeatureFlag, type FeatureFlags } from "./feature-flags"
 import type { WorkspaceRoute } from "./routing"
-import { currentContext, currentState } from "./selectors"
+import {
+  currentContext,
+  currentState,
+  mainWindowFocused,
+  panelPlace,
+  terminalsViewShown,
+} from "./selectors"
 
 // Presentation state the workspace model does not own. One store per App; it
 // starts over on reload apart from the slices persisted below.
@@ -71,6 +77,12 @@ export type UiState = {
   // every session, and never persisted, as a window can't open again without the person's click
   // (shell/own-windows.ts holds the windows themselves).
   readonly ownWindows: readonly RailPanel[]
+  // The panel whose window of its own has the person's focus, where one has (`watchOwnWindowFocus`):
+  // the page's own window hasn't then.
+  readonly ownWindowFocused: RailPanel | null
+  // The panels whose window on the stage is out of sight, as the view reports it
+  // (`useTileOnScreen`): off the camera's view on Canvas, scrolled away in Grid; never persisted.
+  readonly offScreenPanels: readonly RailPanel[]
   // The last panel whose window of its own couldn't open, refused by the browser or the desktop
   // app, for its toast; never persisted.
   readonly windowRefused: { readonly id: string; readonly panel: RailPanel } | null
@@ -205,6 +217,8 @@ export const initialUi = ({
   leaving: null,
   moved: null,
   ownWindows: [],
+  ownWindowFocused: null,
+  offScreenPanels: [],
   windowRefused: null,
   agentFocus: null,
   filesExcludeFocus: false,
@@ -572,27 +586,45 @@ export const watchClosing = (workspace: Store<Workspace>, ui: UiStore): (() => v
 // going, drops them. A pick also belongs to the Sessions panel, so leaving that panel ends it,
 // and a later visit opens sessions as usual.
 export const watchMoving = (workspace: Store<Workspace>, ui: UiStore): (() => void) => {
+  // The Sessions view shows in the sidebar by the route, and in the Terminals panel's window,
+  // which the session's stage holds, by the shell.
+  const dropUnseen = (): void => {
+    const state = ui.getSnapshot()
+    if (state.moving && terminalsViewShown(state, workspace.getSnapshot()) !== "sessions")
+      ui.update((each) => ({ ...each, moving: null }))
+  }
   const stops = [
-    workspace.subscribe(() => dropStaleMove(workspace, ui)),
-    ui.subscribe(() => {
-      const { moving, location } = ui.getSnapshot()
-      if (moving && location.route.panel !== "sessions")
-        ui.update((state) => ({ ...state, moving: null }))
+    workspace.subscribe(() => {
+      dropStaleMove(workspace, ui)
+      dropUnseen()
     }),
+    ui.subscribe(dropUnseen),
   ]
   return () => stops.forEach((stop) => stop())
 }
 
 // The Terminals panel's view the route shows, kept in the shell for its rail toggle to open
-// next, however the route got there: a switch, a shortcut, a link, Back or Forward.
-export const watchTerminalsView = (ui: UiStore): (() => void) => {
+// next, however the route got there: a switch, a shortcut, a link, Back or Forward. Noted as the
+// route turns to it, and as the panel comes back to the sidebar, which shows the route's view, so
+// the view chosen in the panel's window, which the route doesn't name, holds while the route stays
+// where it was and the panel in its window. Not on every navigation: the route names the Terminals
+// view by default, so selecting a terminal would undo the window's choice.
+export const watchTerminalsView = (ui: UiStore, workspace: Store<Workspace>): (() => void) => {
+  let noted: SidebarPanel | null = null
+  let docked = false
   const note = (): void => {
-    const { location, shell } = ui.getSnapshot()
-    if (noteTerminalsView(shell, location.route.panel) !== shell)
-      updateShell(ui, (edited) => noteTerminalsView(edited, location.route.panel))
+    const state = ui.getSnapshot()
+    const { panel } = state.location.route
+    const inSidebar = panelPlace(state, workspace.getSnapshot(), "terminals") === "sidebar"
+    const turned = panel !== noted || (inSidebar && !docked)
+    noted = panel
+    docked = inSidebar
+    if (turned && noteTerminalsView(state.shell, panel) !== state.shell)
+      updateShell(ui, (edited) => noteTerminalsView(edited, panel))
   }
   note()
-  return ui.subscribe(note)
+  const stops = [ui.subscribe(note), workspace.subscribe(note)]
+  return () => stops.forEach((stop) => stop())
 }
 
 const dropStaleMove = (workspace: Store<Workspace>, ui: UiStore): void => {
@@ -613,8 +645,13 @@ const dropStaleMove = (workspace: Store<Workspace>, ui: UiStore): void => {
 }
 
 // The terminal the person looks at: the selected one of the session on screen, while the
-// page has their focus.
-export const viewing = (workspace: Workspace, ui: Pick<UiState, "pageFocused">): Viewing => {
+// app's own window has their focus (`mainWindowFocused`).
+export const viewing = (
+  workspace: Workspace,
+  ui: Pick<UiState, "pageFocused" | "ownWindowFocused">,
+): Viewing => {
   const { selected } = currentState(workspace)
-  return ui.pageFocused && selected ? { context: currentContext(workspace), id: selected } : null
+  return mainWindowFocused(ui) && selected
+    ? { context: currentContext(workspace), id: selected }
+    : null
 }

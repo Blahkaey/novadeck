@@ -12,13 +12,16 @@ import {
   savedSession,
 } from "../support/sessions"
 import {
+  detachPanel,
   expectSelected,
   expectTerminalsView,
   literal,
   openSessions,
   openTerminalsView,
+  panelWindow,
   sidebar,
   sidebarPanel,
+  terminalsView,
   terminalsViewChoice,
   terminalTab,
   terminalTabNames,
@@ -214,6 +217,27 @@ describe("Moving a terminal to another session", () => {
       await expect.element(toast()).toBeInTheDocument()
       await expectTerminalsView("Terminals")
       await expect.element(terminalTab("Dev server")).not.toBeInTheDocument()
+    })
+  })
+
+  context("picking among all the sessions with the Terminals panel in a window", () => {
+    it("shows the sessions in that window and moves the terminal to the one picked", async () => {
+      const { others } = await openWithSessions(listed + 1)
+      await detachPanel("Terminals")
+      await moveMenuByKeyboard("Dev server")
+      await userEvent.keyboard("{End}{Enter}")
+      await expect.element(strip("Dev server")).toBeVisible()
+      await expect.element(terminalsView("Sessions")).toBeChecked()
+      const row = pickRow(others.at(-1)!)
+      await expect.element(row).toBeVisible()
+      expect(panelWindow("Terminals").element().contains(row.element())).toBe(true)
+      // The panel's rows are still settling, so the row is pressed itself.
+      ;(row.element() as HTMLElement).click()
+
+      await expect.element(toast()).toBeInTheDocument()
+      await expect.element(terminalsView("Terminals")).toBeChecked()
+      await expect.element(terminalTab("Dev server")).not.toBeInTheDocument()
+      await expect.element(panelWindow("Terminals")).toBeVisible()
     })
   })
 

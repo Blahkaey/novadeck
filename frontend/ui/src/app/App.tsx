@@ -374,11 +374,13 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
                   <div className="workspace-body relative flex min-h-0 flex-1">
                     {sidebarRail()}
                     <TeamWireSection
+                      // Beside the rail, so only while the sidebar holds the list and shows it.
                       shown={
                         !zen &&
                         !sidebarCollapsed &&
                         shell.sidebarVisible &&
-                        sidebarPanel === "terminals"
+                        sidebarPanel === "terminals" &&
+                        sidebarDocked
                       }
                       tabList={tabList}
                     />

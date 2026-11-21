@@ -374,6 +374,7 @@
 /* A panel's window of its own (app/OwnWindows.tsx): that window's whole page, in the sidebar's
    colours, which the panel fills. */
 .panel-own-window {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100dvh;

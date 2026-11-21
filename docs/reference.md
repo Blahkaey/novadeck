@@ -1121,17 +1121,23 @@ shortcut leaves typing in the terminal. A panel stays as you left it while anoth
 sidebar is hidden, on a narrow window too, where the sidebar opens over the workspace: a note
 you were writing, a search, and where its list was scrolled are there when you come back.
 
-Notes, Todo, History and Files can also open as a window on the workspace, beside your
-terminals: **Open in a window** in the panel's header (its tooltip says so; its name is "Open
-Notes in a window") puts the panel in a window of the session on screen, selected, with the
-keyboard in it, its count beside the window's name, and the panel comes as you left it: a note
-you were writing, the Todo column you were on and how far a list was scrolled. Focus shows
+Every panel of the rail (Terminals, the Inbox, Worktrees, Files, Notes, Todo and History) can
+also open as a window on the workspace, beside your terminals: **Open in a window** in the
+panel's header (its tooltip says so; its name is "Open Notes in a window") puts the panel in a
+window of the session on screen, selected, with the keyboard in it, and the panel comes as you
+left it: a note you were writing, the Todo column you were on and how far a list was scrolled.
+Beside the window's name come what the panel's heading carries in the sidebar: its count, the
+Terminals panel's session, the Inbox's "new · show" pill; what comes before its heading, as the
+Terminals panel's switch between its views, and its buttons, as the Inbox's Clear, are on the
+panel's own row under the window's header. Focus shows
 it as it shows a terminal; Grid and Canvas lay it out with the others, and in Canvas its list
 takes the wheel and the pointer, so scrolling it never pans or zooms, while its header still
 moves the window. Esc, the arrows and what you type stay in the panel, as in a companion's
 window. If the sidebar was showing that panel, it moves to the first panel your rail's order
-still has in it; on a narrow window the sidebar closes, so the window shows. The panel's rail icon stays where it is, with a small window mark in its
-corner; its tooltip says it is in a window, and the icon and the panel's shortcut take you to
+still has in it, or hides with none left there; on a narrow window the sidebar closes, so the
+window shows. Returning a panel opens the sidebar on it again, and a sidebar you open with every
+panel in a window shows the note on the one it was last on (below). The panel's rail icon stays
+where it is, with a small window mark in its corner; its tooltip says it is in a window, and the icon and the panel's shortcut take you to
 the window: selected, shown again if you hid it from Grid and Canvas, with the keyboard in it.
 Each panel's window is listed in the Terminals panel under the panel's own icon; clicking it goes
 to the window, and Search and Ctrl+Tab's switcher call it a panel window. The window's header has
@@ -1142,6 +1148,31 @@ the sidebar in the others, so switching sessions moves it, and the session remem
 windows with the rest of how it is laid out. A link or Back that opens the sidebar on a panel in
 a window shows "Notes is in a window" with **Show it**, which goes to the window, and **Return
 to sidebar**.
+
+The Terminals panel's window has the switch between its views on its own row: the session's
+terminals or the project's sessions, which it keeps whichever view the sidebar shows. Its rail
+icon, Toggle Terminals (`Cmd+Shift+E`, `Ctrl+Shift+E` on Windows and Linux), Toggle Sessions
+(`Cmd+Shift+S`, `Ctrl+Shift+S`), the empty workspace's "All sessions…" and **Move to → All
+sessions…** go to the window on the view they name, the last with the sessions there to pick
+from. A `?panel=sessions` link or Back that turns the sidebar from another panel to the sessions
+turns the window to them too, and the sidebar shows the note; one that leaves the sidebar where
+it was leaves the window on its view. Returning it opens the sidebar on the view the window
+showed, and a session that has the panel in the sidebar shows it there on the sidebar's view. Its list has a row for the Terminals window itself, under the panel's icon, which goes to
+the window and returns it, as any panel's row does. The team wires beside the list show only while
+the list is in the sidebar. A tab dragged out of the list in its window on the workspace goes to
+another session as from the sidebar: held over the Sessions choice of its switch, it turns the
+window to the sessions, and dropped on one, the terminal moves there. **New session** there opens
+the new session with the Terminals panel back in the sidebar, as a new session has no windows yet,
+on New terminal; in the panel's own window, which every session shares, the new session's
+terminals show there instead, New terminal ready.
+
+The Inbox's window answers as the sidebar's list does: a row opens its sheet beside it, in the
+window, over the workspace without the workspace stepping back, or over the list where the window
+leaves no room beside it; j, k, the arrows, S and Esc work there, and **Show terminal** goes to the
+terminal without turning the sidebar to the terminals. While the Inbox's window is in sight (not
+panned away on Canvas nor scrolled away in Grid), an update's row you see is read, rows that settle
+keep their place, and no toast says what the Inbox shows already. Worktrees' window closes, without coming
+back to the sidebar, when you turn agent worktrees off.
 
 From its window on the workspace, a panel can go on to a window of its own, which you can move
 anywhere, onto another screen too: **Open in its own window** in the window's header (or its
@@ -1168,6 +1199,18 @@ arrows and typing in its fields. In a browser, keep Novadeck's own tab showing w
 panel in its own window: the panel runs in that tab, so while its window is minimized or
 another tab is in front of it, dragging a note or a card stalls, and code blocks wait to be
 highlighted. The desktop app has no such limit.
+
+Some things don't reach across windows of their own. A terminal's tab dragged in the Terminals
+panel's own window only reorders its list: to move a terminal to another session from there, use
+its **Move to** menu, whose **All sessions…** turns that window to the sessions. The Inbox's sheet
+opens in the Inbox's own window, beside its row where the window has room and over the list where
+it hasn't. An update the Inbox's own window shows is read while that window has your focus, and
+toasts and notifications hold back only then: while you work in Novadeck's main window they ring
+as ever, as Novadeck can't tell whether the Inbox's window shows or is covered, and while you are
+in the Inbox's window no notification rings for what it shows. **Show terminal** there brings
+Novadeck's main window to the front, where a browser lets it.
+Only the panel's own keys work in its own window: the workspace's arrows and shortcuts, F2 among
+them, stay with Novadeck's main window, where F2 renames in the terminal's header.
 
 Hold Ctrl while pressing Tab to choose a terminal, then release Ctrl to switch.
 While navigating Grid and Canvas, the arrow keys select the nearest terminal on that

@@ -68,6 +68,7 @@ export const eachPlatform = [
   "src/views/grid.spec.tsx",
   "src/views/zen.spec.tsx",
   "src/visitor.spec.tsx",
+  "src/workspace/panel-windows.spec.tsx",
   "src/workspace/routing.spec.tsx",
   "src/workspace/sidebar.spec.tsx",
 ]

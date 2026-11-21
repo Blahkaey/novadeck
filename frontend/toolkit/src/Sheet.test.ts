@@ -30,12 +30,16 @@ const row = (left: number, top: number): HTMLElement => {
 }
 
 const sheet = (
-  placement: Pick<ComponentProps<typeof Sheet>, "anchor" | "anchorKey" | "placeKey">,
+  placement: Pick<ComponentProps<typeof Sheet>, "anchor" | "anchorKey" | "placeKey"> &
+    Partial<Pick<ComponentProps<typeof Sheet>, "overlap" | "boundary">>,
+  page: Document = document,
 ) => {
   const props: ComponentProps<typeof Sheet> = {
     label: "Details",
     open: true,
-    boundary: () => null,
+    page,
+    boundary: () => page.body,
+    overlap: false,
     onInteractOutside: () => {},
     onDismiss: () => {},
     children: "Body",
@@ -90,6 +94,20 @@ describe("a sheet", () => {
     })
   })
 
+  context("anchored to a row in another window of the page", () => {
+    it("opens in that window's document, not the page's", async () => {
+      const frame = document.createElement("iframe")
+      document.body.append(frame)
+      mounted.push(() => frame.remove())
+      const page = frame.contentDocument!
+      const anchor = page.body.appendChild(page.createElement("div"))
+      mount(sheet({ anchor: () => anchor, anchorKey: "a" }, page))
+      await settle()
+      expect(page.querySelector(".sheet")?.textContent).toBe("Body")
+      expect(document.querySelector(".sheet")).toBeNull()
+    })
+  })
+
   context("anchored anew to a row that isn't on the page yet", () => {
     it("doesn't stand beside the last row", async () => {
       const first = row(300, 400)
@@ -100,6 +118,59 @@ describe("a sheet", () => {
       view.rerender(sheet({ anchor: () => null, anchorKey: "b" }))
       await settle()
       expect(placed()).not.toBe(besideFirst)
+    })
+  })
+
+  context("beside a row with no room left beside it", () => {
+    // A page 1000 by 800 px, all of it the boundary, and a sheet 400 by 300 px: jsdom lays out
+    // nothing, so each is given its size.
+    const sized = () => {
+      const boundary = document.createElement("div")
+      document.body.append(boundary)
+      mounted.push(() => boundary.remove())
+      boundary.getBoundingClientRect = () =>
+        DOMRect.fromRect({ x: 0, y: 0, width: 1000, height: 800 })
+      const size = (element: Element, name: "clientWidth" | "clientHeight", value: number) => {
+        Object.defineProperty(element, name, { configurable: true, value })
+        mounted.push(() => void delete (element as unknown as Record<string, unknown>)[name])
+      }
+      for (const element of [boundary, document.documentElement]) {
+        size(element, "clientWidth", 1000)
+        size(element, "clientHeight", 800)
+      }
+      const offset = (name: "offsetWidth" | "offsetHeight", value: number) => {
+        const was = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)!
+        Object.defineProperty(HTMLElement.prototype, name, {
+          configurable: true,
+          get(this: HTMLElement) {
+            return this.dataset["part"] === "positioner" ? value : was.get!.call(this)
+          },
+        })
+        mounted.push(() => Object.defineProperty(HTMLElement.prototype, name, was))
+      }
+      offset("offsetWidth", 400)
+      offset("offsetHeight", 300)
+      return boundary
+    }
+    const left = (): number => Number.parseFloat(placed().split(" ")[0]!)
+
+    it("slides back over the row to stay within the boundary, where it may", async () => {
+      const boundary = sized()
+      const anchor = row(780, 100)
+      mount(
+        sheet({ anchor: () => anchor, anchorKey: "a", boundary: () => boundary, overlap: true }),
+      )
+      await settle()
+      expect(left()).toBeLessThan(780 + 200)
+      expect(left() + 400).toBeLessThanOrEqual(1000)
+    })
+
+    it("stays beside the row where it may not", async () => {
+      const boundary = sized()
+      const anchor = row(780, 100)
+      mount(sheet({ anchor: () => anchor, anchorKey: "a", boundary: () => boundary }))
+      await settle()
+      expect(left()).toBe(780 + 200 + 8)
     })
   })
 })

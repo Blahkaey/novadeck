@@ -31,13 +31,13 @@ describe("panel windows", () => {
     ])
   })
 
-  it("opens Notes, Todo, History and Files as windows at once", async () => {
+  it("opens every panel of the rail as a window at once, Files last", async () => {
     const opened: RailPanel[] = []
     const [group] = panelGroups
     await group!.actions
       .find((action) => action.label === "Panels in windows")!
       .run(context(opened))
-    expect(opened).toEqual(["notes", "todo", "history", "files"])
+    expect(opened).toEqual(["terminals", "inbox", "worktrees", "notes", "todo", "history", "files"])
     expect(windowPanels).toEqual(opened)
   })
 

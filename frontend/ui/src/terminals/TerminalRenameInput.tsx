@@ -1,3 +1,4 @@
+import { isElement } from "@novadeck/toolkit/realm"
 import { useLayoutEffect, useRef } from "react"
 
 export type TerminalRename = {
@@ -44,7 +45,7 @@ export const TerminalRenameInput = ({
       field.focus({ preventScroll: true })
       field.select()
     } else if (
-      document.activeElement === field &&
+      field.ownerDocument.activeElement === field &&
       value === name &&
       (field.selectionStart !== 0 || field.selectionEnd !== field.value.length)
     ) {
@@ -60,7 +61,7 @@ export const TerminalRenameInput = ({
       if (
         focus.current.request !== request ||
         focus.current.interacted ||
-        document.activeElement !== field ||
+        field.ownerDocument.activeElement !== field ||
         value !== name ||
         (field.selectionStart === 0 && field.selectionEnd === field.value.length)
       )
@@ -69,8 +70,10 @@ export const TerminalRenameInput = ({
       // double-click selection against the new input and collapse its range.
       field.select()
     }
-    document.addEventListener("selectionchange", restoreSelection)
-    return () => document.removeEventListener("selectionchange", restoreSelection)
+    // In the document the field is in: the page's, or the Terminals panel's window of its own.
+    const page = field.ownerDocument
+    page.addEventListener("selectionchange", restoreSelection)
+    return () => page.removeEventListener("selectionchange", restoreSelection)
   }, [autoFocus, name, request, value])
 
   return (
@@ -101,7 +104,7 @@ export const TerminalRenameInput = ({
       onBlur={(event) => {
         const next = event.relatedTarget
         if (
-          next instanceof Element &&
+          isElement(next) &&
           next.closest<HTMLElement>("[data-rename-terminal]")?.dataset.renameTerminal === id
         )
           return

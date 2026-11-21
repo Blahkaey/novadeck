@@ -4,8 +4,12 @@ import { page, userEvent } from "vitest/browser"
 import { desktopWindow } from "../support/backend"
 import { openConversation, openMessages } from "../support/messages"
 import {
+  chooseView,
+  detachPanel,
   expectStaysAbsent,
   openWorkspace,
+  panelWindow,
+  sidebar,
   sidebarPanel,
   tabDescription,
   terminal,
@@ -110,6 +114,34 @@ describe("The agents demo's Inbox", () => {
 
     await expect.element(confirmation()).toMatchTextContent("Allowed @crow's command.")
     await sidebarPanel("Terminals").click()
+    await expect.poll(() => tabDescription("Checkout review") ?? "").not.toContain("Needs")
+  })
+})
+
+describe("The Inbox in a window on the workspace", () => {
+  it("answers an ask there in Focus, its sheet in sight, the sidebar as it was", async () => {
+    await openWorkspace("/?demo=agents")
+    await expect.poll(() => tabDescription("Checkout review") ?? "").toContain("Needs permission")
+    await chooseView("Focus")
+    await detachPanel("Inbox")
+    await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+
+    const ask = row("Run pnpm test")
+    await expect.element(ask).toBeVisible()
+    expect(panelWindow("Inbox").element().contains(ask.element())).toBe(true)
+    await ask.click()
+    // Laid out within the page, over the window where there is no room beside its row.
+    await expect.element(answer(sheet("Checkout review"), "Yes, proceed")).toBeVisible()
+    await expect
+      .poll(() => {
+        const box = sheet("Checkout review").element().getBoundingClientRect()
+        return box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight
+      })
+      .toBe(true)
+    await press(sheet("Checkout review"), "Yes, proceed")
+
+    await expect.element(confirmation()).toMatchTextContent("Allowed @crow's command.")
+    await expect.element(sidebar()).toHaveAccessibleName("Terminals")
     await expect.poll(() => tabDescription("Checkout review") ?? "").not.toContain("Needs")
   })
 })

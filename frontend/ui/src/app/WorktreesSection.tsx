@@ -7,10 +7,10 @@ import { useCallback, useMemo } from "react"
 
 import { projectPath } from "../sidebar/files-works"
 import { WorktreesPanel } from "../sidebar/WorktreesPanel"
-import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
+import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useStoreSelector } from "./controller/useStoreSelector"
 import { copyOf, sameWorks } from "./files-feed"
-import { usePanelShowing } from "./panels-shown"
+import { usePanelOpen, usePanelShowing } from "./panels-shown"
 import { currentState } from "./selectors"
 
 // What a backend without forges reads in their place.
@@ -103,7 +103,7 @@ export const WorktreesSection = ({ works }: { readonly works: Works }): React.JS
     },
     [commands, inOpenProject, allWorks, projectId],
   )
-  const active = useUiState((state) => state.location.route.panel === "worktrees")
+  const active = usePanelOpen("worktrees")
   const showing = usePanelShowing("worktrees")
   return (
     <WorktreesPanel

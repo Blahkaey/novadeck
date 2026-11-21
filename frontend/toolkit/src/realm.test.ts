@@ -1,6 +1,6 @@
 import { afterEach } from "vitest"
 
-import { clipboardOf, isElement, isHTMLElement, viewOf } from "./realm"
+import { clipboardOf, isElement, isHTMLElement, isKeyboardEvent, viewOf } from "./realm"
 import { context, describe, expect, it } from "./test"
 
 // Another window of the page, as a panel's window of its own is: a frame's, with its own
@@ -24,6 +24,16 @@ describe("realm checks", () => {
       expect(button instanceof HTMLElement).toBe(false)
       expect(isElement(button)).toBe(true)
       expect(isHTMLElement(button)).toBe(true)
+    })
+
+    it("recognise a key pressed there", () => {
+      const other = otherWindow()
+      const key = new other.KeyboardEvent("keydown", { key: " " })
+
+      expect(key instanceof KeyboardEvent).toBe(false)
+      expect(isKeyboardEvent(key)).toBe(true)
+      expect(isKeyboardEvent(new other.MouseEvent("mousedown"))).toBe(false)
+      expect(isKeyboardEvent(null)).toBe(false)
     })
 
     it("find the window it is drawn in", () => {

@@ -9,7 +9,7 @@ import { fromNovadeck, labelOf, subjectOf } from "../inbox/inbox-text"
 import { isDesktop } from "../shell/desktop"
 import type { Ding } from "./ding"
 import type { LandedInbox } from "./inbox-landing"
-import { heldForToast, modalOpen } from "./selectors"
+import { heldForToast, mainWindowFocused, modalOpen } from "./selectors"
 import type { UiStore } from "./ui-store"
 
 // The Inbox these follow: the landed one, which knows what landed quietly, or any with a state.
@@ -277,10 +277,15 @@ export const watchBellRings = (
     leave: () => {},
   })
 
+// Whether the person is in the Inbox's window of its own, where they see what the ping would say.
+const lookingAtInbox = (state: { readonly ownWindowFocused: string | null }): boolean =>
+  state.ownWindowFocused === "inbox"
+
 // Follows the Inbox for the person who isn't looking at it. A new row that needs them
-// pings once (see `followNeeds`), only if the page still hasn't their focus and the person
-// wants them (`notifyNeeds`); a row that pinged and then leaves the Inbox takes its
-// notification back. While the page has their focus a toast rings instead, in
+// pings once (see `followNeeds`), only if the app's own window still hasn't their focus
+// (`mainWindowFocused`), they aren't in the Inbox's window of its own, and they want them
+// (`notifyNeeds`); a row that pinged and then leaves the Inbox takes its
+// notification back. While the app's own window has their focus a toast rings instead, in
 // inbox-toasts.ts. A row whose toast waits behind a modal dialog there goes to whichever
 // comes first: this ping if the person leaves the app with the dialog open, else the toast
 // once it closes. The app icon's `badge` follows the bell's count, drawn as an image where
@@ -312,11 +317,11 @@ export const watchInboxPings = (
   const ping = (row: InboxRow): void => board?.show(rowKey(row), needNotice(row), row.id)
   const handOver = (): void => {
     const state = ui.getSnapshot()
-    if (deferred.size === 0 || (state.pageFocused && modalOpen(state))) return
+    if (deferred.size === 0 || (mainWindowFocused(state) && modalOpen(state))) return
     const standing = new Set(needing(inbox.state.getSnapshot().items).map(rowKey))
     const rows = [...deferred.values()]
     deferred.clear()
-    if (state.pageFocused || !state.preferences.notifyNeeds) return
+    if (mainWindowFocused(state) || !state.preferences.notifyNeeds || lookingAtInbox(state)) return
     for (const row of rows) if (standing.has(rowKey(row))) ping(row)
   }
   const stopHanding = ui.subscribe(handOver)
@@ -324,8 +329,8 @@ export const watchInboxPings = (
     graceMs,
     ring: (row) => {
       const state = ui.getSnapshot()
-      if (!state.preferences.notifyNeeds || !board) return false
-      if (state.pageFocused) {
+      if (!state.preferences.notifyNeeds || !board || lookingAtInbox(state)) return false
+      if (mainWindowFocused(state)) {
         if (!heldForToast(state, workspace.getSnapshot(), desktop)) return false
         deferred.set(rowKey(row), row)
         return true

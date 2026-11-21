@@ -16,6 +16,7 @@ import { answerWordsLimit, Menu, type MenuHandle, type MenuItem } from "@novadec
 import { RequestCard, RequestFrame, type RequestPlace } from "@novadeck/requests/RequestCard"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { Markdown } from "@novadeck/toolkit/Markdown"
+import { isElement } from "@novadeck/toolkit/realm"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import { useAgentContext, useDiagnostics, useRefused } from "./agent-context"
@@ -535,7 +536,7 @@ const cardTopIn = (page: HTMLElement | null): number | undefined =>
 // One row's page under the head: its context, then its card.
 export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
   const { row, failed, sent } = props
-  const { receipt } = useInboxContext()
+  const { receipt, page } = useInboxContext()
   // A resolved row, or an answered one opened again, says how it ended or what its answer did,
   // in place of its menu.
   const settled = endedLine(row) ?? sent?.note ?? null
@@ -573,14 +574,15 @@ export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
       if (event.repeat && /^[1-9]$/.test(event.key)) return
       const target = event.target
       const outside =
-        target instanceof Element &&
-        (rowOf(row.id)?.contains(target) || target.matches(".inbox-sheet-title"))
+        isElement(target) &&
+        (rowOf(row.id, page)?.contains(target) || target.matches(".inbox-sheet-title"))
       if (!outside) return
       if (handle.current?.key(event.key)) event.preventDefault()
     }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [row.id, settled])
+    // In the document the Inbox is in, where its row and the sheet are.
+    page.addEventListener("keydown", onKey)
+    return () => page.removeEventListener("keydown", onKey)
+  }, [row.id, settled, page])
 
   return (
     <div
@@ -588,7 +590,7 @@ export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
       className="inbox-sheet-scroll console-page chat-inline"
       onClickCapture={(event) => {
         if (Date.now() >= movedUntil.current) return
-        if (!(event.target instanceof Element) || !event.target.closest(".request-card")) return
+        if (!isElement(event.target) || !event.target.closest(".request-card")) return
         event.preventDefault()
         event.stopPropagation()
       }}

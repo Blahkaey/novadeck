@@ -301,11 +301,15 @@ Terminals:
   exited from keep their handles on their tabs; its other plain shells show none. The Notes and
   Todo panels open as windows beside them, before the terminals, so the last terminal stays the
   one you look at. Also a burst of 30, a quick failure, a spawn failure and the terminal limit.
-- **Panel windows:** "Panels in windows" opens Notes, Todo, History and Files as windows on the
-  session on screen, as each one's **Open in a window** does (only those the demo shows), Files
-  selected: each is listed in the Terminals panel under its own icon, its rail toggle keeps its
-  place with a window mark, and the sidebar moves to the first panel left in it. The
-  rest is normal use: a window's **Return to sidebar**, the rail toggle that goes to the window,
+- **Panel windows:** "Panels in windows" opens every panel of the rail (Terminals, the Inbox,
+  Worktrees, Notes, Todo, History and Files) as windows on the session on screen, as each one's
+  **Open in a window** does (only those the demo shows: Worktrees with agent worktrees on), Files
+  selected: each is listed in the Terminals window under its own icon, the Terminals window too,
+  its rail toggle keeps its place with a window mark, and with every panel out the sidebar hides;
+  opened again, it shows the note on the panel it was on. The Terminals window's view switch, a
+  pick from **Move to → All sessions…**, the Inbox's sheet beside its row in its window and the
+  Worktrees window closing as agent worktrees turn off in Preferences are normal use, as is the
+  rest: a window's **Return to sidebar**, the rail toggle that goes to the window,
   and the sidebar's "Notes is in a window" note, which a `?panel=notes` link or Back reaches. A
   window's **Open in its own window** opens a real browser window, so a panel in a window of its
   own, its rail toggle, its **Return to sidebar** and closing it, the sidebar's "Notes is in its

@@ -14,7 +14,6 @@ import {
   type KeyState,
 } from "../../interaction/keymap"
 import { arrangeProjects } from "../../projects/project-arrangement"
-import { sidebarVisible } from "../../shell/shell-state"
 import { cycleRecent, moveRecent } from "../../terminals/recent"
 import {
   activeTerminal,
@@ -22,6 +21,9 @@ import {
   currentContext,
   currentState,
   currentTarget,
+  panelOpen,
+  panelPlace,
+  panelShowing,
   windowedDestination,
 } from "../selectors"
 import type { CommandContext } from "./context"
@@ -47,13 +49,20 @@ export const createKeyCommands = (
   { workspace, ui, navigation, canvas, effects, dictation, panelShown }: CommandContext,
 ): Record<CommandId, KeyCommand> => {
   const state = () => currentState(workspace.getSnapshot())
-  const panel = () => ui.getSnapshot().location.route.panel
   const pinnedProject = (index: number) =>
     arrangeProjects(workspace.getSnapshot().projects, ui.getSnapshot().projectArrangement).pinned[
       index
     ]
-  const terminalsPanelVisible = (): boolean =>
-    panel() === "terminals" && sidebarVisible(ui.getSnapshot().shell, effects.desktop())
+  // The terminals' list in sight on the page, in the sidebar or a window on the stage: one in a
+  // window of its own is out of the keys' reach, as the page's keys are the page's.
+  const terminalsPanelVisible = (): boolean => {
+    const [now, model] = [ui.getSnapshot(), workspace.getSnapshot()]
+    return (
+      panelPlace(now, model, "terminals") !== "window" &&
+      panelOpen(now, model, "terminals") &&
+      panelShowing(now, model, "terminals", effects.desktop)
+    )
+  }
   // Where Focus toggles to: Focus itself, or back to the windowed view.
   const focusToggle = () => {
     const { view } = state()

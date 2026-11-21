@@ -1,3 +1,4 @@
+import { isElement } from "@novadeck/toolkit/realm"
 import {
   useEffect,
   useId,
@@ -165,9 +166,10 @@ export const Menu = ({
     if (!arrived) return
     guard.current = Date.now() + arrivalGuardMs
     // What had focus went with the menu before: it comes here, so the keyboard keeps its place.
-    const active = document.activeElement
+    const page = menu.current?.ownerDocument ?? document
+    const active = page.activeElement
     const before = menu.current && areaNow.current?.(menu.current)
-    if (!active || active === document.body || before?.contains(active)) rows.current[0]?.focus()
+    if (!active || active === page.body || before?.contains(active)) rows.current[0]?.focus()
   }, [arrived])
   // Whether a key is to be held back: no repeat answers, nor anything as the menu arrives.
   const held = (key: string, repeat: boolean): boolean =>
@@ -216,7 +218,7 @@ export const Menu = ({
       if (!row) return false
       if (arming) keysGuard.current = Date.now() + arrivalGuardMs
       row.focus({ preventScroll: true })
-      return document.activeElement === row
+      return row.ownerDocument.activeElement === row
     },
   }))
 
@@ -265,7 +267,7 @@ export const Menu = ({
           if (apply(event.key)) event.preventDefault()
         }}
         onPointerMove={(event) => {
-          if (event.pointerType !== "mouse" || !(event.target instanceof Element)) return
+          if (event.pointerType !== "mouse" || !isElement(event.target)) return
           const row = event.target.closest<HTMLElement>("[data-row]")
           const index = row ? Number(row.dataset.row) : -1
           // An armed row keeps the cursor: the mouse passing over another never disarms it.
@@ -273,7 +275,7 @@ export const Menu = ({
           setCursor({ at: index, armed: null })
           // Focus goes along from anything in the menu but the person's words, which would land
           // on a row instead.
-          const active = document.activeElement
+          const active = event.target.ownerDocument.activeElement
           const target = rows.current[index]
           if (active && menu.current?.contains(active) && !isTyping(active))
             target?.focus({ preventScroll: true })
@@ -332,7 +334,7 @@ export const Menu = ({
                 {...common}
                 data-check={item.check === undefined ? undefined : item.check}
                 onClick={(event) => {
-                  if (!(event.target instanceof Element) || Date.now() < guard.current) return
+                  if (!isElement(event.target) || Date.now() < guard.current) return
                   // Its number or its mark presses it, ticking or unticking it in a menu of
                   // several picks; anywhere else but its field or its key puts the person in it.
                   if (event.target.closest(".request-option-number, .request-check"))

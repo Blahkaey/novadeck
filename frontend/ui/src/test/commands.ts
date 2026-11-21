@@ -220,7 +220,7 @@ export const openCommands = ({
   for (const watch of [trackRecent, watchPresentation, watchSwitcher, watchClosing, watchMoving])
     watch(store, ui)
   watchCrashLoop(crashLoop?.crashes, ui)
-  watchTerminalsView(ui)
+  watchTerminalsView(ui, store)
   return {
     context,
     workspace: store,

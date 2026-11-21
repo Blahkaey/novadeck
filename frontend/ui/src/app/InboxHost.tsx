@@ -19,7 +19,8 @@ import { dingOf } from "./ding"
 import { clickNotice, noticeBoard } from "./inbox-pings"
 import { watchInboxToasts } from "./inbox-toasts"
 import { watchMoveToasts } from "./move-toasts"
-import { currentState, modalOpen } from "./selectors"
+import { usePanelPage, usePanelPlace } from "./panels-shown"
+import { currentState, mainWindowFocused, modalOpen } from "./selectors"
 import { focusWhenReady, watchShowToasts } from "./show-toasts"
 import { watchRefusedWindows } from "./window-toasts"
 
@@ -70,8 +71,14 @@ export const InboxHost = ({
   const { inbox } = landing
   // Whether an agent is at work in any project, for the empty Inbox to say.
   const working = useWorkspaceState((state) => anyAgentWorking(state.projects))
-  // Whether the person looks at the page, for an update's row in sight to be read.
-  const looking = useUiState((state) => state.pageFocused && !modalOpen(state))
+  // Where the Inbox is, and the document it is drawn in, where its sheet opens.
+  const place = usePanelPlace("inbox")
+  const page = usePanelPage("inbox")
+  // Whether the person looks at the Inbox, for an update's row in sight to be read: at the app's
+  // own window, with no dialog over it, or at the Inbox's window of its own.
+  const onPage = useUiState((state) => mainWindowFocused(state) && !modalOpen(state))
+  const inOwnWindow = useUiState((state) => state.ownWindowFocused === "inbox")
+  const looking = place === "window" ? inOwnWindow : onPage
   const { hideSidebar, reveal, select, showInbox, peekInbox } = commands
   const phone = useMemo(
     () => (desktop ? undefined : { hideList: hideSidebar, showList: showInbox }),
@@ -112,10 +119,17 @@ export const InboxHost = ({
     },
     [workspace, select, reveal],
   )
-  // Going to an Inbox row's terminal from the Inbox's list turns the sidebar to the terminals.
+  // Going to an Inbox row's terminal from the Inbox's list in the sidebar turns the sidebar to the
+  // terminals; from its window, the sidebar stays as it was, and from its window of its own the
+  // app's window, where the terminal shows, comes to the front.
+  const turnSidebar = active && place === "sidebar"
+  const own = place === "window"
   const revealItem = useCallback(
-    (terminalId: string) => reveal(terminalId, active ? "terminals" : undefined),
-    [reveal, active],
+    (terminalId: string) => {
+      reveal(terminalId, turnSidebar ? "terminals" : undefined)
+      if (own) window.focus()
+    },
+    [reveal, turnSidebar, own],
   )
   return (
     <AgentContextProvider
@@ -130,11 +144,13 @@ export const InboxHost = ({
         working={working}
         active={active}
         looking={looking}
+        page={page}
       >
         {children}
         <NoticeClicks />
         <PlanTextProvider workspace={workspace} companions={backend.companions}>
-          <InboxSheet active={active} />
+          {/* Drawn anew where the Inbox moves, in the document it is in now. */}
+          <InboxSheet key={place} active={active} over={place === "sidebar"} />
         </PlanTextProvider>
         <InboxToasts
           follow={follow}
