@@ -8,7 +8,7 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
-import { clearable, inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
+import { inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import { NovaMark } from "@novadeck/toolkit/NovaLogo"
 import { isHTMLElement } from "@novadeck/toolkit/realm"
 import { sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
@@ -20,7 +20,7 @@ import { focusPanelClose, focusSheet, focusSheetSoon, nextRowButton, rowOf } fro
 import { iconKey, icons, tintOf, typeWords } from "./inbox-icons"
 import { asks as asking, needing } from "./inbox-state"
 import { endedWords, readLabel, resumesLabel, subjectOf, waitLabel } from "./inbox-text"
-import { started, useInboxContext } from "./InboxProvider"
+import { started, useInboxClearNow, useInboxContext } from "./InboxProvider"
 import { useReadOnSight } from "./read-on-sight"
 import { Text } from "./sheet-parts"
 
@@ -347,10 +347,7 @@ const HeldPillView = (): React.JSX.Element | null => {
 
 // The Inbox's clear while any row asks nothing of the person and the backend can clear: what
 // the panel's header offers a button for (`InboxClear`), only then.
-export const useInboxClear = (): (() => void) | undefined => {
-  const { state, clear } = useInboxContext()
-  return clear && state.items.some(clearable) ? clear : undefined
-}
+export const useInboxClear = (): (() => void) | undefined => useInboxClearNow()
 
 // Beside the panel's Hide button while any row asks nothing of the person: clears the Inbox of
 // those, its updates, read, and its resolved rows, for good. What asks stays.

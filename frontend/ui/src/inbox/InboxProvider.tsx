@@ -146,6 +146,12 @@ const OpenerContext = createContext<InboxOpener | null>(null)
 
 export const useInboxOpener = (): InboxOpener | null => useContext(OpenerContext)
 
+// Clears the Inbox's clearable rows while there are any, apart from the rest of the Inbox:
+// the panel's header reads only this, so it doesn't draw again with the Inbox's every change.
+const ClearContext = createContext<(() => void) | undefined>(undefined)
+
+export const useInboxClearNow = (): (() => void) | undefined => useContext(ClearContext)
+
 export const useInboxContext = (): InboxContextValue => {
   const value = useContext(InboxContext)
   if (!value) throw new Error("useInboxContext must be used inside an InboxProvider")
@@ -626,9 +632,14 @@ export const InboxProvider = ({
     },
     [open, inbox],
   )
+  // `clear` is there exactly when the Inbox can clear (`inbox.clear`).
+  const anyClearable = inbox.clear !== undefined && state.items.some(clearable)
+  const clearNow = useMemo(() => (anyClearable ? clear : undefined), [anyClearable, clear])
   return (
     <OpenerContext.Provider value={opener}>
-      <InboxContext.Provider value={value}>{children}</InboxContext.Provider>
+      <ClearContext.Provider value={clearNow}>
+        <InboxContext.Provider value={value}>{children}</InboxContext.Provider>
+      </ClearContext.Provider>
     </OpenerContext.Provider>
   )
 }
