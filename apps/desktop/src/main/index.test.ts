@@ -88,6 +88,10 @@ describe("the compiled desktop app", () => {
     it("offers connection settings from the menu and a failed launch, and saves before restarting", async () => {
       const main = await read("main/index.js")
       expect(main).toContain("askRemoteSettings(")
+      // Over an app window, never a panel window, which goes with its opener.
+      expect(main).toMatch(
+        /askRemoteSettings\(\s*focused && !panels\.is\(focused\) \? focused : appWindows\(\)\[0\]/u,
+      )
       expect(main).toContain('"Open Settings…"')
       expect(main).toContain('"Remote Runner…"')
       expect(main).toContain('"remote-runner.off.json"')
@@ -133,10 +137,11 @@ describe("the compiled desktop app", () => {
       const preload = await read("preload/index.cjs")
 
       expect(main).toContain('app.on("before-quit"')
-      // Only the app's own windows: a look's, out of sight, has no page to save.
+      // Only the app's own windows: a look's, out of sight, has no page to save, and a panel
+      // window's page is its opener's.
       expect(main).toContain("saveWindows(appWindows())")
       expect(main).toMatch(
-        /appWindows = \(\) => BrowserWindow\.getAllWindows\(\)\.filter\(\(window\) => !looker\.is\(window\)\)/,
+        /appWindows = \(\) => BrowserWindow\.getAllWindows\(\)\.filter\(\(window\) => !looker\.is\(window\) && !panels\.is\(window\)\)/,
       )
       expect(main).toContain("() => saveWindows([window])")
       // The order itself is covered in ./quit.test.ts; this is that the app hands it its steps.
@@ -321,6 +326,66 @@ describe("the compiled desktop app", () => {
       expect(main).toContain("watchPageRequests(")
       expect(main).toContain("novadeck:page-request")
       expect(preload).toContain("novadeck:page-request")
+    })
+
+    it("opens a sidebar panel's window only for the app page's main frame, with none of its powers", async () => {
+      const main = await read("main/index.js")
+
+      // The app window's handler allows a panel's window alone; anything else is denied, a
+      // web address after it goes to the system's browser. Which requests, where the window
+      // goes and how it lives are covered in ./window/panel-windows.test.ts.
+      expect(main).toMatch(
+        /setWindowOpenHandler\(\(details\) => \{\s*const panel = panels\d*\.request\(window, details\);\s*if \(panel\) return \{ action: "allow", overrideBrowserWindowOptions: panel \};\s*openOutside\(details\.url\);\s*return \{ action: "deny" \};\s*\}\);\s*panels\d*\.host\(window\);/u,
+      )
+      // Its features may name its place and size alone: any other would set a native option.
+      expect(main).toMatch(
+        /url === "about:blank" && railPanels\.some\([^;]*\? requestedBounds\(features\) : void 0;/u,
+      )
+      // Opened from anything but the app page's main frame, it loads and opens nothing and is
+      // destroyed before it shows.
+      expect(main).toMatch(
+        /if \(frame !== opener\.webContents\.mainFrame \|\| !isAppPage\d*\(frame\.url\)\) \{\s*contents\.setWindowOpenHandler\(\(\) => \(\{ action: "deny" \}\)\);\s*contents\.on\("will-navigate", \(event\) => event\.preventDefault\(\)\);\s*setImmediate\(\(\) => \{\s*if \(!panel\.isDestroyed\(\)\) panel\.destroy\(\);\s*\}\);\s*return;\s*\}/u,
+      )
+      const options = main.slice(
+        main.indexOf("const panelWindowOptions = "),
+        main.indexOf("const panelWindows = "),
+      )
+      expect(options).toMatch(
+        /show: false,[\s\S]*webPreferences: \{\s*contextIsolation: true,\s*nodeIntegration: false,\s*nodeIntegrationInSubFrames: false,\s*nodeIntegrationInWorker: false,\s*sandbox: true,\s*webSecurity: true,\s*webviewTag: false\s*\}/u,
+      )
+      expect(options).not.toContain("preload")
+      // Whatever a feature could set to hide it, cover others or keep it open is pinned too.
+      for (const pinned of [
+        "frame: true",
+        "transparent: false",
+        "opacity: 1",
+        "focusable: true",
+        "alwaysOnTop: false",
+        "skipTaskbar: false",
+        "fullscreenable: true",
+        "simpleFullscreen: false",
+        "kiosk: false",
+        "closable: true",
+      ])
+        expect(options).toContain(pinned)
+      // It loads and opens nothing itself, and goes with its opener's page.
+      const start = main.indexOf("const adopt = ")
+      const adopt = main.slice(start, main.indexOf("const closeAll = ", start))
+      expect(adopt).toMatch(
+        /contents\.setWindowOpenHandler\(\(\{ url \}\) => \{\s*outside\(url\);\s*return \{ action: "deny" \};\s*\}\)/u,
+      )
+      expect(adopt).toContain('contents.on("will-navigate", (event) => event.preventDefault())')
+      expect(adopt).toContain("setBackgroundThrottling(false)")
+      expect(main).toContain('opener.on("closed", () => closeAll(opener))')
+      expect(main).toContain("panels.followDisplays()")
+      // Its page may write to the clipboard and nothing else; which frames is covered in
+      // ./window/permissions.test.ts.
+      expect(main).toMatch(
+        /limitPermissions\(\s*session\.defaultSession,\s*isAppPage,\s*panels\.isPage,/u,
+      )
+      // The page hears of its window's focus with its panel windows', settled.
+      expect(main).toMatch(/panels\d*\.watchFocus\(window\);/u)
+      expect(main).toContain("request: panels.tellFocus")
     })
 
     it("blocks renderer navigation and denies permissions but the app page's clipboard and microphone", async () => {

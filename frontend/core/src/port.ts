@@ -503,7 +503,8 @@ export type BackendFields = {
   // Optional. `listener` hears whether the app's window has the system's focus: at once
   // with the current state, and again on each change; returns the stop. Unlike the page's
   // own document, it stays focused while focus is inside a frame of the page, as a page
-  // in the companion pane. Absent where nothing surrounds the page, as in a browser.
+  // in the companion pane, or in one of the page's panel windows. Absent where nothing
+  // surrounds the page, as in a browser.
   readonly windowFocus?: (listener: (focused: boolean) => void) => () => void
   // Optional. A picture of a part of the page as it's drawn now, `rect` in CSS pixels of
   // its viewport, as a JPEG `data:` address one pixel to each CSS pixel, or undefined where

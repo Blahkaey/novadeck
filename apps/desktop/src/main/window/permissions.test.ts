@@ -17,6 +17,11 @@ const appUrl = "http://127.0.0.1:5173/#/projects"
 const contents = (type: string, url: string) =>
   ({ getType: () => type, getURL: () => url }) as unknown as WebContents
 
+// The page of an open panel window, blank, as the app's page fills it; and one a panel window
+// had once it closed, or another blank window's.
+const panelPage = contents("window", "about:blank")
+const otherBlank = contents("window", "about:blank")
+
 // The app's session as its handlers answer a frame of `contents`.
 const session = (microphone?: () => Promise<boolean>) => {
   const handlers: { check?: Check; request?: Request } = {}
@@ -24,7 +29,12 @@ const session = (microphone?: () => Promise<boolean>) => {
     setPermissionCheckHandler: (handler: Check) => (handlers.check = handler),
     setPermissionRequestHandler: (handler: Request) => (handlers.request = handler),
   }
-  limitPermissions(fake as unknown as Session, (url) => url === appUrl, microphone)
+  limitPermissions(
+    fake as unknown as Session,
+    (url) => url === appUrl,
+    (page) => page === panelPage,
+    microphone,
+  )
   const asks = (
     permission: string,
     from = contents("window", appUrl),
@@ -111,6 +121,37 @@ describe("the app's permissions", () => {
         requested: false,
       })
       expect(app.asks("media", contents("webview", appUrl), true, audio)).toEqual({
+        checked: false,
+        requested: false,
+      })
+    })
+  })
+
+  context("for an open panel window's page", () => {
+    it("allow writing to the clipboard, as its copy buttons do", () => {
+      const app = session()
+      expect(app.asks("clipboard-sanitized-write", panelPage)).toEqual({
+        checked: true,
+        requested: true,
+      })
+    })
+
+    it("refuse reading the clipboard, and everything else", () => {
+      const app = session()
+      for (const permission of ["clipboard-read", "notifications", "geolocation", "openExternal"])
+        expect(app.asks(permission, panelPage)).toEqual({ checked: false, requested: false })
+      expect(
+        app.asks("media", panelPage, true, { mediaType: "audio", mediaTypes: ["audio"] }),
+      ).toEqual({ checked: false, requested: false })
+    })
+
+    it("refuse a frame inside it, and a blank window that is no open panel window's", () => {
+      const app = session()
+      expect(app.asks("clipboard-sanitized-write", panelPage, false)).toEqual({
+        checked: false,
+        requested: false,
+      })
+      expect(app.asks("clipboard-sanitized-write", otherBlank)).toEqual({
         checked: false,
         requested: false,
       })
