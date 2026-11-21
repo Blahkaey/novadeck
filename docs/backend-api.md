@@ -674,9 +674,10 @@ a terminal, `closeNotice(id)` takes away the one still showing for it, and
 `setBadge({ count, image })` puts the Inbox count on the app's icon (macOS dock text,
 Linux launcher count, and on Windows a taskbar overlay drawn from `image`, a small PNG
 data URL); all three are checked on both sides and dropped when invalid.
-`onWindowFocus(listener)` tells the page whether its window has the system's focus (at once, then on
-each change, as a boolean): the page's own `document.hasFocus()` misses focus inside a
-`<webview>` and the window losing focus to another app while it is there. The page asks on
+`onWindowFocus(listener)` tells the page whether its window, or one of its panel windows, has the
+system's focus (at once, then on each change, as a boolean): the page's own `document.hasFocus()`
+misses focus inside a `<webview>` or a panel window, and the window losing focus to another app
+while it is there. The page asks on
 `novadeck:window-focus-request` each time it listens, so a page that loaded again learns the
 current state, and only the app's own page is answered. If the runner process dies, the host starts a
 new one on the next request; shells end with it, and metadata remains. Quitting the

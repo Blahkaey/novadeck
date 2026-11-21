@@ -26,6 +26,7 @@ import {
   Notification,
   powerMonitor,
   safeStorage,
+  screen,
   session,
   shell,
   systemPreferences,
@@ -114,6 +115,7 @@ import {
   bringForward,
   isAppPage,
   openAppWindow,
+  openOutside,
   tellWindowFocus,
   watchAppPage,
 } from "./window/app-window.js"
@@ -121,6 +123,7 @@ import { keepAppearance, registerAppearanceIpc } from "./window/appearance.js"
 import { registerWindowFocusIpc } from "./window/focus.js"
 import { linuxMenu, macMenu, runnerMenu } from "./window/menu.js"
 import { registerPanePictureIpc } from "./window/pane-pictures.js"
+import { panelWindows } from "./window/panel-windows.js"
 import { limitPermissions } from "./window/permissions.js"
 import { keepSpellcheckOffline } from "./window/spellcheck.js"
 
@@ -288,9 +291,19 @@ const run = randomUUID()
 const pages = livePages()
 const { looker } = pages
 
-// The app's own windows: a look's is out of sight and no one's to save, show or count.
+// The sidebar panels the app's windows show in windows of their own, which go with them.
+const panels = panelWindows<BrowserWindow>({
+  displays: screen,
+  ground: () => appearance.current()?.ground ?? "#ffffff",
+  isAppPage,
+  outside: openOutside,
+  focusChanged: tellWindowFocus,
+})
+
+// The app's own windows: a look's is out of sight and no one's to save, show or count, and a
+// panel window's page is its opener's.
 const appWindows = (): BrowserWindow[] =>
-  BrowserWindow.getAllWindows().filter((window) => !looker.is(window))
+  BrowserWindow.getAllWindows().filter((window) => !looker.is(window) && !panels.is(window))
 
 // The last update offer, told to the app's pages as it arrives and to any that ask later.
 const offers = trackOffer(() => appPages(appWindows()))
@@ -353,6 +366,7 @@ const createWindow = (origin: string): BrowserWindow => {
   const window = openAppWindow({
     ...(remote && { runnerHost: new URL(remote.url).hostname }),
     ground: appearance.current()?.ground ?? "#ffffff",
+    panels,
     preloadArguments: [
       `${apiUrlArgumentPrefix}${apiUrl}`,
       webglContextsArgument(webglContexts),
@@ -411,8 +425,11 @@ const openRemotePreferences = (problem?: string): Promise<void> => {
     const saved = await readRemoteSettings(
       join(folder, active ? remoteSettingsFile : remoteOffFile),
     ).catch(() => undefined)
+    // Over the window the person is in, or the app's own where that is a panel window, which
+    // goes with its opener and would take the form with it.
+    const focused = BrowserWindow.getFocusedWindow()
     await askRemoteSettings(
-      BrowserWindow.getFocusedWindow() ?? appWindows()[0],
+      focused && !panels.is(focused) ? focused : appWindows()[0],
       (options) => new BrowserWindow(options),
       {
         ...(saved && { saved }),
@@ -575,6 +592,7 @@ const launch = async (): Promise<void> => {
     show: (window, next) => {
       nativeTheme.themeSource = next.scheme
       window.setBackgroundColor(next.ground)
+      for (const panel of panels.of(window)) panel.setBackgroundColor(next.ground)
       void appearance.save(next)
     },
   })
@@ -652,7 +670,10 @@ const launch = async (): Promise<void> => {
     },
   })
   // The page asks for its window's focus when it starts listening, as when it loads again.
-  registerWindowFocusIpc(ipcMain, { window: appWindow, request: tellWindowFocus })
+  registerWindowFocusIpc(ipcMain, {
+    window: appWindow,
+    request: panels.tellFocus,
+  })
   // The page learns of an update, can open the page of one it must install itself, and
   // chooses the releases the build follows.
   registerUpdateIpc(ipcMain, {
@@ -875,9 +896,12 @@ app.whenReady().then(() => {
   // signal's is not. See ./window/menu.ts.
   // macOS shows its menu bar: Help opens the logs folder. Elsewhere Preferences does.
   refreshMenu()
+  // A panel window on a display that went away comes back onto one there is.
+  panels.followDisplays()
   limitPermissions(
     session.defaultSession,
     isAppPage,
+    panels.isPage,
     // macOS asks the person once, and remembers; elsewhere the page's own request is all.
     process.platform === "darwin"
       ? () => systemPreferences.askForMediaAccess("microphone")
