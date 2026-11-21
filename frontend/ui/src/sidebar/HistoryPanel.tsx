@@ -1,6 +1,7 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { AgentConnection } from "@novadeck/core/port"
+import { panelLabels } from "@novadeck/core/types"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import {
   sidebarListClasses,
@@ -30,7 +31,6 @@ import {
   type RowView,
   type Unremoved,
 } from "./history-rows"
-import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 
 // A row's accessible name: what its click does, and for a row that does nothing, what it is.

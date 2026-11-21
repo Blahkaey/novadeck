@@ -1,6 +1,5 @@
-import type { RailPanel, SidebarPanel as PanelId } from "@novadeck/core/types"
+import { panelLabels, type RailPanel, type SidebarPanel as PanelId } from "@novadeck/core/types"
 
-import { panelLabels } from "../sidebar/panel-labels"
 import { PanelSlot } from "./PanelSlot"
 
 // The sidebar: the panels it holds, stacked in one place, where the open one slides in over the

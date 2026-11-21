@@ -1258,7 +1258,7 @@ folder of `frontend/ui/src/`:
 | `frontend/core/src/files.ts`                                    | The Files panel's contract: folders listed one at a time, agents' changes, hide patterns, and the person's changes to files.   |
 | `frontend/core/src/conversation/picks.ts`                       | What the person has picked and written for a dialog's questions, and the answer it makes.                                      |
 | `frontend/core/src/conversation/turns.ts`                       | A conversation grouped into blocks, the turn's status.                                                                         |
-| `frontend/core/src/roster.ts`                                   | A session's terminals and undocked windows, laid out as tiles, their order and status.                                         |
+| `frontend/core/src/roster.ts`                                   | A session's terminals, undocked windows and panels on its stage, laid out as tiles, their order and status.                    |
 | `frontend/core/src/layout/workspace-layout.ts`                  | Where each terminal sits and how big it is in each view.                                                                       |
 | `terminals/`                                                    | Terminal frame, tabs, rename state, and the recent-terminal switcher.                                                          |
 | `frontend/items/src/`                                           | Items: `store/`, `bar/` (taskbar, peek, drag), `registry.ts`, `kinds/<kind>/` (one folder per kind), `document/` and `homes/`. |

@@ -1,4 +1,4 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal } from "@novadeck/core/roster"
 import type { Tile } from "@novadeck/core/types"
 
 import { openAskAgent } from "../feedback/ask-agent-state"
@@ -12,7 +12,7 @@ import { currentTarget, sameTarget } from "./selectors"
 export const useAskFeedback = (tile: Tile): AskFeedback | undefined => {
   const { backend } = useWorkspaceServices()
   const target = useWorkspaceState(currentTarget, sameTarget)
-  if (!backend.feedback?.ask || isWindow(tile) || !tile.handle || !isAgentTerminal(tile))
+  if (!backend.feedback?.ask || !isTerminal(tile) || !tile.handle || !isAgentTerminal(tile))
     return undefined
   const { handle } = tile
   return {

@@ -1,5 +1,5 @@
 import { critterLive, teamText, treeRole } from "@novadeck/core/derivations"
-import { isWindow, tileOf } from "@novadeck/core/roster"
+import { isTerminal, isWindow, tileOf } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { Tile } from "@novadeck/core/types"
 import { barMembers, composeBar } from "@novadeck/items/bar"
@@ -25,8 +25,8 @@ import { useTerminalBar } from "./terminal-bar"
 import { agentAvatarsOn } from "./ui-store"
 import { useTerminalMarks } from "./useTerminalMarks"
 
-// One terminal's or window's sidebar tab. It selects only what concerns its own tile, so
-// a rename keystroke re-renders the tab being renamed and no other.
+// One terminal's, window's or panel's sidebar tab. It selects only what concerns its own tile,
+// so a rename keystroke re-renders the tab being renamed and no other.
 const TabOfTile = memo(
   ({ terminal, index }: { readonly terminal: Tile; readonly index: number }): React.JSX.Element => {
     const { commands, backend } = useWorkspaceServices()
@@ -95,9 +95,9 @@ const TabOfTile = memo(
     return (
       <TerminalTab
         terminal={terminal}
-        icon={(isWindow(terminal) ? windowProfile(item) : terminalProfile(terminal)).icon}
+        icon={(isTerminal(terminal) ? terminalProfile(terminal) : windowProfile(item)).icon}
         avatar={
-          avatars && !isWindow(terminal) && terminal.handle
+          avatars && isTerminal(terminal) && terminal.handle
             ? { handle: terminal.handle, live: critterLive(terminal) }
             : undefined
         }

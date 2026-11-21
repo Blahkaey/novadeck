@@ -9,6 +9,7 @@ import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
 import { plainNotes, noteLimits, type Note, type NoteChange } from "@novadeck/core/notes"
+import { panelLabels } from "@novadeck/core/types"
 import { sidebarListClasses, sidebarRowClasses } from "@novadeck/toolkit/SidebarItem"
 import { StickyNote } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
@@ -25,7 +26,6 @@ import {
   type Part,
 } from "./NoteParts"
 import { fullWords, movedWords, notesFull, unsavedWords } from "./notes-rows"
-import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 
 // A row follows the pointer once it has moved a few pixels, so a click still edits it; the

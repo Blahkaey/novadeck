@@ -1,6 +1,6 @@
 import { nearestInDirection } from "@novadeck/core/layout/spatial"
 import type { TerminalKey } from "@novadeck/core/port"
-import { hasTile, isWindow, orderedTiles, tilesOf } from "@novadeck/core/roster"
+import { hasTile, isTerminal, orderedTiles, tilesOf } from "@novadeck/core/roster"
 import { viewModes } from "@novadeck/core/state"
 import type { SidebarPanel, Tile } from "@novadeck/core/types"
 
@@ -74,12 +74,12 @@ export const createKeyCommands = (
   }
   // The tile an arrow moves to from the current one: in Grid and Canvas the nearest on
   // its side, if any; in Focus or along the sidebar's list, the next in sidebar order.
-  // With `typing`, only terminals: windows take no typing.
+  // With `typing`, only terminals: windows and panels take no typing.
   const arrowTarget = (arrow: Arrow, inList: boolean, typing = false): string | undefined => {
     const { view, roster } = state()
     const current = targeted()?.id
     const ordered = orderedTiles(roster).filter(
-      (tile) => !typing || !isWindow(tile) || tile.id === current,
+      (tile) => !typing || isTerminal(tile) || tile.id === current,
     )
     if (!ordered.length) return undefined
     const tiles =
@@ -92,12 +92,12 @@ export const createKeyCommands = (
     const id = nearestInDirection(from.rect, others, arrow)
     return ordered.some((tile) => tile.id === id) ? id : undefined
   }
-  // Where dictation pastes: the selected terminal, never a window undocked from a companion.
+  // Where dictation pastes: the selected terminal, never a window or a panel.
   const dictationTarget = (): TerminalKey | undefined => {
     const snapshot = workspace.getSnapshot()
     const { roster, selected } = currentState(snapshot)
     const terminal = tilesOf(roster).find((tile) => tile.id === selected)
-    return terminal && !isWindow(terminal)
+    return terminal && isTerminal(terminal)
       ? { ...currentTarget(snapshot), terminalId: terminal.id }
       : undefined
   }
@@ -216,11 +216,12 @@ export const createKeyCommands = (
       }),
     },
     // Back into the selected terminal, or the one Focus shows.
-    // A window takes no typing, so Enter and Escape leave navigating only from a terminal.
+    // A window or panel takes no typing, so Enter and Escape leave navigating only from a
+    // terminal.
     "navigate.exit": {
       available: () => {
         const tile = targeted()
-        return ui.getSnapshot().shell.navigate && (!tile || !isWindow(tile))
+        return ui.getSnapshot().shell.navigate && (!tile || isTerminal(tile))
       },
       run: handled(() => {
         commands.setNavigate(false)

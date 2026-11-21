@@ -1,5 +1,6 @@
 import type { ClosedTerminal, HistoryState } from "@novadeck/core/history"
 import { itemIdOf } from "@novadeck/core/items"
+import { panelTile } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
 import { terminalFixture } from "@novadeck/core/testing"
 import type { Tile } from "@novadeck/core/types"
@@ -117,5 +118,9 @@ context("the close button's tooltip", () => {
 
   it("says only Close for a companion's window, which History doesn't keep", () => {
     expect(closeTip(keeps, window)).toBe("Close")
+  })
+
+  it("says only Close for a panel's window, which History doesn't keep", () => {
+    expect(closeTip(keeps, panelTile("notes"))).toBe("Close")
   })
 })

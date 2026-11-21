@@ -50,7 +50,10 @@ const teamWorkspace = (): Workspace => {
           {
             ...there!,
             name: "Payments",
-            state: { ...there!.state, roster: { terminals: [], windows: [], order: [] } },
+            state: {
+              ...there!.state,
+              roster: { terminals: [], windows: [], panels: [], order: [] },
+            },
           },
         ],
       },

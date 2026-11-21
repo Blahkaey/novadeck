@@ -1,4 +1,5 @@
 import { MURMUR_NAME } from "@novadeck/core/addons/murmur"
+import { panelTile } from "@novadeck/core/roster"
 import { itemFixture, terminalFixture } from "@novadeck/core/testing"
 import type { ContextMenuAction, ContextMenuItem } from "@novadeck/toolkit/ContextMenu"
 
@@ -116,6 +117,21 @@ describe("a window's menu", () => {
             onRename: ignore,
             onResetTitle: ignore,
             dockIn: { name: "Build Studio", onDock: ignore },
+            onClose: ignore,
+          }),
+        ),
+      ).toEqual(["Close"])
+    })
+  })
+
+  context("for a panel's window", () => {
+    it("offers Close alone: its panel names it", () => {
+      expect(
+        labels(
+          windowMenu({
+            terminal: panelTile("notes"),
+            onRename: ignore,
+            onResetTitle: ignore,
             onClose: ignore,
           }),
         ),

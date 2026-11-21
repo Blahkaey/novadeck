@@ -1,4 +1,6 @@
 import { messagesKey } from "@novadeck/core/items/companion-bar"
+import { addPanel, orderedIds, panelTile } from "@novadeck/core/roster"
+import { workspaceFromSeed, type RestoredView } from "@novadeck/core/seed"
 import { createTerminalState } from "@novadeck/core/state"
 import { itemFixture, terminalFixture } from "@novadeck/core/testing"
 import type { WorkspaceSession } from "@novadeck/core/types"
@@ -150,6 +152,143 @@ describe("saved session state", () => {
         }),
       )
       expect(saved?.state.layout.spans).toEqual({ "01": { columns: 2, rows: 3 } })
+    })
+  })
+
+  context("with panels open on the stage", () => {
+    // The session with Notes and Todo open among its terminals, Notes selected, sized and
+    // placed on the canvas.
+    const withPanels = (): WorkspaceSession => {
+      const base = session()
+      const roster = addPanel(addPanel(base.state.roster, panelTile("notes")), panelTile("todo"))
+      const layout = {
+        ...base.state.layout,
+        canvas: {
+          geometry: {
+            ...base.state.layout.canvas.geometry,
+            "panel:notes": { position: { x: 30, y: 40 }, width: 320, height: 480 },
+          },
+        },
+        spans: { "panel:notes": { columns: 2, rows: 1 } },
+        hidden: { "panel:todo": true },
+      }
+      return {
+        ...base,
+        state: {
+          ...base.state,
+          roster: { ...roster, order: ["02", "panel:notes", "01", "panel:todo"] },
+          layout,
+          selected: "panel:notes",
+        },
+      }
+    }
+    // A saved state with `panels` as given in place of what this build wrote.
+    const savedWith = (panels: unknown): string => {
+      const current = JSON.parse(encodeSession(withPanels())) as { state: Record<string, unknown> }
+      current.state.panels = panels
+      return JSON.stringify(current)
+    }
+    const restore = (view: RestoredView) =>
+      workspaceFromSeed(
+        {
+          projects: [
+            {
+              id: "project",
+              name: "Project",
+              directory: "~/one",
+              sessions: [
+                {
+                  id: "session",
+                  name: "Session",
+                  items: [],
+                  windows: [],
+                  terminals: session().state.roster.terminals,
+                  restored: view,
+                },
+              ],
+            },
+          ],
+        },
+        { view: "focus", windowedView: "grid", now: 0 },
+      ).projects[0]!.history[0]!.state
+
+    it("saves them by name", () => {
+      expect(JSON.parse(encodeSession(withPanels())).state.panels).toEqual(["notes", "todo"])
+    })
+
+    it("saves a session without them as it did before they could open there", () => {
+      const state = JSON.parse(encodeSession(session())).state as Record<string, unknown>
+      expect(Object.keys(state)).toEqual([
+        "order",
+        "layout",
+        "view",
+        "windowedView",
+        "selected",
+        "bars",
+      ])
+    })
+
+    it("opens them again with their places, layout and the selection", () => {
+      const saved = decodeSession(encodeSession(withPanels()))
+      expect(saved?.state.panels).toEqual(["notes", "todo"])
+      const state = restore(saved!.state)
+      expect(state.roster.panels).toEqual([panelTile("notes"), panelTile("todo")])
+      expect(orderedIds(state.roster)).toEqual(["02", "panel:notes", "01", "panel:todo"])
+      expect(state.selected).toBe("panel:notes")
+      expect(state.layout.spans).toEqual({ "panel:notes": { columns: 2, rows: 1 } })
+      expect(state.layout.hidden).toEqual({ "panel:todo": true })
+      expect(state.layout.canvas.geometry["panel:notes"]).toEqual({
+        position: { x: 30, y: 40 },
+        width: 320,
+        height: 480,
+      })
+    })
+
+    it("reads a save from before panels could open there as none", () => {
+      const saved = decodeSession(encodeSession(session()))
+      expect(saved?.state.panels).toEqual([])
+      expect(restore(saved!.state).roster.panels).toEqual([])
+    })
+
+    it("opens each panel it knows once, by its former name too, and none of the rest", () => {
+      const saved = decodeSession(
+        savedWith(["notes", "notes", 3, null, "sessions", "nope", "source", "todo"]),
+      )
+      expect(saved?.state.panels).toEqual(["notes", "files", "todo"])
+      expect(saved?.state.order).toEqual(["02", "panel:notes", "01", "panel:todo"])
+    })
+
+    it("opens none from a list it can't read, and still reads the rest", () => {
+      for (const panels of ["notes", { notes: true }, null]) {
+        const saved = decodeSession(savedWith(panels))
+        expect(saved?.state.panels).toEqual([])
+        expect(saved?.state.selected).toBe("panel:notes")
+      }
+    })
+
+    context("when an older build reads what this one saved", () => {
+      // That build's decoder, as far as it goes: the key list of `decodeSession` before
+      // panels were saved. It rebuilds the state from the keys it knows alone, so it passes
+      // over `panels`; the cast stands for its checks of each key's shape.
+      const olderDecode = (text: string): Omit<RestoredView, "panels"> | undefined => {
+        const value = JSON.parse(text) as { version: unknown; state: Record<string, unknown> }
+        if (value.version !== 2) return undefined
+        const { order, layout, view, windowedView, selected, bars } = value.state
+        if (!Array.isArray(order) || typeof selected !== "string") return undefined
+        return { order, layout, view, windowedView, selected, bars } as Omit<RestoredView, "panels">
+      }
+
+      it("reads it, and restores the session without them", () => {
+        const older = olderDecode(encodeSession(withPanels()))
+        expect(older).toBeDefined()
+        // Its restore knows no panels, so it drops the `panel:` ids and hands the
+        // selection on.
+        const state = restore({ ...older!, panels: [] })
+        expect(state.roster.order).toEqual(["02", "01"])
+        expect(state.selected).toBe("02")
+        expect(Object.keys(state.layout.spans)).toEqual([])
+        expect(state.layout.canvas.geometry).not.toHaveProperty("panel:notes")
+      })
     })
   })
 

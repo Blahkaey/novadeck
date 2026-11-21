@@ -1,9 +1,9 @@
 import { orderedIds } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
+import { panelLabels } from "@novadeck/core/types"
 import { Plus } from "lucide-react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
-import { panelLabels } from "../sidebar/panel-labels"
 import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
 import { TerminalTabs } from "../terminals/TerminalTabs"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"

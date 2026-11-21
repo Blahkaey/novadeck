@@ -1,5 +1,6 @@
+import { panelLabels } from "@novadeck/core/types"
+
 import { HeldPill, InboxClear, InboxCount, InboxList } from "../inbox/InboxList"
-import { panelLabels } from "../sidebar/panel-labels"
 import { SidebarPanel } from "../sidebar/SidebarPanel"
 import { useUiState, useWorkspaceServices } from "./controller/context"
 

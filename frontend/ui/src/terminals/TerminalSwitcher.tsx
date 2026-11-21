@@ -1,4 +1,4 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal, tileName } from "@novadeck/core/roster"
 import { terminalLabel } from "@novadeck/core/terminals/handle"
 import type { Tile } from "@novadeck/core/types"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
@@ -90,8 +90,8 @@ export const TerminalSwitcher = ({
                 ref={current ? active : undefined}
                 role="option"
                 aria-label={terminalLabel(
-                  terminal.name,
-                  isWindow(terminal) ? undefined : terminal.handle,
+                  tileName(terminal),
+                  isTerminal(terminal) ? terminal.handle : undefined,
                 )}
                 aria-selected={current}
                 data-highlighted={current ? "" : undefined}
@@ -101,11 +101,11 @@ export const TerminalSwitcher = ({
                 <Terminal size={14} strokeWidth={1.5} aria-hidden="true" />
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <p className="m-0 flex min-w-0 items-center gap-1.5 text-body leading-4 font-medium">
-                    {!isWindow(terminal) && <HandleChip handle={terminal.handle} />}
-                    <span className="truncate">{terminal.name}</span>
+                    {isTerminal(terminal) && <HandleChip handle={terminal.handle} />}
+                    <span className="truncate">{tileName(terminal)}</span>
                   </p>
                   <p className="switcher-process item-detail m-0 truncate text-caption">
-                    {isWindow(terminal) ? "window" : terminal.process || terminal.command}
+                    {isTerminal(terminal) ? terminal.process || terminal.command : "window"}
                   </p>
                 </div>
                 <ArrowUpRight size={14} aria-hidden="true" className="switcher-go" />

@@ -1,5 +1,5 @@
 import { descendantsOf } from "@novadeck/core/derivations"
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { Tile, WorkspaceSession } from "@novadeck/core/types"
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react"
@@ -77,14 +77,14 @@ const SessionMark = ({ id }: { readonly id: string }): React.JSX.Element | null 
   )
 }
 
-// What a terminal's menu offers to move it: only a terminal, not a window, on a backend that
-// moves terminals, once its shell has started or ended. Undefined for anything else.
+// What a terminal's menu offers to move it: only a terminal, not a window or panel, on a backend
+// that moves terminals, once its shell has started or ended. Undefined for anything else.
 export const useMoveTo = (tile: Tile): MoveTo | undefined => {
   const { backend, commands } = useWorkspaceServices()
   const sessions = useContext(MoveSessionsContext)
   const here = useWorkspaceState((workspace) => currentTarget(workspace).workspaceSessionId)
   const team = useWorkspaceState((workspace) => descendantsOf(workspace, tile.id).length)
-  const movable = Boolean(backend.moveTerminal) && !isWindow(tile) && tile.state !== "starting"
+  const movable = Boolean(backend.moveTerminal) && isTerminal(tile) && tile.state !== "starting"
   const { id } = tile
   const { moveTerminal, pickSession } = commands
   // The same menu entry while nothing it shows changes, so a tab isn't drawn again for it, as

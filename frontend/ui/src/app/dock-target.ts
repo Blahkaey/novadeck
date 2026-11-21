@@ -8,7 +8,7 @@ import { currentState } from "./selectors"
 
 // Where a window undocked from a terminal's companion docks back in: the terminal its
 // item was shown from, by its name now, absent once it has closed. Undefined for a
-// terminal, and for the project window, which came from none.
+// terminal or a panel, and for the project window, which came from none.
 export const useDockTarget = (tile: Tile): DockTarget | undefined => {
   const { commands } = useWorkspaceServices()
   const from = useWorkspaceState((workspace) =>

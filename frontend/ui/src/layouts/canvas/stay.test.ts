@@ -1,3 +1,4 @@
+import { panelTile } from "@novadeck/core/roster"
 import { terminalFixture } from "@novadeck/core/testing"
 import type { Tile } from "@novadeck/core/types"
 
@@ -91,6 +92,13 @@ describe("the windows a canvas arranges", () => {
 
   it("takes its opener for the lead of one its backend hasn't described yet", () => {
     expect(arrangedTiles(terminals, () => false)[4]).toEqual({ id: "05", lead: "01" })
+  })
+
+  it("gives a panel's window no lead", () => {
+    expect(arrangedTiles([...terminals, panelTile("notes")], () => false).at(-1)).toEqual({
+      id: "panel:notes",
+      lead: undefined,
+    })
   })
 
   it("leaves out the windows asked, in the order given", () => {

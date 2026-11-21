@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/react/sortable"
 import { subagentMarks, subagentsBadge, subagentsDetail } from "@novadeck/core/agents/subagents"
 import { nextTurnAge, turnAge } from "@novadeck/core/agents/turn-age"
 import { messageBadgeLabel, type MessageBadge } from "@novadeck/core/messages"
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal, tileName } from "@novadeck/core/roster"
 import {
   endingText,
   idleNote,
@@ -163,14 +163,15 @@ export const TerminalTab = ({
   folder?: string | undefined
 }): React.JSX.Element => {
   const editing = Boolean(rename)
-  const shell = isWindow(terminal) ? undefined : terminal
+  const shell = isTerminal(terminal) ? terminal : undefined
+  const name = tileName(terminal)
   // 24px, the smallest whose LEDs keep their gaps on a 1× screen, as Messages' do.
   const icon = avatar ? (
     <Avatar handle={avatar.handle} live={avatar.live} size={24} />
   ) : (
     <Icon size={14} strokeWidth={1.5} />
   )
-  const label = terminalLabel(terminal.name, shell?.handle)
+  const label = terminalLabel(name, shell?.handle)
   // The detail line shows the state: a glyph (a spinner while a program runs) before the
   // program, what the agent needs of the person right after it, or a note while the shell
   // starts. A tab that has ended is hatched (styles.css); assistive technology says how it
@@ -260,7 +261,7 @@ export const TerminalTab = ({
       <SidebarItem
         ref={ref}
         handleRef={handleRef}
-        name={terminal.name}
+        name={name}
         icon={icon}
         wideIcon={Boolean(avatar)}
         detail={
@@ -367,7 +368,7 @@ export const TerminalTab = ({
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <TerminalRenameInput
                   id={terminal.id}
-                  name={terminal.name}
+                  name={name}
                   label={label}
                   value={rename.value}
                   request={rename.request}

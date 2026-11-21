@@ -2,7 +2,13 @@ import type { ClosedTerminal } from "@novadeck/core/history"
 import type { TerminalRequest } from "@novadeck/core/port"
 import { orderedTiles } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
-import { appearance, itemFixture, terminalFixture, workspaceFixture } from "@novadeck/core/testing"
+import {
+  appearance,
+  itemFixture,
+  terminalFixture,
+  workspaceFixture,
+  workspaceWithPanel,
+} from "@novadeck/core/testing"
 import type { TerminalMetadata } from "@novadeck/core/types"
 import { afterEach, vi } from "vitest"
 
@@ -714,6 +720,25 @@ describe("workspace commands", () => {
       app.commands.close("02")
       expect(app.ui.getSnapshot().rename).toBeNull()
       expect(app.state().roster.terminals.map((item) => item.name)).toEqual(["Terminal"])
+    })
+  })
+
+  context("when closing a panel's window", () => {
+    const url = "/projects/project/sessions/initial/grid?terminal=panel:notes"
+
+    it("takes it off the stage, closing no terminal, and selects its neighbour", () => {
+      const app = openCommands({ workspace: workspaceWithPanel(), url })
+      app.commands.close("panel:notes")
+      expect(app.state().roster.panels).toEqual([])
+      expect(app.state().roster.terminals.map((each) => each.id)).toEqual(["01", "02"])
+      expect(app.state().selected).toBe("02")
+    })
+
+    it("takes no rename", () => {
+      const app = openCommands({ workspace: workspaceWithPanel(), url })
+      const [panel] = app.state().roster.panels
+      app.commands.startRename(panel!, "header")
+      expect(app.ui.getSnapshot().rename).toBeNull()
     })
   })
 

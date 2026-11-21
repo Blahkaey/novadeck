@@ -3,6 +3,7 @@ import { descendantsOf } from "@novadeck/core/derivations"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { TerminalRequest, TourRun } from "@novadeck/core/port"
+import { isPanel, isWindow, tileOf } from "@novadeck/core/roster"
 import { activeProject, type WorkspaceAction } from "@novadeck/core/state"
 import { closeReasons } from "@novadeck/core/terminals/closing"
 import type {
@@ -254,14 +255,17 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     const { view, selected } = currentState(snapshot)
     const active = rename.activeRename()
     if (active?.id === terminalId) rename.finishRename(active, false)
-    // Closing a window closes what it shows; a terminal takes what its bar holds with it.
+    // Closing a window closes what it shows, and a panel's leaves the stage; a terminal takes
+    // what its bar holds with it.
     const target = currentTarget(snapshot)
-    const window = currentState(snapshot).roster.windows.find((each) => each.id === terminalId)
+    const tile = tileOf(currentState(snapshot).roster, terminalId)
     navigateWorkspace(
       [
-        window
-          ? { type: "item/close", target, itemId: window.itemId }
-          : { type: "terminal/close", target, terminalId },
+        tile && isWindow(tile)
+          ? { type: "item/close", target, itemId: tile.itemId }
+          : tile && isPanel(tile)
+            ? { type: "panel/close", target, panel: tile.panel }
+            : { type: "terminal/close", target, terminalId },
       ],
       {},
       true,

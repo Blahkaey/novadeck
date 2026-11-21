@@ -1,3 +1,4 @@
+import { isPanel } from "@novadeck/core/roster"
 import { titleSourceText } from "@novadeck/core/terminals/title-source"
 import type { Tile } from "@novadeck/core/types"
 import type { ContextMenuItem } from "@novadeck/toolkit/ContextMenu"
@@ -104,9 +105,9 @@ const moveItem = (moveTo: MoveTo): ContextMenuItem => ({
 // it, as a line to read rather than choose, then rename, hand a name the person gave back
 // to Novadeck, dock an undocked window back in its terminal, release a terminal from its
 // lead, fold a lead's teammates out of the list, and close. The project window is named by its file and has no terminal to dock in:
-// it offers Close alone. A window running an agent, on a backend that takes feedback, can
-// ask it to write some. The menu takes only text for a label, so the handle is plain
-// `@handle` there, not the chip.
+// it offers Close alone, as a panel's window does, which its panel names. A window running an
+// agent, on a backend that takes feedback, can ask it to write some. The menu takes only text
+// for a label, so the handle is plain `@handle` there, not the chip.
 export const windowMenu = ({
   terminal,
   onRename,
@@ -135,7 +136,7 @@ export const windowMenu = ({
   moveTo?: MoveTo | undefined
   onClose: () => void
 }): ContextMenuItem[] =>
-  isProjectWindow(terminal)
+  isPanel(terminal) || isProjectWindow(terminal)
     ? [{ value: "close", label: "Close", onSelect: onClose }]
     : [
         // A name nobody chose says nothing worth a line.

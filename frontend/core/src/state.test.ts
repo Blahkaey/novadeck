@@ -1,8 +1,9 @@
 import { itemIdOf, type Item } from "./items"
 import { messagesKey } from "./items/companion-bar"
-import { orderedTiles } from "./roster"
+import type { BackendAction } from "./port"
+import { orderedIds, orderedTiles } from "./roster"
 import { activeSession, createTerminalState, workspaceReducer, type WorkspaceAction } from "./state"
-import { context, describe, expect, it } from "./test"
+import { context, describe, expect, expectTypeOf, it } from "./test"
 import { itemFixture, terminalFixture, workspaceFixture } from "./testing"
 import type { CompanionWindowMeta, Workspace, WorkspaceProject, WorkspaceState } from "./types"
 
@@ -958,6 +959,89 @@ describe("sizing a Grid tile", () => {
     const sized = apply(workspaceFixture(), span("01", 2, 1))
     expect(apply(sized, span("01", 2, 1))).toBe(sized)
     expect(apply(sized, span("gone", 2, 1))).toBe(sized)
+  })
+})
+
+describe("a panel opened as a window on the stage", () => {
+  const open = (panel: "notes" | "todo"): WorkspaceAction => ({ type: "panel/open", target, panel })
+  const close = (panel: "notes" | "todo"): WorkspaceAction => ({
+    type: "panel/close",
+    target,
+    panel,
+  })
+
+  it("is the UI's own: no backend reports one", () => {
+    expectTypeOf<Extract<BackendAction, { type: "panel/open" | "panel/close" }>>().toBeNever()
+  })
+
+  context("when the person opens it", () => {
+    it("comes into view selected, after the terminals", () => {
+      const state = run(workspaceFixture(), open("notes"))
+      expect(state.roster.panels).toEqual([{ id: "panel:notes", panel: "notes" }])
+      expect(orderedIds(state.roster)).toEqual(["01", "02", "panel:notes"])
+      expect(state.selected).toBe("panel:notes")
+    })
+
+    it("changes nothing when it is already open", () => {
+      const opened = apply(workspaceFixture(), open("notes"), {
+        type: "terminal/select",
+        target,
+        terminalId: "01",
+      })
+      expect(apply(opened, open("notes"))).toBe(opened)
+    })
+
+    it("is hidden, sized and moved by its id, as any tile", () => {
+      const state = run(
+        workspaceFixture(),
+        open("notes"),
+        { type: "terminal/visibility", target, terminalId: "panel:notes", hidden: true },
+        { type: "grid/span", target, terminalId: "panel:notes", span: { columns: 2, rows: 1 } },
+        { type: "terminal/reorder", target, tabOrder: ["panel:notes", "01", "02"] },
+      )
+      expect(state.layout.hidden).toEqual({ "panel:notes": true })
+      expect(state.layout.spans).toEqual({ "panel:notes": { columns: 2, rows: 1 } })
+      expect(state.roster.order).toEqual(["panel:notes", "01", "02"])
+    })
+  })
+
+  context("when the person closes it", () => {
+    it("hands its selection to its neighbour in the sidebar, and forgets its layout", () => {
+      const state = run(
+        workspaceFixture(),
+        open("notes"),
+        { type: "terminal/reorder", target, tabOrder: ["01", "panel:notes", "02"] },
+        { type: "terminal/visibility", target, terminalId: "panel:notes", hidden: true },
+        {
+          type: "canvas/layout",
+          target,
+          layout: { geometry: { "panel:notes": { position: { x: 1, y: 2 } } } },
+        },
+        { type: "terminal/select", target, terminalId: "panel:notes" },
+        close("notes"),
+      )
+      expect(state.roster.panels).toEqual([])
+      expect(state.roster.order).toEqual(["01", "02"])
+      expect(state.selected).toBe("02")
+      expect(state.layout.hidden).toEqual({})
+      expect(state.layout.canvas.geometry).toEqual({})
+    })
+
+    it("selects nothing on Canvas", () => {
+      const state = run(workspaceFixture({ view: "canvas" }), open("notes"), close("notes"))
+      expect(state.selected).toBe("")
+    })
+
+    it("keeps the selection on another tile, and the panels still open", () => {
+      const state = run(workspaceFixture(), open("todo"), open("notes"), close("todo"))
+      expect(state.roster.panels).toEqual([{ id: "panel:notes", panel: "notes" }])
+      expect(state.selected).toBe("panel:notes")
+    })
+
+    it("changes nothing when it isn't open", () => {
+      const fixture = workspaceFixture()
+      expect(apply(fixture, close("notes"))).toBe(fixture)
+    })
   })
 })
 
