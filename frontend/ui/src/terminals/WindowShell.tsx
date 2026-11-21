@@ -1,4 +1,4 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import {
   idleNote,
   pausedUntil,
@@ -11,7 +11,15 @@ import type { Tile } from "@novadeck/core/types"
 import { ContextMenu, type ContextMenuItem } from "@novadeck/toolkit/ContextMenu"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { BellOff, Minimize2, Maximize2, Mic, X } from "lucide-react"
+import {
+  BellOff,
+  Minimize2,
+  Maximize2,
+  Mic,
+  PanelLeftOpen,
+  SquareArrowOutUpRight,
+  X,
+} from "lucide-react"
 import { lazy, Suspense, useMemo, useRef, type ReactNode } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
@@ -47,7 +55,8 @@ export type DictationControls = {
 }
 
 export type WindowShellProps = {
-  // A terminal, or a window undocked from a companion, which runs nothing.
+  // A terminal, or a window that runs nothing: one undocked from a companion, the project's, or
+  // a sidebar panel's.
   terminal: Tile
   children?: ReactNode
   // The header's icon, which also opens the terminal switcher.
@@ -58,6 +67,9 @@ export type WindowShellProps = {
   switcher?: { onOpen: (button: HTMLButtonElement) => void }
   onFlyTo?: () => void
   windowed?: { destination: string; onOpen: () => void }
+  // A panel's window opens the panel in a window of its own, where one can open.
+  onOwnWindow?: (() => void) | undefined
+  // A panel's window closes by returning its panel to the sidebar, which its button says.
   onClose?: () => void
   // The close button's tooltip, which says where a closed terminal goes.
   closeTip?: string | undefined
@@ -101,6 +113,7 @@ export const WindowShell = ({
   onFocus,
   switcher,
   onFlyTo,
+  onOwnWindow,
   onClose,
   closeTip = "Close",
   windowed,
@@ -140,8 +153,9 @@ export const WindowShell = ({
   } | null>(null)
   const ignoreDoubleClickUntil = useRef(0)
   const renaming = Boolean(rename)
-  const shell = isWindow(terminal) ? undefined : terminal
-  const label = terminalLabel(terminal.name, shell?.handle)
+  const shell = isTerminal(terminal) ? terminal : undefined
+  const name = tileName(terminal)
+  const label = terminalLabel(name, shell?.handle)
   // Its phase, the need mark after its name, and its note for assistive technology, from the
   // same derivation as its tab: what the agent needs of the person, that Novadeck can't hear
   // from it, that it is paused at its limit, what it waits on that wakes it, that it reported
@@ -175,9 +189,10 @@ export const WindowShell = ({
   // reset count down.
   useRenderAt(phase === "waiting" && shell ? nextWaitingChange(shell) : nextWhenChange(resets))
   const headerDoubleAction = onFlyTo
-  // The project window is named by its file, so its name is no rename's: a double-click on it
-  // is the header's own.
-  const nameRenames = !isProjectWindow(terminal)
+  // The project window is named by its file, and a panel's by its panel, so their name is no
+  // rename's: a double-click on it is the header's own.
+  const panel = isPanel(terminal)
+  const nameRenames = !panel && !isProjectWindow(terminal)
   const header = (
     <header
       className="terminal-header flex shrink-0 touch-manipulation select-none flex-nowrap items-center justify-between whitespace-nowrap"
@@ -292,7 +307,7 @@ export const WindowShell = ({
             hidden={renaming}
           >
             <Heading hidden={renaming} data-terminal-name="">
-              {terminal.name}
+              {name}
             </Heading>
             {lead && !renaming && (
               <Tooltip
@@ -338,7 +353,7 @@ export const WindowShell = ({
           {rename && (
             <TerminalRenameInput
               id={terminal.id}
-              name={terminal.name}
+              name={name}
               label={label}
               value={rename.value}
               request={rename.request}
@@ -404,17 +419,31 @@ export const WindowShell = ({
             </button>
           </Tooltip>
         )}
+        {onOwnWindow && (
+          <Tooltip content="Open in its own window">
+            <button
+              className={`${headerActionClasses} terminal-own-window nodrag nopan`}
+              aria-label={`Open ${name} in its own window`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onOwnWindow()
+              }}
+            >
+              <SquareArrowOutUpRight size={12} />
+            </button>
+          </Tooltip>
+        )}
         {onClose && (
           <Tooltip content={closeTip}>
             <button
               className={`${headerActionClasses} terminal-close nodrag nopan`}
-              aria-label={`Close ${label}`}
+              aria-label={panel ? `Return ${name} to the sidebar` : `Close ${label}`}
               onClick={(event) => {
                 event.stopPropagation()
                 onClose()
               }}
             >
-              <X size={12} />
+              {panel ? <PanelLeftOpen size={12} /> : <X size={12} />}
             </button>
           </Tooltip>
         )}
@@ -424,7 +453,7 @@ export const WindowShell = ({
   return (
     <section
       className={`terminal-window flex h-full min-h-0 min-w-0 flex-col overflow-hidden ${compact ? "terminal-compact" : "terminal-focused"}`}
-      aria-label={`${label} terminal`}
+      aria-label={`${label} ${panel ? "window" : "terminal"}`}
       data-terminal={terminal.id}
       data-terminal-phase={phase}
       {...(shell?.state === "sleeping" ? { "data-terminal-sleeping": true } : {})}

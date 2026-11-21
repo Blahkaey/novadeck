@@ -16,6 +16,8 @@ const context = (selected: DemoActionContext["selected"]): DemoActionContext => 
     throw new Error("unused")
   },
   startFresh: () => undefined,
+  openPanels: () => {},
+  refuseNextWindow: () => {},
   dispatch: undefined,
   workspace: () => undefined,
   note: () => undefined,

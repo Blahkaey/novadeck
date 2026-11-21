@@ -1,22 +1,24 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import { matchesQuery } from "@novadeck/core/terminals/find"
 import type { Tile } from "@novadeck/core/types"
 import { Dialog } from "@novadeck/toolkit/Dialog"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { SearchCombobox } from "@novadeck/toolkit/SearchCombobox"
-import { ArrowUpRight, Search, Terminal as TerminalIcon, X } from "lucide-react"
+import { ArrowUpRight, Search, X, type LucideIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
-// What a result says of where it runs. A window runs nothing, so only its name finds it.
+// What a result says of where it runs. A window, a panel's among them, runs nothing, so only its
+// name finds it.
 const detail = (tile: Tile): { readonly command: string; readonly directory: string } =>
-  isWindow(tile) ? { command: "window", directory: "" } : tile
+  isTerminal(tile) ? tile : { command: isPanel(tile) ? "panel window" : "window", directory: "" }
 
 // The handle a result is found by, typed with or without its `@`.
-const handleOf = (tile: Tile): string => (isWindow(tile) ? "" : (tile.handle ?? ""))
+const handleOf = (tile: Tile): string => (isTerminal(tile) ? (tile.handle ?? "") : "")
 
 export const TerminalSearch = ({
   open,
   terminals,
+  iconOf,
   destination,
   onSelect,
   onClose,
@@ -24,6 +26,8 @@ export const TerminalSearch = ({
 }: {
   open: boolean
   terminals: readonly Tile[]
+  // What a result is drawn with: a terminal's icon, or a panel's for its window.
+  iconOf: (tile: Tile) => LucideIcon
   destination: string
   onSelect: (id: string) => void
   onClose: () => void
@@ -35,7 +39,7 @@ export const TerminalSearch = ({
     if (open) chosen.current = null
   }, [open])
   const matches = terminals.filter((terminal) =>
-    matchesQuery([handleOf(terminal), terminal.name, detail(terminal).directory], query),
+    matchesQuery([handleOf(terminal), tileName(terminal), detail(terminal).directory], query),
   )
   const select = (id: string): void => {
     chosen.current = id
@@ -88,30 +92,33 @@ export const TerminalSearch = ({
             No terminals match “{query}”.
           </p>
         }
-        items={matches.map((terminal) => ({
-          value: terminal.id,
-          label: terminal.name,
-          content: (
-            <>
-              <TerminalIcon size={14} strokeWidth={1.5} />
-              <span className="search-result-copy flex min-w-0 flex-1 flex-col gap-1.5">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  {!isWindow(terminal) && <HandleChip handle={terminal.handle} />}
-                  <strong className="truncate text-body leading-4 font-medium">
-                    {terminal.name}
-                  </strong>
-                </span>
-                <small className="item-detail search-result-meta flex min-w-0 items-center gap-2 text-caption">
-                  <span className="shrink-0">{detail(terminal).command}</span>
-                  <span className="search-result-path truncate pl-2">
-                    {detail(terminal).directory}
+        items={matches.map((terminal) => {
+          const Icon = iconOf(terminal)
+          return {
+            value: terminal.id,
+            label: tileName(terminal),
+            content: (
+              <>
+                <Icon size={14} strokeWidth={1.5} />
+                <span className="search-result-copy flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {isTerminal(terminal) && <HandleChip handle={terminal.handle} />}
+                    <strong className="truncate text-body leading-4 font-medium">
+                      {tileName(terminal)}
+                    </strong>
                   </span>
-                </small>
-              </span>
-              <ArrowUpRight size={14} className="search-result-action" />
-            </>
-          ),
-        }))}
+                  <small className="item-detail search-result-meta flex min-w-0 items-center gap-2 text-caption">
+                    <span className="shrink-0">{detail(terminal).command}</span>
+                    <span className="search-result-path truncate pl-2">
+                      {detail(terminal).directory}
+                    </span>
+                  </small>
+                </span>
+                <ArrowUpRight size={14} className="search-result-action" />
+              </>
+            ),
+          }
+        })}
       />
       <div className="modal-footer search-footnote flex items-center justify-between px-5 py-3 text-caption">
         <span>Open in {destination}</span>

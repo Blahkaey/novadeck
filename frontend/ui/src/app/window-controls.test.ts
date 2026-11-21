@@ -267,6 +267,18 @@ describe("watching the window's controls", () => {
     expect(root.dataset.windowInactive).toBeUndefined()
   })
 
+  it("quietens it while a panel's window of its own has the focus", () => {
+    const { root, view } = page()
+    const { port } = controls()
+    const ui = uiWith(false)
+    const stop = watchWindowControls(ui, view, port)
+    ui.update((state) => ({ ...state, pageFocused: true, ownWindowFocused: "notes" }))
+    expect(root.dataset.windowInactive).toBe("")
+    ui.update((state) => ({ ...state, ownWindowFocused: null }))
+    expect(root.dataset.windowInactive).toBeUndefined()
+    stop()
+  })
+
   context("at the end, as Windows' caption buttons", () => {
     it("keeps them in Zen, on a plate in the corner where no Focus header runs along the top", () => {
       const { root, view, pointer } = page()

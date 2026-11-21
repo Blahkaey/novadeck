@@ -1,24 +1,9 @@
 import { noteLimits } from "@novadeck/core/notes"
 
 import { describe, expect, it } from "../test"
-import {
-  addedByWords,
-  addWords,
-  clearDoneWords,
-  doneCount,
-  kindWords,
-  movedWords,
-  notesFull,
-} from "./notes-rows"
+import { addedByWords, clearDoneWords, doneCount, movedWords, notesFull } from "./notes-rows"
 
-describe("The Notes panel's words", () => {
-  it("name what the add field adds, and what its button changes that to", () => {
-    expect(addWords("todo")).toBe("Add a todo…")
-    expect(addWords("note")).toBe("Add a note…")
-    expect(kindWords("todo")).toBe("Adding todos · switch to plain notes")
-    expect(kindWords("note")).toBe("Adding plain notes · switch to todos")
-  })
-
+describe("The Notes panel's and the Todo board's words", () => {
   it("count the done todos, one or many", () => {
     expect(doneCount(1)).toBe("1 done todo")
     expect(doneCount(3)).toBe("3 done todos")

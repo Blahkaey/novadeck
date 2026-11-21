@@ -38,6 +38,7 @@ import {
   resolveRoute,
   filesShown,
   notesShown,
+  panelShownOn,
   reportsWorks,
 } from "./routing"
 import { watchScale } from "./scale"
@@ -50,6 +51,7 @@ import {
   watchPresentation,
   watchClosing,
   watchMoving,
+  watchTerminalsView,
   watchCrashLoop,
   keepProjectArrangement,
   watchSwitcher,
@@ -131,6 +133,7 @@ const createServices = (
     itemStore,
     canvas,
     effects: domEffects,
+    panelShown: panelShownOn(backend),
   })
   return {
     services: {
@@ -205,6 +208,7 @@ export const WorkspaceProvider = ({
   useEffect(() => watchPortable(services.backend.portable, services.ui), [services])
   useEffect(() => watchClosing(services.workspace, services.ui), [services])
   useEffect(() => watchMoving(services.workspace, services.ui), [services])
+  useEffect(() => watchTerminalsView(services.ui, services.workspace), [services])
   useEffect(() => {
     const { history } = services.backend
     return history && historyShown(services.backend)
@@ -238,7 +242,7 @@ export const WorkspaceProvider = ({
     if (backend.inbox) stops.push(watchBellRings(landing.inbox, ui))
     if (backend.inbox && (board || backend.badge))
       stops.push(
-        watchInboxPings(landing.inbox, ui, {
+        watchInboxPings(landing.inbox, workspace, ui, {
           board,
           badge: backend.badge,
         }),

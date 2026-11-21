@@ -34,6 +34,7 @@ import {
   type WroteFolder,
   type MurmurSettings,
   type MurmurState,
+  type BoardColumn,
   type Note,
   type NotesChange,
   type PageLook,
@@ -619,6 +620,18 @@ export type Runner = {
       readonly id: string
       readonly index: number
     }): Promise<Note[]>
+    /**
+     * Puts a note in its place: a todo in `column` of the Todo board, taking that column's
+     * state, a plain note among the plain notes with no column; just before `before` where
+     * that is another note of the same place, else after the last of them. `CONFLICT` for a
+     * column given a plain note, or none a todo.
+     */
+    place(input: {
+      readonly projectId: string
+      readonly id: string
+      readonly column?: BoardColumn
+      readonly before?: string
+    }): Promise<Note[]>
     /** Deletes notes for good; an id the project doesn't have is skipped. */
     remove(input: { readonly projectId: string; readonly ids: readonly string[] }): Promise<Note[]>
   }
@@ -1131,6 +1144,7 @@ export const connectRunner = async (
       add: (input) => call((client) => client.notes.add(input)),
       update: (input) => call((client) => client.notes.update(input)),
       move: (input) => call((client) => client.notes.move(input)),
+      place: (input) => call((client) => client.notes.place(input)),
       remove: (input) =>
         call((client) => client.notes.remove({ projectId: input.projectId, ids: [...input.ids] })),
     },

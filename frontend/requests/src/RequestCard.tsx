@@ -1,5 +1,6 @@
 import type { ChatAnswer, ChatRequest } from "@novadeck/core/conversation"
 import type { Refused } from "@novadeck/core/conversation/prompt-refusal"
+import { isElement } from "@novadeck/toolkit/realm"
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from "react"
 
 import type { Drafted } from "./drafts"
@@ -185,23 +186,23 @@ export const RequestCard = ({
   // never does, which would raise a phone's keyboard for a field.
   const toDialog = (event: React.MouseEvent<HTMLElement>): void => {
     const { target, nativeEvent } = event
-    if (event.detail > 1 || !(target instanceof Element) || target.closest(controls)) return
+    if (event.detail > 1 || !isElement(target) || target.closest(controls)) return
     const by = "pointerType" in nativeEvent ? nativeEvent.pointerType : ""
     if (by === "touch" || by === "pen") return
-    if (window.getSelection()?.isCollapsed === false) return
-    const active = document.activeElement
-    if (active && active !== document.body && card.current?.contains(active)) return
+    // The window the card is drawn in: the page's, or an Inbox's window of its own.
+    const page = target.ownerDocument
+    if (page.getSelection()?.isCollapsed === false) return
+    const active = page.activeElement
+    if (active && active !== page.body && card.current?.contains(active)) return
     dialogHandle.current?.focus(false)
   }
   const status = useRef<HTMLParagraphElement>(null)
   useEffect(() => {
     if (!request.answered) return
     took.current = true
-    const { activeElement } = document
-    if (
-      activeElement === document.body ||
-      status.current?.closest("article")?.contains(activeElement)
-    )
+    const page = status.current?.ownerDocument ?? document
+    const { activeElement } = page
+    if (activeElement === page.body || status.current?.closest("article")?.contains(activeElement))
       status.current?.focus({ preventScroll: true })
   }, [request.answered])
   const settled = useRef(onSettled)
@@ -220,8 +221,9 @@ export const RequestCard = ({
     setError(null)
     // The person's next words go to the host's next place, unless they have moved focus out of
     // the card.
-    const active = document.activeElement
-    if (!active || active === document.body || card.current?.contains(active)) onSubmitted(given)
+    const page = card.current?.ownerDocument ?? document
+    const active = page.activeElement
+    if (!active || active === page.body || card.current?.contains(active)) onSubmitted(given)
     // Once it took, the request goes and so does this card.
     answer(given).then(
       () => {

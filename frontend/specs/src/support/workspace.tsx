@@ -1,4 +1,4 @@
-import { App } from "@novadeck/ui/app/App"
+import { App, type AppProps } from "@novadeck/ui/app/App"
 import { StrictMode } from "react"
 import { expect } from "vitest"
 import { cleanup, render } from "vitest-browser-react"
@@ -34,11 +34,15 @@ export const nextFrames = (count: number): Promise<void> =>
 
 /**
  * Opens the app, optionally at a deep link such as `/projects/storefront/sessions/initial/grid`,
- * and `embedded` as another page frames it.
+ * `embedded` as another page frames it, and with `panel` beside it, as the content preview's
+ * debug panel is.
  */
 export const openWorkspace = async (
   route?: string,
-  { embedded = false }: { readonly embedded?: boolean } = {},
+  {
+    embedded = false,
+    panel,
+  }: { readonly embedded?: boolean; readonly panel?: AppProps["panel"] } = {},
 ): Promise<void> => {
   forgetEarlierPages()
   // A same-page history entry below the app keeps an extra Back inside the test page.
@@ -46,7 +50,7 @@ export const openWorkspace = async (
   window.history.pushState(null, "", route === undefined ? "/" : `/#${route}`)
   await render(
     <StrictMode>
-      <App createBackend={createSpecBackend} embedded={embedded} />
+      <App createBackend={createSpecBackend} embedded={embedded} panel={panel} />
     </StrictMode>,
   )
   // A link may open with a modal dialog, which hides the rest of the app.
@@ -208,15 +212,89 @@ export const chooseView = async (name: "Focus" | "Grid" | "Canvas"): Promise<voi
 
 export const sidebar = (): Locator => page.getByRole("complementary")
 
-export const sidebarPanel = (
-  name: "Terminals" | "Files" | "Sessions" | "History" | "Inbox" | "Worktrees" | "Notes",
-): Locator =>
+type PanelName = "Terminals" | "Files" | "History" | "Inbox" | "Worktrees" | "Notes" | "Todo"
+
+/** A toggle on the rail. Terminals' is checked while either view of its panel shows. */
+export const sidebarPanel = (name: PanelName): Locator =>
   page
     .getByRole("radiogroup", { name: "Sidebar actions" })
     // The Inbox adds how many wait to its name, e.g. "Inbox, 3 waiting".
     .getByRole("radio", {
       name: name === "Inbox" ? new RegExp(`^${name}(,|$)`) : name,
     })
+
+/** A sidebar panel opened as a window on the stage of the active Focus, Grid or Canvas view. */
+export const panelWindow = (name: PanelName): Locator =>
+  page.getByRole("region", { name: `${name} window` })
+
+/** The button in a panel's header, in the sidebar, that opens the panel in a window. */
+export const detachButton = (name: PanelName): Locator =>
+  page.getByRole("button", { name: `Open ${name} in a window` })
+
+/** The button in a panel's window's header that returns the panel to the sidebar. */
+export const returnButton = (name: PanelName): Locator =>
+  panelWindow(name).getByRole("button", { name: `Return ${name} to the sidebar` })
+
+const isChecked = (choice: Locator): boolean => {
+  const element = choice.query()
+  return element instanceof HTMLInputElement
+    ? element.checked
+    : element?.getAttribute("aria-checked") === "true"
+}
+
+// Whether the sidebar shows, open on the panel `name`: its rail toggle is pressed, which a
+// collapsed sidebar, still named for the panel, leaves unpressed.
+const isPanelOpen = (name: PanelName): boolean => isChecked(sidebarPanel(name))
+
+/** Opens a panel in a window from its header, opening the sidebar on it first. */
+export const detachPanel = async (name: PanelName): Promise<void> => {
+  if (!isPanelOpen(name)) await sidebarPanel(name).click()
+  await expect.element(sidebar()).toHaveAccessibleName(name)
+  await detachButton(name).click()
+  await expect.element(panelWindow(name)).toBeVisible()
+}
+
+type TerminalsView = "Terminals" | "Sessions"
+
+/**
+ * A choice of the switch before the Terminals panel's title, between the open session's
+ * terminals and the project's sessions: the one in the view that shows.
+ */
+export const terminalsView = (name: TerminalsView): Locator =>
+  page.getByRole("radiogroup", { name: "Terminals panel view" }).getByRole("radio", { name })
+
+/**
+ * The icon a person sees for the switch's choice `name`: the label its radio wears, as the
+ * radio itself is hidden under it.
+ */
+export const terminalsViewChoice = (name: TerminalsView): Locator =>
+  page.elementLocator((terminalsView(name).element() as HTMLInputElement).labels![0]!)
+
+/** Presses the switch's choice `name`, as a person clicks its icon. */
+export const chooseTerminalsView = async (name: TerminalsView): Promise<void> => {
+  await terminalsViewChoice(name).click()
+}
+
+/** Waits until the Terminals panel shows `name`: the rail's Terminals and the switch's choice checked. */
+export const expectTerminalsView = async (name: TerminalsView): Promise<void> => {
+  await expect.element(sidebarPanel("Terminals")).toBeChecked()
+  await expect.element(terminalsView(name)).toBeChecked()
+}
+
+/**
+ * Shows the Terminals panel's view `name` as a person gets there: the rail's Terminals toggle
+ * when the panel doesn't show, which opens the view last seen, then the switch's choice when
+ * that view isn't `name`.
+ */
+export const openTerminalsView = async (name: TerminalsView): Promise<void> => {
+  if (!isChecked(sidebarPanel("Terminals"))) await sidebarPanel("Terminals").click()
+  await expect.element(terminalsView(name)).toBeInTheDocument()
+  if (!isChecked(terminalsView(name))) await chooseTerminalsView(name)
+  await expectTerminalsView(name)
+}
+
+/** Shows the project's sessions, the Terminals panel's second view. */
+export const openSessions = (): Promise<void> => openTerminalsView("Sessions")
 
 /** `text` as a regular expression that matches it as written. */
 export const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

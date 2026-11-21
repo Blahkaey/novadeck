@@ -18,9 +18,15 @@ import {
   runningLeads,
   terminalOrigins,
 } from "@novadeck/core/derivations"
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isWindow } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
-import type { CompanionWindowMeta, TerminalMetadata, Tile } from "@novadeck/core/types"
+import {
+  panelLabels,
+  type CompanionWindowMeta,
+  type PanelTile,
+  type TerminalMetadata,
+  type Tile,
+} from "@novadeck/core/types"
 import { Avatar } from "@novadeck/items/Avatar"
 import { shellTailsOf } from "@novadeck/items/shells"
 import { TerminalCompanion } from "@novadeck/items/TerminalCompanion"
@@ -38,6 +44,10 @@ import {
 } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
+import { useDesktop } from "../shell/desktop"
+import { PanelCountSlot, PanelExtraSlot, PanelSlot } from "../shell/PanelSlot"
+import { PanelAwayNote } from "../sidebar/PanelElsewhere"
+import { panelIcons } from "../terminals/panel-icons"
 import { presentedProgram, terminalProfile, windowProfile } from "../terminals/processes/profiles"
 import { renameView } from "../terminals/rename-state"
 import { unreadEnd } from "../terminals/unread-state"
@@ -62,6 +72,7 @@ import { MountedTerminal } from "./MountedTerminal"
 import { useMoveTo } from "./move-to"
 import { plainTitle } from "./murmur-offer"
 import { NameChip } from "./NameChip"
+import { usePanelPlace } from "./panels-shown"
 import { ChatWithPeers } from "./peer-looks"
 import { useReleaseLead } from "./release-lead"
 import {
@@ -74,16 +85,18 @@ import {
 } from "./selectors"
 import { useFoldTeam } from "./team-fold"
 import { useBarShells, useShellsHome, useTerminalBar } from "./terminal-bar"
-import { agentAvatarsOn, chatViewOn } from "./ui-store"
+import { agentAvatarsOn, chatViewOn, type UiState } from "./ui-store"
 import { useTerminalMarks } from "./useTerminalMarks"
 
 const noChatConversation = createStore(noConversation)
 
-// What every window in the current view takes from the workspace, a terminal's or one
-// undocked from a companion: its header, its menu, and the controls its layout offers.
+// What every window in the current view takes from the workspace, a terminal's, one undocked
+// from a companion or a panel's: its header, its menu, and the controls its layout offers. A
+// panel's window that can open its panel in a window of its own offers it (`ownWindow`).
 const useWindowFrame = (
   tile: Tile,
   { onFlyTo }: TerminalLayoutControls,
+  ownWindow?: () => void,
 ): Omit<WindowShellProps, "children" | "icon"> => {
   const { backend, commands, landing } = useWorkspaceServices()
   const { openWindowed, openFocus, close, startRename, openSwitcher } = commands
@@ -145,8 +158,10 @@ const useWindowFrame = (
       releaseLead,
       foldTeam,
       moveTo,
+      ownWindow,
       onClose: () => close(id),
     }),
+    onOwnWindow: ownWindow,
     compact,
     switcher: { onOpen: (button) => openSwitcher(id, button) },
     onClose: () => close(id),
@@ -191,6 +206,77 @@ const WorkspaceWindow = memo(
           ) : (
             <UndockedWindow itemStore={itemStore} target={target} item={item} />
           ))}
+      </WindowShell>
+    )
+  },
+)
+
+// A panel of the rail in a window on the stage, in the same frame as a terminal's, under its
+// panel's name and icon, with the panel's count, its scope and its title's extra beside the name,
+// as the Inbox's pill of rows waiting to join: its body is the panel itself,
+// drawn once by the app, which this window holds while the panel is on the stage (PanelSlot).
+// Its body takes its own pointer and wheel on Canvas, and its own keys, as a companion's pane
+// does; the header still moves the window, and, on a wide screen, opens the panel in a window
+// of its own. While the panel is in one, opened from another session, this window says so in its
+// place, with a way to that window and a way to bring the panel here.
+const WorkspacePanelWindow = memo(
+  ({
+    tile,
+    controls,
+  }: {
+    readonly tile: PanelTile
+    readonly controls: TerminalLayoutControls
+  }): React.JSX.Element => {
+    const { commands, ui } = useWorkspaceServices()
+    const { panel } = tile
+    const own = usePanelPlace(panel) === "window"
+    // The view says when the window is out of sight: off the camera's view on Canvas, scrolled
+    // away in Grid; Focus says nothing, as it shows the window it lays out.
+    const offScreen = controls.onScreen === false
+    useEffect(() => {
+      if (!offScreen) return
+      const without = (state: UiState): UiState => ({
+        ...state,
+        offScreenPanels: state.offScreenPanels.filter((each) => each !== panel),
+      })
+      ui.update((state) => {
+        const rest = without(state)
+        return { ...rest, offScreenPanels: [...rest.offScreenPanels, panel] }
+      })
+      return () => void ui.update(without)
+    }, [offScreen, panel, ui])
+    const ownWindow = useDesktop() && !own ? () => commands.openOwnWindow(panel) : undefined
+    const frame = useWindowFrame(tile, controls, ownWindow)
+    const Icon = panelIcons[panel]
+    return (
+      <WindowShell
+        {...frame}
+        icon={<Icon size={14} strokeWidth={1.5} />}
+        titleExtra={
+          <>
+            <PanelCountSlot panel={panel} />
+            <PanelExtraSlot panel={panel} />
+          </>
+        }
+      >
+        <div
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col nodrag nopan nowheel"
+          data-workspace-companion
+        >
+          {own ? (
+            <div className="px-3">
+              <PanelAwayNote
+                text={`${panelLabels[panel]} is in its own window`}
+                actions={[
+                  { label: "Show it", onClick: () => commands.revealPanel(panel) },
+                  { label: "Bring it here", onClick: () => commands.bringPanelHere(panel) },
+                ]}
+              />
+            </div>
+          ) : (
+            <PanelSlot panel={panel} />
+          )}
+        </div>
       </WindowShell>
     )
   },
@@ -552,7 +638,9 @@ export const WorkspaceTerminal = memo(
 
 // Layouts call this for each terminal and window they place.
 export const renderTerminal = (tile: Tile, controls: TerminalLayoutControls): React.JSX.Element =>
-  isWindow(tile) ? (
+  isPanel(tile) ? (
+    <WorkspacePanelWindow key={tile.id} tile={tile} controls={controls} />
+  ) : isWindow(tile) ? (
     <WorkspaceWindow key={tile.id} window={tile} controls={controls} />
   ) : (
     <WorkspaceTerminal key={tile.id} terminal={tile} controls={controls} />

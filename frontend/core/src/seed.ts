@@ -1,7 +1,7 @@
 import { isOnBar, type Item } from "./items"
 import { arrive, emptyBar, messagesKey, settle, type Bar, type BarKey } from "./items/companion-bar"
 import { removeFromLayout } from "./layout/workspace-layout"
-import { addTerminal, addWindow, isWindow } from "./roster"
+import { addWindow, panelTile } from "./roster"
 import {
   createTerminalState,
   createWorkspace,
@@ -12,6 +12,7 @@ import type {
   CanvasLayout,
   CompanionWindowMeta,
   Project,
+  RailPanel,
   TerminalMetadata,
   Tile,
   ViewMode,
@@ -24,16 +25,18 @@ import type {
 // How the UI showed a session's terminals and windows, as it saved it: only its own view
 // state, by id, never the terminals, windows or items themselves, which their
 // backend reports. What's new, or waiting to open, isn't kept: nothing is after a reload.
+// The panels open on its stage are the UI's own, so they are kept, by name.
 export type RestoredView = Omit<
   WorkspaceState,
   "roster" | "items" | "bars" | "fresh" | "waiting"
 > & {
   readonly order: readonly string[]
+  readonly panels: readonly RailPanel[]
   // Each terminal's bar as the person arranged it, where the view kept them.
   readonly bars?: WorkspaceState["bars"]
 }
 
-// A session's view state, without its terminals, windows and items.
+// A session's view state, without its terminals, windows and items; its panels by name.
 export const viewOf = ({
   roster,
   items: _items,
@@ -43,6 +46,7 @@ export const viewOf = ({
 }: WorkspaceState): RestoredView => ({
   ...view,
   order: roster.order,
+  panels: roster.panels.map((tile) => tile.panel),
 })
 
 export type SessionSeed = {
@@ -86,10 +90,10 @@ const validate = (seed: WorkspaceSeed): void => {
   if (empty) throw new WorkspaceSeedError(`Project "${empty.id}" in the seed has no session`)
 }
 
-const appendTile = (state: WorkspaceState, tile: Tile): WorkspaceState => ({
-  ...state,
-  roster: isWindow(tile) ? addWindow(state.roster, tile) : addTerminal(state.roster, tile),
-})
+const withWindows = (
+  state: WorkspaceState,
+  windows: readonly CompanionWindowMeta[],
+): WorkspaceState => ({ ...state, roster: windows.reduce(addWindow, state.roster) })
 
 // The session's items, and each terminal's bar: as saved, less what's gone, with what the
 // save didn't know after, oldest first. An item whose terminal or window isn't known is
@@ -126,12 +130,14 @@ const savedIds = (layout: WorkspaceState["layout"], order: readonly string[]): S
   ])
 
 const restoredState = (
-  { order, bars = {}, ...restored }: RestoredView,
+  { order, panels: names, bars = {}, ...restored }: RestoredView,
   terminals: readonly TerminalMetadata[],
   windows: readonly CompanionWindowMeta[],
   items: readonly Item[],
 ): WorkspaceState => {
-  const tiles: readonly Tile[] = [...terminals, ...windows]
+  // The panels it had open are back first, so what it kept of them is kept.
+  const panels = names.map(panelTile)
+  const tiles: readonly Tile[] = [...terminals, ...windows, ...panels]
   const present = new Set(tiles.map((tile) => tile.id))
   const gone = [...savedIds(restored.layout, order)].filter((id) => !present.has(id))
   const layout = gone.reduce(removeFromLayout, restored.layout)
@@ -145,7 +151,7 @@ const restoredState = (
     ...restored,
     layout,
     selected,
-    roster: { terminals: [...terminals], windows, order: sorted },
+    roster: { terminals: [...terminals], windows, panels, order: sorted },
     items: [],
     bars: {},
     fresh: {},
@@ -178,14 +184,14 @@ export const workspaceFromSeed = (seed: WorkspaceSeed, defaults: SeedDefaults): 
         const state = session.restored
           ? restoredState(session.restored, terminals, windows, items)
           : withItems(
-              windows.reduce(
-                appendTile,
+              withWindows(
                 createTerminalState(
                   terminals,
                   defaults.view,
                   defaults.windowedView,
                   session.canvasLayout ? { canvasLayout: session.canvasLayout } : {},
                 ),
+                windows,
               ),
               items,
               {},

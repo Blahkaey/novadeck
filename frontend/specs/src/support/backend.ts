@@ -27,6 +27,7 @@ import { isDemoFiles } from "@novadeck/demo/files"
 import { isDemoInbox } from "@novadeck/demo/inbox"
 import { demoInboxRowsAll } from "@novadeck/demo/inbox/fixtures"
 import { demoResolved, demoResolvedRows } from "@novadeck/demo/inbox/resolved"
+import { isDemoNotes } from "@novadeck/demo/notes"
 import { demoTerminalId } from "@novadeck/demo/samples"
 import type { SampleArtifact } from "@novadeck/demo/showcase/artifacts"
 import { createShowcaseDemo } from "@novadeck/demo/showcase/demo"
@@ -476,6 +477,15 @@ export const fileEdits = {
       .filter(isDemoFiles)
       .map((files) => files.edits()?.text({ projectId, path }))
       .find((text) => text !== undefined),
+}
+
+/** The person's notes as the demo keeps them, in each backend the page started. */
+export const notesFault = {
+  /** The next change to the notes fails, as one the runner couldn't save. */
+  failNext: (): void => {
+    for (const notes of new Set(started.map(({ backend }) => backend.notes)))
+      if (isDemoNotes(notes)) notes.failNext()
+  },
 }
 
 export const worktreeDiff = {

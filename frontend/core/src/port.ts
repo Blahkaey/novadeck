@@ -526,7 +526,8 @@ export type BackendFields = {
   // Optional. `listener` hears whether the app's window has the system's focus: at once
   // with the current state, and again on each change; returns the stop. Unlike the page's
   // own document, it stays focused while focus is inside a frame of the page, as a page
-  // in the companion pane. Absent where nothing surrounds the page, as in a browser.
+  // in the companion pane, or in one of the page's panel windows. Absent where nothing
+  // surrounds the page, as in a browser.
   readonly windowFocus?: (listener: (focused: boolean) => void) => () => void
   // Optional. The window's own controls where they sit over the page's top, its header standing
   // in for a title bar, at its `side`: macOS's close, minimise and zoom buttons at the start,

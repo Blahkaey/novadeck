@@ -299,8 +299,27 @@ Terminals:
   question, and an action ask), so their "?" and "!" show beside "Working, a side question",
   an agent that works on with a question open. You stay on one that needs permission, and the
   marks land on the others as you look away. Its shell an agent opened and its shell an agent
-  exited from keep their handles on their tabs; its other plain shells show none. Also a
-  burst of 30, a quick failure, a spawn failure and the terminal limit.
+  exited from keep their handles on their tabs; its other plain shells show none. The Notes and
+  Todo panels open as windows beside them, before the terminals, so the last terminal stays the
+  one you look at. Also a burst of 30, a quick failure, a spawn failure and the terminal limit.
+- **Panel windows:** "Panels in windows" opens every panel of the rail (Terminals, the Inbox,
+  Worktrees, Notes, Todo, History and Files) as windows on the session on screen, as each one's
+  **Open in a window** does (only those the demo shows: Worktrees with agent worktrees on), Files
+  selected: each is listed in the Terminals window under its own icon, the Terminals window too,
+  its rail toggle keeps its place with a window mark, and with every panel out the sidebar hides;
+  opened again, it shows the note on the panel it was on. The Terminals window's view switch, a
+  pick from **Move to → All sessions…**, the Inbox's sheet beside its row in its window and the
+  Worktrees window closing as agent worktrees turn off in Preferences are normal use, as is the
+  rest: a window's **Return to sidebar**, the rail toggle that goes to the window,
+  and the sidebar's "Notes is in a window" note, which a `?panel=notes` link or Back reaches. A
+  window's **Open in its own window** opens a real browser window, so a panel in a window of its
+  own, its rail toggle, its **Return to sidebar** and closing it, the sidebar's "Notes is in its
+  own window" note, and the note in its window on another session's workspace (open it there
+  first, then in its own window from another session, and switch back) with **Bring it here**,
+  are normal use too. "Next own window is blocked" has the next one refused, as a popup blocker
+  would: the toast that says so shows, and the panel stays in its window on the workspace. The
+  "Every state at once" gallery opens no window of a panel's own, as a browser opens one only
+  from a click on it.
 - **Worktrees:** acts on the selected terminal's first worktree in the Worktrees panel, which lists the
   open project's worktrees (every demo seeds a few from its own terminals, in several projects, so
   switching projects switches the list: one in conflict with main, two with each other, one
@@ -763,22 +782,34 @@ Agents:
 
 App:
 
-- **Notes:** only where the demo keeps the person's notes (`plain`, `agents`, `messages`,
-  `inbox` and `welcome`; the showcase and the videos' demos have no Notes panel). Storefront
-  starts with four todos, one of them with details and one added by an agent, marked so (Codex's
-  icon at the end of its line, whose tooltip reads "Added by Codex · @pike", History's Tax
-  rounding agent), a plain note and two todos under Done; the other projects start with none.
-  Adding, checking off, editing, moving, deleting and Clear done all work there, so they need
-  no action. Each action acts on the open project's notes and leaves the others': "Next
-  notes change fails" makes the next change fail once (the list stays as it was, and a line
-  above it says the change wasn't saved, until a change takes), "Sample notes" puts
-  storefront's samples in the open project, "No notes" empties it (the panel says what it is
-  for), "Every todo done" leaves nothing to do over a Done group of six, "Project full of
-  notes" fills it with the 200 a project keeps (the add field takes no more, and a line says
-  why), "A long note" adds a todo whose line is as long as one can be, with details that have
-  a heading, lists, code and a link, and "An agent adds a todo" puts a todo first in the list,
-  marked as added by the first agent running in the session on screen (Claude Code's @wren,
-  from History, where none runs), as an agent's `note` tool adds one.
+- **Notes and Todo:** only where the demo keeps the person's notes (`plain`, `agents`,
+  `messages`, `inbox` and `welcome`; the showcase and the videos' demos have neither the Notes
+  panel nor the Todo board). Storefront starts with two plain notes in the Notes panel and a
+  card in every column of the Todo board: three in To do, one of them added by an agent, marked
+  so (Codex's icon at the end of its line, whose tooltip reads "Added by Codex · @pike",
+  History's Tax rounding agent), one with details In progress, and two in Done; the other
+  projects start with none. Adding, checking off, editing, moving (by drag, the Move menu or Alt
+  and the arrows), deleting and Clear done all work there, so they need no action. The sidebar, at
+  most 400px wide, shows the board one column at a time; its three columns side by side need
+  520px, which the phone drawer gives it: on a window from about 590 to 700px wide, the Todo
+  panel opens over the whole width, as the Inbox's does. Each action but the last two acts on
+  the open project's notes and leaves the others': "Next notes change fails" makes the next
+  change fail once (the
+  list or the board stays as the backend has it, and a line above it says the change wasn't
+  saved, until a change takes), "Sample notes" puts storefront's samples in the open project,
+  "No notes" empties both (each says what it is for), "No todos" empties the board and keeps
+  the plain notes, "Every todo done" leaves To do and In progress empty over a Done column of
+  six, "Project full of notes" fills it with the 200 a project keeps, plain notes and cards in
+  every column (neither add field takes more, and a line says why), "A long note" adds a card
+  whose line is as long as one can be, with details that have a heading, lists, code and a link,
+  and "An agent adds a todo" puts a card first in To do, marked as added by the first agent
+  running in the session on screen (Claude Code's @wren, from History, where none runs), as an
+  agent's `note` tool adds one. "Card moves not offered" boots the demo again with a backend
+  that can't place a note, as a runner from before the Todo board: the cards have no Move
+  button, can't be dragged, and Alt and the arrows move none, a line under the add field says
+  moving cards needs the runner updated, checking off and opening again still take a card to
+  Done and To do, and the Notes panel's notes still move (by the older `move`); "Card moves
+  offered" boots it again with them.
 - **Inbox:** each action adds one row of its kind to the Inbox, over what the agents wait on,
   waiting from now and in place of the one of its kind already there: a stuck agent, Codex's
   command permission, an unreadable dialog, a held message, a decision with options, a
@@ -1325,7 +1356,7 @@ folder of `frontend/ui/src/`:
 | `frontend/core/src/files.ts`                                    | The Files panel's contract: folders listed one at a time, agents' changes, hide patterns, and the person's changes to files.   |
 | `frontend/core/src/conversation/picks.ts`                       | What the person has picked and written for a dialog's questions, and the answer it makes.                                      |
 | `frontend/core/src/conversation/turns.ts`                       | A conversation grouped into blocks, the turn's status.                                                                         |
-| `frontend/core/src/roster.ts`                                   | A session's terminals and undocked windows, laid out as tiles, their order and status.                                         |
+| `frontend/core/src/roster.ts`                                   | A session's terminals, undocked windows and panels on its stage, laid out as tiles, their order and status.                    |
 | `frontend/core/src/layout/workspace-layout.ts`                  | Where each terminal sits and how big it is in each view.                                                                       |
 | `terminals/`                                                    | Terminal frame, tabs, rename state, and the recent-terminal switcher.                                                          |
 | `frontend/items/src/`                                           | Items: `store/`, `bar/` (taskbar, peek, drag), `registry.ts`, `kinds/<kind>/` (one folder per kind), `document/` and `homes/`. |

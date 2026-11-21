@@ -84,16 +84,23 @@ export const createNavigator = ({
     void navigate?.(url, { replace, state: depth > 0 ? { dialogDepth: depth } : null })
   }
 
-  const go = (changes: Partial<WorkspaceRoute>, replace = false): void => {
+  // How many entries of the app's own a dialog `next` opens over, for closing it to go back
+  // through: one where it opens now, those it had where it stays open.
+  const depthOf = (next: WorkspaceRoute, replace: boolean): number => {
     const { route, dialogDepth } = current()
-    const next = { ...route, ...changes }
-    const depth = !next.dialog
+    return !next.dialog
       ? 0
       : !route.dialog
         ? 1
         : dialogDepth > 0
           ? dialogDepth + (replace ? 0 : 1)
           : 0
+  }
+
+  const go = (changes: Partial<WorkspaceRoute>, replace = false): void => {
+    const { route } = current()
+    const next = { ...route, ...changes }
+    const depth = depthOf(next, replace)
     const destination = routeUrl(next)
     // Ignore selection callbacks for the current location too; a bubbling click
     // must not undo a view change queued by a child control.
@@ -107,7 +114,8 @@ export const createNavigator = ({
   ): void => {
     const next = workspace.transact(actions)
     const { route } = current()
-    visit(routeUrl({ ...route, ...workspaceRoute(next), panel: route.panel, ...changes }), replace)
+    const target = { ...route, ...workspaceRoute(next), panel: route.panel, ...changes }
+    visit(routeUrl(target), replace, depthOf(target, replace))
   }
 
   const closeDialog = (): void => {

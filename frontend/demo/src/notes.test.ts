@@ -1,4 +1,4 @@
-import { doneNotes, openNotes, todosLeft } from "@novadeck/core/notes"
+import { boardCards, openNotes, plainNotes, todosLeft } from "@novadeck/core/notes"
 import type { Backend } from "@novadeck/core/port"
 
 import { createDemoNotes, demoNotes, isDemoNotes, withNotes } from "./notes"
@@ -15,21 +15,64 @@ const setup = (withSamples = true) => {
 }
 
 describe("The demo's notes", () => {
-  it("start with the storefront's: todos, one an agent added, a plain note, one with a body, and some done", () => {
+  it("start with the storefront's: todos, one an agent added, plain notes, one with a body, and some done", () => {
     const notes = demoNotes(now)
 
     expect(todosLeft(notes, "storefront")).toBe(4)
-    expect(openNotes(notes, "storefront").filter((note) => !note.todo)).toHaveLength(1)
+    expect(openNotes(notes, "storefront").filter((note) => !note.todo)).toHaveLength(2)
     expect(openNotes(notes, "storefront").some((note) => note.body !== "")).toBe(true)
     // Codex added it as @pike, the storefront's Tax rounding agent in History.
     expect(notes.filter((note) => note.by).map(({ text, by }) => [text, by])).toEqual([
       ["Move the price formatter into the shared package", { agent: "codex", handle: "pike" }],
     ])
-    expect(doneNotes(notes, "storefront").map(({ text }) => text)).toEqual([
+    expect(boardCards(notes, "storefront", "done").map(({ text }) => text)).toEqual([
       "Rename the checkout route",
       "Update the screenshots in the README",
     ])
     expect(new Set(notes.map(({ id }) => id)).size).toBe(notes.length)
+  })
+
+  it("fill every column of the storefront's Todo board, and its plain notes", () => {
+    const notes = demoNotes(now)
+    const texts = (column: "todo" | "doing" | "done") =>
+      boardCards(notes, "storefront", column).map(({ text }) => text)
+
+    expect(texts("todo")).toEqual([
+      "Ask @wren to cover expired coupon codes",
+      "Reply to the design review about the empty cart",
+      "Move the price formatter into the shared package",
+    ])
+    expect(texts("doing")).toEqual(["Check the cart total on a slow connection"])
+    expect(texts("done")).toEqual([
+      "Rename the checkout route",
+      "Update the screenshots in the README",
+    ])
+    expect(plainNotes(notes, "storefront").map(({ text }) => text)).toEqual([
+      "Staging deploys from the release branch",
+      "Coupon codes reset on the demo store every night",
+    ])
+  })
+
+  it("place a card where the person drops it, and a plain note among the plain notes", () => {
+    const { notes, state } = setup()
+    const [first, , second] = boardCards(state().notes, "storefront", "todo")
+    const [doing] = boardCards(state().notes, "storefront", "doing")
+
+    notes.place(first!.id, "doing", doing!.id)
+    expect(boardCards(state().notes, "storefront", "doing").map(({ id }) => id)).toEqual([
+      first!.id,
+      doing!.id,
+    ])
+    notes.place(second!.id, "done", null)
+    expect(boardCards(state().notes, "storefront", "done").at(-1)).toMatchObject({
+      id: second!.id,
+      // The demo's clock moves a second with each change.
+      doneAt: now + 2_000,
+    })
+    // A plain note goes in no column.
+    const before = state().notes
+    notes.place(plainNotes(before, "storefront")[0]!.id, "todo", null)
+    expect(state().notes).toBe(before)
   })
 
   it("keep what the person adds, changes, moves and removes", () => {
@@ -45,7 +88,7 @@ describe("The demo's notes", () => {
     expect(texts()).toEqual(["Ship it", "Remember the flag"])
     notes.change(ship!.id, { done: true })
     expect(texts()).toEqual(["Remember the flag"])
-    expect(doneNotes(state().notes, "storefront")[0]).toMatchObject({
+    expect(boardCards(state().notes, "storefront", "done")[0]).toMatchObject({
       text: "Ship it",
       doneAt: now + 4_000,
     })

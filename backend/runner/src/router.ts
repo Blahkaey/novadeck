@@ -365,6 +365,7 @@ export const createRouter = (options: {
       }),
       update: api.notes.update.handler(({ input }) => notes.update(input)),
       move: api.notes.move.handler(({ input }) => notes.move(input)),
+      place: api.notes.place.handler(({ input }) => notes.place(input)),
       remove: api.notes.remove.handler(({ input }) => notes.remove(input)),
     },
     works: {

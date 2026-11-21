@@ -7,7 +7,13 @@
    panel couldn't do is a `.sidebar-refusal` line, red-edged, its `p` beside a dismiss button;
    each panel sets its margin.
 
-   Hooks: on a panel, data-active="true" | "false".
+   Hooks: on a panel, data-active="true" | "false", whether its place shows it (the panel the
+   sidebar is open on, or in a window the Terminals panel's view chosen); data-place="stage" in a
+   window on the stage, which it fills, its heading heard but not shown (the window's names it
+   and shows its count, scope and title's extra), its own row showing only what comes before its
+   title and its actions, and gone while it has neither; and data-place="window" in a window of
+   its own, which it fills, its header as in the sidebar with a `.sidebar-return` button in place
+   of `.sidebar-close`.
 
    Tokens, each optional (its fallback in brackets):
    --sidebar-create-border-color (line): the create button's edge, at rest and hovered. */
@@ -163,4 +169,23 @@
     .session-move-here {
     opacity: 0;
   }
+}
+
+/* The dot on the Terminals panel's Sessions choice (TerminalsViewSwitch) while another session
+   asks something of the person: the rail's attention dot, smaller, over the icon's corner, cut
+   out of it by a ring of the segment's ground at rest, under the pointer, or chosen. */
+.terminals-view-dot {
+  --_dot-ground: var(--segmented-bg, var(--color-shell));
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+}
+@media (hover: hover) {
+  .segment:hover:not([data-disabled]) > .terminals-view-dot {
+    --_dot-ground: var(--segmented-hover-bg, var(--color-soft));
+  }
+}
+.segment:is([data-state="checked"], :has(> input:checked)) > .terminals-view-dot {
+  --_dot-ground: var(--segmented-active-bg, var(--color-paper));
 }

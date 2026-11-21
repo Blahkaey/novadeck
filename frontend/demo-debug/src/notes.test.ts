@@ -1,4 +1,11 @@
-import { doneNotes, noteLimits, openNotes, todosLeft } from "@novadeck/core/notes"
+import {
+  boardCards,
+  boardColumns,
+  noteLimits,
+  openNotes,
+  plainNotes,
+  todosLeft,
+} from "@novadeck/core/notes"
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { createDemoNotes } from "@novadeck/demo/notes"
 
@@ -18,6 +25,8 @@ const context = (activeProjectId?: string): DemoActionContext => ({
     throw new Error("unused")
   },
   startFresh: () => undefined,
+  openPanels: () => {},
+  refuseNextWindow: () => {},
   dispatch: undefined,
   workspace: () => (activeProjectId ? ({ activeProjectId } as Workspace) : undefined),
   note: () => undefined,
@@ -40,21 +49,37 @@ const onScreen = (projectId: string, terminals: Partial<TerminalMetadata>[]): Wo
 
 const setup = () => {
   const notes = createDemoNotes(0)
-  const [group] = notesGroups(notes)
+  const placing: boolean[] = []
+  const [group] = notesGroups({ setPlacesNotes: (next) => void placing.push(next) }, notes)
   const action = (label: string) => group!.actions.find((each) => each.label === label)!
   const run = (label: string, projectId?: string) => void action(label).run(context(projectId))
   // Runs it with this workspace on screen.
   const runOn = (label: string, workspace: Workspace) =>
     void action(label).run({ ...context(), workspace: () => workspace })
-  return { notes, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
+  return { notes, placing, group: group!, run, runOn, state: () => notes.state.getSnapshot() }
 }
 
-describe("the debug panel's Notes group", () => {
+describe("the debug panel's Notes and Todo group", () => {
   it("offers nothing where the backend's notes aren't the demo's", () => {
-    const { state, add, change, move, remove } = createDemoNotes(0)
+    const { state, add, change, move, place, remove } = createDemoNotes(0)
 
-    expect(notesGroups(undefined)).toEqual([])
-    expect(notesGroups({ state, add, change, move, remove })).toEqual([])
+    const launch = { setPlacesNotes: () => {} }
+
+    expect(notesGroups(launch, undefined)).toEqual([])
+    expect(notesGroups(launch, { state, add, change, move, place, remove })).toEqual([])
+  })
+
+  it("boots the demo again with cards that move, or that don't, as on an older runner", () => {
+    const { group, placing, run } = setup()
+
+    run("Card moves not offered")
+    run("Card moves offered")
+    expect(placing).toEqual([false, true])
+    expect(
+      group.actions
+        .filter(({ label }) => label.startsWith("Card moves"))
+        .map((each) => each.reboots),
+    ).toEqual([true, true])
   })
 
   it("makes the next change fail, once, with the notes kept", () => {
@@ -74,13 +99,25 @@ describe("the debug panel's Notes group", () => {
     const storefront = state().notes
 
     run("Project full of notes", "infra")
-    expect(openNotes(state().notes, "infra")).toHaveLength(noteLimits.perProject)
+    expect(state().notes.filter((note) => note.projectId === "infra")).toHaveLength(
+      noteLimits.perProject,
+    )
     expect(state().notes.filter((note) => note.projectId === "storefront")).toEqual(storefront)
     run("No notes", "infra")
     expect(state().notes).toEqual(storefront)
     run("Sample notes", "infra")
     expect(todosLeft(state().notes, "infra")).toBe(todosLeft(storefront, "storefront"))
     expect(new Set(state().notes.map(({ id }) => id)).size).toBe(state().notes.length)
+  })
+
+  it("empties the board and keeps the plain notes", () => {
+    const { run, state } = setup()
+    const plain = plainNotes(state().notes, "storefront")
+
+    run("No todos", "storefront")
+    for (const column of boardColumns)
+      expect(boardCards(state().notes, "storefront", column)).toEqual([])
+    expect(plainNotes(state().notes, "storefront")).toEqual(plain)
   })
 
   it("acts on the storefront before a workspace is committed", () => {
@@ -95,7 +132,9 @@ describe("the debug panel's Notes group", () => {
 
     run("Every todo done", "storefront")
     expect(openNotes(state().notes, "storefront")).toEqual([])
-    expect(doneNotes(state().notes, "storefront")).toHaveLength(6)
+    expect(boardCards(state().notes, "storefront", "done")).toHaveLength(6)
+    // A todo checked off is in progress no more.
+    expect(state().notes.filter((note) => "doing" in note)).toEqual([])
   })
 
   it("shows a note at its longest, with details", () => {
@@ -148,6 +187,14 @@ describe("the debug panel's notes", () => {
 
     expect(notes).toHaveLength(noteLimits.perProject)
     expect(new Set(notes.map(({ id }) => id)).size).toBe(notes.length)
+  })
+
+  it("fill a project with plain notes and cards in every column of the board", () => {
+    const notes = fullNotes("p", 0)
+
+    expect(plainNotes(notes, "p")).toHaveLength(noteLimits.perProject / 4)
+    for (const column of boardColumns)
+      expect(boardCards(notes, "p", column)).toHaveLength(noteLimits.perProject / 4)
   })
 
   it("stay within a note's limits", () => {

@@ -5,7 +5,7 @@ import {
   type Arranged,
   type CanvasArrangement,
 } from "@novadeck/core/layout/canvas-arrangement"
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal } from "@novadeck/core/roster"
 import type { TerminalMetadata, Tile } from "@novadeck/core/types"
 import type { Viewport, XYPosition } from "@xyflow/react"
 
@@ -36,11 +36,11 @@ export const arrangedTiles = (
   tiles: readonly Tile[],
   omit: (tile: Tile) => boolean,
 ): readonly Arranged[] => {
-  const terminals = new Set(tiles.filter((tile) => !isWindow(tile)).map((tile) => tile.id))
+  const terminals = new Set(tiles.filter(isTerminal).map((tile) => tile.id))
   return tiles
     .filter((tile) => !omit(tile))
     .map((tile) => {
-      const lead = isWindow(tile) ? undefined : leadOf(tile)
+      const lead = isTerminal(tile) ? leadOf(tile) : undefined
       return { id: tile.id, lead: lead !== undefined && terminals.has(lead) ? lead : undefined }
     })
 }

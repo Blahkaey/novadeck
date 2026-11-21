@@ -93,7 +93,7 @@ const show = (
     ),
     selectedId: options.selectedId,
     active: true,
-    watching: true,
+    showing: true,
     onClose: () => {},
     onSelect,
     canOpenFile: () => options.canOpen ?? true,

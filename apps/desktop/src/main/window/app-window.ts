@@ -18,6 +18,7 @@ import {
 import { windowControlsSide, windowFocusChannel } from "../../bridge.js"
 import { developmentOrigin, uiAddress, uiFile } from "../resources.js"
 import { controlsWindowOptions } from "./controls.js"
+import type { PanelWindows } from "./panel-windows.js"
 import { ownPage } from "./permissions.js"
 
 // The folder the main process's bundle runs from, which the preload's sits beside.
@@ -53,14 +54,20 @@ export const appPages = (windows: readonly BrowserWindow[]): WebContents[] =>
     )
 
 /**
- * Tells a window's page whether the window has the system's focus; the page tracks it
- * itself only while its own document does, not while focus is inside a frame of it.
+ * Tells a window's page whether it has the system's focus, `focused`: the window or one of
+ * its panel windows has it. The page tracks it itself only while its own document does,
+ * not while focus is inside a frame of it or in a panel window.
  */
-export const tellWindowFocus = (window: BrowserWindow): void => {
+export const tellWindowFocus = (window: BrowserWindow, focused: boolean): void => {
   if (window.isDestroyed()) return
   const contents = window.webContents
   if (contents.isDestroyed() || !isAppPage(contents.getURL())) return
-  contents.send(windowFocusChannel, window.isFocused())
+  contents.send(windowFocusChannel, focused)
+}
+
+/** Opens a link to the web in the system's browser; any other address goes nowhere. */
+export const openOutside = (url: string): void => {
+  if (webAddress(url)) void shell.openExternal(url)
 }
 
 /** Shows a window again, as a second launch asks for. */
@@ -96,7 +103,8 @@ export const watchAppPage = (contents: WebContents, log: Log): void => {
  * Windows its own controls sit in the page's header, which stands in for its title bar
  * (./controls.ts), Windows' in the page's `ink`.
  * `preloadArguments` reach its preload. It never
- * navigates away; links to the web open in the system's browser, and only page views of
+ * navigates away; links to the web open in the system's browser, a sidebar panel the page
+ * asks for opens in a window of its own (see ./panel-windows.ts), and only page views of
  * the pages' partition attach.
  */
 export const openAppWindow = ({
@@ -105,6 +113,7 @@ export const openAppWindow = ({
   zoomFactor,
   preloadArguments,
   runnerHost,
+  panels,
 }: {
   readonly ground: string
   // The page's last ink, which Windows' caption buttons draw in until it says again.
@@ -112,6 +121,7 @@ export const openAppWindow = ({
   readonly zoomFactor: number
   readonly preloadArguments: readonly string[]
   readonly runnerHost?: string
+  readonly panels: PanelWindows<BrowserWindow>
 }): BrowserWindow => {
   const window = new BrowserWindow({
     width: 1120,
@@ -149,8 +159,7 @@ export const openAppWindow = ({
   }
 
   window.once("ready-to-show", () => window.show())
-  window.on("focus", () => tellWindowFocus(window))
-  window.on("blur", () => tellWindowFocus(window))
+  panels.watchFocus(window)
 
   window.webContents.on("will-navigate", (event) => event.preventDefault())
   // The app uses no WebRTC, and no page policy can keep a frame in it from opening a peer
@@ -158,10 +167,13 @@ export const openAppWindow = ({
   // doesn't go through a proxy (see SECURITY.md, PDF Previews).
   window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp")
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (webAddress(url)) void shell.openExternal(url)
+  window.webContents.setWindowOpenHandler((details) => {
+    const panel = panels.request(window, details)
+    if (panel) return { action: "allow", overrideBrowserWindowOptions: panel }
+    openOutside(details.url)
     return { action: "deny" }
   })
+  panels.host(window)
 
   window.webContents.on("will-attach-webview", (event, preferences, params) => {
     if (!attachPage(preferences, params, pagesPartition)) event.preventDefault()

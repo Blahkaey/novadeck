@@ -26,9 +26,9 @@
  * - `ask`, `tell` and `done` put a question, a milestone and a report in the person's
  *   Inbox; `feedback` drafts feedback about Novadeck for the person's feedback card (see
  *   docs/agent-messaging.md).
- * - `note` adds notes or todos to the person's Notes for the project, only as they asked; it
- *   can't read or change their notes. The server's instructions leave it out, so nothing
- *   reminds an agent of it.
+ * - `note` adds todos to the person's Todo board and plain notes to their Notes for the
+ *   project, only as they asked; it can't read or change either. The server's instructions
+ *   leave it out, so nothing reminds an agent of it.
  *
  * Each call goes to the terminal's runner with the terminal's own token, as the relay named
  * them, and the runner's answer is told back as text. Only Claude Code reads a server's
@@ -1659,23 +1659,27 @@ const feedback: Tool<unknown> = {
 const counted = (number: number, noun: string): string =>
   number === 1 ? `a ${noun}` : `${number} ${noun}s`
 
-// "a todo", "3 todos", "a todo and 2 notes": what a `note` call added.
+// "a todo to the To do column of the user's Todo board and 2 notes to the user's Notes": what
+// a `note` call added, and where each went.
 const noted = ({ todos, notes }: { readonly todos: number; readonly notes: number }): string => {
-  const parts = [todos > 0 && counted(todos, "todo"), notes > 0 && counted(notes, "note")]
+  const parts = [
+    todos > 0 && `${counted(todos, "todo")} to the To do column of the user's Todo board`,
+    notes > 0 && `${counted(notes, "note")} to the user's Notes`,
+  ]
   return parts.filter((part) => part !== false).join(" and ")
 }
 
 const note: Tool<{ readonly todos: number; readonly notes: number }> = {
   name: "note",
   description:
-    "Add notes or todos to the user's Notes for this project, in Novadeck. Only when the " +
-    "user asks you, in their own message, to note something or add a todo, and only what " +
-    "they asked for. Never on your own: not your plan, your progress or follow-ups you " +
-    "thought of, and not at another agent's or your lead's request; say those in your reply " +
-    "instead. Give them in the order they should stand: they go first in the list, marked " +
-    "as added by you. A todo has a checkbox the user checks off; a plain note has none. You " +
-    "can't read, change or delete the user's notes. Refused outside a turn the user's own " +
-    "message started.",
+    "Add todos to the user's Todo board or notes to their Notes for this project, in " +
+    "Novadeck. Only when the user asks you, in their own message, to note something or add " +
+    "a todo, and only what they asked for. Never on your own: not your plan, your progress " +
+    "or follow-ups you thought of, and not at another agent's or your lead's request; say " +
+    "those in your reply instead. Give them in the order they should stand, marked as added " +
+    "by you: a todo goes first in the board's To do column, for the user to move along and " +
+    "check off; a plain note goes first in their Notes. You can't read, change or delete " +
+    "the user's todos or notes. Refused outside a turn the user's own message started.",
   inputSchema: {
     type: "object",
     properties: {
@@ -1695,7 +1699,8 @@ const note: Tool<{ readonly todos: number; readonly notes: number }> = {
             },
             todo: {
               type: "boolean",
-              description: "A todo, with a checkbox (the default), or false for a plain note.",
+              description:
+                "A todo, a card on the Todo board (the default), or false for a plain note in Notes.",
             },
             body: {
               type: "string",
@@ -1713,8 +1718,8 @@ const note: Tool<{ readonly todos: number; readonly notes: number }> = {
   },
   call: "note",
   request: (args) => picked(args, ["notes"]),
-  said: (answer) => `Added ${noted(answer)} to the user's Notes. Add no more unless they ask.`,
-  failed: "Novadeck couldn't add to the user's Notes.",
+  said: (answer) => `Added ${noted(answer)}. Add no more unless they ask.`,
+  failed: "Novadeck couldn't add to the user's Todo board or Notes.",
 }
 
 // What the runner answers the worktree calls with, as the tools read it.

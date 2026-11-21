@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/react/sortable"
 import { subagentMarks, subagentsBadge, subagentsDetail } from "@novadeck/core/agents/subagents"
 import { nextTurnAge, turnAge } from "@novadeck/core/agents/turn-age"
 import { messageBadgeLabel, type MessageBadge } from "@novadeck/core/messages"
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import {
   endingText,
   idleNote,
@@ -30,7 +30,16 @@ import {
   sidebarRowWideIconClasses,
 } from "@novadeck/toolkit/SidebarItem"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { BellOff, Check, Eye, EyeOff, Pencil, X, type LucideIcon } from "lucide-react"
+import {
+  BellOff,
+  Check,
+  Eye,
+  EyeOff,
+  PanelLeftOpen,
+  Pencil,
+  X,
+  type LucideIcon,
+} from "lucide-react"
 import { lazy, Suspense, type ReactNode } from "react"
 
 import { workspaceShortcutBindings } from "../interaction/shortcuts"
@@ -100,7 +109,8 @@ export const TerminalTab = ({
   foldedRows,
   folder,
 }: {
-  // A terminal, or a window undocked from a companion, which runs nothing.
+  // A terminal, or a window that runs nothing: one undocked from a companion, the project's, or
+  // a sidebar panel's, whose close returns the panel to the sidebar.
   terminal: Tile
   // What it presents as: its program, or what the window shows.
   icon: LucideIcon
@@ -164,14 +174,15 @@ export const TerminalTab = ({
   folder?: string | undefined
 }): React.JSX.Element => {
   const editing = Boolean(rename)
-  const shell = isWindow(terminal) ? undefined : terminal
+  const shell = isTerminal(terminal) ? terminal : undefined
+  const name = tileName(terminal)
   // 24px, the smallest whose LEDs keep their gaps on a 1× screen, as Messages' do.
   const icon = avatar ? (
     <Avatar handle={avatar.handle} live={avatar.live} size={24} />
   ) : (
     <Icon size={14} strokeWidth={1.5} />
   )
-  const label = terminalLabel(terminal.name, shell?.handle)
+  const label = terminalLabel(name, shell?.handle)
   // The detail line shows the state: a glyph (a spinner while a program runs) before the
   // program, what the agent needs of the person right after it, or a note while the shell
   // starts. A tab that has ended is hatched (styles.css); assistive technology says how it
@@ -267,7 +278,7 @@ export const TerminalTab = ({
       <SidebarItem
         ref={ref}
         handleRef={handleRef}
-        name={terminal.name}
+        name={name}
         icon={icon}
         wideIcon={Boolean(avatar)}
         detail={
@@ -375,7 +386,7 @@ export const TerminalTab = ({
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <TerminalRenameInput
                   id={terminal.id}
-                  name={terminal.name}
+                  name={name}
                   label={label}
                   value={rename.value}
                   request={rename.request}
@@ -422,7 +433,7 @@ export const TerminalTab = ({
                     <Check size={14} strokeWidth={1.5} />
                   </button>
                 </Tooltip>
-              ) : isProjectWindow(terminal) ? null : (
+              ) : isPanel(terminal) || isProjectWindow(terminal) ? null : (
                 <Tooltip
                   content={
                     selected
@@ -453,8 +464,18 @@ export const TerminalTab = ({
               </Tooltip>
             ) : (
               <Tooltip content={closeTip}>
-                <button className={actionClasses} aria-label={`Close ${label}`} onClick={onClose}>
-                  <X size={14} strokeWidth={1.5} />
+                <button
+                  className={actionClasses}
+                  aria-label={
+                    isPanel(terminal) ? `Return ${name} to the sidebar` : `Close ${label}`
+                  }
+                  onClick={onClose}
+                >
+                  {isPanel(terminal) ? (
+                    <PanelLeftOpen size={14} strokeWidth={1.5} />
+                  ) : (
+                    <X size={14} strokeWidth={1.5} />
+                  )}
                 </button>
               </Tooltip>
             )}

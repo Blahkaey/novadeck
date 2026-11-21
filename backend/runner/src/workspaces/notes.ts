@@ -2,6 +2,7 @@ import {
   note,
   noteAuthor,
   noteLimits,
+  type BoardColumn,
   type Note,
   type NoteAuthor,
   type NotesChange,
@@ -16,7 +17,10 @@ const log = logs.for("notes")
 
 // The person's own notes on each project: todos, which they check off, and plain notes, in
 // their order. A project's notes are kept whole, as one text, and read afresh for each call,
-// so nothing here holds them: a removed project's go with its row.
+// so nothing here holds them: a removed project's go with its row. Its todos are the cards of
+// the project's Todo board, each column's in the order the notes stand; the rules that move
+// them are the core's (`frontend/core/src/notes.ts`), which the UI applies before the runner
+// answers, so the two keep to the same ones.
 
 /** What `Notes` keeps a project's notes with. */
 export type NoteRecords = {
@@ -65,6 +69,14 @@ export type NewNote = {
   readonly text: string
   readonly todo: boolean
   readonly body?: string | undefined
+}
+
+/** Where a note is to go: a todo into `column`, a plain note with none; before `before`. */
+export type NotePlace = {
+  readonly projectId: string
+  readonly id: string
+  readonly column?: BoardColumn | undefined
+  readonly before?: string | undefined
 }
 
 /** What a change gives of a note; what is left out stays as it is. */
@@ -161,25 +173,26 @@ export class Notes {
 
   /**
    * Changes what is given of a note. A todo checked off is done from now, unless it already
-   * was; a plain note is never done, so taking the checkbox away opens it again. A body
-   * keeps no white space at its end.
+   * was, and goes first in Done; one opened again goes first in To do. A plain note is never
+   * done, so taking the checkbox away opens it again. Each of those takes a todo out of In
+   * progress; any other change leaves the note where it stands. A body keeps no white space
+   * at its end.
    */
   update({ projectId, id, ...change }: NoteUpdate): Note[] {
     const notes = this.list(projectId)
     const before = found(notes, id)
     const todo = change.todo ?? before.todo
     const done = change.done ?? before.doneAt !== null
+    const doneAt = todo && done ? (before.doneAt ?? this.now()) : null
     const after: Note = {
-      ...before,
+      ...withState(before, doneAt, todo && doneAt === null && before.doing === true),
       text: change.text ?? before.text,
       body: change.body === undefined ? before.body : change.body.trimEnd(),
       todo,
-      doneAt: todo && done ? (before.doneAt ?? this.now()) : null,
     }
-    return this.write(
-      projectId,
-      notes.map((each) => (each === before ? after : each)),
-    )
+    const replaced = notes.map((each) => (each === before ? after : each))
+    const entered = enteredColumn(columnOf(before), columnOf(after))
+    return this.write(projectId, entered ? firstIn(replaced, after, entered) : replaced)
   }
 
   /**
@@ -199,6 +212,39 @@ export class Notes {
       input.projectId,
       notes.map((each) => (each.doneAt === null ? order[next++]! : each)),
     )
+  }
+
+  /**
+   * Puts a note in its place: a todo into `column`, which takes that column's state (done
+   * from now unless it already was, in progress only in `doing`), a plain note among the plain
+   * notes. It stands just before `before` where that is another note of the same place, else
+   * after the last of them, or where it was when there is none; no other note moves. A column
+   * for a plain note, or none for a todo, is a CONFLICT.
+   */
+  place(input: NotePlace): Note[] {
+    const notes = this.list(input.projectId)
+    const moving = found(notes, input.id)
+    const column = input.column ?? null
+    if (moving.todo !== (column !== null))
+      throw new DomainError(
+        "CONFLICT",
+        moving.todo ? "A todo goes in a column of the board." : "A plain note goes in no column.",
+      )
+    const after =
+      column === null
+        ? moving
+        : withState(
+            moving,
+            column === "done" ? (moving.doneAt ?? this.now()) : null,
+            column === "doing",
+          )
+    const rest = notes.filter((each) => each !== moving)
+    const ofPlace = (each: Note): boolean =>
+      each.projectId === moving.projectId && columnOf(each) === column
+    const anchor = rest.findIndex((each) => each.id === input.before && ofPlace(each))
+    const last = rest.findLastIndex(ofPlace)
+    const at = anchor !== -1 ? anchor : last !== -1 ? last + 1 : notes.indexOf(moving)
+    return this.write(input.projectId, rest.toSpliced(at, 0, after))
   }
 
   /** Deletes notes for good; an id the project doesn't have is skipped. */
@@ -253,12 +299,14 @@ export class Notes {
 }
 
 // A note as it is kept, its fields always in this order, so the same notes are the same text;
-// `by` only where an agent added it, so the person's own notes keep the text they had.
+// `doing` only on a todo in progress and `by` only where an agent added it, so the person's
+// other notes keep the text they had.
 const keptOf = ({
   id,
   text,
   body,
   todo,
+  doing,
   doneAt,
   createdAt,
   by,
@@ -267,10 +315,41 @@ const keptOf = ({
   text,
   body,
   todo,
+  ...(doing && { doing }),
   doneAt,
   createdAt,
   ...(by && { by: { agent: by.agent, handle: by.handle } }),
 })
+
+// The board column a note stands in; null for a plain note, which is on no board.
+const columnOf = (each: Note): BoardColumn | null => {
+  if (!each.todo) return null
+  if (each.doneAt !== null) return "done"
+  return each.doing ? "doing" : "todo"
+}
+
+// `before` done at `doneAt` (null while open) and in progress where `doing`, which is written
+// only where true. The same note where that is what it was.
+const withState = (before: Note, doneAt: number | null, doing: boolean): Note => {
+  if (doneAt === before.doneAt && doing === (before.doing === true)) return before
+  const { doing: _, ...rest } = before
+  return { ...rest, doneAt, ...(doing && { doing }) }
+}
+
+// The column a change put a note first in: Done once it is checked off, To do once it is
+// opened again; none for any other change.
+const enteredColumn = (from: BoardColumn | null, to: BoardColumn | null): BoardColumn | null =>
+  from !== to && (to === "done" || (from === "done" && to === "todo")) ? to : null
+
+// With `moving` just before the first other note of its project in `column`; where it has
+// none, where it was.
+const firstIn = (notes: Note[], moving: Note, column: BoardColumn): Note[] => {
+  const rest = notes.filter((each) => each !== moving)
+  const first = rest.findIndex(
+    (each) => each.projectId === moving.projectId && columnOf(each) === column,
+  )
+  return first === -1 ? notes : rest.toSpliced(first, 0, moving)
+}
 
 const changeOf = (projectId: string, notes: Note[]): NotesChange => ({
   type: "changed",

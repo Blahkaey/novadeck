@@ -1,16 +1,21 @@
+import { afterEach } from "vitest"
 import { page, userEvent, type Locator } from "vitest/browser"
 
 import { pressShortcut } from "../support/keyboard"
 import { expectStaysTrue } from "../support/layouts"
 import {
+  chooseTerminalsView,
   clickInto,
   commandInput,
   expectStaysAbsent,
+  expectTerminalsView,
+  openSessions,
   openWorkspace,
   press,
   reloadWorkspace,
   sidebar,
   sidebarPanel,
+  terminalsView,
 } from "../support/workspace"
 import { context, describe, expect, it } from "../test"
 
@@ -38,10 +43,10 @@ describe("sidebar settings", () => {
       await openWorkspace()
       await sidebarPanel("Inbox").click()
       await expect.element(sidebar()).toHaveAccessibleName("Inbox")
-      await sidebarPanel("Sessions").click()
-      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
+      await sidebarPanel("Terminals").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
 
-      await sidebarPanel("Sessions").click()
+      await sidebarPanel("Terminals").click()
 
       await expect.element(sidebar()).toHaveAccessibleName("Inbox")
       await sidebarPanel("Inbox").click()
@@ -126,7 +131,7 @@ describe("sidebar settings", () => {
       await expect.element(heading()).toBeVisible()
       expect(scope()).toBeNull()
 
-      await sidebarPanel("Sessions").click()
+      await openSessions()
       await page.getByRole("button", { name: "New session" }).click()
 
       await expect.element(sidebar()).toHaveAccessibleName("Terminals")
@@ -218,6 +223,201 @@ describe("sidebar settings", () => {
       await reloadWorkspace()
 
       await expect.poll(order).toEqual(moved)
+    })
+  })
+})
+
+describe("the Terminals panel's views", () => {
+  context("when the switch beside the title is pressed", () => {
+    it("shows the sessions under the same rail toggle, leaving typing in the terminal", async () => {
+      await openWorkspace()
+      await expectTerminalsView("Terminals")
+
+      await chooseTerminalsView("Sessions")
+
+      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
+      await expect.element(sidebar().getByRole("heading", { name: /^Sessions/ })).toBeVisible()
+      await expectTerminalsView("Sessions")
+      await expect.element(commandInput("Checkout implementation")).toHaveFocus()
+
+      await chooseTerminalsView("Terminals")
+
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+      await expectTerminalsView("Terminals")
+      await expect.element(commandInput("Checkout implementation")).toHaveFocus()
+    })
+
+    it("changes the view by the arrow keys, keeping the focus on the switch", async () => {
+      await openWorkspace()
+      terminalsView("Terminals").element().focus()
+      await expect.element(terminalsView("Terminals")).toHaveFocus()
+
+      await press("{ArrowRight}")
+
+      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
+      await expect.element(terminalsView("Sessions")).toHaveFocus()
+
+      await press("{ArrowLeft}")
+
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+      await expect.element(terminalsView("Terminals")).toHaveFocus()
+    })
+  })
+
+  context("when the rail's Terminals toggle opens the panel", () => {
+    it("shows the view last seen", async () => {
+      await openWorkspace()
+      await openSessions()
+      await sidebarPanel("Inbox").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+
+      await sidebarPanel("Terminals").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
+      await expectTerminalsView("Sessions")
+
+      await chooseTerminalsView("Terminals")
+      await expectTerminalsView("Terminals")
+      await sidebarPanel("Inbox").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await sidebarPanel("Terminals").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("Terminals")
+      await expectTerminalsView("Terminals")
+    })
+  })
+
+  context("when the rail's Terminals toggle is pressed while either view shows", () => {
+    it("goes back to the panel before the Terminals panel, not to its other view", async () => {
+      await openWorkspace()
+      await sidebarPanel("Inbox").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await sidebarPanel("Terminals").click()
+      await expectTerminalsView("Terminals")
+      await chooseTerminalsView("Sessions")
+      await expectTerminalsView("Sessions")
+
+      await sidebarPanel("Terminals").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("Inbox")
+      await expect.element(sidebarPanel("Inbox")).toBeChecked()
+    })
+
+    it("hides the sidebar where no panel came before, and opens the same view again", async () => {
+      await openWorkspace()
+      await openSessions()
+
+      await sidebarPanel("Terminals").click()
+
+      await expect.element(sidebar()).not.toBeInTheDocument()
+      await sidebarPanel("Terminals").click()
+      await expect.element(sidebar()).toHaveAccessibleName("Sessions")
+    })
+  })
+
+  context("when the rail's order was saved while Sessions had a toggle of its own", () => {
+    it("puts Terminals where Sessions stood", async () => {
+      localStorage.setItem("novadeck.sidebar-order", JSON.stringify(["inbox", "sessions", "files"]))
+
+      await openWorkspace()
+
+      const toggles = page.getByRole("radiogroup", { name: "Sidebar actions" }).getByRole("radio")
+      const order = toggles
+        .elements()
+        .map((toggle) => toggle.getAttribute("aria-label")!.split(",")[0])
+      expect(order.slice(0, 2)).toEqual(["Inbox", "Terminals"])
+      expect(order).not.toContain("Sessions")
+    })
+  })
+})
+
+// The agents demo keeps the person's notes and the terminals they closed.
+const agents = "/?demo=agents"
+const drawer = (name: string): Locator => page.getByRole("dialog", { name })
+const noteField = (): Locator => page.getByRole("textbox", { name: "Add a note…" })
+const historySearch = (): Locator => page.getByRole("searchbox", { name: "Find a closed terminal" })
+const closedRows = (): Locator =>
+  page.getByRole("list", { name: "Closed terminals" }).getByRole("button", { name: /^Restore / })
+const topOf = (locator: Locator): number => locator.element().getBoundingClientRect().top
+
+describe("what a panel holds", () => {
+  afterEach(async () => {
+    await page.viewport(1440, 900)
+  })
+
+  context("when another panel shows and the first comes back", () => {
+    it("keeps the note being written", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Notes").click()
+      await noteField().fill("Check the refund flow")
+
+      await sidebarPanel("History").click()
+      await expect.element(sidebar()).toHaveAccessibleName("History")
+      await sidebarPanel("Notes").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("Notes")
+      await expect.element(noteField()).toHaveValue("Check the refund flow")
+    })
+  })
+
+  context("when the sidebar is hidden and shown again", () => {
+    it("keeps the list where it was scrolled to", async () => {
+      await page.viewport(1440, 500)
+      await openWorkspace(agents)
+      await sidebarPanel("History").click()
+      await expect.element(closedRows().last()).toBeInTheDocument()
+      const first = topOf(closedRows().first())
+      closedRows().last().element().scrollIntoView({ block: "end" })
+      const scrolled = topOf(closedRows().last())
+      expect(topOf(closedRows().first())).toBeLessThan(first)
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(sidebar()).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("History")
+      await expect.poll(() => topOf(closedRows().last())).toBeCloseTo(scrolled, 0)
+    })
+  })
+
+  context("when the phone's drawer closes and opens again", () => {
+    it("keeps the note being written and the History search", async () => {
+      await page.viewport(390, 800)
+      await openWorkspace(agents)
+      await sidebarPanel("Notes").click()
+      await noteField().fill("Check the refund flow")
+      await sidebarPanel("History").click()
+      await historySearch().fill("tax")
+      await expect.element(page.getByRole("heading", { name: /^History 1\/14$/ })).toBeVisible()
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(drawer("History")).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(drawer("History")).toBeVisible()
+      await expect.element(page.getByRole("button", { name: "Hide history" })).toHaveFocus()
+      await expect.element(historySearch()).toHaveValue("tax")
+      await expect.element(page.getByRole("heading", { name: /^History 1\/14$/ })).toBeVisible()
+      await sidebarPanel("Notes").click()
+      await expect.element(noteField()).toHaveValue("Check the refund flow")
+    })
+
+    it("keeps the list where it was scrolled to", async () => {
+      await page.viewport(390, 500)
+      await openWorkspace(agents)
+      await sidebarPanel("History").click()
+      await expect.element(closedRows().last()).toBeInTheDocument()
+      const first = topOf(closedRows().first())
+      closedRows().last().element().scrollIntoView({ block: "end" })
+      const scrolled = topOf(closedRows().last())
+      expect(topOf(closedRows().first())).toBeLessThan(first)
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(drawer("History")).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(drawer("History")).toBeVisible()
+      await expect.poll(() => topOf(closedRows().last())).toBeCloseTo(scrolled, 0)
     })
   })
 })

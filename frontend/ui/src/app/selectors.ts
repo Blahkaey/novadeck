@@ -1,14 +1,19 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
 import type { Item } from "@novadeck/core/items"
+import { hasPanel, panelTile, tilesOf } from "@novadeck/core/roster"
 import { activeProject, activeSession } from "@novadeck/core/state"
-import type {
-  TerminalMetadata,
-  Tile,
-  ViewMode,
-  WindowedView,
-  Workspace,
-  WorkspaceState,
-  WorkspaceTarget,
+import {
+  railPanelOf,
+  type RailPanel,
+  type SidebarPanel,
+  type TerminalMetadata,
+  type TerminalsView,
+  type Tile,
+  type ViewMode,
+  type WindowedView,
+  type Workspace,
+  type WorkspaceState,
+  type WorkspaceTarget,
 } from "@novadeck/core/types"
 
 import { sidebarVisible, type FocusPreview } from "../shell/shell-state"
@@ -128,21 +133,113 @@ export const modalOpen = (ui: UiState): boolean =>
   ui.leaving !== null ||
   ui.recent.switcher?.mode === "click"
 
-// Whether the sidebar shows the Inbox's panel.
-export const inboxShown = (ui: UiState, desktop: () => boolean): boolean =>
-  ui.location.route.panel === "inbox" && sidebarVisible(ui.shell, desktop())
+// Where a panel of the rail is in the session on screen: in a window of its own, whatever the
+// session, while it has one open; else on the session's stage, as a window, while its roster
+// holds the panel's tile; else in the sidebar. Each session keeps its own stage; a window of its
+// own is this run's.
+export type PanelPlace = "sidebar" | "stage" | "window"
+
+export const panelPlace = (
+  ui: Pick<UiState, "ownWindows">,
+  workspace: Workspace,
+  panel: RailPanel,
+): PanelPlace =>
+  ui.ownWindows.includes(panel)
+    ? "window"
+    : hasPanel(currentState(workspace).roster, panelTile(panel).id)
+      ? "stage"
+      : "sidebar"
+
+// The panels in a window on the stage of the session on screen, in the order they opened; a new
+// list each time, for `sameItems` to compare.
+export const panelsOnStage = (workspace: Workspace): readonly RailPanel[] =>
+  currentState(workspace).roster.panels.map(({ panel }) => panel)
+
+// The panels out of the sidebar: in a window of their own, then on the stage of the session on
+// screen, each once; a new list each time, for `sameItems` to compare.
+export const panelsAway = (
+  ui: Pick<UiState, "ownWindows">,
+  workspace: Workspace,
+): readonly RailPanel[] => [
+  ...ui.ownWindows,
+  ...panelsOnStage(workspace).filter((panel) => !ui.ownWindows.includes(panel)),
+]
+
+// Whether a panel, or a view of the Terminals panel, is the one its place shows: in the sidebar,
+// the one the route names; in a window, the panel itself, and of the Terminals panel the view the
+// person last chose (`terminalsView`), as the route names the sidebar's panel, not the window's.
+export const panelOpen = (
+  ui: Pick<UiState, "ownWindows" | "location" | "shell">,
+  workspace: Workspace,
+  panel: SidebarPanel,
+): boolean =>
+  panelPlace(ui, workspace, railPanelOf(panel)) === "sidebar"
+    ? ui.location.route.panel === panel
+    : railPanelOf(panel) !== "terminals" || ui.shell.terminalsView === panel
+
+// The view the Terminals panel shows (`panelOpen`), where it is in a window or the route names it.
+export const terminalsViewShown = (
+  ui: Pick<UiState, "ownWindows" | "location" | "shell">,
+  workspace: Workspace,
+): TerminalsView | null =>
+  (["terminals", "sessions"] as const).find((view) => panelOpen(ui, workspace, view)) ?? null
+
+// Whether the panel's window is in sight on the stage: in Focus, the tile Focus shows; in Grid
+// and Canvas, one the person hasn't hidden, or hidden and selected, which they show for a look.
+const windowInSight = (ui: UiState, workspace: Workspace, panel: RailPanel): boolean => {
+  const { id } = panelTile(panel)
+  const { view, roster, selected, layout } = currentState(workspace)
+  if (view !== "focus") return !layout.hidden[id] || selected === id
+  const context = currentContext(workspace)
+  return activeTerminal(tilesOf(roster), selected, context, ui.shell.focusPreview)?.id === id
+}
+
+// Whether a panel of the rail is in sight, which is when it reads, follows and ticks, and when
+// what it lists counts as seen. In the sidebar: while the sidebar shows, open on it (on either
+// view of the Terminals panel for its toggle). In a window on the stage: while the window is in
+// sight. In a window of its own: while it is open. `desktop` is asked only when the route names
+// a panel in the sidebar.
+export const panelShowing = (
+  ui: UiState,
+  workspace: Workspace,
+  panel: RailPanel,
+  desktop: () => boolean,
+): boolean => {
+  const place = panelPlace(ui, workspace, panel)
+  if (place === "window") return true
+  if (place === "stage") return windowInSight(ui, workspace, panel)
+  return railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
+}
+
+// Whether the Inbox's panel is in sight.
+export const inboxShown = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  panelShowing(ui, workspace, "inbox", desktop)
+
+// Whether the app's own window has the person's focus: the page's, and none of the panels'
+// windows of their own, which the desktop app counts as its focus too and a browser doesn't.
+export const mainWindowFocused = (ui: Pick<UiState, "pageFocused" | "ownWindowFocused">): boolean =>
+  ui.pageFocused && ui.ownWindowFocused === null
+
+// Whether the person looks at the Inbox, for its toasts and pings to hold back: as it shows
+// (`inboxShown`), but on the stage only while its window is in the view's sight, not panned or
+// scrolled away (`offScreenPanels`), and in its window of its own only while that window has
+// their focus, as whether it shows behind another can't be told.
+export const inboxInSight = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  panelPlace(ui, workspace, "inbox") === "window"
+    ? ui.ownWindowFocused === "inbox"
+    : !ui.offScreenPanels.includes("inbox") && inboxShown(ui, workspace, desktop)
 
 // Whether a toast may show now: the page has the person's focus, they want to hear what
 // needs them, and the Inbox isn't what they look at. (The toasts also skip an item of the
 // terminal they've come back to, see inbox-toasts.ts.) `desktop` is asked only when the
 // sidebar matters.
-export const mayToast = (ui: UiState, desktop: () => boolean): boolean =>
-  ui.pageFocused && ui.preferences.notifyNeeds && !inboxShown(ui, desktop)
+export const mayToast = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  mainWindowFocused(ui) && ui.preferences.notifyNeeds && !inboxInSight(ui, workspace, desktop)
 
 // Whether a toast for the item waits behind a modal dialog: it would show but for the dialog.
 // The OS ping defers the same items, so that one never rings for what no toast waits for.
-export const heldForToast = (ui: UiState, desktop: () => boolean): boolean =>
-  modalOpen(ui) && mayToast(ui, desktop)
+export const heldForToast = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  modalOpen(ui) && mayToast(ui, workspace, desktop)
 
 // The current session's folds, each lead with the tabs its fold hides (not the one the person is
 // on, nor the leads above it, which show in place): what a drag keeps together.

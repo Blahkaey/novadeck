@@ -1,3 +1,4 @@
+import { viewOf } from "@novadeck/toolkit/realm"
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from "react"
 
 // A long text in the log shows its first lines when it runs past this many, and a key opens the
@@ -34,13 +35,15 @@ export const useFold = <T extends HTMLElement>(
   useLayoutEffect(() => {
     const element = ref.current
     if (!element) return
+    // The window the text is drawn in: the page's, or an Inbox's window of its own.
+    const view = viewOf(element)
     const measure = (): void => {
-      const height = parseFloat(getComputedStyle(element).lineHeight)
+      const height = parseFloat(view.getComputedStyle(element).lineHeight)
       setLines(height > 0 ? Math.round(element.scrollHeight / height) : 0)
     }
     measure()
-    if (typeof ResizeObserver === "undefined") return
-    const watch = new ResizeObserver(measure)
+    if (typeof view.ResizeObserver === "undefined") return
+    const watch = new view.ResizeObserver(measure)
     watch.observe(element)
     if (element.firstElementChild) watch.observe(element.firstElementChild)
     return () => watch.disconnect()

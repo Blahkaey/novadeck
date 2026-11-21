@@ -4,7 +4,12 @@ import type { Backend } from "@novadeck/core/port"
 import { activeSession } from "@novadeck/core/state"
 import { createWorkspaceStore, type WorkspaceStore } from "@novadeck/core/store"
 import { appearance, workspaceFixture } from "@novadeck/core/testing"
-import type { PreferencesValue, Workspace } from "@novadeck/core/types"
+import {
+  railPanels,
+  type PreferencesValue,
+  type RailPanel,
+  type Workspace,
+} from "@novadeck/core/types"
 
 import type { CommandContext, CommandEffects } from "../app/commands/context"
 import { createNavigator, type RouterNavigate } from "../app/commands/navigator"
@@ -19,6 +24,7 @@ import {
   watchPresentation,
   watchMoving,
   watchSwitcher,
+  watchTerminalsView,
 } from "../app/ui-store"
 import type { CanvasHandle } from "../layouts/canvas/types"
 
@@ -47,6 +53,8 @@ export type CommandsOptions = {
   readonly history?: CommandContext["history"]
   // The backend's move of a terminal to another session, when it has one.
   readonly moveTerminal?: CommandContext["moveTerminal"]
+  // Whether the backend keeps the person's notes, which the Notes panel and Todo board list.
+  readonly notes?: boolean
 }
 
 // Real stores, navigator, commands and store subscriptions over a fixture workspace, with effects that
@@ -83,14 +91,16 @@ export const openCommands = ({
   murmur,
   history,
   moveTerminal,
+  notes = false,
 }: CommandsOptions = {}) => {
+  const panels = availablePanels(true, history !== undefined, false, notes)
   const [pathname = "", query = ""] = url.split("?")
   const resolved = resolveRoute(
     workspace,
     { pathname, search: `?${query}` },
     preferences,
     0,
-    availablePanels(true, history !== undefined),
+    panels,
   )
   const store = createWorkspaceStore(resolved.workspace)
   const ui = createUiStore(
@@ -102,9 +112,17 @@ export const openCommands = ({
   const chat = createChat()
   const effects: string[] = []
   const queued: (() => void)[] = []
-  const screen: { desktop: boolean; tiles: { id: string; rect: Rect }[] } = {
+  const screen: {
+    desktop: boolean
+    tiles: { id: string; rect: Rect }[]
+    railOrder: readonly RailPanel[]
+    // Whether a window of a panel's own opens, or the browser refuses it.
+    windowsOpen: boolean
+  } = {
     desktop,
     tiles: [],
+    railOrder: railPanels,
+    windowsOpen: true,
   }
   let ids = 0
   const record: CommandEffects = {
@@ -118,10 +136,19 @@ export const openCommands = ({
     focusZenCreate: () => effects.push("focus zen create"),
     focusZenEnter: () => effects.push("focus zen enter"),
     focusTerminalsCreate: () => effects.push("focus terminals create"),
+    focusTerminalsView: (view) => effects.push(`focus ${view} view`),
     focusMovePick: () => effects.push("focus move pick"),
     focusWorkspaceViewport: () => effects.push("focus viewport"),
     focusTerminalTab: (id) => effects.push(`focus tab ${id}`),
     focusTerminalInput: (id) => (effects.push(`focus input ${id}`), true),
+    focusPanel: (panel) => effects.push(`focus ${panel} panel`),
+    openOwnWindow: (panel) => {
+      effects.push(`open ${panel} window`)
+      return screen.windowsOpen
+    },
+    focusOwnWindow: (panel) => effects.push(`focus ${panel} window`),
+    closeOwnWindow: (panel) => effects.push(`close ${panel} window`),
+    railOrder: () => screen.railOrder,
     tileRects: () => screen.tiles,
     refocus: (element) => {
       effects.push("refocus")
@@ -145,7 +172,7 @@ export const openCommands = ({
     workspace: store,
     ui,
     now: () => 1,
-    panels: availablePanels(true, history !== undefined),
+    panels,
   })
   const urls: (string | number)[] = []
   // What each new terminal was asked for, as the backend received it.
@@ -195,6 +222,7 @@ export const openCommands = ({
   for (const watch of [trackRecent, watchPresentation, watchSwitcher, watchClosing, watchMoving])
     watch(store, ui)
   watchCrashLoop(crashLoop?.crashes, ui)
+  watchTerminalsView(ui, store)
   return {
     context,
     workspace: store,

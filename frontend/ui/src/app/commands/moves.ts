@@ -9,7 +9,7 @@ import {
   type MoveTarget,
   sameOver,
 } from "../../terminals/move-state"
-import { currentContext, currentState, currentTarget } from "../selectors"
+import { currentContext, currentState, currentTarget, terminalsViewShown } from "../selectors"
 import type { CommandContext } from "./context"
 import { newWorkspaceSession } from "./sessions"
 
@@ -59,15 +59,16 @@ export const createMoveCommands = (
   // Puts the sidebar back as it was, for a pick from a menu that showed the Sessions panel.
   let putBack: (() => void) | undefined
   const endPick = (): void => {
-    const { moving, location } = ui.getSnapshot()
+    const { moving } = ui.getSnapshot()
     if (!moving) return
+    const view = terminalsViewShown(ui.getSnapshot(), workspace.getSnapshot())
     ui.update((state) => ({ ...state, moving: null }))
     const back = putBack
     putBack = undefined
     // A drag started from the Terminals panel and returns there; a menu pick leaves the
     // sidebar as the person had it.
     if (moving.via === "menu") back?.()
-    else if (location.route.panel === "sessions") showTerminals()
+    else if (view === "sessions") showTerminals()
   }
   // Moves it now, to a session made for it first where it goes to a new one.
   const go = (terminalId: string, to: MoveTarget): void => {

@@ -36,7 +36,8 @@ colour, and nothing else of it: any other value is dropped.
 A valid report sets Electron's `nativeTheme.themeSource`, which is global to the app: it
 changes the native parts of every window, and what `prefers-color-scheme` reports to
 every page the app shows, the companion pane's pages included. It also sets the
-reporting window's background colour and keeps the report in `appearance.json` in the
+reporting window's background colour, and its panel windows' (see Desktop Panel Windows),
+and keeps the report in `appearance.json` in the
 app's data folder, written to a temporary file beside it and renamed over it. The next
 launch reads that file back through the same check before it sets `themeSource` and
 opens windows on the kept colour. A compromised UI can change no more through this
@@ -60,9 +61,10 @@ take a notice away by its terminal id (`closeNotice`, `novadeck:notice-close`), 
 Inbox count for the app's icon (`setBadge`, `novadeck:badge`): a whole number from 0 to 999 and
 an image that is null or a base64 PNG data URL of at most 16384 characters, checked by
 `desktopBadgeOf` in the page, the preload and `apps/desktop/src/main/notices/badge.ts`, each from
-the app's own window only. The page can also ask whether its window has the system's focus
-(`onWindowFocus`, `novadeck:window-focus-request`, carrying nothing); the host answers only the
-app's own page, with a boolean, and sends it again on each change. On Linux,
+the app's own window only. The page can also ask whether its window, or one of its panel
+windows, has the system's focus (`onWindowFocus`, `novadeck:window-focus-request`, carrying
+nothing); the host answers only the app's own page, with a boolean, and sends it again on each
+change. On Linux,
 Electron hands the body to the desktop's notification server as it is, and that server
 may read it as markup (it advertised `body-markup` and `body-hyperlinks` when probed with
 Electron 44), so the host escapes `&`, `<` and `>` in the body there
@@ -107,6 +109,54 @@ waits for the app to exit and then, for up to ten minutes, for the uninstaller's
 gone; it deletes nothing if the file is still there, as after a cancelled uninstall. A compromised UI can end the app's shells and remove the app and,
 by sending `keepData: false`, the app's data folder, which it could already do through the
 runner; it can remove no other path through this channel.
+
+## Desktop Panel Windows
+
+The app's page can show a sidebar panel in a window of its own: it opens a blank window with
+`window.open("", "novadeck-panel-<panel>", "popup,left=…,top=…,width=…,height=…")` and moves
+that panel's part of its own page into it, so the panel stays the app page's, run by the app
+page's script. The desktop host (`apps/desktop/src/main/window/panel-windows.ts`) lets such a
+window open only when its address is exactly `about:blank`, its name is `novadeck-panel-`
+followed by one of the rail's panels (`railPanels` in `frontend/core/src/types.ts`), and its
+features name nothing but `popup` (bare, or `1`, `yes` or `true`) and `left`, `top`, `width` and
+`height`, each a whole number. Electron makes a new window's options of every feature it is
+given, so any other, such as `frame=no`, `kiosk`, `alwaysOnTop` or `closable=no`, would set the
+native window's; a request naming one is denied, and should one get past that, the window's
+options set each that could hide the window, cover others or keep the person from closing it
+anyway: framed, opaque, focusable, in the taskbar, not on top, with no window type or largest
+size, and free to move, resize, minimize, maximize, close and go full screen. Every other window
+the app's page asks for is denied as before, a web address going to the person's browser.
+Electron doesn't tell the open handler which frame asked, so the window opens hidden and shows
+only when its opener is the main frame of the app's window showing the app's own page; one that a
+frame inside the page opened, or that has no opener, loads and opens nothing and is destroyed
+before it shows.
+
+A panel window has none of the app window's powers: no preload, so no bridge, no Node, a sandbox,
+context isolation, the web's own security and no page views (`webviewTag` off), set over whatever
+the opener's preferences would hand on. It answers to no IPC, as the host takes requests only
+from the main frame of a window showing the app's page. The app's session grants its main frame
+one permission, writing to the clipboard (`clipboard-sanitized-write`), only while it is an open
+panel window of an app window: the app page's own clipboard refuses writes while the focus is in
+the panel window, as a document without the focus can't write, so a copy made in a panel window
+writes through that window's clipboard. It can't read the clipboard, and its frames, and any
+other blank window, get nothing. It loads nothing: a
+navigation in it is cancelled, a window it opens is denied (a web link going to the person's
+browser, as from the app's window), a page loading again in it, as on a reload, closes it, and it
+sends no WebRTC traffic over UDP that doesn't go through a proxy. It closes with its opener's
+page, as that window closes, crashes or loads again, and it is no app window: closing it saves
+nothing and quits nothing, a second launch or a click on a notification brings the app's window
+forward, not it, and the last app window closing quits as before. While one is open the opener's
+page isn't throttled in the background, so the panel keeps up while the app's window is minimized
+or hidden.
+
+Its place and size are the page's features (`left`, `top`, `width`, `height`, its outer bounds),
+kept on a display that exists: where less than half of it would lie on the displays' work areas
+together, or its top edge would be on none of them, it is centred on the display of the app's
+window instead. It is never wider or taller than the work areas it lies on nor smaller than
+280×240, and as a display goes or changes, a panel window left off every display is moved back
+the same way, unless it is minimized, maximized or full screen. A compromised UI can open no
+more through this than framed, closable blank windows of its own page, which it could already
+draw in its own window, and write to the clipboard from them, as it already can from its own.
 
 ## Companion Pane Pages
 

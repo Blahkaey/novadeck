@@ -292,7 +292,7 @@ else the program it was opened to run, or "Terminal"), directories, what
 they run and the program each last had in its foreground (only its name, never its
 command line, which can hold secrets). The UI shows them, renames through the runner,
 and saves only how it shows them: layouts, sidebar order, the view and the selection,
-by terminal id. A terminal has a `restoredProcess` only while it
+by terminal id, and the sidebar panels open as windows in each session. A terminal has a `restoredProcess` only while it
 has no live shell: a program running when the runner lost the shell, the shell was
 killed, or the app closed becomes it, and it ends once a shell reaches its prompt or
 runs a program. Every replacement shell starts in the runner backend's `freshShell`,
@@ -376,7 +376,8 @@ still go through. It all updates as messages move. The content preview
 demo (`?demo=messages`) has every state, entries to you and the pause.
 
 Right-click a window's header for the same menu as its sidebar tab: Rename, Reset to
-automatic for a name you gave, Dock in for an undocked window, and Close.
+automatic for a name you gave, Dock in for an undocked window, and Close. A panel's window
+offers Open in its own window, on a wide window, and Return to sidebar.
 
 Use the eye on a terminal tab to hide it from Grid and Canvas without closing it.
 Hidden tabs stay in the list with a faded label. While selected, a hidden terminal
@@ -523,8 +524,16 @@ windows undocked from them, and its agents' messages, so it stays gone after a r
 answers or the app quits; quitting waits briefly for it. A reload before the runner
 answers leaves the project there, and it comes back.
 
-Sessions group a project's terminals, and the Sessions panel lists them in the order you
-put them in. Drag a session to move it, or focus it and press Space, the arrows, then Space
+Sessions group a project's terminals. The Terminals panel has two views, picked by the
+switch before its title: the open session's terminals, and the project's sessions in the
+order you put them in. Both share the rail's Terminals icon, which opens the view you last
+saw; Toggle Terminals (`Cmd+Shift+E`, `Ctrl+Shift+E` on Windows and Linux) opens the
+terminals and Toggle Sessions (`Cmd+Shift+S`, `Ctrl+Shift+S`) the sessions. While another
+session has an agent waiting on you, a dot shows on the rail's Terminals icon and on the
+switch's Sessions choice. To move a terminal to another session, drag its tab over the
+Sessions choice, hold it there until the sessions show, and drop it on one.
+
+In the sessions view, drag a session to move it, or focus it and press Space, the arrows, then Space
 again. A new session goes first. Rename one with its pencil or a double-click on it: Enter
 saves and Escape keeps the old name. Its trash icon deletes it, asking first when it has
 terminals. They close and go to History, and you can restore them into another session.
@@ -702,14 +711,15 @@ There are two lists:
   project's list is read again when the panel is shown and on **Refresh**, so a change made in
   another window shows then.
 
-## Notes
+## Notes and Todo
 
-**Notes** is a panel on the sidebar's rail for what you mean to do in a project and want to
-remember about it: one list per project, yours. Where a backend keeps no notes, the panel
-isn't there.
+**Notes** and **Todo** are two panels on the sidebar's rail for one project's list of what you
+want to remember about it and what you mean to do in it, yours: Notes holds the plain notes,
+and Todo is a board of the todos. Where a backend keeps no notes, neither panel is there.
 
 Ask an agent to note something ("add a todo to revisit the retry logic") and it adds it with
-Novadeck's `note` tool, first in the open project's list, in the order it gave, at once. That
+Novadeck's `note` tool, first in the open project's list, in the order it gave, at once: a
+todo goes first in the board's To do, a plain note first in Notes. That
 is all an agent can do with the list: it can't read your notes, change, check off, move or
 delete one, and it adds one only in a turn your own message started. Once Novadeck has
 delivered another agent's message into that turn (with your prompt, at a tool call, or as it
@@ -722,30 +732,57 @@ Novadeck can tell that you started the turn, not that you asked for a note in it
 told to fix a bug could still add one then, and what it reads of other agents on its own (their
 latest prompts in a listing, files they wrote) doesn't count as a message delivered.
 
-Type in the field at the top and press Enter to add a todo, first in the list; the field
-stays ready for the next. The button before the field switches it to plain notes, which
-have no checkbox, and back. A line is one line of up to 500 characters.
+### Notes
 
-Tick a todo's checkbox to check it off. It moves under **Done** at the foot of the list,
-folded until you open it, and unticking it there opens it again. The count beside the
-panel's title, and in the tooltip of its rail toggle, is how many todos are still to do;
-plain notes are never counted. Done's **Clear** button deletes every done todo for good,
-after asking; a done row's trash deletes that one without asking.
+Type in the field at the top of Notes and press Enter to add a plain note, first in the list;
+the field stays ready for the next. A line is one line of up to 500 characters. The count
+beside the panel's title is how many plain notes the project has.
 
 Click a line to change it where it stands: Enter saves, Escape keeps the old line, and
 clicking away saves. The chevron at the end of a row opens what is under the line: its
 details, written as Markdown (up to 8,000 characters) and shown formatted, with **Edit
-details**, **Make it a note** or **Make it a todo**, and **Delete**. Opening a note with no
-details starts writing some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and
-clicking away saves. A chevron that stands out marks a note with details.
+details**, **Make it a todo** and **Delete**. Opening a note with no details starts writing
+some; `Cmd+Enter` or `Ctrl+Enter` saves them, Escape cancels, and clicking away saves. A
+chevron that stands out marks a note with details. **Make it a todo** turns the note into a
+card in the Todo board's To do, details and all.
 
-Drag a line to move its note among the open ones, or focus it and press Alt with the up or
-down arrow. The order is yours and is kept.
+Drag a line to move its note among the others, or focus it and press Alt with the up or down
+arrow. The order is yours and is kept.
 
-Notes are kept by the runner with the workspace, so they stay after a restart and show in
-every window, and they go with their project when you remove it. A project keeps up to 200.
-If a change can't be saved, the list goes back to what was saved and a line above it says
-so.
+### Todo
+
+The **Todo** board has three columns: **To do**, **In progress** and **Done**, each with how
+many cards it holds. The count beside the panel's title, and in the tooltip of its rail
+toggle, is how many todos are still to do, those in progress among them. The board lays
+itself out by its own width: under 520 pixels, as in the sidebar, it shows one column at a
+time, with a tab for each above it; wider, it shows the three side by side, each scrolling on
+its own. On a narrow window, where the sidebar opens over the workspace, the Todo panel opens
+over the whole width, as the Inbox does, so from about 590 pixels wide it shows the three
+columns.
+
+Type in the field at the top and press Enter to add a card, first in To do. Tick a card's
+checkbox to check it off: it moves first in Done, which shows when it was checked off.
+Unticking a done card opens it again, first in To do. Its line and its details change as a
+note's do, and under its chevron **Make it a note** turns it into a plain note in Notes.
+Done's **Clear** button deletes every done card for good, after asking; **Delete** under a
+card's chevron deletes that one without asking.
+
+Move a card by dragging its line, within its column or onto another column's cards, the room
+under them, or, where the board shows one column, a column's tab (which puts it first there);
+Escape ends a drag where it began. From the keyboard, each card's **Move** button opens a menu
+with **Move up**, **Move down** and a choice of column, which puts the card first in it; or
+focus the card and press Alt with the up or down arrow to move it within its column, and with
+the left or right arrow to move it first into the column beside. Where the board shows one
+column, it follows a card you move to another. A screen reader hears where each card went.
+The order of every column is yours and is kept. Connected to a runner from an older version of
+Novadeck, cards can't be moved, by dragging, the menu or the keys, and a line under the field
+says moving cards needs the runner updated; checking a card off and opening it again still
+take it to Done and To do, and Notes' notes still move.
+
+Notes and todos are kept by the runner with the workspace, so they stay after a restart and
+show in every window, and they go with their project when you remove it. A project keeps up to
+200 of them together. If a change can't be saved, the list and the board go back to what was
+saved and a line above them says so.
 
 ## History
 
@@ -1013,6 +1050,7 @@ leave Zen to show the requested panel. Zen is temporary and resets on reload.
 | Toggle Worktrees (with agent worktrees on)        | `Cmd+Shift+G`      | `Ctrl+Shift+G`                   |
 | Toggle Files                                      | `Cmd+Shift+F`      | `Ctrl+Shift+F`                   |
 | Toggle Notes                                      | `Cmd+Shift+L`      | `Ctrl+Shift+L`                   |
+| Toggle Todo                                       | `Cmd+Shift+D`      | `Ctrl+Shift+D`                   |
 | Toggle History                                    | `Cmd+Shift+H`      | `Ctrl+Shift+H`                   |
 | Switch to pinned project 1 to 9                   | `Cmd+1` to `Cmd+9` | `Ctrl+Shift+1` to `Ctrl+Shift+9` |
 | Open preferences                                  | `Cmd+,`            | `Ctrl+,`                         |
@@ -1085,13 +1123,107 @@ A paste that fails, as of a copy over 32 MB or with the clipboard unreadable, sa
 terminal.
 
 The new-session shortcut creates and selects an empty session in the current project
-and opens the Sessions sidebar.
+and opens its terminals in the sidebar.
 
 A rail icon or sidebar shortcut opens or switches to its panel. Pressing it again on the open
-panel goes back one step, to the panel you were on just before, so a look at the Inbox, Sessions
-or History returns to where you were; back there, or on the panel the sidebar opened on, it hides
+panel goes back one step, to the panel you were on just before, so a look at the Inbox or
+History returns to where you were; back there, or on the panel the sidebar opened on, it hides
 the sidebar. A rail icon's tooltip says where the next press goes. Hiding the sidebar by its
-shortcut leaves typing in the terminal.
+shortcut leaves typing in the terminal. A panel stays as you left it while another shows or the
+sidebar is hidden, on a narrow window too, where the sidebar opens over the workspace: a note
+you were writing, a search, and where its list was scrolled are there when you come back.
+
+Every panel of the rail (Terminals, the Inbox, Worktrees, Files, Notes, Todo and History) can
+also open as a window on the workspace, beside your terminals: **Open in a window** in the
+panel's header (its tooltip says so; its name is "Open Notes in a window") puts the panel in a
+window of the session on screen, selected, with the keyboard in it, and the panel comes as you
+left it: a note you were writing, the Todo column you were on and how far a list was scrolled.
+Beside the window's name come what the panel's heading carries in the sidebar: its count, the
+Terminals panel's session, the Inbox's "new · show" pill; what comes before its heading, as the
+Terminals panel's switch between its views, and its buttons, as the Inbox's Clear, are on the
+panel's own row under the window's header. Focus shows
+it as it shows a terminal; Grid and Canvas lay it out with the others, and in Canvas its list
+takes the wheel and the pointer, so scrolling it never pans or zooms, while its header still
+moves the window. Esc, the arrows and what you type stay in the panel, as in a companion's
+window. If the sidebar was showing that panel, it moves to the first panel your rail's order
+still has in it, or hides with none left there; on a narrow window the sidebar closes, so the
+window shows. Returning a panel opens the sidebar on it again, and a sidebar you open with every
+panel in a window shows the note on the one it was last on (below). The panel's rail icon stays
+where it is, with a small window mark in its corner; its tooltip says it is in a window, and the icon and the panel's shortcut take you to
+the window: selected, shown again if you hid it from Grid and Canvas, with the keyboard in it.
+Each panel's window is listed in the Terminals panel under the panel's own icon; clicking it goes
+to the window, and Search and Ctrl+Tab's switcher call it a panel window. The window's header has
+**Return to sidebar** where a terminal's has Close (so do its row's button and its right-click
+menu): the window closes, the sidebar opens on the panel, and the keyboard goes there. Each
+session keeps its own: a panel is in a window in the sessions where you opened it there, and in
+the sidebar in the others, so switching sessions moves it, and the session remembers its panel
+windows with the rest of how it is laid out. A link or Back that opens the sidebar on a panel in
+a window shows "Notes is in a window" with **Show it**, which goes to the window, and **Return
+to sidebar**.
+
+The Terminals panel's window has the switch between its views on its own row: the session's
+terminals or the project's sessions, which it keeps whichever view the sidebar shows. Its rail
+icon, Toggle Terminals (`Cmd+Shift+E`, `Ctrl+Shift+E` on Windows and Linux), Toggle Sessions
+(`Cmd+Shift+S`, `Ctrl+Shift+S`), the empty workspace's "All sessions…" and **Move to → All
+sessions…** go to the window on the view they name, the last with the sessions there to pick
+from. A `?panel=sessions` link or Back that turns the sidebar from another panel to the sessions
+turns the window to them too, and the sidebar shows the note; one that leaves the sidebar where
+it was leaves the window on its view. Returning it opens the sidebar on the view the window
+showed, and a session that has the panel in the sidebar shows it there on the sidebar's view. Its list has a row for the Terminals window itself, under the panel's icon, which goes to
+the window and returns it, as any panel's row does. The team wires beside the list show only while
+the list is in the sidebar. A tab dragged out of the list in its window on the workspace goes to
+another session as from the sidebar: held over the Sessions choice of its switch, it turns the
+window to the sessions, and dropped on one, the terminal moves there. **New session** there opens
+the new session with the Terminals panel back in the sidebar, as a new session has no windows yet,
+on New terminal; in the panel's own window, which every session shares, the new session's
+terminals show there instead, New terminal ready.
+
+The Inbox's window answers as the sidebar's list does: a row opens its sheet beside it, in the
+window, over the workspace without the workspace stepping back, or over the list where the window
+leaves no room beside it; j, k, the arrows, S and Esc work there, and **Show terminal** goes to the
+terminal without turning the sidebar to the terminals. While the Inbox's window is in sight (not
+panned away on Canvas nor scrolled away in Grid), an update's row you see is read, rows that settle
+keep their place, and no toast says what the Inbox shows already. Worktrees' window closes, without coming
+back to the sidebar, when you turn agent worktrees off.
+
+From its window on the workspace, a panel can go on to a window of its own, which you can move
+anywhere, onto another screen too: **Open in its own window** in the window's header (or its
+right-click menu), on a wide window, not on a phone. The window opens where that panel's last
+one was, at its size, or about a sidebar's width the first time; Novadeck remembers where each
+panel's own window was. The panel moves out of the workspace into it, as you left it, with the
+keyboard in it, and the window's title names the panel and the open project. There it fills the
+window, under its name, its count and its own buttons, with **Return to sidebar** where the
+sidebar has Hide. It stays in its own window whichever session you switch to. Its rail icon keeps
+its window mark, its tooltip says it is in its own window, and the icon and the panel's shortcut
+bring that window to the front. Closing the window, with its own close button or **Return to
+sidebar**, puts the panel back in the sidebar, open on it, with the keyboard there, and closes its
+window on the session on screen too, if that session has one; a question or a menu the panel had
+open there closes with it. Closing Novadeck closes them all.
+A session that had the panel in a window on its workspace keeps that window: switching to it shows
+"Notes is in its own window" there, with **Show it**, which brings the window to the front, and
+**Bring it here**, which closes the window of its own and puts the panel back in this one. A link
+or Back that opens the sidebar on it shows the same note, with **Show it** and **Return to
+sidebar**. Windows of their own aren't opened again at the next launch: a browser opens one only
+from your click, so the panels are back in the sidebar. Where the browser blocks the window (a
+popup blocker), the panel stays where it was and a note says so. The workspace's shortcuts stay
+with Novadeck's main window: in a panel's own window only the panel's own keys work, as Esc, the
+arrows and typing in its fields. In a browser, keep Novadeck's own tab showing while you use a
+panel in its own window: the panel runs in that tab, so while its window is minimized or
+another tab is in front of it, dragging a note or a card stalls, and code blocks wait to be
+highlighted. The desktop app has no such limit.
+
+Some things don't reach across windows of their own. A terminal's tab dragged in the Terminals
+panel's own window only reorders its list: to move a terminal to another session from there, use
+its **Move to** menu, whose **All sessions…** turns that window to the sessions. The Inbox's sheet
+opens in the Inbox's own window, beside its row where the window has room and over the list where
+it hasn't. An update the Inbox's own window shows counts as seen while that window has your
+focus, and is read once that window loses it; toasts and notifications
+hold back only while it has your focus: while you work in Novadeck's main window they ring
+as ever, as Novadeck can't tell whether the Inbox's window shows or is covered, and while you are
+in the Inbox's window no notification rings for what it shows. **Show terminal** there brings
+Novadeck's main window to the front, where a browser lets it.
+Only the panel's own keys work in its own window: the workspace's arrows and shortcuts, F2 among
+them, stay with Novadeck's main window, where F2 renames in the terminal's header.
 
 Hold Ctrl while pressing Tab to choose a terminal, then release Ctrl to switch.
 While navigating Grid and Canvas, the arrow keys select the nearest terminal on that

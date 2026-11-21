@@ -62,8 +62,8 @@ const NameInput = ({
           if (event.key === "Enter" && result.outcome === "commit") onCommit(result.path, true)
           else onEnd(true)
         }}
-        onBlur={() => {
-          if (ended.current || !document.hasFocus()) return
+        onBlur={(event) => {
+          if (ended.current || !event.currentTarget.ownerDocument.hasFocus()) return
           ended.current = true
           if (result.outcome === "commit") onCommit(result.path, false)
           else onEnd(false)

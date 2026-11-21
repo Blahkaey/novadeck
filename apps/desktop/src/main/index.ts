@@ -28,9 +28,11 @@ import {
   webContents,
   powerMonitor,
   safeStorage,
+  screen,
   session,
   shell,
   systemPreferences,
+  type WebContents,
 } from "electron"
 
 import {
@@ -118,6 +120,7 @@ import {
   bringForward,
   isAppPage,
   openAppWindow,
+  openOutside,
   tellWindowFocus,
   watchAppPage,
 } from "./window/app-window.js"
@@ -131,6 +134,7 @@ import {
 import { registerWindowFocusIpc } from "./window/focus.js"
 import { linuxMenu, macMenu, runnerMenu, windowsMenu } from "./window/menu.js"
 import { registerPanePictureIpc } from "./window/pane-pictures.js"
+import { panelWindows } from "./window/panel-windows.js"
 import { limitPermissions } from "./window/permissions.js"
 import { keepScale, registerScaleIpc } from "./window/scale.js"
 import { atspiReaders, runIn } from "./window/screen-reader-linux.js"
@@ -280,7 +284,8 @@ const windowControls = new WeakMap<BrowserWindow, WindowControls>()
 // first paint too.
 const scale = keepScale(
   join(app.getPath("userData"), "scale.json"),
-  () => appPages(appWindows()),
+  // A panel window's page shows the scale too, as its opener's (see ./window/panel-windows.ts).
+  () => [...appPages(appWindows()), ...panelPages()],
   (page) => {
     // Electron gives the views a page hosts its zoom whenever the page's changes.
     rezoomPages(page, webContents.getAllWebContents())
@@ -316,9 +321,26 @@ const run = randomUUID()
 const pages = livePages()
 const { looker } = pages
 
-// The app's own windows: a look's is out of sight and no one's to save, show or count.
+// The sidebar panels the app's windows show in windows of their own, which go with them.
+const panels = panelWindows<BrowserWindow>({
+  displays: screen,
+  ground: () => appearance.current()?.ground ?? "#ffffff",
+  zoom: () => scale.current(),
+  isAppPage,
+  outside: openOutside,
+  focusChanged: tellWindowFocus,
+})
+
+// The app's own windows: a look's is out of sight and no one's to save, show or count, and a
+// panel window's page is its opener's.
 const appWindows = (): BrowserWindow[] =>
-  BrowserWindow.getAllWindows().filter((window) => !looker.is(window))
+  BrowserWindow.getAllWindows().filter((window) => !looker.is(window) && !panels.is(window))
+
+// The pages of the panel windows open.
+const panelPages = (): WebContents[] =>
+  BrowserWindow.getAllWindows()
+    .filter((window) => panels.is(window) && !window.webContents.isDestroyed())
+    .map((window) => window.webContents)
 
 // The last update offer, told to the app's pages as it arrives and to any that ask later.
 const offers = trackOffer(() => appPages(appWindows()))
@@ -383,6 +405,7 @@ const createWindow = (origin: string): BrowserWindow => {
     ground: appearance.current()?.ground ?? "#ffffff",
     ink: appearance.current()?.ink,
     zoomFactor: scale.current(),
+    panels,
     preloadArguments: [
       `${apiUrlArgumentPrefix}${apiUrl}`,
       webglContextsArgument(webglContexts),
@@ -446,8 +469,11 @@ const openRemotePreferences = (problem?: string): Promise<void> => {
     const saved = await readRemoteSettings(
       join(folder, active ? remoteSettingsFile : remoteOffFile),
     ).catch(() => undefined)
+    // Over the window the person is in, or the app's own where that is a panel window, which
+    // goes with its opener and would take the form with it.
+    const focused = BrowserWindow.getFocusedWindow()
     await askRemoteSettings(
-      BrowserWindow.getFocusedWindow() ?? appWindows()[0],
+      focused && !panels.is(focused) ? focused : appWindows()[0],
       (options) => new BrowserWindow(options),
       {
         ...(saved && { saved }),
@@ -617,6 +643,7 @@ const launch = async (): Promise<void> => {
     show: (window, next) => {
       nativeTheme.themeSource = next.scheme
       window.setBackgroundColor(next.ground)
+      for (const panel of panels.of(window)) panel.setBackgroundColor(next.ground)
       // Windows' caption buttons draw in the page's ink.
       if (next.ink) windowControls.get(window)?.paint(next.ink)
       void appearance.save(next)
@@ -696,7 +723,10 @@ const launch = async (): Promise<void> => {
     },
   })
   // The page asks for its window's focus when it starts listening, as when it loads again.
-  registerWindowFocusIpc(ipcMain, { window: appWindow, request: tellWindowFocus })
+  registerWindowFocusIpc(ipcMain, {
+    window: appWindow,
+    request: panels.tellFocus,
+  })
   // The page sets the window's controls on its header's middle, or hides them, as in Zen
   // (macOS and Windows; on Linux the window keeps the system's title bar and nothing listens).
   if (windowControlsSide(process.platform))
@@ -945,9 +975,12 @@ app.whenReady().then(() => {
   // signal's is not. See ./window/menu.ts.
   // macOS shows its menu bar: Help opens the logs folder. Elsewhere Preferences does.
   refreshMenu()
+  // A panel window on a display that went away comes back onto one there is.
+  panels.followDisplays()
   limitPermissions(
     session.defaultSession,
     isAppPage,
+    panels.isPage,
     // macOS asks the person once, and remembers; elsewhere the page's own request is all.
     process.platform === "darwin"
       ? () => systemPreferences.askForMediaAccess("microphone")

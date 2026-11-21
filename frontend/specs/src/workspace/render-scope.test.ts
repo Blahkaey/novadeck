@@ -73,6 +73,15 @@ vi.mock("@novadeck/ui/shell/WorkspaceSidebar", async (original) => {
   const actual = await original<typeof import("@novadeck/ui/shell/WorkspaceSidebar")>()
   return { ...actual, WorkspaceSidebar: await counted("sidebar", actual.WorkspaceSidebar) }
 })
+// Each panel's frame, by its id: every panel draws one, drawn once by the app outside the
+// sidebar, which shows it.
+vi.mock("@novadeck/ui/sidebar/SidebarPanel", async (original) => {
+  const actual = await original<typeof import("@novadeck/ui/sidebar/SidebarPanel")>()
+  return {
+    ...actual,
+    SidebarPanel: await counted("panel", actual.SidebarPanel, (props) => props.id),
+  }
+})
 vi.mock("@novadeck/ui/shell/WorkspacePanels", async (original) => {
   const actual = await original<typeof import("@novadeck/ui/shell/WorkspacePanels")>()
   return { ...actual, WorkspacePanels: await counted("app", actual.WorkspacePanels) }
@@ -228,6 +237,9 @@ describe("workspace render scope", () => {
           "app",
           "header",
           "sidebar",
+          "panel terminals-panel",
+          "panel sessions-panel",
+          "panel inbox-panel",
           "stage",
           "overlays",
           `tab ${second}`,
@@ -298,7 +310,7 @@ describe("workspace render scope", () => {
       expect(others).toEqual([])
     })
 
-    // The sidebar keeps every panel mounted and the overlays every dialog, closed or not: both
+    // The app keeps every panel mounted and the overlays every dialog, closed or not: both
     // once drew again whole for each agent's news, the tabs read from the tiles and the closed
     // search handed every tile.
     it.each(["canvas", "grid", "focus"] as const)(
@@ -316,7 +328,7 @@ describe("workspace render scope", () => {
         )
         expect(seen[`tab ${first}`]).toBeGreaterThan(0)
         expect(Object.keys(seen)).not.toEqual(
-          expect.arrayContaining([expect.stringMatching(/^(sidebar|overlays)/)]),
+          expect.arrayContaining([expect.stringMatching(/^(sidebar|panel|overlays)/)]),
         )
       },
     )
@@ -348,7 +360,33 @@ describe("workspace render scope", () => {
       )
       expect(seen[`tab ${first}`]).toBeGreaterThan(0)
       expect(Object.keys(seen)).not.toEqual(
-        expect.arrayContaining([expect.stringMatching(/^(sidebar|overlays)/)]),
+        expect.arrayContaining([
+          expect.stringMatching(/^(sidebar|panel (?!files-panel)|overlays)/),
+        ]),
+      )
+    })
+  })
+
+  context("when the view changes", () => {
+    // The app around the panels draws again for it; the panels, drawn once apart from the
+    // sidebar, once all did.
+    it("wakes neither the sidebar nor any panel", async () => {
+      const { services } = await open()
+      const seen = rendersDuring(() => services.commands.changeView("grid"))
+      expect(seen.stage ?? seen.app).toBeGreaterThan(0)
+      expect(Object.keys(seen)).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/^(sidebar|panel)/)]),
+      )
+    })
+  })
+
+  context("when Zen hides the sidebar", () => {
+    it("wakes no panel", async () => {
+      const { services } = await open()
+      const seen = rendersDuring(() => services.commands.enterZen())
+      expect(seen.sidebar).toBeGreaterThan(0)
+      expect(Object.keys(seen)).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/^panel/)]),
       )
     })
   })

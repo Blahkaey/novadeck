@@ -59,6 +59,7 @@ export const eachPlatform = [
   "src/projects/editing.spec.tsx",
   "src/projects/pins.spec.tsx",
   "src/projects/sessions.spec.tsx",
+  "src/projects/todo.spec.tsx",
   "src/terminals/clipboard.spec.tsx",
   "src/terminals/keys.spec.tsx",
   "src/terminals/move.spec.tsx",
@@ -68,6 +69,7 @@ export const eachPlatform = [
   "src/views/grid.spec.tsx",
   "src/views/zen.spec.tsx",
   "src/visitor.spec.tsx",
+  "src/workspace/panel-windows.spec.tsx",
   "src/workspace/routing.spec.tsx",
   "src/workspace/sidebar.spec.tsx",
 ]
@@ -122,6 +124,31 @@ const behaviour = (name: string, include: string[], platform: Platform | undefin
           failFetches: async ({ page }, glob: string, failing: boolean) => {
             if (failing) await page.route(glob, (route) => route.abort("failed"))
             else await page.unroute(glob)
+          },
+          // A person's mouse in a window the app opened of a panel's own, found by its name, at
+          // a point of its page: Playwright's locators see only the test's frame.
+          ownWindowPointer: async (
+            { context },
+            windowName: string,
+            action: "click" | "right-click" | "press" | "move" | "release",
+            point?: { x: number; y: number },
+          ) => {
+            const named = await Promise.all(
+              context.pages().map(async (each) => ({
+                each,
+                name: await each.evaluate<string>("window.name").catch(() => ""),
+              })),
+            )
+            const target = named.find((each) => each.name === windowName)?.each
+            if (!target) throw new Error(`No window named ${windowName}`)
+            if (action === "release") return target.mouse.up()
+            if (!point) throw new Error("Missing point in the window")
+            if (action === "click" || action === "right-click")
+              return target.mouse.click(point.x, point.y, {
+                button: action === "click" ? "left" : "right",
+              })
+            await target.mouse.move(point.x, point.y, { steps: action === "move" ? 16 : 1 })
+            if (action === "press") await target.mouse.down()
           },
         },
         headless: true,

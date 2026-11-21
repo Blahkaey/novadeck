@@ -33,6 +33,7 @@ export const shortcut = {
   worktrees: (): Chord => commandShift("G"),
   files: (): Chord => commandShift("F"),
   notes: (): Chord => commandShift("L"),
+  todo: (): Chord => commandShift("D"),
   history: (): Chord => commandShift("H"),
   preferences: (): Chord =>
     isMac()

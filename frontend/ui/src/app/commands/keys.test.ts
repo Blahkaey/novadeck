@@ -1,4 +1,9 @@
-import { appearance, workspaceFixture, workspaceWithWindow } from "@novadeck/core/testing"
+import {
+  appearance,
+  workspaceFixture,
+  workspaceWithPanel,
+  workspaceWithWindow,
+} from "@novadeck/core/testing"
 import type { SidebarPanel } from "@novadeck/core/types"
 import { afterEach, vi } from "vitest"
 
@@ -177,6 +182,17 @@ describe("key commands", () => {
       const app = navigating({
         workspace: workspaceWithWindow(),
         url: "/projects/project/sessions/initial/grid?terminal=w1",
+      })
+      expect(app.keydown({ key: "Enter" })).toBe("passed")
+      expect(app.shell().navigate).toBe(true)
+    })
+  })
+
+  context("when pressing Enter while navigating on a panel's window", () => {
+    it("keeps navigating, since a panel takes no typing", () => {
+      const app = navigating({
+        workspace: workspaceWithPanel(),
+        url: "/projects/project/sessions/initial/grid?terminal=panel:notes",
       })
       expect(app.keydown({ key: "Enter" })).toBe("passed")
       expect(app.shell().navigate).toBe(true)
@@ -462,6 +478,16 @@ describe("key commands", () => {
       expect(app.state().selected).toBe("01")
     })
 
+    it("passes over a panel's window, which takes no typing", () => {
+      const app = openKeys({
+        workspace: workspaceWithPanel(),
+        url: "/projects/project/sessions/initial/grid?terminal=02",
+      })
+      app.screen.tiles = [tile("01", 0, 0), tile("02", 110, 0), tile("panel:notes", 220, 0)]
+      expect(app.keydown({ key: "ArrowRight", ctrlKey: true, shiftKey: true })).toBe("handled")
+      expect(app.state().selected).toBe("02")
+    })
+
     it("swallows the chord at the edge rather than send it to the terminal", () => {
       const app = openKeys({
         workspace: workspaceFixture({ view: "grid", terminals: 2 }),
@@ -551,6 +577,36 @@ describe("key commands", () => {
       expect(app.ui.getSnapshot().rename).toMatchObject({ id: "01", origin: "sidebar" })
       expect(app.keydown({ key: "Delete" })).toBe("handled")
       expect(app.state().roster.terminals.map((terminal) => terminal.id)).toEqual(["02"])
+    })
+  })
+
+  context("when renaming with the Terminals panel out of the sidebar", () => {
+    it("renames in the list on the stage, and in the header with the list in its own window", () => {
+      const app = navigating()
+      app.commands.detachPanel("terminals", { focus: false })
+      app.commands.select("01")
+      // Grid shows the Terminals window beside the terminal.
+      expect(app.keydown({ key: "F2" })).toBe("handled")
+      expect(app.ui.getSnapshot().rename).toMatchObject({ id: "01", origin: "sidebar" })
+      app.commands.cancelRename("01")
+      app.commands.openOwnWindow("terminals")
+      app.commands.select("01")
+      expect(app.keydown({ key: "F2" })).toBe("handled")
+      expect(app.ui.getSnapshot().rename).toMatchObject({ id: "01", origin: "header" })
+    })
+  })
+
+  context("when renaming or closing a panel's window from the keyboard", () => {
+    it("renames nothing, and closes the window alone", () => {
+      const app = navigating({
+        workspace: workspaceWithPanel(),
+        url: "/projects/project/sessions/initial/grid?terminal=panel:notes",
+      })
+      expect(app.keydown({ key: "F2" })).toBe("handled")
+      expect(app.ui.getSnapshot().rename).toBeNull()
+      expect(app.keydown({ key: "Delete" })).toBe("handled")
+      expect(app.state().roster.panels).toEqual([])
+      expect(app.state().roster.terminals.map((terminal) => terminal.id)).toEqual(["01", "02"])
     })
   })
 
@@ -654,6 +710,17 @@ describe("key commands for voice input", () => {
         dictation,
         workspace: workspaceWithWindow(),
         url: "/projects/project/sessions/initial/grid?terminal=w1",
+      })
+      app.keydown(chord)
+      expect(dictation.calls).toEqual(["press none KeyM"])
+    })
+
+    it("offers no target when a panel's window is selected", () => {
+      const dictation = fakeDictation()
+      const app = openKeys({
+        dictation,
+        workspace: workspaceWithPanel(),
+        url: "/projects/project/sessions/initial/grid?terminal=panel:notes",
       })
       app.keydown(chord)
       expect(dictation.calls).toEqual(["press none KeyM"])

@@ -35,6 +35,7 @@ export type CommandId =
   | "sidebar.worktrees"
   | "sidebar.files"
   | "sidebar.notes"
+  | "sidebar.todo"
   | "sidebar.history"
   | "recent.next"
   | "recent.previous"
@@ -429,6 +430,12 @@ export const keymapFor = (platform: Platform): readonly KeyBinding[] => {
       layer: "app",
       keys: { shortcut: chord.notes },
       command: "sidebar.notes",
+      repeat: "swallow",
+    },
+    {
+      layer: "app",
+      keys: { shortcut: chord.todo },
+      command: "sidebar.todo",
       repeat: "swallow",
     },
     {

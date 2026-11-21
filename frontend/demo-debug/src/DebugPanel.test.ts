@@ -91,6 +91,8 @@ const mount = () => {
       failViewLoads: () => {},
       selected: () => undefined,
       select: () => {},
+      openPanels: () => {},
+      refuseNextWindow: () => {},
     }),
   )
   mounted.push(view)

@@ -96,7 +96,7 @@ export const viewedTerminal = (
   workspace: Workspace,
   ui: UiState,
   desktop: () => boolean = isDesktop,
-): Viewing => (inboxShown(ui, desktop) && !desktop() ? null : viewing(workspace, ui))
+): Viewing => (inboxShown(ui, workspace, desktop) && !desktop() ? null : viewing(workspace, ui))
 
 export type Landing = {
   readonly inbox: LandedInbox

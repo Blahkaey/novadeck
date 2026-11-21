@@ -1,112 +1,34 @@
-import type { AgentName } from "@novadeck/core/harnesses"
-import type { ClosedTerminal } from "@novadeck/core/history"
-import type { Note, NoteChange } from "@novadeck/core/notes"
-import type { AgentConnection } from "@novadeck/core/port"
-import type { SidebarPanel as PanelId } from "@novadeck/core/types"
-import type { Work, WorkClosing } from "@novadeck/core/works"
-import { Plus } from "lucide-react"
-import type { ComponentProps, ReactNode } from "react"
+import { panelLabels, type RailPanel, type SidebarPanel as PanelId } from "@novadeck/core/types"
 
-import { HeldPill, InboxClear, InboxCount, InboxList } from "../inbox/InboxList"
-import { shortcutBindings } from "../interaction/shortcuts"
-import { HistoryPanel } from "../sidebar/HistoryPanel"
-import { NotesPanel } from "../sidebar/NotesPanel"
-import { panelLabels } from "../sidebar/panel-labels"
-import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
-import { WorktreesPanel } from "../sidebar/WorktreesPanel"
-import { programIcon } from "../terminals/processes/profiles"
-import { TerminalTabs } from "../terminals/TerminalTabs"
+import { PanelElsewhere } from "../sidebar/PanelElsewhere"
+import { PanelSlot } from "./PanelSlot"
 
-type Props = Omit<ComponentProps<typeof TerminalTabs>, "ids"> & {
-  projectId: string
-  workspaceSessionId: string
-  // The Sessions panel's list, which reads the sessions itself, how many there are, and the
-  // open one's name once the project has others to tell it from.
-  sessions: ReactNode
-  sessionCount: number
-  sessionName: string | undefined
-  // The tiles' ids in sidebar order: each tab reads its own tile.
-  orderedIds: readonly string[]
-  sidebarPanel: PanelId
-  sidebarVisible: boolean
-  // The Files panel, wired to where the backend reads the projects' files (FilesSection); left
-  // out, there is none.
-  files: ReactNode
-  // Where the backend keeps closed terminals: this project's rows, how to read them afresh
-  // (stable, as it starts a read), the agents it can connect, what a row's click does, and
-  // how to delete rows for good. Left out, there is no History panel.
-  history:
-    | {
-        rows: readonly ClosedTerminal[]
-        list: () => Promise<unknown>
-        connections: readonly AgentConnection[] | undefined
-        onRestore: (row: ClosedTerminal) => void
-        onReveal: (terminalId: string) => void
-        onConnect: (agent: AgentName) => void
-        onRemove: (ids: readonly string[]) => Promise<void>
-      }
-    | undefined
-  // Where the backend keeps the person's notes: the open project's, whether their last
-  // change didn't take, and what adding, changing, moving and deleting one does. Left out,
-  // there is no Notes panel.
-  notes:
-    | {
-        notes: readonly Note[]
-        failed: boolean
-        onAdd: (note: { text: string; todo: boolean }) => void
-        onChange: (id: string, change: NoteChange) => void
-        onMove: (id: string, index: number) => void
-        onRemove: (ids: readonly string[]) => void
-      }
-    | undefined
-  // Where the backend reports each tracked worktree's work against main: the open project's
-  // works, the terminals' titles by id, the selected terminal, what a row's click does and what
-  // its × does. Left out, there is no Worktrees panel.
-  worktrees:
-    | {
-        works: readonly Work[]
-        // The backend has reported every work at least once: until then no works isn't none.
-        reported: boolean
-        // Follows the works until the returned release is called.
-        watch: () => () => void
-        titles: ReadonlyMap<string, string>
-        selectedId: string | undefined
-        onSelect: (work: Work, on: string | undefined) => Promise<void>
-        // Whether a file of a work can be opened so: it is in the open project.
-        canOpenFile: (work: Work, path: string) => boolean
-        // Opens a file of a work in the project window as a preview of what the works merge to.
-        onOpenFile: (work: Work, path: string) => void
-        onCloseWork: (root: string, force: boolean) => Promise<WorkClosing>
-      }
-    | undefined
-  onHide: () => void
-  onCreate: () => void
-}
-// A closed terminal's icon: its agent's, or its last program's, or a plain terminal's.
-const historyIcon = (row: ClosedTerminal): React.JSX.Element => {
-  const Icon = programIcon(row.agent ?? row.program ?? "")
-  return <Icon size={14} strokeWidth={1.5} />
+// The panel the sidebar is open on while it is in a window, on the stage or of its own (`own`),
+// and what its note offers.
+export type ElsewherePanel = {
+  readonly panel: RailPanel
+  readonly own: boolean
+  readonly onShow: () => void
+  readonly onReturn: () => void
+  readonly onHide: () => void
 }
 
+// The sidebar: the panels it holds, stacked in one place, where the open one slides in over the
+// rest (sidebar.css). Each panel is drawn once by the app and shown here through its slot, so
+// it stays as the person left it while another panel or none shows. A panel in a window is
+// held there instead; open on one, the sidebar says where it is (`elsewhere`).
 export const WorkspaceSidebar = ({
-  projectId,
-  workspaceSessionId,
-  sessions,
-  sessionCount,
-  sessionName,
-  orderedIds,
+  panels,
   sidebarPanel,
   sidebarVisible,
-  files,
-  history,
-  notes,
-  worktrees,
-  onHide,
-  onCreate,
-  renderTab,
-  onReorder,
-  away,
-}: Props): React.JSX.Element => (
+  elsewhere,
+}: {
+  // The panels the sidebar holds, in the order they stack.
+  panels: readonly RailPanel[]
+  sidebarPanel: PanelId
+  sidebarVisible: boolean
+  elsewhere?: ElsewherePanel | undefined
+}): React.JSX.Element => (
   <aside
     id="terminal-sidebar"
     className="sidebar relative flex shrink-0 flex-col overflow-hidden"
@@ -114,83 +36,19 @@ export const WorkspaceSidebar = ({
     aria-hidden={!sidebarVisible}
     inert={!sidebarVisible}
   >
-    {files}
-    <SidebarPanel
-      id="sessions-panel"
-      title={panelLabels.sessions}
-      count={sessionCount}
-      active={sidebarPanel === "sessions"}
-      onClose={onHide}
-    >
-      {sessions}
-    </SidebarPanel>
-    {notes && (
-      <NotesPanel
-        key={`notes/${projectId}`}
-        projectId={projectId}
-        {...notes}
-        active={sidebarPanel === "notes"}
-        onClose={onHide}
+    {panels.map((panel) => (
+      <PanelSlot key={panel} panel={panel} />
+    ))}
+    {elsewhere && (
+      <PanelElsewhere
+        key={elsewhere.panel}
+        id={`${elsewhere.panel}-elsewhere`}
+        title={panelLabels[elsewhere.panel]}
+        own={elsewhere.own}
+        onShow={elsewhere.onShow}
+        onReturn={elsewhere.onReturn}
+        onHide={elsewhere.onHide}
       />
     )}
-    {history && (
-      <HistoryPanel
-        key={`history/${projectId}`}
-        {...history}
-        iconOf={historyIcon}
-        active={sidebarPanel === "history"}
-        onClose={onHide}
-      />
-    )}
-    <SidebarPanel
-      id="terminals-panel"
-      title={panelLabels.terminals}
-      titleHint={`Recent · ${shortcutBindings().recent.display.join(" ")}`}
-      count={orderedIds.length}
-      // Which session's terminals these are, once the project has others to tell it from.
-      scope={sessionName}
-      active={sidebarPanel === "terminals"}
-      onClose={onHide}
-    >
-      <button
-        className={sidebarCreateClasses}
-        aria-label="New terminal"
-        data-terminals-create
-        onClick={onCreate}
-      >
-        <Plus size={14} className="shrink-0" />
-        <span className="min-w-0 truncate">Terminal</span>
-        <kbd className="hint mb-[-2px] ml-auto shrink-0 whitespace-nowrap">
-          {shortcutBindings().newTerminal.display.join(" ")}
-        </kbd>
-      </button>
-      <TerminalTabs
-        key={`${projectId}/${workspaceSessionId}`}
-        ids={orderedIds}
-        renderTab={renderTab}
-        onReorder={onReorder}
-        away={away}
-      />
-    </SidebarPanel>
-    {worktrees && (
-      <WorktreesPanel
-        key="worktrees"
-        {...worktrees}
-        active={sidebarPanel === "worktrees"}
-        watching={sidebarVisible && sidebarPanel === "worktrees"}
-        onClose={onHide}
-      />
-    )}
-    <SidebarPanel
-      id="inbox-panel"
-      title={panelLabels.inbox}
-      count={<InboxCount />}
-      titleExtra={<HeldPill />}
-      active={sidebarPanel === "inbox"}
-      onClose={onHide}
-      actions={<InboxClear />}
-    >
-      <InboxList />
-    </SidebarPanel>
   </aside>
 )

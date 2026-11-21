@@ -36,6 +36,7 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
   let worktrees = true
   let forges = true
   let fileOperations = true
+  let placesNotes = true
   let play: DemoLaunch["play"]
   return async (signal, progress): Promise<BackendConnection> => {
     await rehearsals.beforeConnect(signal, unavailable)
@@ -107,6 +108,11 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
       fileOperations,
       setFileOperations: (next) => {
         fileOperations = next
+        rehearsals.rehearse({ reboot: true })
+      },
+      placesNotes,
+      setPlacesNotes: (next) => {
+        placesNotes = next
         rehearsals.rehearse({ reboot: true })
       },
     }

@@ -8,8 +8,9 @@
    the account's subscriptions, `.footer-usage`, a pill each with its `.usage-popover`, and
    the group of buttons after them, `.footer-misc`, both in `.footer-end`; between the two
    ends, `.footer-middle`, for the sandbox's chip), the rail of sidebar toggles (`.sidebar-tools`) and the sidebar
-   (`.sidebar`), which on narrow screens opens as a `.sidebar-drawer`. Each region is a
-   ground with an edge toward the workspace.
+   (`.sidebar`), which on narrow screens opens as a `.sidebar-drawer`, and whose panels each
+   fill a `.panel-own-window` in a window of their own. Each region is a ground with an edge
+   toward the workspace.
 
    The rail's toggles are segments (the segmented recipe). Hooks: on a rail's toggle, data-dragging="true" while it's carried along the rail to a new
    place (SidebarRail.tsx).
@@ -396,6 +397,29 @@
   color: var(--color-ink);
   cursor: grabbing;
 }
+/* A toggle whose panel is in a window, on the stage or of its own (data-detached): a small window's outline over
+   its icon's lower right corner, cut out of the icon by the ground behind it, as the attention
+   dot is (attention-dot.css). */
+.rail-detached-mark {
+  position: absolute;
+  right: calc(50% - 11px);
+  bottom: calc(50% - 10px);
+  width: 9px;
+  height: 8px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-top-width: 3px;
+  border-radius: 2px;
+  background-color: var(--region-rail-bg, var(--color-shell));
+  box-shadow: 0 0 0 1.5px var(--region-rail-bg, var(--color-shell));
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .sidebar-tools .segment:hover:not([data-disabled]) > .rail-detached-mark {
+    background-color: var(--segmented-hover-bg, var(--color-soft));
+    box-shadow: 0 0 0 1.5px var(--segmented-hover-bg, var(--color-soft));
+  }
+}
 
 .sidebar {
   --_bg: var(--region-sidebar-bg, var(--color-shell));
@@ -405,6 +429,18 @@
   background-color: var(--_bg);
   background-image: var(--region-sidebar-image, none);
   color: var(--_fg);
+}
+/* A panel's window of its own (app/OwnWindows.tsx): that window's whole page, in the sidebar's
+   colours, which the panel fills. */
+.panel-own-window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--region-sidebar-bg, var(--color-shell));
+  background-image: var(--region-sidebar-image, none);
+  color: var(--region-sidebar-fg, var(--color-ink));
 }
 .sidebar-drawer {
   background-color: var(--region-sidebar-bg, var(--color-shell));

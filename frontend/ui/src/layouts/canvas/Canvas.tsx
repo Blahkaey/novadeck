@@ -1,7 +1,7 @@
 import "./canvas.css"
 import type { Arranged } from "@novadeck/core/layout/canvas-arrangement"
 import { canvasPointPosition } from "@novadeck/core/layout/window-place"
-import { isWindow } from "@novadeck/core/roster"
+import { isWindow, tileName } from "@novadeck/core/roster"
 import type { Tile } from "@novadeck/core/types"
 import { rescaleAvatars } from "@novadeck/items/Avatar"
 import { useDrag, useDragSession } from "@novadeck/items/drag-session"
@@ -378,7 +378,7 @@ const TerminalCanvas = ({
       selectable: !hidden[terminal.id],
       focusable: !hidden[terminal.id],
       selected: selected === terminal.id,
-      ariaLabel: `${terminal.name} terminal`,
+      ariaLabel: `${tileName(terminal)} terminal`,
       data: {
         preview: preview === terminal.id,
         team:

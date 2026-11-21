@@ -92,8 +92,9 @@ export type DesktopBridge = {
    * Calls `listener` with whether the app's window has the system's focus: at once with
    * the current state, and again on each change. Unlike the page's own `document.hasFocus()`,
    * it stays true while focus is inside a frame of the page, as a page in the companion
-   * pane, and turns false when the person switches to another app. Returns a function that
-   * stops listening. Absent from apps that came before it.
+   * pane, or in one of its panel windows, and turns false when the person switches to
+   * another app. Returns a function that stops listening. Absent from apps that came before
+   * it.
    */
   onWindowFocus?(listener: (focused: boolean) => void): () => void
   /**

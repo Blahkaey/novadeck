@@ -1,5 +1,4 @@
 import { descendantsOf, teamOf } from "@novadeck/core/derivations"
-import { isWindow } from "@novadeck/core/roster"
 import { terminalGlance } from "@novadeck/core/terminals/ending"
 import type { TerminalMetadata } from "@novadeck/core/types"
 
@@ -30,7 +29,7 @@ export const useGlance = (
   )
   const marks = useTerminalMarks(landing.inbox, { ...target, terminalId: id })
   const unread = useUiState((state) => unreadEnd(state.unread, context, id))
-  if (!tile || isWindow(tile)) return undefined
+  if (!tile) return undefined
   return { tile, glance: terminalGlance(tile, marks, unread) }
 }
 

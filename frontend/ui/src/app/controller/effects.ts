@@ -8,10 +8,14 @@ import {
   focusZenCreate,
   focusZenEnter,
   focusTerminalsCreate,
+  focusTerminalsView,
   focusMovePick,
+  focusPanel,
 } from "../../interaction/dom"
 import { cancelTerminalTransition, transitionTerminal } from "../../layouts/transition"
 import { isDesktop } from "../../shell/desktop"
+import { closeOwnWindow, focusOwnWindow, openOwnWindow, panelPage } from "../../shell/own-windows"
+import { readSidebarOrder } from "../../shell/shell-storage"
 import type { CommandEffects } from "../commands/context"
 
 // What commands do to the page: focus, view transitions, timers and the clock.
@@ -22,11 +26,18 @@ export const domEffects: CommandEffects = {
   focusSidebarToggleStranded,
   focusZenCreate,
   focusZenEnter,
-  focusTerminalsCreate,
-  focusMovePick,
+  // The Terminals panel's controls, in the document it is drawn in.
+  focusTerminalsCreate: () => focusTerminalsCreate(panelPage("terminals")),
+  focusTerminalsView: (view) => focusTerminalsView(view, panelPage("terminals")),
+  focusMovePick: () => focusMovePick(panelPage("terminals")),
   focusWorkspaceViewport,
-  focusTerminalTab,
+  focusTerminalTab: (id) => focusTerminalTab(id, panelPage("terminals")),
   focusTerminalInput,
+  focusPanel,
+  openOwnWindow,
+  focusOwnWindow,
+  closeOwnWindow,
+  railOrder: readSidebarOrder,
   tileRects,
   refocus: (element) => {
     if (element.isConnected) element.focus({ preventScroll: true })

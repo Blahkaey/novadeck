@@ -1,4 +1,5 @@
 /* oxlint-disable react/no-array-index-key -- Parts are read from text that has no ids; they never reorder. */
+import { clipboardOf, viewOf } from "@novadeck/toolkit/realm"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { Check, Copy } from "lucide-react"
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
@@ -40,8 +41,11 @@ export const Detail = ({
   useLayoutEffect(() => measure.current())
   useEffect(() => {
     const element = box.current
-    if (!element || typeof ResizeObserver === "undefined") return
-    const watch = new ResizeObserver(() => measure.current())
+    if (!element) return
+    // The observer of the window the box is drawn in: the page's, or an Inbox's window of its own.
+    const Observer = viewOf(element).ResizeObserver
+    if (typeof Observer === "undefined") return
+    const watch = new Observer(() => measure.current())
     watch.observe(element)
     return () => watch.disconnect()
   }, [])
@@ -98,8 +102,9 @@ export const CopyButton = ({
         type="button"
         className="icon-button small dim request-copy"
         aria-label={label}
-        onClick={() => {
-          navigator.clipboard
+        onClick={(event) => {
+          // Through the clipboard of the window the button is in, which has the focus.
+          clipboardOf(event.currentTarget)
             ?.writeText(text)
             .then(() => {
               setCopied(true)

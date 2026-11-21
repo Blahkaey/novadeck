@@ -1,17 +1,24 @@
+import { isElement } from "@novadeck/toolkit/realm"
 import { useEffect, useRef, useState } from "react"
 
 const rowMark = "data-menu-row"
 
+// A field the person may type into, of whichever window: a card in an Inbox's window of its own
+// is drawn in that window's document, whose elements `instanceof` this window's doesn't know.
+const fieldOf = (target: EventTarget): HTMLInputElement | HTMLTextAreaElement | undefined =>
+  isElement(target) && (target.localName === "textarea" || target.localName === "input")
+    ? (target as HTMLInputElement | HTMLTextAreaElement)
+    : undefined
+
 // Whether keys in `target` type words.
-export const isTyping = (target: EventTarget): boolean =>
-  target instanceof HTMLTextAreaElement ||
-  (target instanceof HTMLInputElement && (target.type === "text" || target.type === "number"))
+export const isTyping = (target: EventTarget): boolean => {
+  const field = fieldOf(target)
+  return field?.localName === "textarea" || field?.type === "text" || field?.type === "number"
+}
 
 // Whether `target` holds words the person typed, which focus moving away would leave mid-thought.
 export const holdsWords = (target: Element): boolean =>
-  (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) &&
-  isTyping(target) &&
-  target.value !== ""
+  isTyping(target) && fieldOf(target)?.value !== ""
 
 export type Menu = {
   // The row the person is on.
@@ -56,14 +63,14 @@ export const useMenu = (count: number): Menu => {
       }
     },
     onPointerMove: (event) => {
-      if (event.pointerType !== "mouse" || !(event.target instanceof Element)) return
+      if (event.pointerType !== "mouse" || !isElement(event.target)) return
       const option = event.target.closest(".request-option")
       if (!option || !event.currentTarget.contains(option)) return
       const rows = [...event.currentTarget.querySelectorAll<HTMLElement>(`[${rowMark}]`)]
       const index = rows.findIndex((row) => row === option || option.contains(row))
       const row = rows[index]
       if (!row || index === at || row.matches(":disabled")) return
-      const active = document.activeElement
+      const active = option.ownerDocument.activeElement
       // Focus goes along from anything in the dialog but a field the person writes in, empty
       // or not: their words would land on a row instead.
       if (active && option.closest(".request-dialog")?.contains(active) && !isTyping(active))

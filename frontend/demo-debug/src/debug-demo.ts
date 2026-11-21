@@ -1,5 +1,6 @@
 import type { SandboxState } from "@novadeck/core/desktop/sandbox"
 import type { ProjectFiles } from "@novadeck/core/files"
+import type { Notes } from "@novadeck/core/notes"
 import type {
   Backend,
   BackendConnectionState,
@@ -57,6 +58,7 @@ import { modelGroups } from "./models"
 import { murmurGroups } from "./murmur"
 import { notesGroups } from "./notes"
 import { pageGroups } from "./pages"
+import { panelGroups } from "./panels"
 import { pdfGroups } from "./pdfs"
 import { planGroups } from "./plans"
 import { createDemoStates } from "./states"
@@ -120,6 +122,11 @@ export type DemoLaunch = {
   readonly fileOperations: boolean
   // Boots again with the backend making, renaming, moving, copying and deleting files or not.
   readonly setFileOperations: (offered: boolean) => void
+  // Whether the backend puts notes in their places; false for a runner from before the Todo
+  // board.
+  readonly placesNotes: boolean
+  // Boots again with the backend putting notes in their places or not.
+  readonly setPlacesNotes: (offered: boolean) => void
 }
 
 // A backend's files with no file made, renamed, moved, copied or deleted, as a runner without them.
@@ -130,6 +137,9 @@ const readOnly = ({
   remove: _remove,
   ...files
 }: ProjectFiles) => files
+
+// A backend's notes with none put in its place, as a runner from before the Todo board.
+const unplaced = ({ place: _place, ...notes }: Notes) => notes
 
 // What the panel's groups read and change of the shell around the demo.
 export type DemoShell = {
@@ -265,6 +275,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
 
   const { worktrees: offered, forges: forgesOffered, ...withoutWorktrees } = inner
   const files = inner.files && !launch.fileOperations ? readOnly(inner.files) : inner.files
+  const notes = inner.notes && !launch.placesNotes ? unplaced(inner.notes) : inner.notes
   const installs = createDemoInstalls()
   // On the panel's own agents, which the tour runs one of. The inner demo's tour is the one its
   // player follows, so the panel's actions reach it.
@@ -275,6 +286,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
     ...(launch.worktrees && offered ? { worktrees: offered } : {}),
     ...(launch.forges && forgesOffered ? { forges: forgesOffered } : {}),
     ...(files && { files }),
+    ...(notes && { notes }),
     commit: (workspace, actions) => {
       latest = workspace
       inner.commit(workspace, actions)
@@ -343,6 +355,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
         ...states,
         groups: [
           ...states.groups,
+          ...panelGroups,
           ...installGroups(installs, states),
           ...tourGroups(tour),
           updatesGroup(launch, states.updateControls),
@@ -363,7 +376,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...murmurGroups(isDemoMurmur(inner.murmur) ? inner.murmur : undefined),
           ...voiceGroups(isDemoVoice(inner.voice) ? inner.voice : undefined),
           ...historyGroups(inner.history),
-          ...notesGroups(inner.notes),
+          ...notesGroups(launch, inner.notes),
           ...filesGroups(isDemoFiles(inner.files) ? inner.files : undefined, launch),
           ...fileEditingGroups(isDemoFiles(inner.files) ? inner.files : undefined),
           ...worksGroups(inner.works),

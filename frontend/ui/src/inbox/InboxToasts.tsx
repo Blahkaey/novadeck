@@ -2,7 +2,7 @@ import type { InboxRow } from "@novadeck/core/inbox"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { NovaMark } from "@novadeck/toolkit/NovaLogo"
 import { createToasts, shownToasts, ToastRegion } from "@novadeck/toolkit/Toast"
-import { ArrowRightLeft, Eye, Folder, Terminal, type LucideIcon } from "lucide-react"
+import { AppWindow, ArrowRightLeft, Eye, Folder, Terminal, type LucideIcon } from "lucide-react"
 import { useEffect, useMemo } from "react"
 
 import { focusSheetSoon } from "./inbox-dom"
@@ -57,11 +57,25 @@ export type MoveBoard = {
   readonly close: () => void
 }
 
-// A toast is an Inbox row's, an agent's wish to show something, or a move the person made.
+// A window of a panel's own that couldn't open: what the toast says of it.
+export type RefusedToast = {
+  readonly id: string
+  readonly words: string
+}
+
+// What shows the toast of a window that couldn't open: one at a time, the newest replacing the
+// last.
+export type RefusedBoard = {
+  readonly show: (refused: RefusedToast) => void
+}
+
+// A toast is an Inbox row's, an agent's wish to show something, a move the person made, or a
+// window the person asked for that couldn't open.
 type Toast =
   | { readonly kind: "inbox"; readonly row: InboxRow }
   | { readonly kind: "show"; readonly waiting: ShowWaiting }
   | { readonly kind: "moved"; readonly moved: MovedToast }
+  | { readonly kind: "refused"; readonly refused: RefusedToast }
 
 // What the pill past the shown toasts says: `count` toasts are hidden, `inbox` of them the
 // Inbox's, which it says are in the Inbox; show toasts aren't, and aren't counted there.
@@ -71,6 +85,17 @@ export const moreWords = (count: number, inbox: number): string =>
 // The key of a row's toast, apart from the terminals' keys of the Inbox's.
 const showKey = (itemId: string): string => `show:${itemId}`
 const movedKey = "moved"
+const refusedKey = "refused"
+
+// A refused window's toast: which panel's window couldn't open, and what may have stopped it.
+const RefusedCard = ({ refused }: { readonly refused: RefusedToast }): React.JSX.Element => (
+  <div className="window-toast">
+    <span className="window-toast-icon" aria-hidden="true">
+      <AppWindow size={15} strokeWidth={1.6} />
+    </span>
+    <span className="window-toast-words">{refused.words}</span>
+  </div>
+)
 
 // A move's toast: where the terminal went and that it still runs, or why it couldn't go, and
 // Undo and Go there. A click on the toast goes there too; its buttons' own clicks don't.
@@ -177,6 +202,7 @@ export const InboxToasts = ({
   follow,
   followShows,
   followMoves,
+  followRefused,
   showInbox,
   peekInbox,
   showTerminal,
@@ -187,13 +213,15 @@ export const InboxToasts = ({
   readonly followShows: (board: ShowBoard) => () => void
   // Tells of the person's moves on the board until the returned stop.
   readonly followMoves: (board: MoveBoard) => () => void
+  // Tells of the windows that couldn't open on the board until the returned stop.
+  readonly followRefused: (board: RefusedBoard) => () => void
   readonly showInbox: () => void
   // Shows the Inbox for one row; returns what puts the sidebar back, unless it showed already.
   readonly peekInbox: () => (() => void) | undefined
   // Brings the terminal into view, selected, which opens what waits on it.
   readonly showTerminal: (terminalId: string) => void
 }): React.JSX.Element => {
-  const { open, now } = useInboxContext()
+  const { open, now, page } = useInboxContext()
   const toasts = useMemo(() => createToasts<Toast>(), [])
   useEffect(() => {
     // The row each terminal's toast shows.
@@ -217,16 +245,21 @@ export const InboxToasts = ({
       show: (moved) => toasts.show(movedKey, { kind: "moved", moved }),
       close: () => toasts.close(movedKey),
     }
+    const refusals: RefusedBoard = {
+      show: (refused) => toasts.show(refusedKey, { kind: "refused", refused }),
+    }
     const stop = follow(board)
     const stopShows = followShows(shows)
     const stopMoves = followMoves(moves)
+    const stopRefused = followRefused(refusals)
     return () => {
       stop()
       stopShows()
       stopMoves()
+      stopRefused()
       toasts.clear()
     }
-  }, [follow, followShows, followMoves, toasts])
+  }, [follow, followShows, followMoves, followRefused, toasts])
   return (
     <ToastRegion
       toasts={toasts}
@@ -234,9 +267,10 @@ export const InboxToasts = ({
       onSelect={(toast, { keyboard }) => {
         if (toast.kind === "show") return showTerminal(toast.waiting.terminalId)
         if (toast.kind === "moved") return toast.moved.failed ? undefined : toast.moved.go()
+        if (toast.kind === "refused") return
         open(toast.row.id, { once: true, after: peekInbox() })
         // From the keyboard, on to the sheet that opens, as from a row.
-        if (keyboard) focusSheetSoon()
+        if (keyboard) focusSheetSoon(page)
       }}
       onMore={showInbox}
       spreadLabel={(count) => {
@@ -251,6 +285,8 @@ export const InboxToasts = ({
       {(toast) =>
         toast.kind === "moved" ? (
           <MovedCard moved={toast.moved} />
+        ) : toast.kind === "refused" ? (
+          <RefusedCard refused={toast.refused} />
         ) : toast.kind === "show" ? (
           <ToastCard text={showText(toast.waiting, now)} Icon={Eye} />
         ) : (

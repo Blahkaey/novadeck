@@ -1203,8 +1203,9 @@ with every safety check again at that time:
   caller's own team's work since it last looked. See
   [Agent messaging](agent-messaging.md).
 - **Notes** the person asks for come from the same server's `note` tool, listed in every
-  Novadeck terminal: it adds notes or todos first in the caller's project's Notes, each
-  marked with the agent that added it, and can't read or change a note. The runner takes it
+  Novadeck terminal: it adds todos first in the To do column of the caller's project's Todo
+  board and plain notes first in its Notes, each marked with the agent that added it, and
+  can't read or change a note. The runner takes it
   only in a turn the person's own message started that no other agent's message reached
   (`terminals/note-request.ts`). See [Agent messaging](agent-messaging.md), "Notes the
   person asks for".

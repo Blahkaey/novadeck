@@ -30,14 +30,29 @@ const ownFrame = (
 ): contents is WebContents =>
   mainFrame && contents?.getType() === "window" && own(contents.getURL())
 
+// Whether a frame may write to the clipboard, and nothing else: the main frame of an open panel
+// window of the app's (see ./panel-windows.ts), which `panel` recognises by its page, so a copy
+// button in a panel shown there works. It reads nothing.
+const panelWrite = (
+  contents: WebContents | null,
+  mainFrame: boolean,
+  permission: string,
+  panel: (contents: WebContents) => boolean,
+): boolean =>
+  permission === "clipboard-sanitized-write" &&
+  mainFrame &&
+  contents?.getType() === "window" &&
+  panel(contents)
+
 // The microphone, for voice input, and never the camera: a request for audio alone.
 const audioOnly = (types: readonly string[] | undefined): boolean =>
   types !== undefined && types.length > 0 && types.every((type) => type === "audio")
 
 /**
  * Refuses the app's session every permission but the clipboard, the font list and the microphone for
- * the app's own page, which `own` recognises by its address. Live pages have a session of
- * their own, which refuses them everything (see @novadeck/viewers/browser/host).
+ * the app's own page, which `own` recognises by its address, and writing to the clipboard
+ * for the page of an open panel window, which `panel` recognises. Live pages have a session
+ * of their own, which refuses them everything (see @novadeck/viewers/browser/host).
  *
  * `microphone` asks the system to allow the microphone before a request is granted, as
  * macOS requires; the system's answer decides, and it is asked only for the page's own
@@ -46,15 +61,18 @@ const audioOnly = (types: readonly string[] | undefined): boolean =>
 export const limitPermissions = (
   target: Session,
   own: (url: string) => boolean,
+  panel: (contents: WebContents) => boolean,
   microphone: () => Promise<boolean> = async () => true,
 ): void => {
   target.setPermissionCheckHandler((contents, permission, _origin, details) => {
-    if (!ownFrame(contents, details.isMainFrame, own)) return false
+    if (!ownFrame(contents, details.isMainFrame, own))
+      return panelWrite(contents, details.isMainFrame, permission, panel)
     if (permission === "media") return "mediaType" in details && details.mediaType === "audio"
     return clipboard.has(permission)
   })
   target.setPermissionRequestHandler((contents, permission, respond, details) => {
-    if (!ownFrame(contents, details.isMainFrame, own)) return respond(false)
+    if (!ownFrame(contents, details.isMainFrame, own))
+      return respond(panelWrite(contents, details.isMainFrame, permission, panel))
     if (permission !== "media") return respond(clipboard.has(permission))
     if (!("mediaTypes" in details) || !audioOnly(details.mediaTypes)) return respond(false)
     // A refusal by the system, or a failure to ask, is a refusal.

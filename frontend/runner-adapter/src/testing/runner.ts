@@ -305,6 +305,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       add: (input) => note(`add note ${input.id}`, () => runner.notes.add(input)),
       update: (input) => note(`update note ${input.id}`, () => runner.notes.update(input)),
       move: (input) => note(`move note ${input.id}`, () => runner.notes.move(input)),
+      place: (input) => note(`place note ${input.id}`, () => runner.notes.place(input)),
       remove: (input) => note("remove notes", () => runner.notes.remove(input)),
     },
     works: {

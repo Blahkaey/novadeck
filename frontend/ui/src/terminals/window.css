@@ -15,7 +15,8 @@
    line while a program runs), `.terminal-title`, `.terminal-content` (the terminal's
    output, which a theme may filter), `.terminal-host` (the terminal's content, and
    `.terminal-stats` over it: what the agent runs on, its `.terminal-stats-runs` and its
-   context's `.terminal-stats-ring`), `.terminal-actions`, `.terminal-rename-input`.
+   context's `.terminal-stats-ring`), `.terminal-actions`, `.terminal-rename-input`, and a
+   panel's window's `.panel-window-count` after its name and `.panel-window-extra` after that.
 
    Layers: the window is positioned, and its `::after` is always the glass, a layer
    over everything the window holds (z-index 300, above the taskbar's 60, the chat's 10,
@@ -516,6 +517,20 @@
   border-top: var(--window-phase-need-border-width, 2px) solid
     var(--window-phase-need-border-color, var(--color-warning-fg));
   animation: terminal-pulse 1.6s ease-in-out infinite;
+}
+/* A panel's window's count, after its name (PanelSlot.tsx), in the voice of the count beside
+   the panel's heading in the sidebar, without the label's frame a theme draws around a title;
+   gone while the panel has nothing to count. Its scope after it, as the Terminals window's
+   session, gives up its room before the name. */
+.panel-window-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--section-label-fg, var(--color-muted));
+  font-family: var(--section-label-font, var(--font-sans));
+  white-space: nowrap;
+}
+.panel-window-count:has(> :empty) {
+  display: none;
 }
 /* What the agent needs, right after the window's name, in the tab's style. */
 .terminal-need {

@@ -1,3 +1,4 @@
+import { EnvironmentProvider } from "@ark-ui/react/environment"
 import { Popover as ArkPopover, usePopoverContext } from "@ark-ui/react/popover"
 import { Portal } from "@ark-ui/react/portal"
 import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react"
@@ -5,10 +6,17 @@ import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from
 export type SheetProps = {
   readonly label: string
   readonly open: boolean
+  // The document it opens in, its anchor's: the page's, or another window's of the page, where
+  // what the anchor is part of is drawn (a panel in a window of its own). A click outside it is
+  // one in that document.
+  readonly page: Document
   // Where its anchor is now, read each time the sheet places itself.
   readonly anchor: () => HTMLElement | null
   // What it stays within: the area it slides along to fit.
-  readonly boundary: () => HTMLElement | null
+  readonly boundary: () => HTMLElement
+  // Whether it may slide back over its anchor to stay within it, where there is no room beside
+  // the anchor, as beside a list that spans its window.
+  readonly overlap: boolean
   // What the anchor is: the sheet starts over, and places itself anew, when it changes.
   readonly anchorKey: string
   // Where the anchor stands among what is around it: the sheet moves to it, as it is, when
@@ -32,8 +40,10 @@ export type SheetProps = {
 export const Sheet = ({
   label,
   open,
+  page,
   anchor,
   boundary,
+  overlap,
   anchorKey,
   placeKey,
   onInteractOutside,
@@ -48,20 +58,23 @@ export const Sheet = ({
     reads.current = { anchor, boundary }
   })
   return (
-    <Placed
-      // A sheet placed for one anchor is placed again, from nothing, for the next: where
-      // the last anchor was counts for nothing.
-      key={anchorKey}
-      label={label}
-      open={open}
-      reads={reads}
-      placeKey={placeKey}
-      onInteractOutside={onInteractOutside}
-      onDismiss={onDismiss}
-      className={className}
-    >
-      {children}
-    </Placed>
+    <EnvironmentProvider value={page}>
+      <Placed
+        // A sheet placed for one anchor is placed again, from nothing, for the next: where
+        // the last anchor was counts for nothing.
+        key={anchorKey}
+        label={label}
+        open={open}
+        reads={reads}
+        overlap={overlap}
+        placeKey={placeKey}
+        onInteractOutside={onInteractOutside}
+        onDismiss={onDismiss}
+        className={className}
+      >
+        {children}
+      </Placed>
+    </EnvironmentProvider>
   )
 }
 
@@ -70,12 +83,16 @@ const Placed = ({
   label,
   open,
   reads,
+  overlap,
   placeKey,
   onInteractOutside,
   onDismiss,
   children,
   className,
-}: Pick<SheetProps, "label" | "open" | "onInteractOutside" | "onDismiss" | "children"> & {
+}: Pick<
+  SheetProps,
+  "label" | "open" | "overlap" | "onInteractOutside" | "onDismiss" | "children"
+> & {
   readonly reads: RefObject<Pick<SheetProps, "anchor" | "boundary">>
   readonly placeKey: string | undefined
   readonly className: string | undefined
@@ -90,8 +107,9 @@ const Placed = ({
       offset: { mainAxis: 8, crossAxis: -12 },
       overflowPadding: 12,
       flip: false,
+      overlap,
       fitViewport: true,
-      boundary: () => reads.current.boundary() ?? document.body,
+      boundary: () => reads.current.boundary(),
       // Where the anchor last was, where it has gone: the sheet stays put.
       getAnchorRect: () => {
         const rect = reads.current.anchor()?.getBoundingClientRect()
@@ -99,7 +117,7 @@ const Placed = ({
         return last.current
       },
     }),
-    [reads],
+    [reads, overlap],
   )
   return (
     <ArkPopover.Root

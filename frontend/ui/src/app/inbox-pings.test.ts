@@ -1,7 +1,7 @@
 import { emptyInbox, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import type { Notice } from "@novadeck/core/port"
-import { createStore } from "@novadeck/core/store"
-import { appearance } from "@novadeck/core/testing"
+import { createStore, createWorkspaceStore } from "@novadeck/core/store"
+import { appearance, workspaceFixture } from "@novadeck/core/testing"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
@@ -14,6 +14,9 @@ import {
   watchInboxPings,
 } from "./inbox-pings"
 import { createUiStore, initialUi } from "./ui-store"
+
+// The workspace on screen, whose sessions keep every panel in the sidebar.
+const workspaceOnScreen = () => createWorkspaceStore(workspaceFixture())
 
 // A ding that sounds nothing: the board under test is about its notices.
 const testDing = createDing({ sound: () => ({ on: false, volume: 0, name: "felt" }) })
@@ -133,7 +136,7 @@ const setup = (
     testDing,
   )!
   const images: number[] = []
-  const stop = watchInboxPings({ state: inbox }, ui, {
+  const stop = watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
     board,
     badge: (badge) => void badges.push(badge),
     graceMs,
@@ -146,7 +149,18 @@ const setup = (
   })
   const set = (next: InboxRow[]) => inbox.update((state) => ({ ...state, items: next }))
   const focus = (pageFocused: boolean) => ui.update((state) => ({ ...state, pageFocused }))
-  return { set, focus, shown, closed, badges, images, board, stop }
+  // The person goes to the Inbox's window of its own, or leaves it.
+  const inInbox = (inside: boolean) =>
+    ui.update((state) => ({
+      ...state,
+      ownWindows: ["inbox"],
+      ownWindowFocused: inside ? "inbox" : null,
+    }))
+  // The person is in the Notes panel's window of its own, which the desktop app counts as its
+  // focus too.
+  const inOther = () =>
+    ui.update((state) => ({ ...state, ownWindows: ["notes"], ownWindowFocused: "notes" }))
+  return { set, focus, inInbox, inOther, shown, closed, badges, images, board, stop }
 }
 
 beforeEach(() => {
@@ -172,6 +186,30 @@ describe("pings for what needs the person", () => {
         },
       ])
       stop()
+    })
+
+    it("sends none while the person is in the Inbox's window of its own, and one once they leave it", () => {
+      const app = setup()
+      app.inInbox(true)
+      const seen = ask("a")
+      app.set([seen])
+      vi.advanceTimersByTime(5000)
+      expect(app.shown).toEqual([])
+      app.inInbox(false)
+      app.set([seen, request("b", "Bash", "pnpm test")])
+      vi.advanceTimersByTime(5000)
+      expect(app.shown.map((notice) => notice.body)).toEqual(["Run pnpm test?"])
+      app.stop()
+    })
+
+    it("sends one while the person is in another panel's window of its own", () => {
+      const app = setup()
+      app.focus(true)
+      app.inOther()
+      app.set([ask("a")])
+      vi.advanceTimersByTime(2000)
+      expect(app.shown).toHaveLength(1)
+      app.stop()
     })
 
     it("sends none for a row that is answered or withdrawn within the grace", () => {
@@ -698,7 +736,9 @@ describe("the app icon's image on Windows", () => {
     })
     const badges: unknown[] = []
     const ui = backgrounded()
-    watchInboxPings({ state: inbox }, ui, { badge: (badge) => void badges.push(badge) })()
+    watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
+      badge: (badge) => void badges.push(badge),
+    })()
     expect(texts).toEqual(["9+"])
     expect(canvas.width).toBe(32)
     expect(badges[0]).toEqual({ count: 12, image: "data:image/png;base64,x" })

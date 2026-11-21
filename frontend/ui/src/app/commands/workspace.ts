@@ -3,7 +3,7 @@ import { descendantsOf } from "@novadeck/core/derivations"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { TerminalRequest, TourRun } from "@novadeck/core/port"
-import { hasTile } from "@novadeck/core/roster"
+import { hasTile, isPanel, isWindow, tileOf } from "@novadeck/core/roster"
 import { activeProject, type WorkspaceAction } from "@novadeck/core/state"
 import { closeReasons } from "@novadeck/core/terminals/closing"
 import type {
@@ -144,7 +144,7 @@ export type WorkspaceCommands = ShellCommands &
     // running in it, or, where the backend keeps History, an agent mid-turn, one waiting on
     // background work, or one that couldn't be restored. A terminal that leads anyone always
     // asks. The project window saves the edits to its file first, and asks first where they
-    // can't be saved (see `Leave`).
+    // can't be saved (see `Leave`). A panel's window returns the panel to the sidebar.
     readonly close: (terminalId: string) => void
     // Answers the pending close confirmation: closes the terminal alone, or, with "team", also
     // everyone it leads, at any depth.
@@ -257,11 +257,11 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     if (active?.id === terminalId) rename.finishRename(active, false)
     // Closing a window closes what it shows; a terminal takes what its bar holds with it.
     const target = currentTarget(snapshot)
-    const window = currentState(snapshot).roster.windows.find((each) => each.id === terminalId)
+    const tile = tileOf(currentState(snapshot).roster, terminalId)
     navigateWorkspace(
       [
-        window
-          ? { type: "item/close", target, itemId: window.itemId }
+        tile && isWindow(tile)
+          ? { type: "item/close", target, itemId: tile.itemId }
           : { type: "terminal/close", target, terminalId },
       ],
       {},
@@ -438,11 +438,16 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       while (project.history.some((session) => session.name === next.name))
         next.name = `${name} (${suffix++})`
       set("freshSession", next.id)
-      set("sidebarCollapsed", false)
-      // The new session's own terminal tabs, where its first terminal is made.
-      navigateWorkspace([{ type: "session/add", projectId: project.id, session: next }], {
-        panel: "terminals",
-      })
+      // The new session's own terminal tabs, where its first terminal is made: in the sidebar,
+      // or in the Terminals panel's window of its own, which every session shares. A window on
+      // the stage is the session's, so the new one has the panel in the sidebar.
+      const own = ui.getSnapshot().ownWindows.includes("terminals")
+      if (own) set("terminalsView", "terminals")
+      else set("sidebarCollapsed", false)
+      navigateWorkspace(
+        [{ type: "session/add", projectId: project.id, session: next }],
+        own ? {} : { panel: "terminals" },
+      )
       effects.afterFrame(effects.focusTerminalsCreate)
     },
     switchProject,
@@ -734,6 +739,9 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     reveal,
     close: (terminalId) => {
       const snapshot = workspace.getSnapshot()
+      // A panel's window closes into the sidebar.
+      const tile = tileOf(currentState(snapshot).roster, terminalId)
+      if (tile && isPanel(tile)) return shell.returnPanel(tile.panel)
       const target = currentTarget(snapshot)
       const shown = projectWindowFile(currentState(snapshot))
       const window = currentState(snapshot).roster.windows.find((each) => each.id === terminalId)

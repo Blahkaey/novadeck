@@ -1,14 +1,27 @@
+import { itemIdOf } from "./items"
 import {
+  addPanel,
+  addWindow,
   createRoster,
+  hasTile,
+  isPanel,
+  isTerminal,
+  isWindow,
   keepFoldsTogether,
+  listFirst,
   orderBefore,
   orderedIds,
+  panelTile,
+  removePanel,
+  reorderTerminals,
   setTerminalProcess,
   setTerminalStatus,
+  tileName,
   tileOf,
 } from "./roster"
-import { describe, expect, it } from "./test"
-import type { TerminalMetadata, TerminalStatus } from "./types"
+import { context, describe, expect, it } from "./test"
+import { terminalFixture } from "./testing"
+import type { CompanionWindowMeta, TerminalMetadata, TerminalStatus } from "./types"
 
 // Every field of a terminal that no status carries: what it is, beside what it is doing.
 type KeysOf<T> = T extends unknown ? keyof T : never
@@ -88,7 +101,7 @@ describe("a tile looked up by id", () => {
   }
 
   it("finds the tile, and nothing once it is gone", () => {
-    expect(tileOf(roster, "02")?.name).toBe("Dev")
+    expect(tileOf(roster, "02")).toMatchObject({ name: "Dev" })
     expect(tileOf(roster, "03")).toBeUndefined()
   })
 
@@ -128,5 +141,62 @@ describe("a drag past a folded lead", () => {
 
   it("leaves an order with nothing folded as it is", () => {
     expect(keepFoldsTogether(["X", "L", "a"], [])).toEqual(["X", "L", "a"])
+  })
+})
+
+describe("a panel opened on the stage", () => {
+  const window: CompanionWindowMeta = {
+    id: "w1",
+    home: "undocked",
+    itemId: itemIdOf("hero"),
+    name: "hero.png",
+    titleSource: { kind: "default" },
+  }
+  const notes = panelTile("notes")
+  const roster = addPanel(
+    addWindow(createRoster([terminalFixture(1, "~/one"), terminalFixture(2, "~/one")]), window),
+    notes,
+  )
+
+  it("is its panel's one tile, by an id no terminal's or window's can be", () => {
+    expect(notes).toEqual({ id: "panel:notes", panel: "notes" })
+    expect(panelTile("notes")).toEqual(notes)
+  })
+
+  it("is neither a terminal nor a companion window, and goes by its panel's name", () => {
+    expect([isPanel(notes), isTerminal(notes), isWindow(notes)]).toEqual([true, false, false])
+    expect([isPanel(window), isTerminal(window)]).toEqual([false, false])
+    expect(isTerminal(roster.terminals[0]!)).toBe(true)
+    expect(tileName(notes)).toBe("Notes")
+    expect(tileName(window)).toBe("hero.png")
+  })
+
+  it("is laid out after the terminals and windows the order doesn't place", () => {
+    expect(hasTile(roster, "panel:notes")).toBe(true)
+    expect(tileOf(roster, "panel:notes")).toBe(notes)
+    expect(orderedIds(roster)).toEqual(["01", "02", "w1", "panel:notes"])
+  })
+
+  it("keeps the place the person gave it", () => {
+    const moved = reorderTerminals(roster, ["panel:notes", "02", "01"])
+    expect(orderedIds(moved)).toEqual(["panel:notes", "02", "01", "w1"])
+  })
+
+  context("when a terminal is listed first", () => {
+    it("still follows the terminals while the person hasn't placed it", () => {
+      expect(orderedIds(listFirst(roster, "02"))).toEqual(["02", "01", "w1", "panel:notes"])
+    })
+
+    it("keeps its place once they have", () => {
+      const placed = reorderTerminals(roster, ["panel:notes", "01", "02"])
+      expect(orderedIds(listFirst(placed, "02"))).toEqual(["02", "panel:notes", "01", "w1"])
+    })
+  })
+
+  it("leaves the roster and its order once removed", () => {
+    const removed = removePanel(reorderTerminals(roster, ["panel:notes", "01"]), "panel:notes")
+    expect(removed.panels).toEqual([])
+    expect(removed.order).toEqual(["01"])
+    expect(removePanel(removed, "panel:notes")).toBe(removed)
   })
 })

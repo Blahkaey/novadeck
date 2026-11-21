@@ -1,7 +1,7 @@
 import { emptyInbox, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import type { Notice } from "@novadeck/core/port"
-import { createStore } from "@novadeck/core/store"
-import { appearance } from "@novadeck/core/testing"
+import { createStore, createWorkspaceStore } from "@novadeck/core/store"
+import { appearance, workspaceFixture } from "@novadeck/core/testing"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
@@ -9,6 +9,9 @@ import { createDing } from "./ding"
 import { noticeBoard, watchInboxPings } from "./inbox-pings"
 import { watchInboxToasts } from "./inbox-toasts"
 import { createUiStore, initialUi, type UiState } from "./ui-store"
+
+// The workspace on screen, whose sessions keep every panel in the sidebar.
+const workspaceOnScreen = () => createWorkspaceStore(workspaceFixture())
 
 // A ding that sounds nothing: the board under test is about its notices.
 const testDing = createDing({ sound: () => ({ on: false, volume: 0, name: "felt" }) })
@@ -92,7 +95,8 @@ const setup = (items: InboxRow[] = [], pings = true) => {
     close: (terminalId: string, itemId: string) => void closed.push(`${terminalId}:${itemId}`),
   }
   const dings: string[] = []
-  const stop = watchInboxToasts({ state: inbox }, ui, board, {
+  const workspace = workspaceOnScreen()
+  const stop = watchInboxToasts({ state: inbox }, workspace, ui, board, {
     pings,
     ding: (terminalId) => void dings.push(terminalId),
     desktop: () => true,
@@ -107,7 +111,7 @@ const setup = (items: InboxRow[] = [], pings = true) => {
         route: { ...state.location.route, ...patch },
       },
     }))
-  return { inbox, ui, set, change, route, shown, closed, dings, stop }
+  return { inbox, ui, workspace, set, change, route, shown, closed, dings, stop }
 }
 
 beforeEach(() => {
@@ -429,6 +433,34 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
+    it("closes every toast as the Inbox's window on the stage comes into sight", () => {
+      const { set, workspace, closed, stop } = setup()
+      set([ask("a", "t1"), ask("b", "t2")])
+      vi.advanceTimersByTime(2000)
+      workspace.dispatch({
+        type: "panel/open",
+        target: { projectId: "project", workspaceSessionId: "initial" },
+        panel: "inbox",
+      })
+      expect(closed).toEqual(["t1:a", "t2:b"])
+      stop()
+    })
+
+    it("closes none for the Inbox's window on Canvas out of the camera's view", () => {
+      const { set, workspace, change, closed, shown, stop } = setup()
+      change((state) => ({ ...state, offScreenPanels: ["inbox"] }))
+      workspace.dispatch({
+        type: "panel/open",
+        target: { projectId: "project", workspaceSessionId: "initial" },
+        panel: "inbox",
+      })
+      set([ask("a", "t1")])
+      vi.advanceTimersByTime(2000)
+      expect(shown).toEqual(["t1:a"])
+      expect(closed).toEqual([])
+      stop()
+    })
+
     it("closes the one of a terminal as it is selected, and no other", () => {
       const { set, route, closed, stop } = setup()
       set([ask("a", "t1"), ask("b", "t2")])
@@ -503,7 +535,10 @@ describe("toasts and desktop notifications together", () => {
       },
       testDing,
     )
-    const stop = watchInboxPings({ state: inbox }, ui, { board, desktop: () => true })
+    const stop = watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
+      board,
+      desktop: () => true,
+    })
     return { set, change, shown, pings, stop }
   }
 
@@ -549,7 +584,10 @@ describe("a row held behind a modal dialog", () => {
       },
       testDing,
     )
-    const stop = watchInboxPings({ state: inbox }, ui, { board, desktop: () => true })
+    const stop = watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
+      board,
+      desktop: () => true,
+    })
     route({ dialog: "search" })
     set([ask("a")])
     vi.advanceTimersByTime(2000)
@@ -599,7 +637,10 @@ describe("a row that no toast waits for", () => {
       },
       testDing,
     )
-    const stop = watchInboxPings({ state: inbox }, ui, { board, desktop: () => true })
+    const stop = watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
+      board,
+      desktop: () => true,
+    })
     // The Inbox is what the person looks at, so no toast would wait for the row.
     route({ dialog: "preferences", panel: "inbox" })
     set([ask("a", "t1")])
@@ -607,5 +648,40 @@ describe("a row that no toast waits for", () => {
     change((state) => ({ ...state, pageFocused: false }))
     expect(pings).toEqual([])
     stop()
+  })
+})
+
+describe("the Inbox's toasts with the Inbox in a window of its own", () => {
+  const ownInbox = (each: ReturnType<typeof setup>) =>
+    each.change((state) => ({ ...state, ownWindows: ["inbox"] }))
+
+  it("ring while the person is in the app's own window, which may cover it", () => {
+    const app = setup()
+    ownInbox(app)
+    app.set([ask("a", "t1")])
+    vi.advanceTimersByTime(2000)
+    expect(app.shown).toEqual(["t1:a"])
+    app.stop()
+  })
+
+  it("close as the person goes to the Inbox's window", () => {
+    const app = setup()
+    ownInbox(app)
+    app.set([ask("a", "t1")])
+    vi.advanceTimersByTime(2000)
+    app.change((state) => ({ ...state, pageFocused: false, ownWindowFocused: "inbox" }))
+    expect(app.closed).toEqual(["t1:a"])
+    app.stop()
+  })
+})
+
+describe("the Inbox's toasts with the person in a panel's window of its own", () => {
+  it("ring none, as the app's own window, where they show, may be covered", () => {
+    const app = setup()
+    app.change((state) => ({ ...state, ownWindows: ["notes"], ownWindowFocused: "notes" }))
+    app.set([ask("a", "t1")])
+    vi.advanceTimersByTime(2000)
+    expect(app.shown).toEqual([])
+    app.stop()
   })
 })

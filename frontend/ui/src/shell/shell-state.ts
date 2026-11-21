@@ -1,12 +1,20 @@
-import type { SidebarPanel, ViewMode } from "@novadeck/core/types"
+import {
+  railPanelOf,
+  type SidebarPanel,
+  type TerminalsView,
+  type ViewMode,
+} from "@novadeck/core/types"
 
 // A step back for the open panel's toggle, kept with the panel it was taken to (`on`): a panel
 // the app moves to by itself, as for a new session or on Back, has no step to go back.
 export type SidebarStep = { readonly on: SidebarPanel; readonly to: SidebarPanel }
 
-// Where the toggle of `open`, the panel showing, goes back to, if anywhere.
+// Where the toggle of `open`, the panel showing, goes back to, if anywhere. Panels that share a
+// rail toggle, as Terminals and Sessions do, are one step: switching between them takes none.
 export const stepBack = (step: SidebarStep | null, open: SidebarPanel): SidebarPanel | null =>
-  step?.on === open && step.to !== open ? step.to : null
+  step && railPanelOf(step.on) === railPanelOf(open) && railPanelOf(step.to) !== railPanelOf(open)
+    ? step.to
+    : null
 
 export type KeyboardFocus = { readonly id: string; readonly view: ViewMode }
 type CanvasKeyboardFocus = {
@@ -39,6 +47,8 @@ export type ShellState = {
   readonly sidebarBack: SidebarStep | null
   // Zen hides the chrome and remembers the sidebar to restore on exit.
   readonly zen: ZenState | null
+  // The view of the Terminals panel the person last saw, which its rail toggle opens.
+  readonly terminalsView: TerminalsView
   // Canvas opens as it was left, with its camera on the selection, when it next mounts:
   // the person comes back to it from Focus by a window's own button.
   readonly revealCanvas: boolean
@@ -64,6 +74,7 @@ export const initialShell = (sidebarCollapsed: boolean): ShellState => ({
   sidebarCollapsed,
   sidebarBack: null,
   zen: null,
+  terminalsView: "terminals",
   revealCanvas: false,
   reordered: 0,
   keyboardFocus: null,
@@ -83,6 +94,12 @@ export const hideSidebar = (shell: ShellState): ShellState => ({
   sidebar: false,
   sidebarBack: null,
 })
+
+// Remembers the view of the Terminals panel the route names, for its rail toggle to open next.
+export const noteTerminalsView = (shell: ShellState, panel: SidebarPanel): ShellState =>
+  (panel === "terminals" || panel === "sessions") && shell.terminalsView !== panel
+    ? { ...shell, terminalsView: panel }
+    : shell
 
 // Leaves Zen and opens the sidebar on whichever panel the route names.
 export const showPanel = (shell: ShellState): ShellState => ({

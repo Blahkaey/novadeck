@@ -53,7 +53,7 @@ import { forgeIntegration, forgeName } from "./forges.js"
 import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
 import { terminalMessages, threadId } from "./messages.js"
-import { note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
+import { boardColumn, note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
 import {
   checkoutState,
   checkoutUpdate,
@@ -704,7 +704,9 @@ export const contract = {
       .output(z.array(note)),
     // Changes what is given of a note: its line, its body, whether it is a todo, and whether
     // it is checked off (`done`), from now. A plain note is never done: taking the checkbox
-    // away opens it again.
+    // away opens it again. Checking a todo off puts it first in its board's Done, and opening
+    // a done one again first in To do; either takes it out of In progress, as taking the
+    // checkbox away does. Any other change leaves the note where it stands.
     update: procedure
       .input(
         z.strictObject({
@@ -725,6 +727,22 @@ export const contract = {
           projectId: id,
           id,
           index: z.number().int().min(0).max(noteLimits.perProject),
+        }),
+      )
+      .output(z.array(note)),
+    // Puts a note in its place on the Todo board, or among the plain notes: a todo into
+    // `column`, which takes that column's state (Done from now unless it already was, In
+    // progress only in `doing`), a plain note with no column. It stands just before `before`
+    // where that is another note of the same column (or another plain note), else after the
+    // last of them, or where it was when there is none; no other note moves. A column for a
+    // plain note, or none for a todo, is a CONFLICT.
+    place: procedure
+      .input(
+        z.strictObject({
+          projectId: id,
+          id,
+          column: boardColumn.optional(),
+          before: id.optional(),
         }),
       )
       .output(z.array(note)),

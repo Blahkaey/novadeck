@@ -7,7 +7,13 @@ import { workspaceReducer } from "@novadeck/core/state"
 import { createStore, createWorkspaceStore, type Store } from "@novadeck/core/store"
 import { terminalNote, terminalPhase } from "@novadeck/core/terminals/ending"
 import { isAgentProgram } from "@novadeck/core/terminals/process"
-import type { AgentStatus, AgentUsage, TerminalMetadata, Workspace } from "@novadeck/core/types"
+import type {
+  AgentStatus,
+  AgentUsage,
+  RailPanel,
+  TerminalMetadata,
+  Workspace,
+} from "@novadeck/core/types"
 import type { DemoAgentVerbs } from "@novadeck/demo/agents/link"
 import { demoTurns } from "@novadeck/demo/agents/turns"
 import { createMockTerminal, demoSeed, demoTerminalId, terminalSlot } from "@novadeck/demo/samples"
@@ -181,6 +187,10 @@ const panel = (
   const plus: TerminalKey[] = []
   const calls: VerbCall[] = []
   const released: TerminalKey[] = []
+  // The panels opened as windows, in order, as the app opens them: selected as each comes; and
+  // those of them opened without the focus.
+  const opened: RailPanel[] = []
+  const unfocused: RailPanel[] = []
   let aimed: DemoTarget = "selected"
   const create = (select: boolean): TerminalKey => {
     const number = 90 + added.length
@@ -210,6 +220,12 @@ const panel = (
     },
     addInBackground: () => create(false),
     startFresh: () => {},
+    openPanels: (panels, options) => {
+      opened.push(...panels)
+      if (options?.focus === false) unfocused.push(...panels)
+      for (const each of panels) workspace.dispatch({ type: "panel/open", target, panel: each })
+    },
+    refuseNextWindow: () => {},
     dispatch: (actions: readonly BackendAction[]) => void workspace.transact(actions),
     workspace: () => workspace.getSnapshot(),
     note: (text) => void notes.push(text),
@@ -236,6 +252,8 @@ const panel = (
     plus,
     calls,
     released,
+    opened,
+    unfocused,
     aim: (next: DemoTarget) => void (aimed = next),
     find,
     terminal,
@@ -307,6 +325,16 @@ describe("demo states", () => {
         "ended",
       ]),
     )
+  })
+
+  it("opens the Notes and Todo panels' windows beside them, and leaves the last terminal on screen, the focus with it", async () => {
+    const { run, opened, unfocused, onScreen, plus, actionContext } = panel("04")
+    await run("Every state at once")
+    expect(opened).toEqual(["notes", "todo"])
+    expect(unfocused).toEqual(["notes", "todo"])
+    const { roster } = actionContext.workspace()!.projects[0]!.history[0]!.state
+    expect(roster.panels.map((each) => each.panel)).toEqual(["notes", "todo"])
+    expect(onScreen()).toBe(plus.at(-1)!.terminalId)
   })
 
   it("lets the agents that end a turn and then sleep go, leaving their turns to the Inbox", async () => {
@@ -717,6 +745,8 @@ describe("demo states", () => {
         addTerminal: () => key("04"),
         addInBackground: () => key("04"),
         startFresh: () => {},
+        openPanels: () => {},
+        refuseNextWindow: () => {},
         dispatch: () => {},
         workspace: () => only,
         note: (text) => void notes.push(text),
@@ -893,6 +923,9 @@ const openOver = (variant: "plain" | "agents" | "inbox", harness: AgentName = "c
     addTerminal: () => add(viewed),
     addInBackground: add,
     startFresh: () => {},
+    // The gallery's panel windows are the app's, which this backend doesn't draw.
+    openPanels: () => {},
+    refuseNextWindow: () => {},
     dispatch: (batch) => void workspace.transact(batch as never),
     workspace: () => workspace.getSnapshot(),
     note: () => {},

@@ -5,8 +5,10 @@ import {
   type FolderListing,
   type FilesProject,
 } from "@novadeck/core/files"
+import { panelLabels } from "@novadeck/core/types"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
+import { clipboardOf, isElement } from "@novadeck/toolkit/realm"
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { ChevronsDownUp, EyeOff, File, Folder, RefreshCw, X } from "lucide-react"
@@ -74,7 +76,7 @@ import { FilesExcludeDialog } from "./FilesExcludeDialog"
 import { NameRow } from "./FilesNameRow"
 import { FilesStrip } from "./FilesStrip"
 import { NoteRow, TreeRow, type Pointed } from "./FilesTreeRows"
-import { panelLabels } from "./panel-labels"
+import { usePanelView } from "./panel-host"
 import { SidebarPanel } from "./SidebarPanel"
 import { useFilesClipboard, type PasteChanges } from "./useFilesClipboard"
 import { useFilterMotion } from "./useFilterMotion"
@@ -112,7 +114,7 @@ const deleteBar = (row: FilesRow): React.JSX.Element => (
 // The path of the row an event happened in, from anywhere in it, its chips too; none on the
 // tree's empty space or a note.
 const pathAt = (target: EventTarget): string | undefined =>
-  target instanceof Element
+  isElement(target)
     ? target.closest(".files-row")?.querySelector<HTMLElement>("[data-path]")?.dataset["path"]
     : undefined
 
@@ -120,8 +122,9 @@ const pathAt = (target: EventTarget): string | undefined =>
 // that row of the tree `tree`, or on nothing, as where that row went. Anywhere else, the person
 // put it there since.
 const focusStays = (tree: HTMLElement | null, asked: string | null): boolean => {
-  const focused = document.activeElement
-  if (focused === null || focused === document.body) return true
+  const page = tree?.ownerDocument ?? document
+  const focused = page.activeElement
+  if (focused === null || focused === page.body) return true
   return asked !== null && tree?.contains(focused) === true && pathAt(focused) === asked
 }
 
@@ -179,7 +182,7 @@ const FilesPanelView = ({
   roster,
   squads,
   active,
-  visible,
+  showing,
   onHide,
 }: {
   // What the demo's agents changed in the project, laid over its files; a runner has none.
@@ -223,11 +226,10 @@ const FilesPanelView = ({
   squads: readonly Squad[]
   // Whether this is the sidebar's panel now.
   active: boolean
-  // Whether the sidebar itself is shown, not collapsed.
-  visible: boolean
+  // Whether the panel is in sight: it reads, watches and lights agents only then.
+  showing: boolean
   onHide: () => void
 }): React.JSX.Element => {
-  const showing = active && visible
   const platform = currentPlatform()
   const [listings, setListings] = useState<Listings>(noListings)
   const { editing, reread: rereadExclude } = useProjectExclude(projectExclude, showing)
@@ -337,7 +339,13 @@ const FilesPanelView = ({
   const [treeNode, setTreeNode] = useState<HTMLDivElement | null>(null)
   const [rowsNode, setRowsNode] = useState<HTMLDivElement | null>(null)
   const [drawnKey, setDrawnKey] = useState(0)
-  const { width: treeWidth, height: treeHeight, fonts } = useTreeMeasure(treeNode, drawnKey)
+  // The window the panel is drawn in, the page's or its own.
+  const panelView = usePanelView()
+  const {
+    width: treeWidth,
+    height: treeHeight,
+    fonts,
+  } = useTreeMeasure(treeNode, drawnKey, panelView)
   const scroll = useTreeScroll(treeNode)
   const view = useMemo(
     () => windowOf(lines.length, scroll.top, treeHeight),
@@ -526,12 +534,12 @@ const FilesPanelView = ({
     setMenuRow(row)
     focusRow(row)
   }
-  // Puts text on the clipboard; a page that may not, or a clipboard that refuses, says so above
-  // the tree. A copy that works says nothing.
+  // Puts text on the clipboard of the window the panel is in; a page that may not, or a clipboard
+  // that refuses, says so above the tree. A copy that works says nothing.
   const copy = (text: string): void => {
     setFailure(null)
     const refused = (): void => say(`Couldn't copy ${text} to the clipboard.`)
-    const write = navigator.clipboard?.writeText(text)
+    const write = clipboardOf(panelView.document)?.writeText(text)
     if (!write) {
       refused()
       return

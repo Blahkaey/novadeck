@@ -9,68 +9,73 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
-import { sidebarPanels, type SidebarPanel } from "@novadeck/core/types"
-import { ToggleGroup, ToggleGroupItem } from "@novadeck/toolkit/ToggleGroup"
 import {
-  FolderGit2,
-  GitCompare,
-  History,
-  Inbox,
-  Layers2,
-  ListTodo,
-  Terminal as TerminalIcon,
-} from "lucide-react"
+  panelLabels,
+  railPanelOf,
+  railPanels,
+  type RailPanel,
+  type SidebarPanel,
+} from "@novadeck/core/types"
+import { ToggleGroup, ToggleGroupItem } from "@novadeck/toolkit/ToggleGroup"
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps } from "react"
 
 import { shortcutBindings, type ShortcutName } from "../interaction/shortcuts"
-import { panelLabels } from "../sidebar/panel-labels"
+import { panelIcons } from "../terminals/panel-icons"
 import { BellDot } from "./BellDot"
 import { FlareDot, recentDropMs, useRecentDrop } from "./HistoryDot"
 import type { InboxBadge } from "./inbox-badge"
 import { movedPanel } from "./rail-order"
 import { stepBack, type SidebarStep } from "./shell-state"
 
-const panelIcons = {
-  terminals: TerminalIcon,
-  inbox: Inbox,
-  sessions: Layers2,
-  worktrees: GitCompare,
-  files: FolderGit2,
-  notes: ListTodo,
-  history: History,
-} as const satisfies Record<SidebarPanel, unknown>
-
-// Each panel's key.
-const panelShortcuts: Readonly<Record<SidebarPanel, ShortcutName>> = {
+// Each toggle's key.
+const panelShortcuts: Readonly<Record<RailPanel, ShortcutName>> = {
   terminals: "terminals",
   inbox: "inbox",
-  sessions: "sessions",
   worktrees: "worktrees",
   files: "files",
   notes: "notes",
+  todo: "todo",
   history: "history",
 }
 
-// A toggle's tooltip: its panel, what it holds for the person, and, while its panel is open,
-// where a click takes the sidebar: back to the panel shown before it, or hidden.
+// Where a panel out of the sidebar is: in a window on the stage, or in a window of its own.
+export type PanelAway = "stage" | "window"
+
+// What a toggle says of where its panel is, out of the sidebar.
+const awayWords: Readonly<Record<PanelAway, string>> = {
+  stage: "in a window",
+  window: "in its own window",
+}
+
+// A toggle's tooltip: its panel, what it holds for the person, and where a click takes it: to
+// the panel's window, while the panel is in one on the stage or of its own (`away`); while its
+// panel is open in the sidebar, back to the panel shown before it, or hidden; then the key that
+// does what the click does: while the sessions show (`view`), the Sessions key.
 export const railTooltip = ({
   panel,
+  view = panel,
   detail,
   open,
   back,
+  away,
 }: {
-  panel: SidebarPanel
+  panel: RailPanel
+  view?: SidebarPanel
   detail?: string | undefined
   open: boolean
   back: SidebarPanel | null
+  away?: PanelAway | undefined
 }): string => {
-  const action = open
-    ? back && back !== panel
-      ? `back to ${panelLabels[back]}`
-      : "hide sidebar"
-    : undefined
+  const action = away
+    ? `${awayWords[away]}: go to it`
+    : open
+      ? back && railPanelOf(back) !== panel
+        ? `back to ${panelLabels[back]}`
+        : "hide sidebar"
+      : undefined
   // Its keys joined by no-break spaces, so a wrapping tooltip keeps them on one line.
-  const keys = shortcutBindings()[panelShortcuts[panel]].display.join("\u00a0")
+  const key = open && view === "sessions" ? "sessions" : panelShortcuts[panel]
+  const keys = shortcutBindings()[key].display.join("\u00a0")
   return [panelLabels[panel], detail, action, keys].filter(Boolean).join(" · ")
 }
 
@@ -99,6 +104,11 @@ const modifiers = [
   }),
 ]
 
+const capitalized = (words: string): string => words.charAt(0).toUpperCase() + words.slice(1)
+
+// No panel in a window, the same each render.
+const noneDetached: readonly RailPanel[] = []
+
 // How many worktrees were made in a project, and which: the open one.
 export type WorksMadeIn = { readonly count: number; readonly projectId: string }
 const noneMadeIn: WorksMadeIn = { count: 0, projectId: "" }
@@ -119,13 +129,16 @@ export const SidebarRail = ({
   worksMade,
   sessionsAsk,
   todosLeft = 0,
+  detached = noneDetached,
+  ownWindows = noneDetached,
+  historyInWindow = false,
   hasFiles = false,
   hasHistory = false,
   hasWorktrees = false,
   hasNotes = false,
-  order = sidebarPanels,
+  order = railPanels,
   onOrder,
-  toggleSidebar,
+  toggleRail,
 }: {
   mobile?: boolean
   sidebarVisible: boolean
@@ -144,39 +157,52 @@ export const SidebarRail = ({
   // toggle's dot flares for; another project's count is not news, so a switch flares nothing.
   worksMade?: WorksMadeIn
   // What the sessions other than the open one ask of the person, in words, while any does: the
-  // Sessions toggle's dot, name and tooltip.
+  // Terminals toggle's dot, description and tooltip, as Sessions is a view of its panel.
   sessionsAsk?: string | undefined
-  // How many of the open project's todos are still to do, which the Notes toggle's tooltip
+  // How many of the open project's todos are still to do, which the Todo toggle's tooltip
   // says: a count for the person, not news, so it draws no dot.
   todosLeft?: number
+  // The panels out of the sidebar, in a window on the stage of the session on screen or of their
+  // own: their toggles stay in place, marked, and take the person to the window; none shows as
+  // the sidebar's open panel.
+  detached?: readonly RailPanel[]
+  // Those of them in a window of their own, which their toggles say.
+  ownWindows?: readonly RailPanel[]
+  // History's window is in sight on the stage, where a landing shows as in the open panel.
+  historyInWindow?: boolean
   // Whether the backend has a Files panel to toggle.
   hasFiles?: boolean
   // Whether the backend keeps closed terminals, which the History panel lists.
   hasHistory?: boolean
   // Whether the backend reports each terminal's work against main, which the Worktrees panel lists.
   hasWorktrees?: boolean
-  // Whether the backend keeps the person's notes, which the Notes panel lists.
+  // Whether the backend keeps the person's notes, which the Notes panel and the Todo board list.
   hasNotes?: boolean
-  // Every panel, the ones this backend doesn't show included, in the person's order.
-  order?: readonly SidebarPanel[]
-  onOrder?: (order: readonly SidebarPanel[]) => void
-  toggleSidebar: (panel: SidebarPanel) => void
+  // Every toggle, the ones this backend doesn't show included, in the person's order.
+  order?: readonly RailPanel[]
+  onOrder?: (order: readonly RailPanel[]) => void
+  toggleRail: (panel: RailPanel) => void
 }): React.JSX.Element => {
   const shown = order.filter(
     (id) =>
       (hasFiles || id !== "files") &&
       (hasHistory || id !== "history") &&
       (hasWorktrees || id !== "worktrees") &&
-      (hasNotes || id !== "notes"),
+      (hasNotes || (id !== "notes" && id !== "todo")),
   )
-  const toggleId = (id: SidebarPanel): string => `${mobile ? "mobile-" : ""}${id}-toggle`
+  const toggleId = (id: RailPanel): string => `${mobile ? "mobile-" : ""}${id}-toggle`
   const [dragging, setDragging] = useState(false)
   // The toggle that takes the focus after a keyboard move or a drag, as moving its button
   // among the others loses the focus it had; a new object asks again.
-  const [focusRequest, setFocusRequest] = useState<{ id: SidebarPanel } | null>(null)
+  const [focusRequest, setFocusRequest] = useState<{ id: RailPanel } | null>(null)
   // The same each render, so only a new request or a drop restarts the toggle's wait.
   const focused = useCallback(() => setFocusRequest(null), [])
   const move = (from: number, to: number): void => onOrder?.(movedPanel(order, shown, from, to))
+  // The panel the sidebar shows, unless it is in a window and the sidebar only says so.
+  const open =
+    sidebarVisible && !detached.includes(railPanelOf(sidebarPanel))
+      ? railPanelOf(sidebarPanel)
+      : undefined
   return (
     <DragDropProvider
       sensors={sensors}
@@ -198,11 +224,11 @@ export const SidebarRail = ({
         aria-label="Sidebar actions"
         aria-hidden={Boolean(zen)}
         orientation="vertical"
-        value={sidebarVisible ? [sidebarPanel] : []}
+        value={open ? [open] : []}
         onValueChange={(value) => {
           // Pressing the open panel's toggle leaves none pressed: the command for that panel
           // decides whether it goes back to the panel before it or hides the sidebar.
-          toggleSidebar(sidebarPanels.find((panel) => panel === value[0]) ?? sidebarPanel)
+          toggleRail(railPanels.find((panel) => panel === value[0]) ?? railPanelOf(sidebarPanel))
         }}
       >
         {shown.map((id, index) => (
@@ -212,14 +238,20 @@ export const SidebarRail = ({
             value={id}
             index={index}
             count={shown.length}
-            open={sidebarVisible && sidebarPanel === id}
+            open={open === id}
+            away={ownWindows.includes(id) ? "window" : detached.includes(id) ? "stage" : undefined}
+            view={sidebarPanel}
             back={stepBack(sidebarBack, id)}
             badge={id === "inbox" ? badge : undefined}
             bellRings={bellRings}
-            drops={id === "history" ? { count: historyDrops, last: lastDrop } : undefined}
+            drops={
+              id === "history"
+                ? { count: historyDrops, last: lastDrop, inSight: historyInWindow }
+                : undefined
+            }
             flares={id === "worktrees" ? (worksMade ?? noneMadeIn) : undefined}
-            sessionsAsk={id === "sessions" ? sessionsAsk : undefined}
-            todosLeft={id === "notes" ? todosLeft : 0}
+            sessionsAsk={id === "terminals" ? sessionsAsk : undefined}
+            todosLeft={id === "todo" ? todosLeft : 0}
             dragging={dragging}
             focusRequest={focusRequest}
             onFocused={focused}
@@ -241,6 +273,8 @@ const RailToggle = ({
   index,
   count,
   open,
+  away,
+  view,
   back,
   badge,
   bellRings,
@@ -254,29 +288,34 @@ const RailToggle = ({
   onStep,
 }: {
   id: string
-  value: SidebarPanel
+  value: RailPanel
   index: number
   count: number
   // Its panel shows, so a click goes back to the panel before it or hides the sidebar.
   open: boolean
+  // Where its panel is out of the sidebar, in a window a click goes to.
+  away: PanelAway | undefined
+  // The panel that shows, which picks the key its tooltip names while it is open.
+  view: SidebarPanel
   back: SidebarPanel | null
   // What the Inbox holds, on its toggle.
   badge: InboxBadge | undefined
   // How many new Inbox rows the bell has rung for, which its dot rings with.
   bellRings: number
-  // On the History toggle, how many closed terminals landed there and the last one, in words.
-  drops: { count: number; last: string | undefined } | undefined
+  // On the History toggle, how many closed terminals landed there and the last one, in words,
+  // and whether History's window shows them landing.
+  drops: { count: number; last: string | undefined; inSight: boolean } | undefined
   // On the Worktrees toggle, how many worktrees were made in the open project, which its dot
   // flares for.
   flares: WorksMadeIn | undefined
-  // What the other sessions ask of the person, on the Sessions toggle.
+  // What the other sessions ask of the person, on the Terminals toggle.
   sessionsAsk: string | undefined
-  // On the Notes toggle, how many of the open project's todos are still to do.
+  // On the Todo toggle, how many of the open project's todos are still to do.
   todosLeft: number
   // Some toggle is being dragged, which leaves no tooltip open.
   dragging: boolean
   // Asks the toggle with this id to take the focus, once it has settled in its place.
-  focusRequest: { id: SidebarPanel } | null
+  focusRequest: { id: RailPanel } | null
   // Told once the toggle has taken the focus it was asked for.
   onFocused: () => void
   onStep: (by: -1 | 1) => void
@@ -298,8 +337,10 @@ const RailToggle = ({
   }, [focusRequest, value, isDragSource, onFocused])
   const label = panelLabels[value]
   const Icon = panelIcons[value]
-  // A landing is named in the tooltip for a while; while History shows, the row says it.
-  const recentDrop = useRecentDrop(drops?.count ?? 0, recentDropMs) && !open
+  // A landing is named in the tooltip for a while; while History shows, in the sidebar or a
+  // window, the row says it.
+  const dropsShown = open || drops?.inSight === true
+  const recentDrop = useRecentDrop(drops?.count ?? 0, recentDropMs) && !dropsShown
   return (
     <ToggleGroupItem
       ref={(node) => {
@@ -316,16 +357,21 @@ const RailToggle = ({
               ? `${todosLeft} to do`
               : sessionsAsk,
         open,
+        view,
         back,
+        away,
       })}
       tooltipDisabled={dragging}
       value={value}
       id={id}
       className="segment relative inline-flex size-8 shrink-0 items-center justify-center p-2 [&>svg]:shrink-0"
       aria-label={badge?.label ?? label}
-      // The Sessions toggle keeps its name, so it is found by it; what the other sessions ask
-      // is its description.
-      aria-description={sessionsAsk}
+      // The Terminals toggle keeps its name, so it is found by it; what the other sessions ask
+      // is its description, as is a panel's being in a window.
+      aria-description={
+        [away && capitalized(awayWords[away]), sessionsAsk].filter(Boolean).join(". ") || undefined
+      }
+      data-detached={away ? true : undefined}
       aria-keyshortcuts={[
         ...(index > 0 ? ["Alt+ArrowUp"] : []),
         ...(index < count - 1 ? ["Alt+ArrowDown"] : []),
@@ -342,9 +388,10 @@ const RailToggle = ({
       }}
     >
       <Icon size={16} />
+      {away && <span aria-hidden="true" className="rail-detached-mark" />}
       {badge && <BellDot rings={bellRings} />}
       {sessionsAsk && <BellDot rings={0} />}
-      {drops && !open && <FlareDot drops={drops.count} />}
+      {drops && !dropsShown && <FlareDot drops={drops.count} />}
       {/* A dot of its own for each project, so the count it finds at a switch is old news. */}
       {flares !== undefined && !open && <FlareDot key={flares.projectId} drops={flares.count} />}
     </ToggleGroupItem>

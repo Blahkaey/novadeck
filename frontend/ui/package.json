@@ -23,6 +23,7 @@
     "./shell/WorkspaceHeader": "./src/shell/WorkspaceHeader.tsx",
     "./shell/WorkspacePanels": "./src/shell/WorkspacePanels.tsx",
     "./shell/WorkspaceSidebar": "./src/shell/WorkspaceSidebar.tsx",
+    "./sidebar/SidebarPanel": "./src/sidebar/SidebarPanel.tsx",
     "./styles.css": "./src/styles.css",
     "./terminals/TerminalTab": "./src/terminals/TerminalTab.tsx",
     "./terminals/WindowShell": "./src/terminals/WindowShell.tsx",

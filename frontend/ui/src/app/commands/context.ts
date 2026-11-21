@@ -3,7 +3,7 @@ import type { Murmur } from "@novadeck/core/addons/murmur"
 import type { Rect } from "@novadeck/core/layout/spatial"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceStore } from "@novadeck/core/store"
-import type { SidebarPanel } from "@novadeck/core/types"
+import type { RailPanel, SidebarPanel, TerminalsView } from "@novadeck/core/types"
 import type { ItemStore } from "@novadeck/items/store"
 
 import type { CanvasHandle } from "../../layouts/canvas/types"
@@ -29,11 +29,30 @@ export type CommandEffects = {
   readonly focusSidebarToggleStranded: (panel: SidebarPanel) => void
   readonly focusZenCreate: () => void
   readonly focusZenEnter: () => void
+  // The Terminals panel's create button, wherever the panel is drawn, as are the three below.
   readonly focusTerminalsCreate: () => void
+  // Focuses the switch beside the Terminals panel's title, in the view that shows, once the
+  // switch pressed in the other view has hidden with it.
+  readonly focusTerminalsView: (view: TerminalsView) => void
   // Focuses the Sessions panel's first place to move a terminal to, once it shows for a pick.
   readonly focusMovePick: () => void
   readonly focusWorkspaceViewport: () => void
   readonly focusTerminalTab: (id: string) => void
+  // Puts keyboard focus in the panel, or a view of the Terminals panel, in the sidebar or its
+  // window, once it can take it.
+  readonly focusPanel: (panel: SidebarPanel) => void
+  // Opens a window of the panel's own, named for it, where it was last or at a default size, in
+  // front: called in the person's click, as a browser opens a window from nothing else. False
+  // where it didn't open, as a browser's popup blocker or the desktop app refused it.
+  readonly openOwnWindow: (panel: RailPanel) => boolean
+  // Brings the panel's window of its own to the front, keyboard focus in the panel there, or in
+  // the view of the Terminals panel it names.
+  readonly focusOwnWindow: (panel: SidebarPanel) => void
+  // Closes the panel's window of its own, remembering where it was, and gives the page its
+  // focus back; nothing where it has none open.
+  readonly closeOwnWindow: (panel: RailPanel) => void
+  // The rail's toggles in the order the person left them.
+  readonly railOrder: () => readonly RailPanel[]
   // Focuses the terminal's input now; false when it has none that can take focus.
   readonly focusTerminalInput: (id: string) => boolean
   // Where each terminal and window the current view shows is on screen.

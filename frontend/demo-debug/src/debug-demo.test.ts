@@ -74,6 +74,8 @@ const launch = (): DemoLaunch => ({
   setForges: () => {},
   fileOperations: true,
   setFileOperations: () => {},
+  placesNotes: true,
+  setPlacesNotes: () => {},
 })
 
 describe("the debug layer's demo", () => {
@@ -126,6 +128,15 @@ describe("the debug layer's demo", () => {
       undefined,
     ])
     expect(reading?.list).toBeDefined()
+  })
+
+  it("puts notes in their places unless the launch says the backend can't", () => {
+    // The agents demo, which keeps the person's notes.
+    const agents = { ...launch(), variant: "agents" as const }
+    expect(createDebugDemo(agents).notes?.place).toBeDefined()
+    const older = createDebugDemo({ ...agents, placesNotes: false }).notes
+    expect(older?.place).toBeUndefined()
+    expect(older?.move).toBeDefined()
   })
 
   it("offers forge integrations unless the launch says the backend has none", () => {

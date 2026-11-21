@@ -8,8 +8,9 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
-import { clearable, inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
+import { inboxType, rowKey, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import { NovaMark } from "@novadeck/toolkit/NovaLogo"
+import { isHTMLElement } from "@novadeck/toolkit/realm"
 import { sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import { Bell, BellOff, ListX, LoaderCircle, X } from "lucide-react"
@@ -19,7 +20,7 @@ import { focusPanelClose, focusSheet, focusSheetSoon, nextRowButton, rowOf } fro
 import { iconKey, icons, tintOf, typeWords } from "./inbox-icons"
 import { asks as asking, needing } from "./inbox-state"
 import { endedWords, readLabel, resumesLabel, subjectOf, waitLabel } from "./inbox-text"
-import { started, useInboxContext } from "./InboxProvider"
+import { started, useInboxClearNow, useInboxContext } from "./InboxProvider"
 import { useSight } from "./read-on-leaving"
 import { Text } from "./sheet-parts"
 
@@ -31,11 +32,16 @@ const answeredIn = (
   ghosts: Readonly<Record<string, InboxRow>>,
 ): boolean => row.id in ghosts && !state.answering[row.id] && !state.failed[row.id]
 
+// The pointer sensor the rows drag with: one that follows a drag in whichever window the list is
+// drawn in, as the Inbox's window of its own (the app's, `PanelPointerSensor`), or dnd-kit's own,
+// which follows the page's alone, as in tests that draw the list on its own.
+export type RowSensor = typeof PointerSensor
+
 // A row follows the pointer once it has moved a few pixels, so a click still opens it; the
 // keyboard moves rows with Alt and the arrows instead, so dnd-kit adds no keyboard sensor and
 // none of its screen reader markup.
-const sensors = [
-  PointerSensor.configure({
+const sensorsOf = (Sensor: RowSensor) => [
+  Sensor.configure({
     activationConstraints: (event) =>
       event.pointerType === "touch"
         ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
@@ -96,6 +102,7 @@ const Row = ({
     ghosts,
     active,
     looking,
+    page,
     open,
     close,
     sighted,
@@ -121,7 +128,7 @@ const Row = ({
     !settled &&
     !state.answering[row.id] &&
     state.failed[row.id] === undefined
-  useSight(element, unread, looking, () => sighted(row))
+  useSight(element, unread, looking, page, () => sighted(row))
   const type = inboxType(row)
   const pending = Boolean(state.answering[row.id])
   // Answered here and gone from the backend's rows, which keeps it until its sheet closes.
@@ -186,7 +193,7 @@ const Row = ({
           if (current) return close()
           open(row.id)
           // From the keyboard, on to the sheet that opens.
-          if (event.detail === 0) focusSheetSoon()
+          if (event.detail === 0) focusSheetSoon(page)
         }}
         // The sheet follows its row in the tab order: Tab or the right arrow goes into it.
         onKeyDown={(event) => {
@@ -226,13 +233,13 @@ const Row = ({
             !event.altKey
           ) {
             event.preventDefault()
-            const next = nextRowButton(row.id)
+            const next = nextRowButton(row.id, page)
             dismiss(row.id)
             next?.focus()
             return
           }
           if (!current || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
-          if ((event.key === "Tab" || event.key === "ArrowRight") && focusSheet())
+          if ((event.key === "Tab" || event.key === "ArrowRight") && focusSheet(page))
             event.preventDefault()
         }}
       >
@@ -282,7 +289,7 @@ const Row = ({
               const keyboard = event.detail === 0
               const select = event.currentTarget.previousElementSibling
               dismiss(row.id)
-              if (keyboard && select instanceof HTMLElement) select.focus()
+              if (keyboard && isHTMLElement(select)) select.focus()
             }}
           >
             <X size={14} strokeWidth={1.6} />
@@ -336,12 +343,14 @@ const HeldPillView = (): React.JSX.Element | null => {
   )
 }
 
+// The Inbox's clear while any row asks nothing of the person and the backend can clear: what
+// the panel's header offers a button for (`InboxClear`), only then.
+export const useInboxClear = (): (() => void) | undefined => useInboxClearNow()
+
 // Beside the panel's Hide button while any row asks nothing of the person: clears the Inbox of
-// those, its updates, read, and its resolved rows, for good. What asks stays. Where the backend
-// can't clear, there is no button.
-export const InboxClear = (): React.JSX.Element | null => {
-  const { state, clear } = useInboxContext()
-  if (!clear || !state.items.some(clearable)) return null
+// those, its updates, read, and its resolved rows, for good. What asks stays.
+export const InboxClear = ({ clear }: { readonly clear: () => void }): React.JSX.Element => {
+  const { page } = useInboxContext()
   return (
     <Tooltip content="Clear updates and resolved">
       <button
@@ -352,7 +361,7 @@ export const InboxClear = (): React.JSX.Element | null => {
           // The button goes once nothing is left to clear: the keyboard moves on to Hide.
           const keyboard = event.detail === 0
           clear()
-          if (keyboard) focusPanelClose()
+          if (keyboard) focusPanelClose(page)
         }}
       >
         <ListX size={14} strokeWidth={1.6} />
@@ -361,9 +370,11 @@ export const InboxClear = (): React.JSX.Element | null => {
   )
 }
 
-// The keyboard goes back to a row once it is in its new place.
-const focusRow = (id: string): void => {
-  requestAnimationFrame(() => rowOf(id)?.querySelector<HTMLElement>(".inbox-row-select")?.focus())
+// The keyboard goes back to a row once it is in its new place, in `page`, the Inbox's document.
+const focusRow = (id: string, page: Document): void => {
+  ;(page.defaultView ?? window).requestAnimationFrame(() =>
+    rowOf(id, page)?.querySelector<HTMLElement>(".inbox-row-select")?.focus(),
+  )
 }
 
 // The ids the person's order keeps, in the list's (`shown`) with the rows that drag,
@@ -384,8 +395,13 @@ export const arrangedIds = (
 const needsBefore = (before: InboxRow | undefined): boolean =>
   before !== undefined && asking(before)
 
-const InboxListView = (): React.JSX.Element => {
-  const { shown, view, working, state, ghosts, arrange } = useInboxContext()
+const InboxListView = ({
+  sensor = PointerSensor,
+}: {
+  readonly sensor?: RowSensor
+}): React.JSX.Element => {
+  const { shown, view, working, state, ghosts, arrange, page } = useInboxContext()
+  const sensors = useMemo(() => sensorsOf(sensor), [sensor])
   const placements = shown.map((row) => ({
     row,
     asks: asking(row) && !answeredIn(row, state, ghosts),
@@ -472,7 +488,7 @@ const InboxListView = (): React.JSX.Element => {
               const { source } = event.operation
               if (!isSortable(source)) return
               const id = String(source.id)
-              if (source.element?.contains(document.activeElement)) focusRow(id)
+              if (source.element?.contains(page.activeElement)) focusRow(id, page)
               if (event.canceled || source.initialIndex === source.index) return
               move(id, source.index)
             }}
@@ -492,7 +508,7 @@ const InboxListView = (): React.JSX.Element => {
                           index: place,
                           onStep: (by) => {
                             move(row.id, place + by)
-                            focusRow(row.id)
+                            focusRow(row.id, page)
                           },
                         }
                   }

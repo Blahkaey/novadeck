@@ -67,11 +67,14 @@ export const createSightReader = ({
 // Tells `seen` once the row `element` shows has been in sight for the dwell, while `unread`
 // and while the person `looking` at the page: it has their focus and no dialog covers it, as
 // the app's own focus says (`ui.pageFocused`, which counts the desktop app's frames as the
-// page). Where the browser has no observer nothing is seen: the row is opened to be read.
+// page), or, for the Inbox in a window of its own, that window's focus. `page` is the document
+// the row is drawn in, whose window's observer sees it in sight: another window's sees it
+// nowhere. Where the browser has no observer nothing is seen: the row is opened to be read.
 export const useSight = (
   element: Element | null,
   unread: boolean,
   looking: boolean,
+  page: Document,
   seen: () => void,
 ): void => {
   const latest = useRef({ seen, looking })
@@ -80,13 +83,14 @@ export const useSight = (
     latest.current = { seen, looking }
   })
   useEffect(() => {
-    if (!unread || !element || typeof IntersectionObserver === "undefined") return
+    const Observer = page.defaultView?.IntersectionObserver
+    if (!unread || !element || !Observer) return
     const current = createSightReader({
       focused: latest.current.looking,
       seen: () => latest.current.seen(),
     })
     reader.current = current
-    const observer = new IntersectionObserver(
+    const observer = new Observer(
       (entries) => {
         const last = entries.at(-1)
         if (last) current.sight(last.isIntersecting && last.intersectionRatio >= sightFraction)
@@ -99,7 +103,7 @@ export const useSight = (
       observer.disconnect()
       if (reader.current === current) reader.current = null
     }
-  }, [element, unread])
+  }, [element, unread, page])
   useEffect(() => {
     reader.current?.focus(looking)
   }, [looking])

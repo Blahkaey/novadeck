@@ -7,6 +7,7 @@ import {
   type InboxState,
 } from "@novadeck/core/inbox"
 import { drafted, untouched, type DialogDraft } from "@novadeck/requests/drafts"
+import { isElement, isHTMLElement } from "@novadeck/toolkit/realm"
 import {
   createContext,
   useCallback,
@@ -92,6 +93,9 @@ export type InboxContextValue = {
   readonly looking: boolean
   // Notes an update's row as seen in the list: it is read once the person leaves the list.
   readonly sighted: (row: InboxRow) => void
+  // The document the Inbox is drawn in: the page's, or its window's of its own, where its sheet
+  // opens and its keys are heard.
+  readonly page: Document
   // Opens a row's sheet; with `once`, for that row alone (see `OpenOptions`).
   readonly open: (id: string, options?: OpenOptions) => void
   readonly close: () => void
@@ -145,6 +149,12 @@ const OpenerContext = createContext<InboxOpener | null>(null)
 
 export const useInboxOpener = (): InboxOpener | null => useContext(OpenerContext)
 
+// Clears the Inbox's clearable rows while there are any, apart from the rest of the Inbox:
+// the panel's header reads only this, so it doesn't draw again with the Inbox's every change.
+const ClearContext = createContext<(() => void) | undefined>(undefined)
+
+export const useInboxClearNow = (): (() => void) | undefined => useContext(ClearContext)
+
 export const useInboxContext = (): InboxContextValue => {
   const value = useContext(InboxContext)
   if (!value) throw new Error("useInboxContext must be used inside an InboxProvider")
@@ -162,8 +172,12 @@ const noOrder: readonly string[] = []
 const noOrderStore = { subscribe: () => () => {}, getSnapshot: () => noOrder }
 
 const editable = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
+  isHTMLElement(target) &&
   Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
+
+// Runs `run` once `page` has drawn what changed, in the frames of its window.
+const afterDrawn = (page: Document, run: () => void): void =>
+  void (page.defaultView ?? window).requestAnimationFrame(run)
 
 type Phone = {
   // Takes the list off the screen for a sheet, and brings it back.
@@ -178,6 +192,7 @@ export const InboxProvider = ({
   working = false,
   active = false,
   looking = false,
+  page,
   children,
 }: {
   readonly inbox: Inbox
@@ -191,6 +206,8 @@ export const InboxProvider = ({
   readonly active?: boolean
   // Whether the person looks at the page: it has their focus and no dialog covers it.
   readonly looking?: boolean
+  // The document the Inbox is drawn in (`InboxContextValue.page`).
+  readonly page: Document
   readonly children?: ReactNode
 }): React.JSX.Element => {
   const state = useSyncExternalStore(inbox.state.subscribe, inbox.state.getSnapshot)
@@ -264,11 +281,13 @@ export const InboxProvider = ({
     phone,
     ghosts,
     arranged,
+    page,
     snoozing: undefined as ((row: InboxRow, on: boolean) => void) | undefined,
   })
   useLayoutEffect(() => {
-    latest.current = { ...latest.current, state, view, phone, ghosts, arranged }
+    latest.current = { ...latest.current, state, view, phone, ghosts, arranged, page }
   })
+
   const heldRows = useMemo(() => held(view, state.items), [view, state.items])
   // An ask that settles while its sheet is open stays open, settled, to say so; one settled
   // before opens no sheet (`open`).
@@ -342,7 +361,8 @@ export const InboxProvider = ({
       setView(openRow(kept, target.id, snapshot.items, order))
       if (!target.seen) inbox.see(target.id)
       // Its row comes into view, for the sheet to sit beside.
-      requestAnimationFrame(() => rowOf(target.id)?.scrollIntoView?.({ block: "nearest" }))
+      const { page: at } = latest.current
+      afterDrawn(at, () => rowOf(target.id, at)?.scrollIntoView?.({ block: "nearest" }))
     },
     [inbox, close],
   )
@@ -452,8 +472,9 @@ export const InboxProvider = ({
             // With nothing left, the keyboard goes back to the snoozed row.
             if (!target) {
               close()
-              requestAnimationFrame(() =>
-                rowOf(row.id)?.querySelector<HTMLElement>(".inbox-row-select")?.focus(),
+              const { page: at } = latest.current
+              afterDrawn(at, () =>
+                rowOf(row.id, at)?.querySelector<HTMLElement>(".inbox-row-select")?.focus(),
               )
               return
             }
@@ -463,9 +484,10 @@ export const InboxProvider = ({
               : release(before, snapshot.items, order)
             setView(openRow(kept, target.id, snapshot.items, order))
             if (!target.seen) inbox.see(target.id)
-            requestAnimationFrame(() => rowOf(target.id)?.scrollIntoView?.({ block: "nearest" }))
+            const { page: at } = latest.current
+            afterDrawn(at, () => rowOf(target.id, at)?.scrollIntoView?.({ block: "nearest" }))
             // The keyboard goes on to the next sheet, as from its row.
-            focusSheetSoon()
+            focusSheetSoon(at)
           }
         : undefined,
     [inbox, close],
@@ -496,7 +518,7 @@ export const InboxProvider = ({
   // cancels, cancels). j and k move down and up the list; with a sheet open, the right and
   // left arrows do too from the sheet, which keeps the keyboard (on the list's row the right
   // arrow goes into the sheet). Only where the keys are the Inbox's: on its list, its sheet,
-  // or no field at all; every other layer keeps its own.
+  // or no field at all; every other layer keeps its own. Heard in the document the Inbox is in.
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.isComposing) return
@@ -508,16 +530,16 @@ export const InboxProvider = ({
         return
       const target = event.target
       const ours =
-        target === document ||
-        target === document.body ||
-        target === document.documentElement ||
-        (target instanceof Element &&
+        target === page ||
+        target === page.body ||
+        target === page.documentElement ||
+        (isElement(target) &&
           target.closest(".inbox-sheet, #inbox-panel, .inbox-fullscreen") !== null)
       if (!ours) return
       const { view: live, state: snapshot, ghosts: dropped, arranged: order } = latest.current
       if (event.key === "Escape") {
         if (live.open === null) return
-        if (editable(target) && target instanceof HTMLElement) {
+        if (editable(target) && isHTMLElement(target)) {
           if (target.closest("[data-cancels]")) return
           target.blur()
           return
@@ -527,10 +549,10 @@ export const InboxProvider = ({
         return
       }
       if (editable(target)) return
-      const inSheet = target instanceof Element && target.closest(".inbox-sheet, .inbox-fullscreen")
-      const inList = target instanceof Element && target.closest("#inbox-panel") !== null
+      const inSheet = isElement(target) && target.closest(".inbox-sheet, .inbox-fullscreen")
+      const inList = isElement(target) && target.closest("#inbox-panel") !== null
       if (live.open === null && !inList) return
-      if (!inSheet && !inList && target !== document.body && target !== document) return
+      if (!inSheet && !inList && target !== page.body && target !== page) return
       if (arrow && (live.open === null || inList)) return
       // S in the open sheet snoozes its row, or brings it back; on a row, the row does.
       if (sleep) {
@@ -555,13 +577,13 @@ export const InboxProvider = ({
       if (to.id !== live.open) open(to.id)
       // The keyboard goes with it: to the next sheet, after an arrow, so the next goes on from
       // there; else to the row, so the row it is on is the one that shows it.
-      if (arrow) focusSheetSoon()
-      else rowOf(to.id)?.querySelector<HTMLElement>(".inbox-row-select")?.focus()
+      if (arrow) focusSheetSoon(page)
+      else rowOf(to.id, page)?.querySelector<HTMLElement>(".inbox-row-select")?.focus()
     }
     // In capture, ahead of the sheet's own layer, which takes Escape's default for itself.
-    document.addEventListener("keydown", onKey, true)
-    return () => document.removeEventListener("keydown", onKey, true)
-  }, [open, close])
+    page.addEventListener("keydown", onKey, true)
+    return () => page.removeEventListener("keydown", onKey, true)
+  }, [open, close, page])
 
   const value = useMemo<InboxContextValue>(
     () => ({
@@ -580,6 +602,7 @@ export const InboxProvider = ({
       active,
       looking,
       sighted,
+      page,
       open,
       close,
       showHeld,
@@ -608,6 +631,7 @@ export const InboxProvider = ({
       active,
       looking,
       sighted,
+      page,
       open,
       close,
       showHeld,
@@ -630,9 +654,14 @@ export const InboxProvider = ({
     },
     [open, inbox],
   )
+  // `clear` is there exactly when the Inbox can clear (`inbox.clear`).
+  const anyClearable = inbox.clear !== undefined && state.items.some(clearable)
+  const clearNow = useMemo(() => (anyClearable ? clear : undefined), [anyClearable, clear])
   return (
     <OpenerContext.Provider value={opener}>
-      <InboxContext.Provider value={value}>{children}</InboxContext.Provider>
+      <ClearContext.Provider value={clearNow}>
+        <InboxContext.Provider value={value}>{children}</InboxContext.Provider>
+      </ClearContext.Provider>
     </OpenerContext.Provider>
   )
 }

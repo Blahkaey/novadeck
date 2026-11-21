@@ -1,6 +1,7 @@
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
 import type { AgentConnection } from "@novadeck/core/port"
+import { panelLabels } from "@novadeck/core/types"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import {
   sidebarListClasses,
@@ -30,7 +31,7 @@ import {
   type RowView,
   type Unremoved,
 } from "./history-rows"
-import { panelLabels } from "./panel-labels"
+import { usePanelView } from "./panel-host"
 import { SidebarPanel } from "./SidebarPanel"
 
 // A row's accessible name: what its click does, and for a row that does nothing, what it is.
@@ -78,12 +79,15 @@ const clearBar = ({ rows }: Clearing): React.JSX.Element => (
 const panel = "#history-panel"
 
 // Where the keyboard goes from a row's Remove button, as its row leaves: the row after it,
-// else the one before, else the panel's Hide button.
-const focusBeside = (id: string): void => {
-  const rows = Array.from(document.querySelectorAll<HTMLElement>(`${panel} [data-history-row]`))
+// else the one before, else the panel's Hide button, or in a window of its own its button back
+// to the sidebar. `page` is the document the panel is in.
+const focusBeside = (page: Document, id: string): void => {
+  const rows = Array.from(page.querySelectorAll<HTMLElement>(`${panel} [data-history-row]`))
   const at = rows.findIndex((row) => row.dataset.historyRow === id)
   const beside = (rows[at + 1] ?? rows[at - 1])?.querySelector<HTMLElement>(".history-row-select")
-  ;(beside ?? document.querySelector<HTMLElement>(`${panel} .sidebar-close`))?.focus()
+  ;(
+    beside ?? page.querySelector<HTMLElement>(`${panel} :is(.sidebar-close, .sidebar-return)`)
+  )?.focus()
 }
 
 // A row drawn as a terminal's tab: its icon and title, with when it closed at the end of the
@@ -213,6 +217,7 @@ const HistoryPanelView = ({
   connections,
   iconOf,
   active,
+  showing,
   onClose,
   onRestore,
   onReveal,
@@ -225,7 +230,10 @@ const HistoryPanelView = ({
   // The agents the backend can connect, where it has them.
   connections: readonly AgentConnection[] | undefined
   iconOf: (row: ClosedTerminal) => ReactNode
+  // Whether this is the sidebar's panel now.
   active: boolean
+  // Whether the panel is in sight: the rows are read only then.
+  showing: boolean
   onClose: () => void
   onRestore: (row: ClosedTerminal) => void
   // Goes to the terminal that holds a conversation, by its handle.
@@ -252,10 +260,10 @@ const HistoryPanelView = ({
     if (rows.length === 0) setTyped("")
   }
   // A panel shown again says nothing of a removal that failed before it was hidden.
-  const [wasActive, setWasActive] = useState(active)
-  if (wasActive !== active) {
-    setWasActive(active)
-    if (!active) setUnremoved(null)
+  const [wasShowing, setWasShowing] = useState(showing)
+  if (wasShowing !== showing) {
+    setWasShowing(showing)
+    if (!showing) setUnremoved(null)
   }
   // Asks the backend to delete rows. When it couldn't, they stay, and a line says so.
   const remove = (taken: readonly ClosedTerminal[], failure: Unremoved): void => {
@@ -264,10 +272,12 @@ const HistoryPanelView = ({
   }
   // Rows say when they closed against the day it is, which is read when the panel opens.
   const [now, setNow] = useState(() => Date.now())
+  // The window the panel is drawn in: the page's, or its own.
+  const view = usePanelView()
   // The rows are read when the panel opens, so what the runner checked is what shows.
   // And again when the window is looked at, as another window may have changed what a row needs.
   useEffect(() => {
-    if (!active) return
+    if (!showing) return
     let current = true
     const read = (): void => {
       list().then(
@@ -280,12 +290,12 @@ const HistoryPanelView = ({
       )
     }
     read()
-    window.addEventListener("focus", read)
+    view.addEventListener("focus", read)
     return () => {
       current = false
-      window.removeEventListener("focus", read)
+      view.removeEventListener("focus", read)
     }
-  }, [active, list])
+  }, [showing, list, view])
   const matches = rows.filter((row) => rowMatches(row, typed))
   const searching = typed.trim() !== ""
   const clearable = rows.filter(removable)
@@ -355,7 +365,7 @@ const HistoryPanelView = ({
             onReveal={onReveal}
             onConnect={onConnect}
             onRemove={(taken, keyboard) => {
-              if (keyboard) focusBeside(taken.id)
+              if (keyboard) focusBeside(view.document, taken.id)
               remove([taken], { kind: "row", id: taken.id, title: taken.title })
             }}
           />
@@ -380,7 +390,7 @@ const HistoryPanelView = ({
           setClearing(null)
         }}
         onCancel={() => setClearing(null)}
-        returnFocus={() => document.querySelector<HTMLElement>(`${panel} .history-clear`)}
+        returnFocus={() => view.document.querySelector<HTMLElement>(`${panel} .history-clear`)}
         widthClassName="w-[min(360px,calc(100vw-32px))]"
       />
     </SidebarPanel>

@@ -1,5 +1,10 @@
 import type { WorkspaceAction } from "@novadeck/core/state"
-import type { Tile, ViewMode, WorkspaceTarget } from "@novadeck/core/types"
+import type {
+  CompanionWindowMeta,
+  TerminalMetadata,
+  ViewMode,
+  WorkspaceTarget,
+} from "@novadeck/core/types"
 
 import type { TerminalRename } from "./TerminalRenameInput"
 
@@ -19,7 +24,7 @@ export type RenameSession = {
 type RenameScope = Pick<RenameSession, "context" | "view" | "target" | "request">
 
 export const beginRename = (
-  terminal: Pick<Tile, "id" | "name">,
+  terminal: Pick<TerminalMetadata | CompanionWindowMeta, "id" | "name">,
   origin: RenameSession["origin"],
   scope: RenameScope,
 ): RenameSession => ({

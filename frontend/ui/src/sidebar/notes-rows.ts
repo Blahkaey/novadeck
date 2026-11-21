@@ -2,18 +2,7 @@ import { noteLimits, type NoteAuthor } from "@novadeck/core/notes"
 
 import { agentName } from "./history-rows"
 
-// What the Notes panel says, apart from its markup.
-
-// What the add field makes: a todo, which has a checkbox, or a plain note.
-export type NoteKind = "todo" | "note"
-
-// The add field's placeholder and name.
-export const addWords = (kind: NoteKind): string =>
-  kind === "todo" ? "Add a todo…" : "Add a note…"
-
-// What the button before the add field says: what the field adds, and what a press changes.
-export const kindWords = (kind: NoteKind): string =>
-  kind === "todo" ? "Adding todos · switch to plain notes" : "Adding plain notes · switch to todos"
+// What the Notes panel and the Todo board say, apart from their markup.
 
 export const doneCount = (count: number): string =>
   `${count} done ${count === 1 ? "todo" : "todos"}`
@@ -28,14 +17,16 @@ export const clearDoneWords = (count: number): string =>
 export const addedByWords = ({ agent, handle }: NoteAuthor): string =>
   `Added by ${agentName(agent)} · @${handle}`
 
-// Where a note went among the open ones, for assistive technology.
+// Where a plain note went among the others, for assistive technology.
 export const movedWords = (text: string, index: number, count: number): string =>
   `${text}, ${index + 1} of ${count}`
 
 // Whether a project holds as many notes as it keeps, so the add field takes no more.
 export const notesFull = (count: number): boolean => count >= noteLimits.perProject
 
-export const fullWords = `This project has ${noteLimits.perProject} notes, the most it keeps. Delete some to add more.`
+export const fullWords = `This project has ${noteLimits.perProject} notes and todos, the most it keeps. Delete some to add more.`
 
-// What the panel says above the list once a change didn't take.
+// What the Notes panel says above its list once a change didn't take, and the Todo board above
+// its columns.
 export const unsavedWords = "Your last change wasn’t saved. The notes are as they were."
+export const boardUnsavedWords = "Your last change wasn’t saved. The board is as it was."

@@ -1,3 +1,4 @@
+import { isHTMLElement, viewOf } from "@novadeck/toolkit/realm"
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react"
 
 import { planMotion, type Frame } from "./files-motion"
@@ -22,11 +23,11 @@ const canAnimate = (): boolean =>
   typeof matchMedia === "function" &&
   !matchMedia("(prefers-reduced-motion: reduce)").matches
 
-// The slots under `parent`, by their data-line.
+// The slots under `parent`, by their data-line, in whichever window the panel is drawn.
 const slotsIn = (parent: Element): Map<string, HTMLElement> => {
   const slots = new Map<string, HTMLElement>()
   for (const child of parent.children)
-    if (child instanceof HTMLElement && child.dataset["line"] !== undefined)
+    if (isHTMLElement(child) && child.dataset["line"] !== undefined)
       slots.set(child.dataset["line"], child)
   return slots
 }
@@ -109,7 +110,7 @@ export const useFilterMotion = ({
     // Down to the view's foot, less the tree's bottom padding, which leaves the scroll as it is.
     const box = tree.querySelector<HTMLElement>(":scope > .files-rows")
     if (box) {
-      const padding = Number.parseFloat(getComputedStyle(tree).paddingBottom) || 0
+      const padding = Number.parseFloat(viewOf(tree).getComputedStyle(tree).paddingBottom) || 0
       box.style.minHeight = `${scrollTop + viewport - padding}px`
       box.style.overflow = "clip"
     }

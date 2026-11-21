@@ -7,8 +7,9 @@ import type { FilesRow } from "./files-tree"
 // row (a dialog gives back no focus a page placed meanwhile). Never out of the field a name is
 // typed in, nor from anywhere else the person put it.
 export const focusMovable = (tree: HTMLElement | null): boolean => {
-  const focused = document.activeElement
-  if (focused === null || focused === document.body) return true
+  const page = tree?.ownerDocument ?? document
+  const focused = page.activeElement
+  if (focused === null || focused === page.body) return true
   if (focused.closest('[role="alertdialog"][data-state="closed"]')) return true
   return tree?.contains(focused) === true && !focused.closest(".files-naming-row")
 }

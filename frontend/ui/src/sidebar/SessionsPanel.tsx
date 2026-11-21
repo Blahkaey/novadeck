@@ -4,12 +4,12 @@ import {
   Feedback,
   KeyboardSensor,
   PointerActivationConstraints,
-  PointerSensor,
 } from "@dnd-kit/dom"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
+import { isElement, isKeyboardEvent } from "@novadeck/toolkit/realm"
 import { sidebarListClasses, SidebarItem } from "@novadeck/toolkit/SidebarItem"
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
@@ -17,6 +17,7 @@ import { ArrowRight, Check, Layers2, Pencil, Plus, Trash2, X } from "lucide-reac
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
+import { PanelPointerSensor } from "./panel-drag"
 import { sidebarCreateClasses } from "./SidebarPanel"
 
 // What a session's terminals show at a glance, worded by the shell (projects/session-marks.ts):
@@ -88,7 +89,8 @@ const terminalsCount = (count: number): string =>
 // A row follows the pointer once it has moved a few pixels, so a click still opens it; the
 // keyboard picks one up with Space, as terminal tabs do.
 const sensors = [
-  PointerSensor.configure({
+  // In whichever window the list is drawn in, as the Terminals panel's window of its own.
+  PanelPointerSensor.configure({
     activationConstraints: (event) =>
       event.pointerType === "touch"
         ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
@@ -166,7 +168,7 @@ const SessionNameInput = ({
         // Its own Save and Cancel answer for it.
         const next = event.relatedTarget
         if (
-          next instanceof Element &&
+          isElement(next) &&
           next.closest<HTMLElement>("[data-rename-session]")?.dataset.renameSession === id
         )
           return
@@ -416,8 +418,9 @@ export const SessionsPanel = ({
     // the element these rows replaced (a race, most often with reduced motion, where no drop
     // animation runs); a focus lost to that comes back.
     const again = setTimeout(() => {
-      const held = document.activeElement
-      if (!held || held === document.body || !held.isConnected) give()
+      const page = list?.ownerDocument ?? document
+      const held = page.activeElement
+      if (!held || held === page.body || !held.isConnected) give()
     }, dropMs + 120)
     return () => clearTimeout(again)
   }, [drag, list])
@@ -459,7 +462,7 @@ export const SessionsPanel = ({
           if (!isSortable(source)) return
           // A drag from the keyboard leaves the focus on the session it moved. Where the focus
           // stands as it ends can't say: moving the row's element may have dropped it.
-          const keyboard = activatorEvent instanceof KeyboardEvent
+          const keyboard = isKeyboardEvent(activatorEvent)
           setDrag((current) => ({
             generation: current.generation + 1,
             focus: keyboard ? String(source.id) : null,

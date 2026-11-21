@@ -103,3 +103,12 @@ export const workspaceWithWindow = (
   ]
   return actions.reduce(workspaceReducer, workspaceFixture(options))
 }
+
+// The fixture's active session with the Notes panel open on its stage, laid out after the
+// terminals and selected.
+export const workspaceWithPanel = (options?: Parameters<typeof workspaceFixture>[0]): Workspace =>
+  workspaceReducer(workspaceFixture(options), {
+    type: "panel/open",
+    target: { projectId: "project", workspaceSessionId: "initial" },
+    panel: "notes",
+  })

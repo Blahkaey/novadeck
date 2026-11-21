@@ -29,6 +29,8 @@ const run = (inbox: ReturnType<typeof createDemoInbox>, label: string, notes: st
       throw new Error("unused")
     },
     startFresh: () => undefined,
+    openPanels: () => {},
+    refuseNextWindow: () => {},
     dispatch: undefined,
     workspace: () => undefined,
     note: (text) => notes.push(text),

@@ -7,7 +7,7 @@ import type { NoticeSound } from "./sounds"
 // What the person chose for the page: a scheme, or whatever the system uses.
 export type SchemePreference = "system" | "light" | "dark"
 export type ViewMode = "focus" | "grid" | "canvas"
-// The sidebar's panels, each with a toggle on the rail.
+// The sidebar's panels, each a place the route can name; the rail's toggles are `railPanels`.
 export const sidebarPanels = [
   "terminals",
   "inbox",
@@ -15,6 +15,7 @@ export const sidebarPanels = [
   "worktrees",
   "files",
   "notes",
+  "todo",
   "history",
 ] as const
 export type SidebarPanel = (typeof sidebarPanels)[number]
@@ -29,6 +30,29 @@ const formerPanels: Readonly<Record<string, SidebarPanel>> = {
 export const panelNamed = (name: string): SidebarPanel | undefined =>
   sidebarPanels.find((panel) => panel === name) ??
   (Object.hasOwn(formerPanels, name) ? formerPanels[name] : undefined)
+// The rail's toggles: one per panel, but Terminals and Sessions share one, as two views of
+// the Terminals panel that a switch beside its title picks between.
+export type RailPanel = Exclude<SidebarPanel, "sessions">
+export const railPanels: readonly RailPanel[] = sidebarPanels.filter(
+  (panel): panel is RailPanel => panel !== "sessions",
+)
+// The rail toggle a panel shows under: Terminals' for Sessions, its own for the rest.
+export const railPanelOf = (panel: SidebarPanel): RailPanel =>
+  panel === "sessions" ? "terminals" : panel
+// What each sidebar panel is called: its heading, its rail toggle and its tooltip, and its name
+// to assistive technology, on the sidebar and its phone drawer, and its window's on the stage.
+export const panelLabels: Readonly<Record<SidebarPanel, string>> = {
+  terminals: "Terminals",
+  inbox: "Inbox",
+  sessions: "Sessions",
+  worktrees: "Worktrees",
+  files: "Files",
+  notes: "Notes",
+  todo: "Todo",
+  history: "History",
+}
+// The views of the Terminals panel, which share its rail toggle.
+export type TerminalsView = Extract<SidebarPanel, "terminals" | "sessions">
 export type WindowedView = Exclude<ViewMode, "focus">
 // The scales of the whole app the person may choose, as a percent of its normal size.
 export const appScales = [80, 90, 100, 110, 125, 150, 175, 200] as const
@@ -301,17 +325,29 @@ export type CompanionWindowMeta = {
   readonly titleSource: Extract<TitleSource, { readonly kind: "person" | "default" }>
 }
 
+// A sidebar panel the person opened as a window on the session's stage, beside its terminals.
+// Its id is the panel's, so a session holds one window per panel, and no terminal's or
+// window's id (a UUID) can be one.
+export type PanelTileId = `panel:${RailPanel}`
+export type PanelTile = {
+  readonly id: PanelTileId
+  readonly panel: RailPanel
+  // Never present: a companion window has one (see `isWindow`).
+  readonly itemId?: never
+}
+
 // Anything laid out by its id.
 export type Placed = { readonly id: string }
 
-// What the sidebar and views lay out: a terminal, or a window undocked from a bar.
-export type Tile = TerminalMetadata | CompanionWindowMeta
+// What the sidebar and views lay out: a terminal, a window undocked from a bar, or a panel.
+export type Tile = TerminalMetadata | CompanionWindowMeta | PanelTile
 
-// The session's terminals and windows, as the backend reports them, and their sidebar
-// order, which holds both.
+// The session's terminals and windows, as the backend reports them, the panels the person
+// opened on its stage, which only the UI keeps, and their sidebar order, which holds all three.
 export type TerminalRoster = {
   readonly terminals: TerminalMetadata[]
   readonly windows: readonly CompanionWindowMeta[]
+  readonly panels: readonly PanelTile[]
   readonly order: string[]
 }
 // How many of Grid's cells a tile spans, across and down; a tile the person never sized spans

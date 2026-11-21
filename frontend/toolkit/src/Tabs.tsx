@@ -1,5 +1,5 @@
 import { Tabs as ArkTabs } from "@ark-ui/react/tabs"
-import type { ReactNode } from "react"
+import type { ReactNode, Ref } from "react"
 
 import { cn } from "./class-name"
 
@@ -44,12 +44,14 @@ export const TabList = ({
   </ArkTabs.List>
 )
 
+// `ref` reaches the tab's button, as for a tab something can be dropped on.
 export const Tab = ({
   className,
   ...props
-}: PartProps & { readonly value: string }): React.JSX.Element => (
-  <ArkTabs.Trigger {...props} className={cn("tab", className)} />
-)
+}: PartProps & {
+  readonly value: string
+  readonly ref?: Ref<HTMLButtonElement>
+}): React.JSX.Element => <ArkTabs.Trigger {...props} className={cn("tab", className)} />
 
 export const TabPanel = ({
   value,

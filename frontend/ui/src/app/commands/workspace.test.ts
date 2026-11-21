@@ -2,7 +2,13 @@ import type { ClosedTerminal } from "@novadeck/core/history"
 import type { TerminalRequest } from "@novadeck/core/port"
 import { orderedTiles } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
-import { appearance, itemFixture, terminalFixture, workspaceFixture } from "@novadeck/core/testing"
+import {
+  appearance,
+  itemFixture,
+  terminalFixture,
+  workspaceFixture,
+  workspaceWithPanel,
+} from "@novadeck/core/testing"
 import type { TerminalMetadata } from "@novadeck/core/types"
 import { afterEach, vi } from "vitest"
 
@@ -717,6 +723,26 @@ describe("workspace commands", () => {
     })
   })
 
+  context("when closing a panel's window", () => {
+    const url = "/projects/project/sessions/initial/grid?terminal=panel:notes"
+
+    it("returns the panel to the sidebar, closing no terminal, and selects its neighbour", () => {
+      const app = openCommands({ workspace: workspaceWithPanel(), url, notes: true })
+      app.commands.close("panel:notes")
+      expect(app.state().roster.panels).toEqual([])
+      expect(app.state().roster.terminals.map((each) => each.id)).toEqual(["01", "02"])
+      expect(app.state().selected).toBe("02")
+      expect(app.ui.getSnapshot().location.route.panel).toBe("notes")
+    })
+
+    it("takes no rename", () => {
+      const app = openCommands({ workspace: workspaceWithPanel(), url })
+      const [panel] = app.state().roster.panels
+      app.commands.startRename(panel!, "header")
+      expect(app.ui.getSnapshot().rename).toBeNull()
+    })
+  })
+
   context("when toggling a sidebar panel in Zen", () => {
     it("leaves Zen and shows the panel, then hides it and focuses its toggle", () => {
       const app = openCommands()
@@ -763,8 +789,7 @@ describe("workspace commands", () => {
 
     it("has no step to go back on a panel the app moved to, as for a new session", () => {
       const app = openCommands()
-      app.commands.toggleSidebar("inbox")
-      app.commands.toggleSidebar("sessions")
+      app.commands.toggleSidebar("files")
       app.commands.startFresh()
       expect(panel(app)).toBe("terminals")
       app.commands.toggleSidebar("terminals")
@@ -774,11 +799,85 @@ describe("workspace commands", () => {
     it("goes back from a panel switched to on a sidebar left open", () => {
       const app = openCommands()
       expect(app.shell().sidebarBack).toBeNull()
-      app.commands.toggleSidebar("sessions")
-      app.commands.toggleSidebar("sessions")
+      app.commands.toggleSidebar("files")
+      app.commands.toggleSidebar("files")
       expect(panel(app)).toBe("terminals")
       app.commands.toggleSidebar("terminals")
       expect(app.shell().sidebarCollapsed).toBe(true)
+    })
+
+    context("on the Terminals panel, whose views share one rail toggle", () => {
+      it("takes no step between its views, so its toggle goes back past both", () => {
+        const app = openCommands()
+        app.commands.toggleSidebar("inbox")
+        app.commands.toggleRail("terminals")
+        app.commands.switchTerminalsView("sessions", true)
+        expect(panel(app)).toBe("sessions")
+        app.commands.toggleRail("terminals")
+        expect(panel(app)).toBe("inbox")
+        expect(app.shell().sidebarCollapsed).toBe(false)
+      })
+
+      it("keeps the step back as the app moves to its terminals, as for a new session", () => {
+        const app = openCommands()
+        app.commands.toggleSidebar("inbox")
+        app.commands.toggleSidebar("sessions")
+        app.commands.startFresh()
+        expect(panel(app)).toBe("terminals")
+        app.commands.toggleSidebar("terminals")
+        expect(panel(app)).toBe("inbox")
+      })
+
+      it("hides the sidebar from either view where there is no step back", () => {
+        const app = openCommands()
+        app.commands.toggleSidebar("sessions")
+        expect(panel(app)).toBe("sessions")
+        app.commands.toggleRail("terminals")
+        expect(app.shell().sidebarCollapsed).toBe(true)
+      })
+
+      it("switches views by their keys, and the open view's key hides the sidebar", () => {
+        const app = openCommands()
+        app.commands.toggleSidebar("sessions")
+        app.commands.toggleSidebar("terminals")
+        expect(panel(app)).toBe("terminals")
+        expect(app.shell().sidebarCollapsed).toBe(false)
+        app.commands.toggleSidebar("terminals")
+        expect(app.shell().sidebarCollapsed).toBe(true)
+      })
+
+      it("opens on the view the person last saw, however they got there", () => {
+        const app = openCommands()
+        app.commands.switchTerminalsView("sessions", true)
+        app.commands.toggleRail("inbox")
+        app.commands.toggleRail("terminals")
+        expect(panel(app)).toBe("sessions")
+        app.commands.hideSidebar()
+        app.navigation.go({ panel: "terminals" })
+        app.commands.toggleRail("inbox")
+        app.commands.hideSidebar()
+        app.commands.toggleRail("terminals")
+        expect(panel(app)).toBe("terminals")
+      })
+
+      it("hands the switch's focus to its twin in the view that shows, by the keys", () => {
+        const app = openCommands()
+        app.commands.switchTerminalsView("sessions", true)
+        app.flush()
+        expect(app.effects).toContain("focus sessions view")
+        const before = app.effects.length
+        app.commands.switchTerminalsView("sessions", true)
+        app.flush()
+        expect(app.effects.length).toBe(before)
+      })
+
+      it("leaves the focus where a mouse's click leaves it", () => {
+        const app = openCommands()
+        app.commands.switchTerminalsView("sessions", false)
+        app.flush()
+        expect(panel(app)).toBe("sessions")
+        expect(app.effects).not.toContain("focus sessions view")
+      })
     })
   })
 
@@ -827,10 +926,10 @@ describe("workspace commands", () => {
 
     it("puts back where the open panel's toggle went back to", () => {
       const app = openCommands()
-      app.commands.toggleSidebar("sessions")
+      app.commands.toggleSidebar("files")
       app.commands.peekInbox()!()
-      expect(panel(app)).toBe("sessions")
-      app.commands.toggleSidebar("sessions")
+      expect(panel(app)).toBe("files")
+      app.commands.toggleSidebar("files")
       expect(panel(app)).toBe("terminals")
       expect(app.shell().sidebarCollapsed).toBe(false)
     })

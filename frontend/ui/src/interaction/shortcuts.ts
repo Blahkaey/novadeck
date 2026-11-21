@@ -30,6 +30,7 @@ export type ShortcutName =
   | "worktrees"
   | "files"
   | "notes"
+  | "todo"
   | "history"
   | "preferences"
   | "navigate"
@@ -147,6 +148,15 @@ export const shortcutBindings = (
       meta: mac,
       shift: true,
       display: [mac ? "⌘" : "Ctrl", "Shift", "L"],
+    },
+    // D for to do: T opens a terminal.
+    todo: {
+      label: "Toggle Todo",
+      key: "d",
+      ctrl: !mac,
+      meta: mac,
+      shift: true,
+      display: [mac ? "⌘" : "Ctrl", "Shift", "D"],
     },
     history: {
       label: "Toggle History",

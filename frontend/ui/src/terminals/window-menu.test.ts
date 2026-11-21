@@ -1,4 +1,5 @@
 import { MURMUR_NAME } from "@novadeck/core/addons/murmur"
+import { panelTile } from "@novadeck/core/roster"
 import { itemFixture, terminalFixture } from "@novadeck/core/testing"
 import type { ContextMenuAction, ContextMenuItem } from "@novadeck/toolkit/ContextMenu"
 
@@ -120,6 +121,34 @@ describe("a window's menu", () => {
           }),
         ),
       ).toEqual(["Close"])
+    })
+  })
+
+  context("for a panel's window", () => {
+    it("offers only to return the panel to the sidebar: its panel names it", () => {
+      expect(
+        labels(
+          windowMenu({
+            terminal: panelTile("notes"),
+            onRename: ignore,
+            onResetTitle: ignore,
+            onClose: ignore,
+          }),
+        ),
+      ).toEqual(["Return to sidebar"])
+    })
+
+    it("offers to open it in a window of its own first, where one can open", () => {
+      const opened: string[] = []
+      const menu = windowMenu({
+        terminal: panelTile("notes"),
+        onRename: ignore,
+        ownWindow: () => opened.push("notes"),
+        onClose: ignore,
+      })
+      expect(labels(menu)).toEqual(["Open in its own window", "Return to sidebar"])
+      action(menu, "own-window").onSelect()
+      expect(opened).toEqual(["notes"])
     })
   })
 

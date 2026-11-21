@@ -1,30 +1,50 @@
 import { isShellProcess } from "./terminals/process"
 import { sameTitleSource } from "./terminals/title-source"
-import type {
-  CompanionWindowMeta,
-  TerminalMetadata,
-  TerminalRoster,
-  TerminalStatus,
-  Tile,
+import {
+  panelLabels,
+  type CompanionWindowMeta,
+  type PanelTile,
+  type RailPanel,
+  type TerminalMetadata,
+  type TerminalRoster,
+  type TerminalStatus,
+  type Tile,
 } from "./types"
 
 export const createRoster = (
   terminals: TerminalMetadata[],
   windows: readonly CompanionWindowMeta[] = [],
-): TerminalRoster => ({ terminals, windows, order: [] })
+): TerminalRoster => ({ terminals, windows, panels: [], order: [] })
 
 export const hasTerminal = (roster: TerminalRoster, terminalId: string): boolean =>
   roster.terminals.some((terminal) => terminal.id === terminalId)
 
-// A window undocked from a terminal's bar, rather than a terminal.
+// A companion window: one undocked from a terminal's bar, or the project window.
 export const isWindow = (tile: Tile): tile is CompanionWindowMeta => tile.itemId !== undefined
 
 export const hasWindow = (roster: TerminalRoster, windowId: string): boolean =>
   roster.windows.some((window) => window.id === windowId)
 
-// Whether the session lays out a terminal or window by this id.
+// A sidebar panel opened as a window on the stage.
+export const isPanel = (tile: Tile): tile is PanelTile => "panel" in tile
+
+// A terminal, rather than a companion window or a panel.
+export const isTerminal = (tile: Tile): tile is TerminalMetadata =>
+  !isWindow(tile) && !isPanel(tile)
+
+// The window a panel opens as: one per panel in a session.
+export const panelTile = (panel: RailPanel): PanelTile => ({ id: `panel:${panel}`, panel })
+
+// What a tile is called: a terminal's or window's name, or its panel's.
+export const tileName = (tile: Tile): string =>
+  isPanel(tile) ? panelLabels[tile.panel] : tile.name
+
+export const hasPanel = (roster: TerminalRoster, panelId: string): boolean =>
+  roster.panels.some((panel) => panel.id === panelId)
+
+// Whether the session lays out a terminal, window or panel by this id.
 export const hasTile = (roster: TerminalRoster, id: string): boolean =>
-  hasTerminal(roster, id) || hasWindow(roster, id)
+  hasTerminal(roster, id) || hasWindow(roster, id) || hasPanel(roster, id)
 
 // One answer per roster, so readers that compare by identity see a change only when the
 // roster changed. A roster is never changed in place.
@@ -39,14 +59,15 @@ export const remembered = <T>(derive: (roster: TerminalRoster) => T) => {
   }
 }
 
-// Every terminal and window, terminals first, as views lay them out.
+// Every terminal, window and panel, terminals first, as views lay them out.
 export const tilesOf: (roster: TerminalRoster) => readonly Tile[] = remembered((roster) => [
   ...roster.terminals,
   ...roster.windows,
+  ...roster.panels,
 ])
 
-// Terminals and windows in sidebar order; those missing from the saved order follow,
-// terminals in creation order, then windows.
+// Tiles in sidebar order; those missing from the saved order follow, terminals in creation
+// order, then windows, then panels.
 export const orderedTiles: (roster: TerminalRoster) => readonly Tile[] = remembered((roster) => {
   const all = tilesOf(roster)
   const byId = new Map(all.map((tile) => [tile.id, tile]))
@@ -63,7 +84,7 @@ const tilesById = remembered(
   (roster): ReadonlyMap<string, Tile> => new Map(tilesOf(roster).map((tile) => [tile.id, tile])),
 )
 
-// The tile with this id, terminal or window; undefined once it has closed.
+// The tile with this id, terminal, window or panel; undefined once it has closed.
 export const tileOf = (roster: TerminalRoster, id: string): Tile | undefined =>
   tilesById(roster).get(id)
 
@@ -82,13 +103,13 @@ export const addTerminal = (
 
 // Lists a terminal first in the sidebar, as the person's own new ones are, above all the
 // rest in the order they had. Every terminal's place is saved, so the ones it went above
-// keep their places when the next one comes; a window's only once the person placed it,
-// so windows still follow the terminals that come later.
+// keep their places when the next one comes; a window's or panel's only once the person
+// placed it, so they still follow the terminals that come later.
 export const listFirst = (roster: TerminalRoster, terminalId: string): TerminalRoster => {
   if (!hasTerminal(roster, terminalId)) return roster
   const placed = new Set(roster.order)
   const rest = orderedTiles(roster)
-    .filter((tile) => tile.id !== terminalId && (!isWindow(tile) || placed.has(tile.id)))
+    .filter((tile) => tile.id !== terminalId && (isTerminal(tile) || placed.has(tile.id)))
     .map((tile) => tile.id)
   return { ...roster, order: [terminalId, ...rest] }
 }
@@ -96,7 +117,8 @@ export const listFirst = (roster: TerminalRoster, terminalId: string): TerminalR
 // Lists a terminal under the terminal `openerId` in the sidebar, after the terminals that
 // one opened before and theirs, so a lead's teammates follow it rather than trailing the
 // list. Without such a terminal, it keeps its place at the end. Only as much of the order
-// as it needs is saved; what isn't follows it, terminals in creation order, windows last.
+// as it needs is saved; what isn't follows it, terminals in creation order, then windows and
+// panels.
 export const listUnderOpener = (
   roster: TerminalRoster,
   terminalId: string,
@@ -234,6 +256,20 @@ export const removeWindow = (roster: TerminalRoster, windowId: string): Terminal
         ...roster,
         windows: roster.windows.filter((window) => window.id !== windowId),
         order: roster.order.filter((id) => id !== windowId),
+      }
+    : roster
+
+export const addPanel = (roster: TerminalRoster, panel: PanelTile): TerminalRoster => ({
+  ...roster,
+  panels: [...roster.panels, panel],
+})
+
+export const removePanel = (roster: TerminalRoster, panelId: string): TerminalRoster =>
+  hasPanel(roster, panelId)
+    ? {
+        ...roster,
+        panels: roster.panels.filter((panel) => panel.id !== panelId),
+        order: roster.order.filter((id) => id !== panelId),
       }
     : roster
 

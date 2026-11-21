@@ -115,8 +115,11 @@ export const watchWindowControls = (
   })
   let zen = Boolean(ui.getSnapshot().shell.zen)
   let revealed = !hides
+  // The window loses the system's focus to a panel's window of its own too, whose title bar is
+  // then the one lit.
   const showFocus = (): void => {
-    if (ui.getSnapshot().pageFocused === false) root.dataset.windowInactive = ""
+    const { pageFocused, ownWindowFocused } = ui.getSnapshot()
+    if (pageFocused === false || ownWindowFocused) root.dataset.windowInactive = ""
     else delete root.dataset.windowInactive
   }
   let placed: number | null | undefined

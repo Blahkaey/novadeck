@@ -19,7 +19,7 @@ const rail = (badge: InboxBadge | undefined, bellRings: number, sessionsAsk?: st
     badge,
     bellRings,
     sessionsAsk,
-    toggleSidebar: () => {},
+    toggleRail: () => {},
   })
 
 describe("the rail's Inbox dot", () => {
@@ -42,16 +42,17 @@ describe("the rail's Inbox dot", () => {
   })
 })
 
-describe("the rail's Sessions dot", () => {
-  it("shows while another session asks, says so in the toggle's description, and never rings", () => {
+describe("the rail's dot for other sessions", () => {
+  it("shows on Terminals while another session asks, in its description, and never rings", () => {
     const { container, rerender, unmount } = render(rail(undefined, 0))
     unmounts.push(unmount)
-    const toggle = () => container.querySelector("#sessions-toggle")!
+    expect(container.querySelector("#sessions-toggle")).toBeNull()
+    const toggle = () => container.querySelector("#terminals-toggle")!
     expect(toggle().querySelector(".bell-dot")).toBeNull()
-    expect(toggle().getAttribute("aria-label")).toBe("Sessions")
+    expect(toggle().getAttribute("aria-label")).toBe("Terminals")
     rerender(rail(undefined, 0, "1 needs you"))
     expect(toggle().querySelector(".bell-dot")).not.toBeNull()
-    expect(toggle().getAttribute("aria-label")).toBe("Sessions")
+    expect(toggle().getAttribute("aria-label")).toBe("Terminals")
     expect(toggle().getAttribute("aria-description")).toBe("1 needs you")
     rerender(rail(undefined, 0, "3 need you · 1 question"))
     expect(toggle().getAttribute("aria-description")).toBe("3 need you · 1 question")
@@ -67,11 +68,21 @@ describe("the rail's tooltips", () => {
         ? ["⌘", "Shift", letter]
         : ["Ctrl", "Shift", letter]
       ).join("\u00a0")
-    expect(railTooltip({ panel: "sessions", open: false, back: "terminals" })).toBe(
-      `Sessions · ${keys("S")}`,
+    expect(railTooltip({ panel: "terminals", open: false, back: "inbox" })).toBe(
+      `Terminals · ${keys("E")}`,
     )
-    expect(railTooltip({ panel: "sessions", open: true, back: "terminals" })).toBe(
-      `Sessions · back to Terminals · ${keys("S")}`,
+    expect(railTooltip({ panel: "terminals", open: true, back: "inbox" })).toBe(
+      `Terminals · back to Inbox · ${keys("E")}`,
+    )
+    // While the sessions show, the Sessions key does what the click does.
+    expect(railTooltip({ panel: "terminals", view: "sessions", open: true, back: "inbox" })).toBe(
+      `Terminals · back to Inbox · ${keys("S")}`,
+    )
+    expect(railTooltip({ panel: "terminals", view: "sessions", open: false, back: null })).toBe(
+      `Terminals · ${keys("E")}`,
+    )
+    expect(railTooltip({ panel: "inbox", open: true, back: "sessions" })).toBe(
+      `Inbox · back to Sessions · ${keys("B")}`,
     )
     expect(railTooltip({ panel: "inbox", detail: "2 waiting", open: true, back: "inbox" })).toBe(
       `Inbox · 2 waiting · hide sidebar · ${keys("B")}`,
@@ -83,14 +94,78 @@ describe("the rail's tooltips", () => {
       `Worktrees · ${keys("G")}`,
     )
     expect(railTooltip({ panel: "files", open: false, back: null })).toBe(`Files · ${keys("F")}`)
-    expect(railTooltip({ panel: "notes", detail: "3 to do", open: false, back: null })).toBe(
-      `Notes · 3 to do · ${keys("L")}`,
+    expect(railTooltip({ panel: "notes", open: false, back: null })).toBe(`Notes · ${keys("L")}`)
+    expect(railTooltip({ panel: "todo", detail: "3 to do", open: false, back: null })).toBe(
+      `Todo · 3 to do · ${keys("D")}`,
     )
   })
 })
 
+describe("a panel in a window", () => {
+  const notesRail = (detached: readonly ("notes" | "todo")[]) =>
+    createElement(SidebarRail, {
+      sidebarVisible: true,
+      sidebarPanel: "notes",
+      zen: false,
+      badge: undefined,
+      bellRings: 0,
+      hasNotes: true,
+      detached,
+      toggleRail: () => {},
+    })
+
+  it("keeps its toggle in place, marked, and never shows as the sidebar's open panel", () => {
+    const { container, rerender, unmount } = render(notesRail([]))
+    unmounts.push(unmount)
+    const toggle = () => container.querySelector("#notes-toggle")!
+    const order = () => [...container.querySelectorAll("[id$='-toggle']")].map((each) => each.id)
+    const before = order()
+    expect(toggle().getAttribute("aria-checked")).toBe("true")
+    expect(toggle().hasAttribute("data-detached")).toBe(false)
+    rerender(notesRail(["notes"]))
+    expect(order()).toEqual(before)
+    expect(toggle().getAttribute("data-detached")).toBe("true")
+    expect(toggle().querySelector(".rail-detached-mark")).not.toBeNull()
+    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    expect(toggle().getAttribute("aria-description")).toBe("In a window")
+  })
+
+  it("says in its tooltip that a click goes to its window", () => {
+    const keys = (
+      navigator.platform.includes("Mac") ? ["⌘", "Shift", "L"] : ["Ctrl", "Shift", "L"]
+    ).join("\u00a0")
+    expect(railTooltip({ panel: "notes", open: false, back: null, away: "stage" })).toBe(
+      `Notes · in a window: go to it · ${keys}`,
+    )
+    expect(railTooltip({ panel: "notes", open: false, back: null, away: "window" })).toBe(
+      `Notes · in its own window: go to it · ${keys}`,
+    )
+  })
+
+  it("says so where its window is its own", () => {
+    const { container, unmount } = render(
+      createElement(SidebarRail, {
+        sidebarVisible: true,
+        sidebarPanel: "terminals",
+        zen: false,
+        badge: undefined,
+        bellRings: 0,
+        hasNotes: true,
+        detached: ["notes", "todo"],
+        ownWindows: ["notes"],
+        toggleRail: () => {},
+      }),
+    )
+    unmounts.push(unmount)
+    const toggle = (panel: string) => container.querySelector(`#${panel}-toggle`)!
+    expect(toggle("notes").getAttribute("data-detached")).toBe("true")
+    expect(toggle("notes").getAttribute("aria-description")).toBe("In its own window")
+    expect(toggle("todo").getAttribute("aria-description")).toBe("In a window")
+  })
+})
+
 describe("the rail's History dot", () => {
-  const historyRail = (historyDrops: number, open = false) =>
+  const historyRail = (historyDrops: number, open = false, inWindow = false) =>
     createElement(SidebarRail, {
       sidebarVisible: open,
       sidebarPanel: open ? "history" : "terminals",
@@ -100,7 +175,8 @@ describe("the rail's History dot", () => {
       hasHistory: true,
       historyDrops,
       lastDrop: "Tests closed just now",
-      toggleSidebar: () => {},
+      ...(inWindow ? { detached: ["history" as const], historyInWindow: true } : {}),
+      toggleRail: () => {},
     })
 
   it("flares for a landing, but not while History shows, nor afterwards for that one", () => {
@@ -114,6 +190,18 @@ describe("the rail's History dot", () => {
     expect(dot()).toBeNull()
     rerender(historyRail(2))
     expect(dot()).toBeNull()
+  })
+
+  it("doesn't flare for a landing History's window shows on the stage", () => {
+    const { container, rerender, unmount } = render(historyRail(0, false, true))
+    unmounts.push(unmount)
+    const dot = () => container.querySelector("#history-toggle .flare-dot")
+    rerender(historyRail(1, false, true))
+    expect(dot()).toBeNull()
+    rerender(historyRail(1))
+    expect(dot()).toBeNull()
+    rerender(historyRail(2))
+    expect(dot()).not.toBeNull()
   })
 })
 
@@ -129,7 +217,7 @@ describe("the rail's Worktrees dot", () => {
       hasWorktrees: true,
       hasHistory: true,
       worksMade: { count, projectId },
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("flares for each worktree made, but not for the count at mount, nor while Worktrees shows", () => {
@@ -172,7 +260,7 @@ describe("the rail's Worktrees dot", () => {
   })
 })
 
-describe("the rail's Notes toggle", () => {
+describe("the rail's Notes and Todo toggles", () => {
   const notesRail = (hasNotes: boolean) =>
     createElement(SidebarRail, {
       sidebarVisible: false,
@@ -182,17 +270,24 @@ describe("the rail's Notes toggle", () => {
       bellRings: 0,
       hasNotes,
       todosLeft: 3,
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
-  it("shows only where the backend keeps the person's notes, and draws no dot for them", () => {
+  it("show only where the backend keeps the person's notes, Todo after Notes, with no dot", () => {
     const { container, rerender, unmount } = render(notesRail(false))
     unmounts.push(unmount)
     expect(container.querySelector("#notes-toggle")).toBeNull()
+    expect(container.querySelector("#todo-toggle")).toBeNull()
     rerender(notesRail(true))
-    const toggle = container.querySelector("#notes-toggle")
-    expect(toggle?.getAttribute("aria-label")).toBe("Notes")
-    expect(toggle?.querySelector("[class*='dot']")).toBeNull()
+    const labels = [...container.querySelectorAll("[id$='-toggle']")].map((toggle) =>
+      toggle.getAttribute("aria-label"),
+    )
+    expect(labels.slice(labels.indexOf("Notes"), labels.indexOf("Notes") + 2)).toEqual([
+      "Notes",
+      "Todo",
+    ])
+    for (const id of ["#notes-toggle", "#todo-toggle"])
+      expect(container.querySelector(id)?.querySelector("[class*='dot']")).toBeNull()
   })
 })
 
@@ -205,7 +300,7 @@ describe("the rail's Worktrees toggle", () => {
       badge: undefined,
       bellRings: 0,
       hasWorktrees,
-      toggleSidebar: () => {},
+      toggleRail: () => {},
     })
 
   it("shows only where the backend reports the terminals' work", () => {

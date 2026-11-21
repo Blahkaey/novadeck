@@ -3,6 +3,7 @@ import { noNotes, todosLeft, type NotesState } from "@novadeck/core/notes"
 import type { Backend, BackendSelection, CreateBackend, TerminalKey } from "@novadeck/core/port"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
+import { panelLabels, railPanelOf, type RailPanel } from "@novadeck/core/types"
 import type { WorksMade } from "@novadeck/core/works"
 import { failViewLoads } from "@novadeck/items/lazy-view"
 import {
@@ -23,12 +24,13 @@ import { cancelTerminalTransition } from "../layouts/transition"
 import { elsewhereSessionsText } from "../projects/session-marks"
 import { useDesktop } from "../shell/desktop"
 import { HistoryDropNotice } from "../shell/HistoryDot"
+import { refuseNextOwnWindow } from "../shell/own-windows"
+import { createPanelNodes, PanelNodesContext } from "../shell/panel-nodes"
 import { sidebarVisible } from "../shell/shell-state"
 import { readSidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
 import { SidebarRail } from "../shell/SidebarRail"
 import { WorkspacePanels } from "../shell/WorkspacePanels"
 import { ZenDock } from "../shell/ZenDock"
-import { panelLabels } from "../sidebar/panel-labels"
 import { createTabListStore, TabListContext, type TabListStore } from "../terminals/tab-list"
 import { TeamWire } from "../terminals/TeamWire"
 import { DictationOverlay } from "../voice/DictationOverlay"
@@ -45,7 +47,10 @@ import { HeaderSection } from "./HeaderSection"
 import { dropWords } from "./history-drops"
 import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
-import { historyShown, filesShown, notesShown } from "./routing"
+import { OwnWindows } from "./OwnWindows"
+import { PanelInstances } from "./PanelInstances"
+import { usePanelPlace, usePanelsAway, usePanelShowing } from "./panels-shown"
+import { historyShown, filesShown, notesShown, panelShownOn } from "./routing"
 import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
@@ -69,6 +74,14 @@ export type WorkspacePanel = ComponentType<{
   // Fails every pane view whose code loads lazily, as if it couldn't be fetched: each says so
   // in its pane, with a Retry.
   readonly failViewLoads: () => void
+  // Opens these panels of the rail as windows on the session's stage, as their headers' buttons
+  // do, with keyboard focus in the last unless `focus` is false.
+  readonly openPanels: (
+    panels: readonly RailPanel[],
+    options?: { readonly focus?: boolean },
+  ) => void
+  // Has the next window of a panel's own refused, as a browser's popup blocker would.
+  readonly refuseNextWindow: () => void
 }>
 
 export type AppProps = (
@@ -148,6 +161,11 @@ const PanelSection = ({ panel }: Pick<AppProps, "panel">): React.JSX.Element | n
       }}
       select={({ terminalId }) => commands.select(terminalId)}
       failViewLoads={failViewLoads}
+      // Only those the rail shows: the others have nothing to open.
+      openPanels={(panels, options) =>
+        panels.filter(panelShownOn(backend)).forEach((each) => commands.detachPanel(each, options))
+      }
+      refuseNextWindow={refuseNextOwnWindow}
     />
   )
 }
@@ -223,7 +241,16 @@ const noneNoted = createStore<NotesState>(noNotes)
 const RailWithBadge = (
   props: Omit<
     ComponentProps<typeof SidebarRail>,
-    "badge" | "bellRings" | "historyDrops" | "lastDrop" | "sessionsAsk" | "worksMade" | "todosLeft"
+    | "badge"
+    | "bellRings"
+    | "historyDrops"
+    | "lastDrop"
+    | "sessionsAsk"
+    | "worksMade"
+    | "todosLeft"
+    | "detached"
+    | "ownWindows"
+    | "historyInWindow"
   >,
 ): React.JSX.Element => {
   const { backend } = useWorkspaceServices()
@@ -236,6 +263,9 @@ const RailWithBadge = (
   const worksMade = useMemo(() => ({ count: made, projectId }), [made, projectId])
   const left = useCallback((state: NotesState) => todosLeft(state.notes, projectId), [projectId])
   const toDo = useStoreSelector(backend.notes?.state ?? noneNoted, left)
+  const detached = usePanelsAway()
+  const ownWindows = useUiState((state) => state.ownWindows)
+  const historyShowing = usePanelShowing("history")
   return (
     <SidebarRail
       {...props}
@@ -246,6 +276,9 @@ const RailWithBadge = (
       sessionsAsk={elsewhereSessionsText(marks, openId)}
       worksMade={worksMade}
       todosLeft={toDo}
+      detached={detached}
+      ownWindows={ownWindows}
+      historyInWindow={historyShowing && detached.includes("history")}
     />
   )
 }
@@ -267,7 +300,7 @@ const ZenDockWithBadge = (
 export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX.Element => {
   const services = useWorkspaceServices()
   const { commands, canvas } = services
-  const { hideSidebar, toggleSidebar, exitZen, changeView, add } = commands
+  const { hideSidebar, toggleSidebar, toggleRail, exitZen, changeView, add } = commands
   const desktop = useDesktop()
   const shell = useUiState((state) => {
     const { zen, sidebar, sidebarCollapsed } = state.shell
@@ -285,8 +318,13 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   }, shallowEqual)
   const { zen, sidebar, sidebarCollapsed, sidebarPanel, fontSize, fontFamily, enabledViews } = shell
   const view = useWorkspaceState((workspace) => currentState(workspace).view)
+  // Whether the sidebar's panel is in it, not in a window.
+  const sidebarDocked = usePanelPlace(railPanelOf(sidebarPanel)) === "sidebar"
   // The Terminals list on screen, which the team wire draws beside.
   const [tabList] = useState(createTabListStore)
+  // Where each panel is drawn once and shown from, by the sidebar.
+  const [panelNodes] = useState(createPanelNodes)
+  const inboxShowing = usePanelShowing("inbox")
   const voice = useDictationController(services)
   useKeyboard(voice?.dictation)
   const { backend } = services
@@ -315,13 +353,13 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
         setRailOrder(order)
         writeSidebarOrder(order)
       }}
-      toggleSidebar={toggleSidebar}
+      toggleRail={toggleRail}
     />
   )
   return (
     <DictationContext.Provider value={voice}>
       <TourProvider>
-        <InboxHost active={sidebarPanel === "inbox" && shell.sidebarVisible}>
+        <InboxHost active={inboxShowing}>
           <main
             className="workspace flex h-dvh min-h-100 flex-col overflow-hidden"
             data-zen={zen}
@@ -338,44 +376,56 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
             <HeaderSection />
             <TabListContext.Provider value={tabList}>
               <MoveSessionsProvider>
-                <div className="workspace-body relative flex min-h-0 flex-1">
-                  {sidebarRail()}
-                  <TeamWireSection
-                    shown={
-                      !zen &&
-                      !sidebarCollapsed &&
-                      shell.sidebarVisible &&
-                      sidebarPanel === "terminals"
-                    }
-                    tabList={tabList}
-                  />
-                  <WorkspacePanels
-                    collapsed={zen || sidebarCollapsed}
-                    mobileOpen={!zen && sidebar}
-                    onMobileOpenChange={(open) => {
-                      if (!open) hideSidebar()
-                    }}
-                    mobileRail={sidebarRail(true)}
-                    mobileLabel={panelLabels[sidebarPanel]}
-                    mobileWide={sidebarPanel === "inbox"}
-                    mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
-                    sidebar={<SidebarSection />}
-                  >
-                    <WorkspaceStage canvas={canvas} />
-                  </WorkspacePanels>
-                  {zen && (
-                    <ZenDockWithBadge
-                      view={view}
-                      enabledViews={enabledViews}
-                      onCreate={() => add()}
-                      onViewChange={(next) => {
-                        if (next !== view) changeView(next)
-                      }}
-                      onInbox={() => toggleSidebar("inbox")}
-                      onExit={exitZen}
+                <PanelNodesContext value={panelNodes}>
+                  <div className="workspace-body relative flex min-h-0 flex-1">
+                    {sidebarRail()}
+                    <TeamWireSection
+                      // Beside the rail, so only while the sidebar holds the list and shows it.
+                      shown={
+                        !zen &&
+                        !sidebarCollapsed &&
+                        shell.sidebarVisible &&
+                        sidebarPanel === "terminals" &&
+                        sidebarDocked
+                      }
+                      tabList={tabList}
                     />
-                  )}
-                </div>
+                    <WorkspacePanels
+                      collapsed={zen || sidebarCollapsed}
+                      mobileOpen={!zen && sidebar}
+                      onMobileOpenChange={(open) => {
+                        if (!open) hideSidebar()
+                      }}
+                      mobileRail={sidebarRail(true)}
+                      mobileLabel={panelLabels[sidebarPanel]}
+                      // The Inbox's list and the Todo board's three columns take the whole width;
+                      // the note on one in a window doesn't.
+                      mobileWide={
+                        sidebarDocked && (sidebarPanel === "inbox" || sidebarPanel === "todo")
+                      }
+                      mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
+                      sidebar={<SidebarSection />}
+                    >
+                      <WorkspaceStage canvas={canvas} />
+                    </WorkspacePanels>
+                    {/* Before the panels, so a window of its own holds its panel before the
+                        panel's own effects ask which window it is in. */}
+                    <OwnWindows />
+                    <PanelInstances />
+                    {zen && (
+                      <ZenDockWithBadge
+                        view={view}
+                        enabledViews={enabledViews}
+                        onCreate={() => add()}
+                        onViewChange={(next) => {
+                          if (next !== view) changeView(next)
+                        }}
+                        onInbox={() => toggleSidebar("inbox")}
+                        onExit={exitZen}
+                      />
+                    )}
+                  </div>
+                </PanelNodesContext>
               </MoveSessionsProvider>
             </TabListContext.Provider>
             <FooterSection />

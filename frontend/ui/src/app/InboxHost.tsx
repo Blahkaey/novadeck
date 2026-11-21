@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { AgentContextProvider } from "../inbox/agent-context"
 import { InboxProvider, useInboxOpener } from "../inbox/InboxProvider"
 import { InboxSheet } from "../inbox/InboxSheet"
-import { InboxToasts, type MoveBoard, type ShowBoard, type ToastBoard } from "../inbox/InboxToasts"
+import {
+  InboxToasts,
+  type MoveBoard,
+  type RefusedBoard,
+  type ShowBoard,
+  type ToastBoard,
+} from "../inbox/InboxToasts"
 import { PlanTextProvider } from "../inbox/plan-text"
 import { focusTerminalInput } from "../interaction/dom"
 import { anyAgentWorking } from "../projects/project-status"
@@ -13,8 +19,10 @@ import { dingOf } from "./ding"
 import { clickNotice, noticeBoard } from "./inbox-pings"
 import { watchInboxToasts } from "./inbox-toasts"
 import { watchMoveToasts } from "./move-toasts"
-import { currentState, modalOpen } from "./selectors"
+import { usePanelPage, usePanelPlace } from "./panels-shown"
+import { currentState, mainWindowFocused, modalOpen } from "./selectors"
 import { focusWhenReady, watchShowToasts } from "./show-toasts"
+import { watchRefusedWindows } from "./window-toasts"
 
 // The Inbox: the backend's, as it lands (see `inbox-landing.ts`), or, where the backend has
 // none, one that lists nothing.
@@ -46,13 +54,13 @@ const NoticeClicks = (): null => {
 
 // Gives the app below it the backend's Inbox: its list, and the sheets that open beside
 // it, which read the context of a row's agent from the backend's conversations and
-// messages. The list is a sidebar panel (`shell/WorkspaceSidebar.tsx`); on a phone it and
+// messages. The list is a sidebar panel (`InboxSection.tsx`); on a phone it and
 // a sheet take the screen in turn, so the sidebar's drawer is shut while a sheet is open.
 export const InboxHost = ({
   active,
   children,
 }: {
-  // Whether the sidebar shows the Inbox's panel.
+  // Whether the Inbox's panel is in sight (`panelShowing`).
   readonly active: boolean
   readonly children: ReactNode
 }): React.JSX.Element => {
@@ -61,8 +69,14 @@ export const InboxHost = ({
   const { inbox } = landing
   // Whether an agent is at work in any project, for the empty Inbox to say.
   const working = useWorkspaceState((state) => anyAgentWorking(state.projects))
-  // Whether the person looks at the page, for an update's row in sight to count as seen.
-  const looking = useUiState((state) => state.pageFocused && !modalOpen(state))
+  // Where the Inbox is, and the document it is drawn in, where its sheet opens.
+  const place = usePanelPlace("inbox")
+  const page = usePanelPage("inbox")
+  // Whether the person looks at the Inbox, for an update's row in sight to count as seen: at the app's
+  // own window, with no dialog over it, or at the Inbox's window of its own.
+  const onPage = useUiState((state) => mainWindowFocused(state) && !modalOpen(state))
+  const inOwnWindow = useUiState((state) => state.ownWindowFocused === "inbox")
+  const looking = place === "window" ? inOwnWindow : onPage
   const { hideSidebar, reveal, select, showInbox, peekInbox } = commands
   const phone = useMemo(
     () => (desktop ? undefined : { hideList: hideSidebar, showList: showInbox }),
@@ -72,8 +86,8 @@ export const InboxHost = ({
   const pings = backend.notices !== undefined
   const follow = useCallback(
     (board: ToastBoard) =>
-      watchInboxToasts(inbox, ui, board, { pings, ding: dingOf(backend, ui).ring }),
-    [inbox, ui, pings, backend],
+      watchInboxToasts(inbox, workspace, ui, board, { pings, ding: dingOf(backend, ui).ring }),
+    [inbox, workspace, ui, pings, backend],
   )
   // What an agent asked to show on a terminal the person isn't on, told as it waits to open.
   const followShows = useCallback(
@@ -85,6 +99,8 @@ export const InboxHost = ({
     (board: MoveBoard) => watchMoveToasts(ui, board, commands),
     [ui, commands],
   )
+  // A panel's window of its own the person asked for that couldn't open.
+  const followRefused = useCallback((board: RefusedBoard) => watchRefusedWindows(ui, board), [ui])
   // Brings the terminal a row waits on into view, as its sidebar row does where the session
   // is on screen, else as a click on a notification about it does.
   const showTerminal = useCallback(
@@ -101,10 +117,17 @@ export const InboxHost = ({
     },
     [workspace, select, reveal],
   )
-  // Going to an Inbox row's terminal from the Inbox's list turns the sidebar to the terminals.
+  // Going to an Inbox row's terminal from the Inbox's list in the sidebar turns the sidebar to the
+  // terminals; from its window, the sidebar stays as it was, and from its window of its own the
+  // app's window, where the terminal shows, comes to the front.
+  const turnSidebar = active && place === "sidebar"
+  const own = place === "window"
   const revealItem = useCallback(
-    (terminalId: string) => reveal(terminalId, active ? "terminals" : undefined),
-    [reveal, active],
+    (terminalId: string) => {
+      reveal(terminalId, turnSidebar ? "terminals" : undefined)
+      if (own) window.focus()
+    },
+    [reveal, turnSidebar, own],
   )
   return (
     <AgentContextProvider
@@ -119,16 +142,19 @@ export const InboxHost = ({
         working={working}
         active={active}
         looking={looking}
+        page={page}
       >
         {children}
         <NoticeClicks />
         <PlanTextProvider workspace={workspace} companions={backend.companions}>
-          <InboxSheet active={active} />
+          {/* Drawn anew where the Inbox moves, in the document it is in now. */}
+          <InboxSheet key={place} active={active} over={place === "sidebar"} />
         </PlanTextProvider>
         <InboxToasts
           follow={follow}
           followShows={followShows}
           followMoves={followMoves}
+          followRefused={followRefused}
           showInbox={showInbox}
           peekInbox={peekInbox}
           showTerminal={showTerminal}
