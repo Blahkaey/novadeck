@@ -5,6 +5,8 @@ import type { AgentMode, Backend } from "@novadeck/core/port"
 import { orderedTiles, tileOf } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { SchemePreference, Tile } from "@novadeck/core/types"
+import { TourConsentDialog } from "@novadeck/tour/TourConsent"
+import { useTourOffer, useTourRun } from "@novadeck/tour/TourProvider"
 import {
   memo,
   Suspense,
@@ -37,9 +39,6 @@ import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
 import { schemeCountOfTheme } from "../theme/themes"
-import { TourClosingCard } from "../tour/ClosingCard"
-import { TourSpotlight } from "../tour/Spotlight"
-import { TourConsentDialog } from "../tour/TourConsent"
 import { CloseTeamRows } from "./CloseTeamRows"
 import {
   useFeatureFlag,
@@ -48,7 +47,7 @@ import {
   useWorkspaceState,
 } from "./controller/context"
 import { useRouteDialog, type RouteDialog } from "./controller/useRouteDialog"
-import { Preferences, TerminalSearch } from "./deferred-views"
+import { Preferences, TerminalSearch, TourClosingCard, TourStage } from "./deferred-views"
 import { dingOf } from "./ding"
 import { moveQuestionOf, sameMoveQuestion } from "./move-question"
 import { NameOffer } from "./NameOffer"
@@ -60,7 +59,6 @@ import {
   sameItems,
   shallowEqual,
 } from "./selectors"
-import { useTourOffer, useTourRun } from "./TourProvider"
 import { chatViewOn, switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
@@ -505,43 +503,39 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         />
       )}
       {driver.shown && (
-        <TourSpotlight
-          {...driver.shown}
-          onPause={driver.pause}
-          onResume={driver.resume}
-          onSkip={driver.skip}
-          onNext={driver.next}
-          onEnd={driver.end}
-          onBack={driver.back}
-        />
+        <Suspense fallback={null}>
+          <TourStage {...driver.shown} onEnd={driver.end} onBack={driver.back} />
+        </Suspense>
       )}
       {driver.closing && (
-        <TourClosingCard
-          agent={driver.closing.agent}
-          canRemove={tourProjectThere}
-          {...(backend.pickDirectory && {
-            onOpen: () => {
-              const closing = driver.closing
-              const before = workspaceStore.getSnapshot().activeProjectId
-              commands.openFolder().then(
-                () => {
-                  const after = workspaceStore.getSnapshot().activeProjectId
-                  // A folder picked, other than the tour's: its agent starts there, and the card
-                  // goes.
-                  if (!closing || after === before || after === closing.projectId) return
-                  commands.add({ command: closing.agent })
-                  driver.close()
-                },
-                // The card stays, for another try.
-                (error: unknown) => console.error("Novadeck couldn't open that folder:", error),
-              )
-            },
-          })}
-          onRemove={() => {
-            if (driver.closing?.projectId) commands.removeProject(driver.closing.projectId)
-          }}
-          onClose={driver.close}
-        />
+        <Suspense fallback={null}>
+          <TourClosingCard
+            agent={driver.closing.agent}
+            canRemove={tourProjectThere}
+            {...(backend.pickDirectory && {
+              onOpen: () => {
+                const closing = driver.closing
+                const before = workspaceStore.getSnapshot().activeProjectId
+                commands.openFolder().then(
+                  () => {
+                    const after = workspaceStore.getSnapshot().activeProjectId
+                    // A folder picked, other than the tour's: its agent starts there, and the card
+                    // goes.
+                    if (!closing || after === before || after === closing.projectId) return
+                    commands.add({ command: closing.agent })
+                    driver.close()
+                  },
+                  // The card stays, for another try.
+                  (error: unknown) => console.error("Novadeck couldn't open that folder:", error),
+                )
+              },
+            })}
+            onRemove={() => {
+              if (driver.closing?.projectId) commands.removeProject(driver.closing.projectId)
+            }}
+            onClose={driver.close}
+          />
+        </Suspense>
       )}
       {tour && (
         <TourConsentDialog

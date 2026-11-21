@@ -784,7 +784,7 @@ App:
   page (`by: "agent"`, asked to open) and finishes its turn. "Tour story: answer the tagline ask
   (A)" answers it as the person would; "Tour story: teammates stay quiet until nudged" has the
   next lead wait for `Tour.nudge` before opening its team; "Tour agent: stop" exits the lead's
-  process (the UI's "Your agent stopped"). "Tour agent: hold at folder trust" / "sign-in" /
+  process (the UI's "Your agent stopped."). "Tour agent: hold at folder trust" / "sign-in" /
   "hooks" hold the next one at that startup screen until "Answer the startup screen"; "Tour
   agent: quiet until nudged" has the next one sit idle at its prompt, no turn begun, until
   `Tour.nudge`, then work and name itself; "Tour agent: ask permission first" has the next one
@@ -793,12 +793,18 @@ App:
   (`&tourScreenMs=<n>` answers the screen after n ms), `&tourAgent=quiet|permission`,
   `&tourStory=off` (stop after the lead names itself), `&tourTeam=quiet`,
   `&tourPatienceMs=<n>` (the UI's wait before nudging).
-  As the agent goes, the tour's driver (`frontend/ui/src/tour/driver.ts`, `app/useTourDriver.ts`)
-  draws a ring around what its step points at and a coach card beside it: "Your agent is
-  starting", or, while a startup screen holds, "Your agent is asking you something first" in
-  that screen's words, or "Your agent is asking your permission" while the lead or a teammate has
-  an Unblock row waiting in the Inbox (any harness's own dialog, or a held message). Pause, Skip step and End tour steer it; while paused, or while another
-  project is on screen, a small bar stands in for it.
+  As the agent goes, the tour's driver (`frontend/tour/src/driver.ts`, `useTourDriver.ts`)
+  plays four acts in Canvas, the first and the last opened by a wipe (an ink sheet with the
+  act's name), the cuts at its start and its result, and its stage (`Stage.tsx`, in its own print look, `print.css`) marks the page's own
+  elements, `data-tour-look` where to look (a magenta line) and `data-tour-click` what to
+  press (a slowly breathing yellow one), each drawn by a mark a little way out from the element
+  (where what clips it leaves room), over all it holds, and, a second after a mark shows, letters one caption box beside them in space no window takes: "Your own agent. In
+  a sandbox.", or, while a startup screen holds, "It wants an answer first." with that screen's
+  words under it, or "It's asking your permission." while the lead or a teammate has an Unblock
+  row waiting in the Inbox (any harness's own dialog, or a held message). End tour sits in the
+  footer; while another project is on screen, a small bar stands in for it. Once
+  the person has answered, "Now they make it." stays on the lead until it shows what it made;
+  act 4 opens on that, its wipe the reveal, and holds on it a few seconds before the closing card.
 - **Boot failures:** each fails the first attempt as the runner would, so a transient one
   retries on its own and the others wait for Retry (an incompatible runner, or a workspace
   a newer Novadeck has used, only for Quit). Each hint carries the error code, so the search
@@ -1041,6 +1047,7 @@ atlas.
 | `frontend/items`          | The items package: kinds, store, taskbar, peek, plan editor, messages, bar drag and homes. |
 | `frontend/chat`           | The chat view: transcript, requests and composer, with the chat's own store and commands.  |
 | `frontend/requests`       | An agent's request drawn and answered: the card, one menu, pages, form and detail.         |
+| `frontend/tour`           | The onboarding tour: consent, run, steps, and its own look over the workspace.             |
 | `frontend/runner-adapter` | The UI's backend for a runner, over a WebSocket or the desktop app.                        |
 | `frontend/terminal-views` | The xterm mount both backends draw terminals with.                                         |
 | `frontend/demo`           | The demo backend: a scripted workspace and simulated terminals.                            |
@@ -1155,7 +1162,7 @@ backend-only tests.
 ### Working on the UI
 
 The UI is split into packages: `frontend/core`, `frontend/ui`, `frontend/toolkit`,
-`frontend/items`, `frontend/chat`, `frontend/requests`, `frontend/runner-adapter`, `frontend/terminal-views`, `frontend/demo`, `frontend/demo-debug`, `frontend/test-kit`,
+`frontend/items`, `frontend/chat`, `frontend/requests`, `frontend/tour`, `frontend/runner-adapter`, `frontend/terminal-views`, `frontend/demo`, `frontend/demo-debug`, `frontend/test-kit`,
 `frontend/specs` and `frontend/chat-contract`, and the apps `apps/desktop`, `apps/try` and `apps/previews`. `frontend/ui`
 holds the page's layers, each a folder of its `src/`; the rest are packages of their own. In
 the table a path that starts with `frontend/` or `apps/` is a package, and any other is a
@@ -1195,6 +1202,7 @@ folder of `frontend/ui/src/`:
 | `frontend/items/src/bar/drag-session.ts`                        | What's dragged off a taskbar, the views' drop spaces, and the windows it's over.                                               |
 | `frontend/chat/src/`                                            | The agent's chat: its blocks, tool rows, requests and the composer, and the chat's own store (`state.ts`) and commands.        |
 | `frontend/requests/src/`                                        | An agent's request drawn and answered (`RequestCard`, `RequestDialog`, `Menu`, `Detail`, forms), and `requests.css`.           |
+| `frontend/tour/src/`                                            | The onboarding tour: consent, start, driver, steps and signals, `TourProvider` (handed a `TourHost`), and `tour.css`.          |
 | `layouts/canvas/`, `grid/`, `focus/`                            | View adapters and colocated library styles.                                                                                    |
 | `layouts/` (top level)                                          | Helpers shared by views: view transitions, background gestures, visibility.                                                    |
 | `inbox/`                                                        | The Inbox: what agents ask of the person, its sidebar rows and the sheet that answers.                                         |
