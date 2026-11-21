@@ -101,8 +101,47 @@ describe("the rail's tooltips", () => {
   })
 })
 
+describe("a panel in a window", () => {
+  const notesRail = (detached: readonly ("notes" | "todo")[]) =>
+    createElement(SidebarRail, {
+      sidebarVisible: true,
+      sidebarPanel: "notes",
+      zen: false,
+      badge: undefined,
+      bellRings: 0,
+      hasNotes: true,
+      detached,
+      toggleRail: () => {},
+    })
+
+  it("keeps its toggle in place, marked, and never shows as the sidebar's open panel", () => {
+    const { container, rerender, unmount } = render(notesRail([]))
+    unmounts.push(unmount)
+    const toggle = () => container.querySelector("#notes-toggle")!
+    const order = () => [...container.querySelectorAll("[id$='-toggle']")].map((each) => each.id)
+    const before = order()
+    expect(toggle().getAttribute("aria-checked")).toBe("true")
+    expect(toggle().hasAttribute("data-detached")).toBe(false)
+    rerender(notesRail(["notes"]))
+    expect(order()).toEqual(before)
+    expect(toggle().getAttribute("data-detached")).toBe("true")
+    expect(toggle().querySelector(".rail-detached-mark")).not.toBeNull()
+    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    expect(toggle().getAttribute("aria-description")).toBe("In a window")
+  })
+
+  it("says in its tooltip that a click goes to its window", () => {
+    const keys = (
+      navigator.platform.includes("Mac") ? ["⌘", "Shift", "L"] : ["Ctrl", "Shift", "L"]
+    ).join("\u00a0")
+    expect(railTooltip({ panel: "notes", open: false, back: null, detached: true })).toBe(
+      `Notes · in a window: go to it · ${keys}`,
+    )
+  })
+})
+
 describe("the rail's History dot", () => {
-  const historyRail = (historyDrops: number, open = false) =>
+  const historyRail = (historyDrops: number, open = false, inWindow = false) =>
     createElement(SidebarRail, {
       sidebarVisible: open,
       sidebarPanel: open ? "history" : "terminals",
@@ -112,6 +151,7 @@ describe("the rail's History dot", () => {
       hasHistory: true,
       historyDrops,
       lastDrop: "Tests closed just now",
+      ...(inWindow ? { detached: ["history" as const], historyInWindow: true } : {}),
       toggleRail: () => {},
     })
 
@@ -126,6 +166,18 @@ describe("the rail's History dot", () => {
     expect(dot()).toBeNull()
     rerender(historyRail(2))
     expect(dot()).toBeNull()
+  })
+
+  it("doesn't flare for a landing History's window shows on the stage", () => {
+    const { container, rerender, unmount } = render(historyRail(0, false, true))
+    unmounts.push(unmount)
+    const dot = () => container.querySelector("#history-toggle .flare-dot")
+    rerender(historyRail(1, false, true))
+    expect(dot()).toBeNull()
+    rerender(historyRail(1))
+    expect(dot()).toBeNull()
+    rerender(historyRail(2))
+    expect(dot()).not.toBeNull()
   })
 })
 

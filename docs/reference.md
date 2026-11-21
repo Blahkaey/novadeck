@@ -292,7 +292,7 @@ else the program it was opened to run, or "Terminal"), directories, what
 they run and the program each last had in its foreground (only its name, never its
 command line, which can hold secrets). The UI shows them, renames through the runner,
 and saves only how it shows them: layouts, sidebar order, the view and the selection,
-by terminal id. A terminal has a `restoredProcess` only while it
+by terminal id, and the sidebar panels open as windows in each session. A terminal has a `restoredProcess` only while it
 has no live shell: a program running when the runner lost the shell, the shell was
 killed, or the app closed becomes it, and it ends once a shell reaches its prompt or
 runs a program. Every replacement shell starts in the runner backend's `freshShell`,
@@ -376,7 +376,8 @@ still go through. It all updates as messages move. The content preview
 demo (`?demo=messages`) has every state, entries to you and the pause.
 
 Right-click a window's header for the same menu as its sidebar tab: Rename, Reset to
-automatic for a name you gave, Dock in for an undocked window, and Close.
+automatic for a name you gave, Dock in for an undocked window, and Close. A panel's window
+offers only Return to sidebar.
 
 Use the eye on a terminal tab to hide it from Grid and Canvas without closing it.
 Hidden tabs stay in the list with a faded label. While selected, a hidden terminal
@@ -1119,6 +1120,28 @@ the sidebar. A rail icon's tooltip says where the next press goes. Hiding the si
 shortcut leaves typing in the terminal. A panel stays as you left it while another shows or the
 sidebar is hidden, on a narrow window too, where the sidebar opens over the workspace: a note
 you were writing, a search, and where its list was scrolled are there when you come back.
+
+Notes, Todo, History and Files can also open as a window on the workspace, beside your
+terminals: **Open in a window** in the panel's header (its tooltip says so; its name is "Open
+Notes in a window") puts the panel in a window of the session on screen, selected, with the
+keyboard in it, its count beside the window's name, and the panel comes as you left it: a note
+you were writing, the Todo column you were on and how far a list was scrolled. Focus shows
+it as it shows a terminal; Grid and Canvas lay it out with the others, and in Canvas its list
+takes the wheel and the pointer, so scrolling it never pans or zooms, while its header still
+moves the window. Esc, the arrows and what you type stay in the panel, as in a companion's
+window. If the sidebar was showing that panel, it moves to the first panel your rail's order
+still has in it; on a narrow window the sidebar closes, so the window shows. The panel's rail icon stays where it is, with a small window mark in its
+corner; its tooltip says it is in a window, and the icon and the panel's shortcut take you to
+the window: selected, shown again if you hid it from Grid and Canvas, with the keyboard in it.
+Each panel's window is listed in the Terminals panel under the panel's own icon; clicking it goes
+to the window, and Search and Ctrl+Tab's switcher call it a panel window. The window's header has
+**Return to sidebar** where a terminal's has Close (so do its row's button and its right-click
+menu): the window closes, the sidebar opens on the panel, and the keyboard goes there. Each
+session keeps its own: a panel is in a window in the sessions where you opened it there, and in
+the sidebar in the others, so switching sessions moves it, and the session remembers its panel
+windows with the rest of how it is laid out. A link or Back that opens the sidebar on a panel in
+a window shows "Notes is in a window" with **Show it**, which goes to the window, and **Return
+to sidebar**.
 
 Hold Ctrl while pressing Tab to choose a terminal, then release Ctrl to switch.
 While navigating Grid and Canvas, the arrow keys select the nearest terminal on that

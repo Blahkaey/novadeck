@@ -1,4 +1,9 @@
-import { railPanelOf, type SidebarPanel, type TerminalsView } from "@novadeck/core/types"
+import {
+  railPanelOf,
+  type RailPanel,
+  type SidebarPanel,
+  type TerminalsView,
+} from "@novadeck/core/types"
 
 // DOM contracts for keyboard policy and focus restoration. Library-specific
 // overlay markup stays here so interaction owners do not depend on it. `data-own-keys`
@@ -199,6 +204,33 @@ export const focusMovePick = (framesLeft = 12): void => {
   // the focus on its way out.
   if (document.activeElement !== target && framesLeft > 0)
     requestAnimationFrame(() => focusMovePick(framesLeft - 1))
+}
+
+// What can take the focus in a panel, in the order Tab reaches it.
+const panelControls =
+  'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])'
+
+// Puts keyboard focus in a panel, wherever it shows, as it comes to the sidebar or opens in a
+// window: on its first control in its body, else in its header, else on its heading. It may
+// still be on its way into view (sliding into the sidebar, Focus mounting its window, Canvas
+// flying to it), so it tries again for a few frames, unless the person moves the focus
+// meanwhile.
+export const focusPanel = (panel: RailPanel): void => {
+  const from = document.activeElement
+  const attempt = (framesLeft: number): void => {
+    if (document.activeElement !== from) return
+    const section = document.getElementById(`${panel}-panel`)
+    const first = (selector: string): HTMLElement | undefined =>
+      [...(section?.querySelectorAll<HTMLElement>(selector) ?? [])].find(usable)
+    const target =
+      first(`.sidebar-panel-content :is(${panelControls})`) ??
+      first(`.sidebar-panel-header :is(${panelControls})`) ??
+      document.getElementById(`${panel}-panel-title`)
+    if (target && section && usable(section)) target.focus({ preventScroll: true })
+    if (document.activeElement !== from || framesLeft === 0) return
+    requestAnimationFrame(() => attempt(framesLeft - 1))
+  }
+  attempt(12)
 }
 
 export const focusTerminalInput = (id: string): boolean => {

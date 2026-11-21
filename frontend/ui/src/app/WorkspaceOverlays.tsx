@@ -36,6 +36,7 @@ import { closeTeamTree, sameCloseTeamTree, type CloseTeamRow } from "../terminal
 import { CloseTerminalDialog } from "../terminals/CloseTerminalDialog"
 import { LeaveEditsDialog } from "../terminals/LeaveEditsDialog"
 import { MoveTeammateDialog } from "../terminals/MoveTeammateDialog"
+import { tileIcon } from "../terminals/panel-icons"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
 import { schemeCountOfTheme } from "../theme/themes"
@@ -301,14 +302,14 @@ const SearchHost = memo(
   ({
     open,
     ...props
-  }: Omit<ComponentProps<typeof TerminalSearch>, "terminals">): React.JSX.Element => {
+  }: Omit<ComponentProps<typeof TerminalSearch>, "terminals" | "iconOf">): React.JSX.Element => {
     const live = useWorkspaceState(
       (workspace) => (open ? orderedTiles(currentState(workspace).roster) : null),
       (a, b) => a === b || (a !== null && b !== null && sameItems(a, b)),
     )
     const [kept, setKept] = useState<readonly Tile[]>([])
     if (live !== null && live !== kept) setKept(live)
-    return <TerminalSearch open={open} terminals={live ?? kept} {...props} />
+    return <TerminalSearch open={open} terminals={live ?? kept} iconOf={tileIcon} {...props} />
   },
 )
 

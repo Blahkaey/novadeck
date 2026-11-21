@@ -1,6 +1,9 @@
+import { PortalInto } from "@novadeck/toolkit/PortalInto"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { X } from "lucide-react"
+import { AppWindow, X } from "lucide-react"
 import type { ReactNode } from "react"
+
+import { usePanelHost } from "./panel-host"
 
 // A panel's create button: a button set flush left across the panel.
 export const sidebarCreateClasses =
@@ -37,11 +40,18 @@ export const SidebarPanel = ({
   actions?: ReactNode
   children: ReactNode
 }): React.JSX.Element => {
+  const host = usePanelHost()
+  // In a window on the stage, which it fills, always in sight while the window is, with no Hide:
+  // the window's header names it, shows its count and returns it to the sidebar. Its heading
+  // stays for assistive technology, by the same ids, out of its own row, which shows only its
+  // actions, and only while it has any. Both places draw the same elements in the same order,
+  // so moving between them keeps what the person had in the panel.
+  const stage = host.place === "stage" ? host : undefined
   const heading = (
     <Tooltip content={titleHint} disabled={!titleHint}>
       <h2
         id={`${id}-title`}
-        tabIndex={titleHint ? 0 : undefined}
+        tabIndex={titleHint ? 0 : -1}
         className="section-label m-0 flex min-w-0 items-center gap-1.5 text-label font-medium"
       >
         {title}
@@ -53,14 +63,26 @@ export const SidebarPanel = ({
   return (
     <section
       id={id}
-      className="sidebar-panel absolute inset-x-3 top-3 bottom-0 flex min-h-0 min-w-0 flex-col opacity-100 visible [transform:translateX(0)] data-[active=false]:pointer-events-none data-[active=false]:invisible data-[active=false]:[transform:translateX(-6px)] data-[active=false]:opacity-0"
-      data-active={active}
+      className={
+        stage
+          ? "sidebar-panel relative flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-1"
+          : "sidebar-panel absolute inset-x-3 top-3 bottom-0 flex min-h-0 min-w-0 flex-col opacity-100 visible [transform:translateX(0)] data-[active=false]:pointer-events-none data-[active=false]:invisible data-[active=false]:[transform:translateX(-6px)] data-[active=false]:opacity-0"
+      }
+      {...(stage
+        ? { "data-place": "stage" }
+        : { "data-active": active, "aria-hidden": !active, inert: !active })}
       aria-labelledby={`${id}-title`}
-      aria-hidden={!active}
-      inert={!active}
     >
-      <header className="sidebar-panel-header flex h-[38px] shrink-0 items-center justify-between gap-3 px-0.5">
-        {titleExtra || titleLead ? (
+      {stage ? (
+        <h2 id={`${id}-title`} className="sr-only" tabIndex={-1}>
+          {title} {count}
+        </h2>
+      ) : null}
+      <header
+        className="sidebar-panel-header flex h-[38px] shrink-0 items-center justify-between gap-3 px-0.5"
+        hidden={stage && !actions}
+      >
+        {stage ? null : titleExtra || titleLead ? (
           <div className="flex min-w-0 items-center gap-2">
             {titleLead}
             {heading}
@@ -69,21 +91,36 @@ export const SidebarPanel = ({
         ) : (
           heading
         )}
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="sidebar-panel-actions ml-auto flex shrink-0 items-center gap-0.5">
           {actions}
-          <Tooltip content="Hide">
-            <button
-              className="icon-button dim sidebar-close size-7"
-              type="button"
-              aria-label={`Hide ${title.toLowerCase()}`}
-              onClick={onClose}
-            >
-              <X size={14} strokeWidth={1.6} />
-            </button>
-          </Tooltip>
+          {host.place === "sidebar" && host.detach && (
+            <Tooltip content="Open in a window">
+              <button
+                className="icon-button dim sidebar-detach size-7"
+                type="button"
+                aria-label={`Open ${title} in a window`}
+                onClick={host.detach}
+              >
+                <AppWindow size={14} strokeWidth={1.6} />
+              </button>
+            </Tooltip>
+          )}
+          {host.place === "sidebar" && (
+            <Tooltip content="Hide">
+              <button
+                className="icon-button dim sidebar-close size-7"
+                type="button"
+                aria-label={`Hide ${title.toLowerCase()}`}
+                onClick={onClose}
+              >
+                <X size={14} strokeWidth={1.6} />
+              </button>
+            </Tooltip>
+          )}
         </div>
       </header>
       <div className="sidebar-panel-content flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      {stage ? <PortalInto node={stage.count}>{count}</PortalInto> : null}
     </section>
   )
 }

@@ -120,7 +120,7 @@ context("the close button's tooltip", () => {
     expect(closeTip(keeps, window)).toBe("Close")
   })
 
-  it("says only Close for a panel's window, which History doesn't keep", () => {
-    expect(closeTip(keeps, panelTile("notes"))).toBe("Close")
+  it("says a panel's window returns the panel to the sidebar", () => {
+    expect(closeTip(keeps, panelTile("notes"))).toBe("Return to sidebar")
   })
 })

@@ -298,8 +298,15 @@ Terminals:
   question, and an action ask), so their "?" and "!" show beside "Working, a side question",
   an agent that works on with a question open. You stay on one that needs permission, and the
   marks land on the others as you look away. Its shell an agent opened and its shell an agent
-  exited from keep their handles on their tabs; its other plain shells show none. Also a
-  burst of 30, a quick failure, a spawn failure and the terminal limit.
+  exited from keep their handles on their tabs; its other plain shells show none. The Notes and
+  Todo panels open as windows beside them, before the terminals, so the last terminal stays the
+  one you look at. Also a burst of 30, a quick failure, a spawn failure and the terminal limit.
+- **Panel windows:** "Panels in windows" opens Notes, Todo, History and Files as windows on the
+  session on screen, as each one's **Open in a window** does (only those the demo shows), Files
+  selected: each is listed in the Terminals panel under its own icon, its rail toggle keeps its
+  place with a window mark, and the sidebar moves to the first panel left in it. The
+  rest is normal use: a window's **Return to sidebar**, the rail toggle that goes to the window,
+  and the sidebar's "Notes is in a window" note, which a `?panel=notes` link or Back reaches.
 - **Worktrees:** acts on the selected terminal's first worktree in the Worktrees panel, which lists the
   open project's worktrees (every demo seeds a few from its own terminals, in several projects, so
   switching projects switches the list: one in conflict with main, two with each other, one

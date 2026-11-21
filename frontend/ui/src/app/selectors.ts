@@ -1,5 +1,6 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
 import type { Item } from "@novadeck/core/items"
+import { hasPanel, panelTile, tilesOf } from "@novadeck/core/roster"
 import { activeProject, activeSession } from "@novadeck/core/state"
 import {
   railPanelOf,
@@ -130,27 +131,57 @@ export const modalOpen = (ui: UiState): boolean =>
   ui.leaving !== null ||
   ui.recent.switcher?.mode === "click"
 
+// Where a panel of the rail is in the session on screen: on its stage, as a window, while its
+// roster holds the panel's tile; else in the sidebar. Each session keeps its own places.
+export type PanelPlace = "sidebar" | "stage"
+
+export const panelPlace = (workspace: Workspace, panel: RailPanel): PanelPlace =>
+  hasPanel(currentState(workspace).roster, panelTile(panel).id) ? "stage" : "sidebar"
+
+// The panels in a window on the stage of the session on screen, in the order they opened; a new
+// list each time, for `sameItems` to compare.
+export const panelsOnStage = (workspace: Workspace): readonly RailPanel[] =>
+  currentState(workspace).roster.panels.map(({ panel }) => panel)
+
+// Whether the panel's window is in sight on the stage: in Focus, the tile Focus shows; in Grid
+// and Canvas, one the person hasn't hidden, or hidden and selected, which they show for a look.
+const windowInSight = (ui: UiState, workspace: Workspace, panel: RailPanel): boolean => {
+  const { id } = panelTile(panel)
+  const { view, roster, selected, layout } = currentState(workspace)
+  if (view !== "focus") return !layout.hidden[id] || selected === id
+  const context = currentContext(workspace)
+  return activeTerminal(tilesOf(roster), selected, context, ui.shell.focusPreview)?.id === id
+}
+
 // Whether a panel of the rail is in sight, which is when it reads, follows and ticks, and when
-// what it lists counts as seen: while the sidebar shows, open on it (on either view of the
-// Terminals panel for its toggle). `desktop` is asked only when the route names the panel.
-export const panelShowing = (ui: UiState, panel: RailPanel, desktop: () => boolean): boolean =>
-  railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
+// what it lists counts as seen. In the sidebar: while the sidebar shows, open on it (on either
+// view of the Terminals panel for its toggle). In a window: while the window is in sight.
+// `desktop` is asked only when the route names a panel in the sidebar.
+export const panelShowing = (
+  ui: UiState,
+  workspace: Workspace,
+  panel: RailPanel,
+  desktop: () => boolean,
+): boolean =>
+  panelPlace(workspace, panel) === "stage"
+    ? windowInSight(ui, workspace, panel)
+    : railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
 
 // Whether the Inbox's panel is in sight.
-export const inboxShown = (ui: UiState, desktop: () => boolean): boolean =>
-  panelShowing(ui, "inbox", desktop)
+export const inboxShown = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  panelShowing(ui, workspace, "inbox", desktop)
 
 // Whether a toast may show now: the page has the person's focus, they want to hear what
 // needs them, and the Inbox isn't what they look at. (The toasts also skip an item of the
 // terminal they've come back to, see inbox-toasts.ts.) `desktop` is asked only when the
 // sidebar matters.
-export const mayToast = (ui: UiState, desktop: () => boolean): boolean =>
-  ui.pageFocused && ui.preferences.notifyNeeds && !inboxShown(ui, desktop)
+export const mayToast = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  ui.pageFocused && ui.preferences.notifyNeeds && !inboxShown(ui, workspace, desktop)
 
 // Whether a toast for the item waits behind a modal dialog: it would show but for the dialog.
 // The OS ping defers the same items, so that one never rings for what no toast waits for.
-export const heldForToast = (ui: UiState, desktop: () => boolean): boolean =>
-  modalOpen(ui) && mayToast(ui, desktop)
+export const heldForToast = (ui: UiState, workspace: Workspace, desktop: () => boolean): boolean =>
+  modalOpen(ui) && mayToast(ui, workspace, desktop)
 
 // The current session's folds, each lead with the tabs its fold hides (not the one the person is
 // on, nor the leads above it, which show in place): what a drag keeps together.

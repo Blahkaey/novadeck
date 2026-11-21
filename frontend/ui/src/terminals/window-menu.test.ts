@@ -125,7 +125,7 @@ describe("a window's menu", () => {
   })
 
   context("for a panel's window", () => {
-    it("offers Close alone: its panel names it", () => {
+    it("offers only to return the panel to the sidebar: its panel names it", () => {
       expect(
         labels(
           windowMenu({
@@ -135,7 +135,7 @@ describe("a window's menu", () => {
             onClose: ignore,
           }),
         ),
-      ).toEqual(["Close"])
+      ).toEqual(["Return to sidebar"])
     })
   })
 

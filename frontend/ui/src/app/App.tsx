@@ -3,7 +3,7 @@ import { noNotes, todosLeft, type NotesState } from "@novadeck/core/notes"
 import type { Backend, BackendSelection, CreateBackend, TerminalKey } from "@novadeck/core/port"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
-import { panelLabels } from "@novadeck/core/types"
+import { panelLabels, railPanelOf, type RailPanel } from "@novadeck/core/types"
 import type { WorksMade } from "@novadeck/core/works"
 import {
   useCallback,
@@ -47,8 +47,16 @@ import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
 import { PanelInstances } from "./PanelInstances"
 import { usePanelShowing } from "./panels-shown"
-import { historyShown, filesShown, notesShown } from "./routing"
-import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
+import { historyShown, filesShown, notesShown, panelShownOn } from "./routing"
+import {
+  currentContext,
+  currentState,
+  currentTarget,
+  panelPlace,
+  panelsOnStage,
+  sameItems,
+  shallowEqual,
+} from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
 import { TourProvider } from "./TourProvider"
@@ -68,6 +76,12 @@ export type WorkspacePanel = ComponentType<{
   readonly selected: () => TerminalKey | undefined
   // Brings a terminal of the session on screen into view selected, as its sidebar row does.
   readonly select: (key: TerminalKey) => void
+  // Opens these panels of the rail as windows on the session's stage, as their headers' buttons
+  // do, with keyboard focus in the last unless `focus` is false.
+  readonly openPanels: (
+    panels: readonly RailPanel[],
+    options?: { readonly focus?: boolean },
+  ) => void
 }>
 
 export type AppProps = (
@@ -146,6 +160,10 @@ const PanelSection = ({ panel }: Pick<AppProps, "panel">): React.JSX.Element | n
         return terminalId ? { ...currentTarget(snapshot), terminalId } : undefined
       }}
       select={({ terminalId }) => commands.select(terminalId)}
+      // Only those the rail shows: the others have nothing to open.
+      openPanels={(panels, options) =>
+        panels.filter(panelShownOn(backend)).forEach((each) => commands.detachPanel(each, options))
+      }
     />
   )
 }
@@ -221,7 +239,15 @@ const noneNoted = createStore<NotesState>(noNotes)
 const RailWithBadge = (
   props: Omit<
     ComponentProps<typeof SidebarRail>,
-    "badge" | "bellRings" | "historyDrops" | "lastDrop" | "sessionsAsk" | "worksMade" | "todosLeft"
+    | "badge"
+    | "bellRings"
+    | "historyDrops"
+    | "lastDrop"
+    | "sessionsAsk"
+    | "worksMade"
+    | "todosLeft"
+    | "detached"
+    | "historyInWindow"
   >,
 ): React.JSX.Element => {
   const { backend } = useWorkspaceServices()
@@ -234,6 +260,8 @@ const RailWithBadge = (
   const worksMade = useMemo(() => ({ count: made, projectId }), [made, projectId])
   const left = useCallback((state: NotesState) => todosLeft(state.notes, projectId), [projectId])
   const toDo = useStoreSelector(backend.notes?.state ?? noneNoted, left)
+  const detached = useWorkspaceState(panelsOnStage, sameItems)
+  const historyShowing = usePanelShowing("history")
   return (
     <SidebarRail
       {...props}
@@ -244,6 +272,8 @@ const RailWithBadge = (
       sessionsAsk={elsewhereSessionsText(marks, openId)}
       worksMade={worksMade}
       todosLeft={toDo}
+      detached={detached}
+      historyInWindow={historyShowing && detached.includes("history")}
     />
   )
 }
@@ -282,6 +312,10 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   }, shallowEqual)
   const { zen, sidebar, sidebarCollapsed, sidebarPanel, fontSize, enabledViews } = shell
   const view = useWorkspaceState((workspace) => currentState(workspace).view)
+  // Whether the sidebar's panel is in it, not in a window on the stage.
+  const sidebarDocked = useWorkspaceState(
+    (workspace) => panelPlace(workspace, railPanelOf(sidebarPanel)) === "sidebar",
+  )
   // The Terminals list on screen, which the team wire draws beside.
   const [tabList] = useState(createTabListStore)
   // Where each panel is drawn once and shown from, by the sidebar.
@@ -358,8 +392,11 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
                       }}
                       mobileRail={sidebarRail(true)}
                       mobileLabel={panelLabels[sidebarPanel]}
-                      // The Inbox's list and the Todo board's three columns take the whole width.
-                      mobileWide={sidebarPanel === "inbox" || sidebarPanel === "todo"}
+                      // The Inbox's list and the Todo board's three columns take the whole width;
+                      // the note on one in a window doesn't.
+                      mobileWide={
+                        sidebarDocked && (sidebarPanel === "inbox" || sidebarPanel === "todo")
+                      }
                       mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
                       sidebar={<SidebarSection />}
                     >

@@ -1,9 +1,10 @@
-import { afterEach } from "vitest"
+import { afterEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
 import {
   chatBoxBeside,
   classifyKeyTarget,
+  focusPanel,
   focusSidebarToggle,
   focusZenCreate,
   insideOwnKeys,
@@ -181,5 +182,71 @@ describe("the chat box beside a terminal's taskbar", () => {
     expect(
       chatBoxBeside(mount('<div data-terminal="t1"><button data-target></button></div>')),
     ).toBe(null)
+  })
+})
+
+describe("focusing a panel as it comes to the sidebar or opens in a window", () => {
+  // The panel's frame (SidebarPanel.tsx): its heading, its header's controls and its body.
+  const panel = (header: string, body: string): string => `
+    <section id="notes-panel">
+      <h2 id="notes-panel-title" tabindex="-1">Notes</h2>
+      <header class="sidebar-panel-header">${header}</header>
+      <div class="sidebar-panel-content">${body}</div>
+    </section>`
+  // The frames the browser would run, run here one at a time.
+  const frames = (): (() => void) => {
+    const waiting: FrameRequestCallback[] = []
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => waiting.push(frame))
+    return () => waiting.shift()?.(performance.now())
+  }
+
+  it("focuses the first control in its body", () => {
+    mount(panel('<button type="button">Hide</button>', "<textarea data-target></textarea>"))
+    focusPanel("notes")
+    expect(document.activeElement).toBe(document.querySelector("[data-target]"))
+  })
+
+  it("focuses a control in its header when its body has none", () => {
+    mount(panel('<button data-target type="button">Hide</button>', "<p>No notes yet.</p>"))
+    focusPanel("notes")
+    expect(document.activeElement).toBe(document.querySelector("[data-target]"))
+  })
+
+  it("focuses its heading when it has no control at all, as in a window with nothing listed", () => {
+    mount(panel("", "<p>Nothing closed yet.</p>"))
+    focusPanel("notes")
+    expect(document.activeElement).toBe(document.getElementById("notes-panel-title"))
+  })
+
+  it("passes over a control it can't use yet, in a panel still inert", () => {
+    mount(`<div inert>${panel("", '<button type="button">Add</button>')}</div>`)
+    const frame = frames()
+    focusPanel("notes")
+    expect(document.activeElement).toBe(document.body)
+    document.querySelector("[inert]")!.removeAttribute("inert")
+    frame()
+    expect(document.activeElement).toBe(document.querySelector("#notes-panel button"))
+  })
+
+  it("tries again on the next frames while the panel isn't there yet", () => {
+    const frame = frames()
+    focusPanel("notes")
+    frame()
+    mount(panel("", "<textarea data-target></textarea>"))
+    frame()
+    expect(document.activeElement).toBe(document.querySelector("[data-target]"))
+  })
+
+  it("gives up once the person moves the focus meanwhile", () => {
+    const frame = frames()
+    focusPanel("notes")
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<button id="elsewhere" type="button">Go</button>',
+    )
+    document.getElementById("elsewhere")!.focus()
+    document.body.insertAdjacentHTML("beforeend", panel("", "<textarea></textarea>"))
+    frame()
+    expect(document.activeElement).toBe(document.getElementById("elsewhere"))
   })
 })

@@ -74,8 +74,8 @@ export const InboxHost = ({
   const pings = backend.notices !== undefined
   const follow = useCallback(
     (board: ToastBoard) =>
-      watchInboxToasts(inbox, ui, board, { pings, ding: dingOf(backend, ui).ring }),
-    [inbox, ui, pings, backend],
+      watchInboxToasts(inbox, workspace, ui, board, { pings, ding: dingOf(backend, ui).ring }),
+    [inbox, workspace, ui, pings, backend],
   )
   // What an agent asked to show on a terminal the person isn't on, told as it waits to open.
   const followShows = useCallback(

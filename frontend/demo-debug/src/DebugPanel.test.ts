@@ -90,6 +90,7 @@ const mount = () => {
       startFresh: () => {},
       selected: () => undefined,
       select: () => {},
+      openPanels: () => {},
     }),
   )
   mounted.push(view)

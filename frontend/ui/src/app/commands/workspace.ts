@@ -144,7 +144,7 @@ export type WorkspaceCommands = ShellCommands &
     // running in it, or, where the backend keeps History, an agent mid-turn, one waiting on
     // background work, or one that couldn't be restored. A terminal that leads anyone always
     // asks. The project window saves the edits to its file first, and asks first where they
-    // can't be saved (see `Leave`).
+    // can't be saved (see `Leave`). A panel's window returns the panel to the sidebar.
     readonly close: (terminalId: string) => void
     // Answers the pending close confirmation: closes the terminal alone, or, with "team", also
     // everyone it leads, at any depth.
@@ -255,17 +255,14 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     const { view, selected } = currentState(snapshot)
     const active = rename.activeRename()
     if (active?.id === terminalId) rename.finishRename(active, false)
-    // Closing a window closes what it shows, and a panel's leaves the stage; a terminal takes
-    // what its bar holds with it.
+    // Closing a window closes what it shows; a terminal takes what its bar holds with it.
     const target = currentTarget(snapshot)
     const tile = tileOf(currentState(snapshot).roster, terminalId)
     navigateWorkspace(
       [
         tile && isWindow(tile)
           ? { type: "item/close", target, itemId: tile.itemId }
-          : tile && isPanel(tile)
-            ? { type: "panel/close", target, panel: tile.panel }
-            : { type: "terminal/close", target, terminalId },
+          : { type: "terminal/close", target, terminalId },
       ],
       {},
       true,
@@ -735,6 +732,9 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     reveal,
     close: (terminalId) => {
       const snapshot = workspace.getSnapshot()
+      // A panel's window closes into the sidebar.
+      const tile = tileOf(currentState(snapshot).roster, terminalId)
+      if (tile && isPanel(tile)) return shell.returnPanel(tile.panel)
       const target = currentTarget(snapshot)
       const shown = projectWindowFile(currentState(snapshot))
       const window = currentState(snapshot).roster.windows.find((each) => each.id === terminalId)

@@ -20,7 +20,7 @@ import {
 } from "@novadeck/core/derivations"
 import { isPanel, isWindow } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
-import type { CompanionWindowMeta, TerminalMetadata, Tile } from "@novadeck/core/types"
+import type { CompanionWindowMeta, PanelTile, TerminalMetadata, Tile } from "@novadeck/core/types"
 import { Avatar } from "@novadeck/items/Avatar"
 import { shellTailsOf } from "@novadeck/items/shells"
 import { TerminalCompanion } from "@novadeck/items/TerminalCompanion"
@@ -38,6 +38,8 @@ import {
 } from "react"
 
 import { shortcutBindings } from "../interaction/shortcuts"
+import { PanelCountSlot, PanelSlot } from "../shell/PanelSlot"
+import { panelIcons } from "../terminals/panel-icons"
 import { presentedProgram, terminalProfile, windowProfile } from "../terminals/processes/profiles"
 import { renameView } from "../terminals/rename-state"
 import { unreadEnd } from "../terminals/unread-state"
@@ -79,8 +81,8 @@ import { useTerminalMarks } from "./useTerminalMarks"
 
 const noChatConversation = createStore(noConversation)
 
-// What every window in the current view takes from the workspace, a terminal's or one
-// undocked from a companion: its header, its menu, and the controls its layout offers.
+// What every window in the current view takes from the workspace, a terminal's, one undocked
+// from a companion or a panel's: its header, its menu, and the controls its layout offers.
 const useWindowFrame = (
   tile: Tile,
   { onFlyTo }: TerminalLayoutControls,
@@ -191,6 +193,38 @@ const WorkspaceWindow = memo(
           ) : (
             <UndockedWindow itemStore={itemStore} target={target} item={item} />
           ))}
+      </WindowShell>
+    )
+  },
+)
+
+// A panel of the rail in a window on the stage, in the same frame as a terminal's, under its
+// panel's name and icon, with the panel's count beside the name: its body is the panel itself,
+// drawn once by the app, which this window holds while the panel is on the stage (PanelSlot).
+// Its body takes its own pointer and wheel on Canvas, and its own keys, as a companion's pane
+// does; the header still moves the window.
+const WorkspacePanelWindow = memo(
+  ({
+    tile,
+    controls,
+  }: {
+    readonly tile: PanelTile
+    readonly controls: TerminalLayoutControls
+  }): React.JSX.Element => {
+    const frame = useWindowFrame(tile, controls)
+    const Icon = panelIcons[tile.panel]
+    return (
+      <WindowShell
+        {...frame}
+        icon={<Icon size={14} strokeWidth={1.5} />}
+        titleExtra={<PanelCountSlot panel={tile.panel} />}
+      >
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col nodrag nopan nowheel"
+          data-workspace-companion
+        >
+          <PanelSlot panel={tile.panel} />
+        </div>
       </WindowShell>
     )
   },
@@ -551,12 +585,10 @@ export const WorkspaceTerminal = memo(
 )
 
 // Layouts call this for each terminal and window they place.
-export const renderTerminal = (
-  tile: Tile,
-  controls: TerminalLayoutControls,
-): React.JSX.Element | null =>
-  // A panel's window is drawn in a later change.
-  isPanel(tile) ? null : isWindow(tile) ? (
+export const renderTerminal = (tile: Tile, controls: TerminalLayoutControls): React.JSX.Element =>
+  isPanel(tile) ? (
+    <WorkspacePanelWindow key={tile.id} tile={tile} controls={controls} />
+  ) : isWindow(tile) ? (
     <WorkspaceWindow key={tile.id} window={tile} controls={controls} />
   ) : (
     <WorkspaceTerminal key={tile.id} terminal={tile} controls={controls} />

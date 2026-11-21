@@ -208,16 +208,47 @@ export const chooseView = async (name: "Focus" | "Grid" | "Canvas"): Promise<voi
 
 export const sidebar = (): Locator => page.getByRole("complementary")
 
+type PanelName = "Terminals" | "Files" | "History" | "Inbox" | "Worktrees" | "Notes" | "Todo"
+
 /** A toggle on the rail. Terminals' is checked while either view of its panel shows. */
-export const sidebarPanel = (
-  name: "Terminals" | "Files" | "History" | "Inbox" | "Worktrees" | "Notes" | "Todo",
-): Locator =>
+export const sidebarPanel = (name: PanelName): Locator =>
   page
     .getByRole("radiogroup", { name: "Sidebar actions" })
     // The Inbox adds how many wait to its name, e.g. "Inbox, 3 waiting".
     .getByRole("radio", {
       name: name === "Inbox" ? new RegExp(`^${name}(,|$)`) : name,
     })
+
+/** A sidebar panel opened as a window on the stage of the active Focus, Grid or Canvas view. */
+export const panelWindow = (name: PanelName): Locator =>
+  page.getByRole("region", { name: `${name} window` })
+
+/** The button in a panel's header, in the sidebar, that opens the panel in a window. */
+export const detachButton = (name: PanelName): Locator =>
+  page.getByRole("button", { name: `Open ${name} in a window` })
+
+/** The button in a panel's window's header that returns the panel to the sidebar. */
+export const returnButton = (name: PanelName): Locator =>
+  panelWindow(name).getByRole("button", { name: `Return ${name} to the sidebar` })
+
+const isChecked = (choice: Locator): boolean => {
+  const element = choice.query()
+  return element instanceof HTMLInputElement
+    ? element.checked
+    : element?.getAttribute("aria-checked") === "true"
+}
+
+// Whether the sidebar shows, open on the panel `name`: its rail toggle is pressed, which a
+// collapsed sidebar, still named for the panel, leaves unpressed.
+const isPanelOpen = (name: PanelName): boolean => isChecked(sidebarPanel(name))
+
+/** Opens a panel in a window from its header, opening the sidebar on it first. */
+export const detachPanel = async (name: PanelName): Promise<void> => {
+  if (!isPanelOpen(name)) await sidebarPanel(name).click()
+  await expect.element(sidebar()).toHaveAccessibleName(name)
+  await detachButton(name).click()
+  await expect.element(panelWindow(name)).toBeVisible()
+}
 
 type TerminalsView = "Terminals" | "Sessions"
 
@@ -238,13 +269,6 @@ export const terminalsViewChoice = (name: TerminalsView): Locator =>
 /** Presses the switch's choice `name`, as a person clicks its icon. */
 export const chooseTerminalsView = async (name: TerminalsView): Promise<void> => {
   await terminalsViewChoice(name).click()
-}
-
-const isChecked = (choice: Locator): boolean => {
-  const element = choice.query()
-  return element instanceof HTMLInputElement
-    ? element.checked
-    : element?.getAttribute("aria-checked") === "true"
 }
 
 /** Waits until the Terminals panel shows `name`: the rail's Terminals and the switch's choice checked. */

@@ -450,9 +450,12 @@ const everyState = (
   hold: Hold,
 ): DemoAction => ({
   label: "Every state at once",
-  hint: `${gallery.length} terminals, one per state`,
-  run: ({ addTerminal, dispatch, workspace, harness }) => {
+  hint: `${gallery.length} terminals, one per state, beside the Notes and Todo panels' windows`,
+  run: ({ addTerminal, openPanels, dispatch, workspace, harness }) => {
     if (!dispatch) return
+    // Two panels' windows beside them, opened before the terminals and without the focus, so the
+    // person looks at the last terminal, not at a window.
+    openPanels(["notes", "todo"], { focus: false })
     // Added first, so each finish lands while the person looks at the last one.
     const keys = gallery.map(() => addTerminal())
     gallery.forEach(({ state }, index) => state && verbs.release(keys[index]!))

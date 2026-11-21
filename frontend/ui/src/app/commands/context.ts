@@ -3,7 +3,7 @@ import type { Murmur } from "@novadeck/core/addons/murmur"
 import type { Rect } from "@novadeck/core/layout/spatial"
 import type { Backend } from "@novadeck/core/port"
 import type { WorkspaceStore } from "@novadeck/core/store"
-import type { SidebarPanel, TerminalsView } from "@novadeck/core/types"
+import type { RailPanel, SidebarPanel, TerminalsView } from "@novadeck/core/types"
 import type { ItemStore } from "@novadeck/items/store"
 
 import type { CanvasHandle } from "../../layouts/canvas/types"
@@ -37,6 +37,10 @@ export type CommandEffects = {
   readonly focusMovePick: () => void
   readonly focusWorkspaceViewport: () => void
   readonly focusTerminalTab: (id: string) => void
+  // Puts keyboard focus in the panel, in the sidebar or its window, once it can take it.
+  readonly focusPanel: (panel: RailPanel) => void
+  // The rail's toggles in the order the person left them.
+  readonly railOrder: () => readonly RailPanel[]
   // Focuses the terminal's input now; false when it has none that can take focus.
   readonly focusTerminalInput: (id: string) => boolean
   // Where each terminal and window the current view shows is on screen.

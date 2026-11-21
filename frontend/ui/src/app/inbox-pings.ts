@@ -1,6 +1,8 @@
 import { rowKey, type Inbox, type InboxRow } from "@novadeck/core/inbox"
 import type { Backend, Notice } from "@novadeck/core/port"
+import type { Store } from "@novadeck/core/store"
 import { handleText } from "@novadeck/core/terminals/handle"
+import type { Workspace } from "@novadeck/core/types"
 
 import { needing } from "../inbox/inbox-state"
 import { fromNovadeck, labelOf, subjectOf } from "../inbox/inbox-text"
@@ -285,6 +287,7 @@ export const watchBellRings = (
 // `image` says the platform takes one, and clears when this stops. Returns the stop.
 export const watchInboxPings = (
   inbox: NeedsInbox,
+  workspace: Store<Workspace>,
   ui: UiStore,
   {
     board,
@@ -323,7 +326,7 @@ export const watchInboxPings = (
       const state = ui.getSnapshot()
       if (!state.preferences.notifyNeeds || !board) return false
       if (state.pageFocused) {
-        if (!heldForToast(state, desktop)) return false
+        if (!heldForToast(state, workspace.getSnapshot(), desktop)) return false
         deferred.set(rowKey(row), row)
         return true
       }

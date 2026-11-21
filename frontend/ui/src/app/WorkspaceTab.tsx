@@ -1,5 +1,5 @@
 import { critterLive, teamText, treeRole } from "@novadeck/core/derivations"
-import { isTerminal, isWindow, tileOf } from "@novadeck/core/roster"
+import { isPanel, isTerminal, isWindow, tileOf } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { Tile } from "@novadeck/core/types"
 import { barMembers, composeBar } from "@novadeck/items/bar"
@@ -7,6 +7,7 @@ import { useHasMessages, useMessageBadge } from "@novadeck/items/messages"
 import { TabKinds } from "@novadeck/items/TabKinds"
 import { memo, useMemo } from "react"
 
+import { panelIcons } from "../terminals/panel-icons"
 import { terminalProfile, windowProfile } from "../terminals/processes/profiles"
 import { isProjectWindow, projectFolder } from "../terminals/project-window"
 import { renameView } from "../terminals/rename-state"
@@ -95,7 +96,11 @@ const TabOfTile = memo(
     return (
       <TerminalTab
         terminal={terminal}
-        icon={(isTerminal(terminal) ? terminalProfile(terminal) : windowProfile(item)).icon}
+        icon={
+          isPanel(terminal)
+            ? panelIcons[terminal.panel]
+            : (isTerminal(terminal) ? terminalProfile(terminal) : windowProfile(item)).icon
+        }
         avatar={
           avatars && isTerminal(terminal) && terminal.handle
             ? { handle: terminal.handle, live: critterLive(terminal) }
@@ -116,7 +121,9 @@ const TabOfTile = memo(
         messageBadge={badge}
         companion={<TabKinds slots={slots} messagesWait={badge !== null} />}
         onVisibilityChange={(isHidden) => commands.setVisibility(target, id, isHidden)}
-        onSelect={() => commands.select(id)}
+        onSelect={() =>
+          isPanel(terminal) ? commands.revealPanel(terminal.panel) : commands.select(id)
+        }
         onBeginRename={() => commands.startRename(terminal, "sidebar")}
         onRenameDraft={(value) => commands.changeRenameDraft(id, value)}
         onRenameSave={() => commands.saveRename(id)}

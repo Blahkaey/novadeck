@@ -2,7 +2,7 @@ import { useSortable } from "@dnd-kit/react/sortable"
 import { subagentMarks, subagentsBadge, subagentsDetail } from "@novadeck/core/agents/subagents"
 import { nextTurnAge, turnAge } from "@novadeck/core/agents/turn-age"
 import { messageBadgeLabel, type MessageBadge } from "@novadeck/core/messages"
-import { isTerminal, tileName } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import {
   endingText,
   idleNote,
@@ -29,7 +29,16 @@ import {
   sidebarRowWideIconClasses,
 } from "@novadeck/toolkit/SidebarItem"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
-import { BellOff, Check, Eye, EyeOff, Pencil, X, type LucideIcon } from "lucide-react"
+import {
+  BellOff,
+  Check,
+  Eye,
+  EyeOff,
+  PanelLeftOpen,
+  Pencil,
+  X,
+  type LucideIcon,
+} from "lucide-react"
 import { lazy, Suspense, type ReactNode } from "react"
 
 import { workspaceShortcutBindings } from "../interaction/shortcuts"
@@ -99,7 +108,8 @@ export const TerminalTab = ({
   foldedRows,
   folder,
 }: {
-  // A terminal, or a window undocked from a companion, which runs nothing.
+  // A terminal, or a window that runs nothing: one undocked from a companion, the project's, or
+  // a sidebar panel's, whose close returns the panel to the sidebar.
   terminal: Tile
   // What it presents as: its program, or what the window shows.
   icon: LucideIcon
@@ -415,7 +425,7 @@ export const TerminalTab = ({
                     <Check size={14} strokeWidth={1.5} />
                   </button>
                 </Tooltip>
-              ) : isProjectWindow(terminal) ? null : (
+              ) : isPanel(terminal) || isProjectWindow(terminal) ? null : (
                 <Tooltip
                   content={
                     selected
@@ -446,8 +456,18 @@ export const TerminalTab = ({
               </Tooltip>
             ) : (
               <Tooltip content={closeTip}>
-                <button className={actionClasses} aria-label={`Close ${label}`} onClick={onClose}>
-                  <X size={14} strokeWidth={1.5} />
+                <button
+                  className={actionClasses}
+                  aria-label={
+                    isPanel(terminal) ? `Return ${name} to the sidebar` : `Close ${label}`
+                  }
+                  onClick={onClose}
+                >
+                  {isPanel(terminal) ? (
+                    <PanelLeftOpen size={14} strokeWidth={1.5} />
+                  ) : (
+                    <X size={14} strokeWidth={1.5} />
+                  )}
                 </button>
               </Tooltip>
             )}

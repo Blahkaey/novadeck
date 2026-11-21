@@ -105,8 +105,9 @@ const moveItem = (moveTo: MoveTo): ContextMenuItem => ({
 // it, as a line to read rather than choose, then rename, hand a name the person gave back
 // to Novadeck, dock an undocked window back in its terminal, release a terminal from its
 // lead, fold a lead's teammates out of the list, and close. The project window is named by its file and has no terminal to dock in:
-// it offers Close alone, as a panel's window does, which its panel names. A window running an
-// agent, on a backend that takes feedback, can ask it to write some. The menu takes only text
+// it offers Close alone. A panel's window, which its panel names, offers only to return the panel
+// to the sidebar, which is how it closes. A window running an agent, on a backend that takes
+// feedback, can ask it to write some. The menu takes only text
 // for a label, so the handle is plain `@handle` there, not the chip.
 export const windowMenu = ({
   terminal,
@@ -136,65 +137,67 @@ export const windowMenu = ({
   moveTo?: MoveTo | undefined
   onClose: () => void
 }): ContextMenuItem[] =>
-  isPanel(terminal) || isProjectWindow(terminal)
-    ? [{ value: "close", label: "Close", onSelect: onClose }]
-    : [
-        // A name nobody chose says nothing worth a line.
-        ...(terminal.titleSource && terminal.titleSource.kind !== "default"
-          ? [
-              {
-                value: "named",
-                label: titleSourceText(terminal.titleSource),
-                disabled: true,
-                onSelect: () => {},
-              },
-            ]
-          : []),
-        { value: "rename", label: "Rename", onSelect: onRename },
-        ...(onResetTitle && terminal.titleSource?.kind === "person"
-          ? [{ value: "reset-title", label: "Reset to automatic", onSelect: onResetTitle }]
-          : []),
-        ...(dockIn
-          ? [
-              {
-                value: "dock",
-                // Its terminal closed: there's nowhere to dock it, so it says so, disabled.
-                label: dockIn.name ? `Dock in ${dockIn.name}` : "Dock in its terminal (closed)",
-                disabled: !dockIn.onDock,
-                onSelect: () => dockIn.onDock?.(),
-              },
-            ]
-          : []),
-        ...(askFeedback
-          ? [
-              {
-                value: "ask-feedback",
-                label: `Ask @${askFeedback.handle} to write feedback…`,
-                icon: createElement(MessageSquareText, { size: 14, strokeWidth: 1.5 }),
-                onSelect: askFeedback.onAsk,
-              },
-            ]
-          : []),
-        ...(releaseLead
-          ? [
-              {
-                value: "release-lead",
-                label: releaseLead.lead
-                  ? `Release from @${releaseLead.lead}`
-                  : "Release from its lead",
-                onSelect: releaseLead.onRelease,
-              },
-            ]
-          : []),
-        ...(foldTeam
-          ? [
-              {
-                value: "fold-team",
-                label: `${foldTeam.folded ? "Show" : "Fold"} ${foldTeam.count} ${foldTeam.count === 1 ? "teammate" : "teammates"}`,
-                onSelect: foldTeam.onToggle,
-              },
-            ]
-          : []),
-        ...(moveTo ? [moveItem(moveTo)] : []),
-        { value: "close", label: "Close", onSelect: onClose },
-      ]
+  isPanel(terminal)
+    ? [{ value: "return", label: "Return to sidebar", onSelect: onClose }]
+    : isProjectWindow(terminal)
+      ? [{ value: "close", label: "Close", onSelect: onClose }]
+      : [
+          // A name nobody chose says nothing worth a line.
+          ...(terminal.titleSource && terminal.titleSource.kind !== "default"
+            ? [
+                {
+                  value: "named",
+                  label: titleSourceText(terminal.titleSource),
+                  disabled: true,
+                  onSelect: () => {},
+                },
+              ]
+            : []),
+          { value: "rename", label: "Rename", onSelect: onRename },
+          ...(onResetTitle && terminal.titleSource?.kind === "person"
+            ? [{ value: "reset-title", label: "Reset to automatic", onSelect: onResetTitle }]
+            : []),
+          ...(dockIn
+            ? [
+                {
+                  value: "dock",
+                  // Its terminal closed: there's nowhere to dock it, so it says so, disabled.
+                  label: dockIn.name ? `Dock in ${dockIn.name}` : "Dock in its terminal (closed)",
+                  disabled: !dockIn.onDock,
+                  onSelect: () => dockIn.onDock?.(),
+                },
+              ]
+            : []),
+          ...(askFeedback
+            ? [
+                {
+                  value: "ask-feedback",
+                  label: `Ask @${askFeedback.handle} to write feedback…`,
+                  icon: createElement(MessageSquareText, { size: 14, strokeWidth: 1.5 }),
+                  onSelect: askFeedback.onAsk,
+                },
+              ]
+            : []),
+          ...(releaseLead
+            ? [
+                {
+                  value: "release-lead",
+                  label: releaseLead.lead
+                    ? `Release from @${releaseLead.lead}`
+                    : "Release from its lead",
+                  onSelect: releaseLead.onRelease,
+                },
+              ]
+            : []),
+          ...(foldTeam
+            ? [
+                {
+                  value: "fold-team",
+                  label: `${foldTeam.folded ? "Show" : "Fold"} ${foldTeam.count} ${foldTeam.count === 1 ? "teammate" : "teammates"}`,
+                  onSelect: foldTeam.onToggle,
+                },
+              ]
+            : []),
+          ...(moveTo ? [moveItem(moveTo)] : []),
+          { value: "close", label: "Close", onSelect: onClose },
+        ]

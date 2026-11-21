@@ -1,0 +1,42 @@
+import type { RailPanel } from "@novadeck/core/types"
+
+import { panelGroups, windowPanels } from "./panels"
+import { describe, expect, it } from "./test"
+import type { DemoActionContext } from "./types"
+
+const context = (opened: RailPanel[]): DemoActionContext => ({
+  target: "selected",
+  harness: "claude",
+  selected: () => undefined,
+  select: () => {},
+  addTerminal: () => {
+    throw new Error("unused")
+  },
+  addInBackground: () => {
+    throw new Error("unused")
+  },
+  startFresh: () => undefined,
+  openPanels: (panels) => void opened.push(...panels),
+  dispatch: undefined,
+  workspace: () => undefined,
+  note: () => undefined,
+  crash: () => undefined,
+})
+
+describe("panel windows", () => {
+  it("sits with the terminals' states", () => {
+    expect(panelGroups.map(({ section, title }) => ({ section, title }))).toEqual([
+      { section: "Terminals", title: "Panel windows" },
+    ])
+  })
+
+  it("opens Notes, Todo, History and Files as windows at once", async () => {
+    const opened: RailPanel[] = []
+    const [group] = panelGroups
+    await group!.actions
+      .find((action) => action.label === "Panels in windows")!
+      .run(context(opened))
+    expect(opened).toEqual(["notes", "todo", "history", "files"])
+    expect(windowPanels).toEqual(opened)
+  })
+})

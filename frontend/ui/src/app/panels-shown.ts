@@ -1,10 +1,10 @@
 import type { RailPanel } from "@novadeck/core/types"
-import { useMemo } from "react"
+import { useCallback, useMemo, useSyncExternalStore } from "react"
 
 import { useDesktop } from "../shell/desktop"
-import { useUiState, useWorkspaceServices } from "./controller/context"
+import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { filesShown, historyShown, notesShown } from "./routing"
-import { panelShowing } from "./selectors"
+import { panelPlace, panelShowing, type PanelPlace } from "./selectors"
 import { useWorktreesShown } from "./use-worktrees-shown"
 
 // The panels of the rail the app shows with this backend and these settings, in the order the
@@ -29,8 +29,29 @@ export const usePanelsShown = (): readonly RailPanel[] => {
   )
 }
 
-// Whether the panel is in sight (`panelShowing`).
+// Whether the panel is in sight (`panelShowing`), which both stores decide: the sidebar's state
+// is the UI store's, and the window's the session's.
 export const usePanelShowing = (panel: RailPanel): boolean => {
   const desktop = useDesktop()
-  return useUiState((state) => panelShowing(state, panel, () => desktop))
+  const { ui, workspace } = useWorkspaceServices()
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const stopUi = ui.subscribe(notify)
+      const stopWorkspace = workspace.subscribe(notify)
+      return () => {
+        stopUi()
+        stopWorkspace()
+      }
+    },
+    [ui, workspace],
+  )
+  const read = useCallback(
+    () => panelShowing(ui.getSnapshot(), workspace.getSnapshot(), panel, () => desktop),
+    [ui, workspace, panel, desktop],
+  )
+  return useSyncExternalStore(subscribe, read)
 }
+
+// Where the panel is in the session on screen (`panelPlace`).
+export const usePanelPlace = (panel: RailPanel): PanelPlace =>
+  useWorkspaceState((workspace) => panelPlace(workspace, panel))

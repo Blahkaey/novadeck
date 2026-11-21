@@ -1,10 +1,12 @@
-import { isTerminal, tileName } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import { terminalLabel } from "@novadeck/core/terminals/handle"
 import type { Tile } from "@novadeck/core/types"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { searchResultClasses } from "@novadeck/toolkit/SearchCombobox"
-import { ArrowUpRight, Layers, Terminal, X } from "lucide-react"
+import { ArrowUpRight, Layers, X } from "lucide-react"
 import { useEffect, useRef } from "react"
+
+import { tileIcon } from "./panel-icons"
 
 export const TerminalSwitcher = ({
   terminals,
@@ -83,6 +85,7 @@ export const TerminalSwitcher = ({
         >
           {terminals.map((terminal) => {
             const current = terminal.id === selected
+            const Icon = tileIcon(terminal)
             return (
               <div
                 key={terminal.id}
@@ -98,14 +101,18 @@ export const TerminalSwitcher = ({
                 onClick={() => onSelect(terminal.id)}
                 className={searchResultClasses}
               >
-                <Terminal size={14} strokeWidth={1.5} aria-hidden="true" />
+                <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <p className="m-0 flex min-w-0 items-center gap-1.5 text-body leading-4 font-medium">
                     {isTerminal(terminal) && <HandleChip handle={terminal.handle} />}
                     <span className="truncate">{tileName(terminal)}</span>
                   </p>
                   <p className="switcher-process item-detail m-0 truncate text-caption">
-                    {isTerminal(terminal) ? terminal.process || terminal.command : "window"}
+                    {isTerminal(terminal)
+                      ? terminal.process || terminal.command
+                      : isPanel(terminal)
+                        ? "panel window"
+                        : "window"}
                   </p>
                 </div>
                 <ArrowUpRight size={14} aria-hidden="true" className="switcher-go" />

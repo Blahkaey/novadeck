@@ -726,12 +726,13 @@ describe("workspace commands", () => {
   context("when closing a panel's window", () => {
     const url = "/projects/project/sessions/initial/grid?terminal=panel:notes"
 
-    it("takes it off the stage, closing no terminal, and selects its neighbour", () => {
-      const app = openCommands({ workspace: workspaceWithPanel(), url })
+    it("returns the panel to the sidebar, closing no terminal, and selects its neighbour", () => {
+      const app = openCommands({ workspace: workspaceWithPanel(), url, notes: true })
       app.commands.close("panel:notes")
       expect(app.state().roster.panels).toEqual([])
       expect(app.state().roster.terminals.map((each) => each.id)).toEqual(["01", "02"])
       expect(app.state().selected).toBe("02")
+      expect(app.ui.getSnapshot().location.route.panel).toBe("notes")
     })
 
     it("takes no rename", () => {

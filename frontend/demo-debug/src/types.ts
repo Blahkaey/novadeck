@@ -1,7 +1,7 @@
 import type { UpdateOffer } from "@novadeck/core/desktop/update"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { Backend, BackendSink, TerminalKey } from "@novadeck/core/port"
-import type { Workspace } from "@novadeck/core/types"
+import type { RailPanel, Workspace } from "@novadeck/core/types"
 import type { DemoScreenStates } from "@novadeck/demo/terminals/runtime"
 import type { ComponentType } from "react"
 
@@ -35,6 +35,13 @@ export type DemoActionContext = {
   // is not selected and the sidebar stays on its panel. Returns its key.
   readonly addInBackground: (to: TerminalKey) => TerminalKey
   readonly startFresh: () => void
+  // Opens these sidebar panels as windows on the stage of the session on screen, as their
+  // headers' buttons do, with keyboard focus in the last unless `focus` is false; one already
+  // open stays as it is.
+  readonly openPanels: (
+    panels: readonly RailPanel[],
+    options?: { readonly focus?: boolean },
+  ) => void
   // The backend's sink; undefined before start or after stop.
   readonly dispatch: BackendSink["dispatch"] | undefined
   // The workspace as last committed.

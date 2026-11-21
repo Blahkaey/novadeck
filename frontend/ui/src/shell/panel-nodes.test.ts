@@ -25,6 +25,13 @@ describe("panel nodes", () => {
     expect(nodes.node("notes")).not.toBe(nodes.node("todo"))
   })
 
+  it("makes one element per panel for its count in a window, apart from the panel's own", () => {
+    const nodes = createPanelNodes()
+    expect(nodes.count("notes")).toBe(nodes.count("notes"))
+    expect(nodes.count("notes")).not.toBe(nodes.count("todo"))
+    expect(nodes.count("notes")).not.toBe(nodes.node("notes"))
+  })
+
   context("when a host holds a panel", () => {
     it("puts the panel's element in it, and parks it in no document once let go", () => {
       const nodes = createPanelNodes()

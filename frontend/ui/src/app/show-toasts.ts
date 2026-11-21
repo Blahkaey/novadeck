@@ -53,7 +53,7 @@ export const watchShowToasts = (
       board.close(itemId)
     }
     const state = ui.getSnapshot()
-    if (!mayToast(state, desktop) || modalOpen(state)) return
+    if (!mayToast(state, workspace.getSnapshot(), desktop) || modalOpen(state)) return
     for (const each of waiting) {
       if (told.get(each.itemId) === each.version) continue
       told.set(each.itemId, each.version)

@@ -38,6 +38,7 @@ import {
   resolveRoute,
   filesShown,
   notesShown,
+  panelShownOn,
   reportsWorks,
 } from "./routing"
 import { currentContext } from "./selectors"
@@ -127,6 +128,7 @@ const createServices = (
     itemStore,
     canvas,
     effects: domEffects,
+    panelShown: panelShownOn(backend),
   })
   return {
     services: {
@@ -230,7 +232,7 @@ export const WorkspaceProvider = ({
     if (backend.inbox) stops.push(watchBellRings(landing.inbox, ui))
     if (backend.inbox && (board || backend.badge))
       stops.push(
-        watchInboxPings(landing.inbox, ui, {
+        watchInboxPings(landing.inbox, workspace, ui, {
           board,
           badge: backend.badge,
         }),

@@ -1,4 +1,6 @@
 import { rowKey, type InboxRow } from "@novadeck/core/inbox"
+import type { Store } from "@novadeck/core/store"
+import type { Workspace } from "@novadeck/core/types"
 
 import { needing } from "../inbox/inbox-state"
 import type { ToastBoard } from "../inbox/InboxToasts"
@@ -24,6 +26,7 @@ import type { UiState, UiStore } from "./ui-store"
 // restarts as the app mounts.
 export const watchInboxToasts = (
   inbox: NeedsInbox,
+  workspace: Store<Workspace>,
   ui: UiStore,
   board: ToastBoard,
   {
@@ -58,14 +61,15 @@ export const watchInboxToasts = (
     const standing = new Set(needing(inbox.state.getSnapshot().items).map(rowKey))
     const rows = [...held.values()]
     held.clear()
-    for (const row of rows) if (standing.has(rowKey(row)) && mayToast(state, desktop)) show(row)
+    for (const row of rows)
+      if (standing.has(rowKey(row)) && mayToast(state, workspace.getSnapshot(), desktop)) show(row)
   }
   // The person has got to what the toasts say: all of them if the Inbox shows, else the one
   // of the terminal they selected. A modal dialog opening takes them all away too, as one
   // standing over a dialog is out of reach and would time out unseen; their rows stay in the
   // Inbox.
   const arrive = (state: UiState): void => {
-    const all = inboxShown(state, desktop) || modalOpen(state)
+    const all = inboxShown(state, workspace.getSnapshot(), desktop) || modalOpen(state)
     const gone = all
       ? [...shown.values()]
       : [shown.get(state.location.route.terminal)].filter((row) => row !== undefined)
@@ -78,7 +82,7 @@ export const watchInboxToasts = (
     graceMs,
     ring: (row) => {
       const state = ui.getSnapshot()
-      if (!mayToast(state, desktop)) return false
+      if (!mayToast(state, workspace.getSnapshot(), desktop)) return false
       // Never over the terminal they're looking at: they came back to it within the grace.
       if (state.location.route.terminal === row.source.terminalId) return false
       if (modalOpen(state)) {

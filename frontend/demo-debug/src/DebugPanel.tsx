@@ -108,6 +108,7 @@ type DebugPanelProps = {
   readonly startFresh: () => void
   readonly selected: () => TerminalKey | undefined
   readonly select: (key: TerminalKey) => void
+  readonly openPanels: DemoActionContext["openPanels"]
 }
 
 export type DebugPanel = ComponentType<DebugPanelProps>
@@ -133,6 +134,7 @@ export const createDebugPanel = ({
     startFresh,
     selected,
     select,
+    openPanels,
   }: DebugPanelProps): React.JSX.Element => {
     const [open, setOpen] = useState(false)
     const [terminals, setTerminals] = useState(shell.terminals)
@@ -179,6 +181,7 @@ export const createDebugPanel = ({
       addTerminal,
       addInBackground,
       startFresh,
+      openPanels,
       dispatch: dispatch(),
       workspace,
       note: setNote,

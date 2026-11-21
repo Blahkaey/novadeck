@@ -1,7 +1,7 @@
 import { emptyInbox, type InboxRow, type InboxState } from "@novadeck/core/inbox"
 import type { Notice } from "@novadeck/core/port"
-import { createStore } from "@novadeck/core/store"
-import { appearance } from "@novadeck/core/testing"
+import { createStore, createWorkspaceStore } from "@novadeck/core/store"
+import { appearance, workspaceFixture } from "@novadeck/core/testing"
 import { afterEach, beforeEach, vi } from "vitest"
 
 import { context, describe, expect, it } from "../test"
@@ -14,6 +14,9 @@ import {
   watchInboxPings,
 } from "./inbox-pings"
 import { createUiStore, initialUi } from "./ui-store"
+
+// The workspace on screen, whose sessions keep every panel in the sidebar.
+const workspaceOnScreen = () => createWorkspaceStore(workspaceFixture())
 
 // A ding that sounds nothing: the board under test is about its notices.
 const testDing = createDing({ sound: () => ({ on: false, volume: 0, name: "felt" }) })
@@ -131,7 +134,7 @@ const setup = (
     testDing,
   )!
   const images: number[] = []
-  const stop = watchInboxPings({ state: inbox }, ui, {
+  const stop = watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
     board,
     badge: (badge) => void badges.push(badge),
     graceMs,
@@ -697,7 +700,9 @@ describe("the app icon's image on Windows", () => {
     })
     const badges: unknown[] = []
     const ui = backgrounded()
-    watchInboxPings({ state: inbox }, ui, { badge: (badge) => void badges.push(badge) })()
+    watchInboxPings({ state: inbox }, workspaceOnScreen(), ui, {
+      badge: (badge) => void badges.push(badge),
+    })()
     expect(texts).toEqual(["9+"])
     expect(canvas.width).toBe(32)
     expect(badges[0]).toEqual({ count: 12, image: "data:image/png;base64,x" })

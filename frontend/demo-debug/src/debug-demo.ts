@@ -48,6 +48,7 @@ import { launchGroups } from "./launch"
 import { messageGroups } from "./messages"
 import { murmurGroups } from "./murmur"
 import { notesGroups } from "./notes"
+import { panelGroups } from "./panels"
 import { pdfGroups } from "./pdfs"
 import { planGroups } from "./plans"
 import { createDemoStates } from "./states"
@@ -319,6 +320,7 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
         ...states,
         groups: [
           ...states.groups,
+          ...panelGroups,
           ...installGroups(installs, states),
           ...tourGroups(tour),
           updatesGroup(launch, states.updateControls),

@@ -25,6 +25,7 @@ const context = (activeProjectId?: string): DemoActionContext => ({
     throw new Error("unused")
   },
   startFresh: () => undefined,
+  openPanels: () => {},
   dispatch: undefined,
   workspace: () => (activeProjectId ? ({ activeProjectId } as Workspace) : undefined),
   note: () => undefined,

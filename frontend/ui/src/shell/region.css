@@ -337,6 +337,29 @@
   color: var(--color-ink);
   cursor: grabbing;
 }
+/* A toggle whose panel is in a window on the stage (data-detached): a small window's outline over
+   its icon's lower right corner, cut out of the icon by the ground behind it, as the attention
+   dot is (attention-dot.css). */
+.rail-detached-mark {
+  position: absolute;
+  right: calc(50% - 11px);
+  bottom: calc(50% - 10px);
+  width: 9px;
+  height: 8px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-top-width: 3px;
+  border-radius: 2px;
+  background-color: var(--region-rail-bg, var(--color-shell));
+  box-shadow: 0 0 0 1.5px var(--region-rail-bg, var(--color-shell));
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .sidebar-tools .segment:hover:not([data-disabled]) > .rail-detached-mark {
+    background-color: var(--segmented-hover-bg, var(--color-soft));
+    box-shadow: 0 0 0 1.5px var(--segmented-hover-bg, var(--color-soft));
+  }
+}
 
 .sidebar {
   --_bg: var(--region-sidebar-bg, var(--color-shell));
