@@ -62,6 +62,7 @@ import { createRunnerItems } from "./companions/items"
 import { answerLook, type Looks } from "./companions/looks"
 import { createRunnerFiles } from "./files"
 import { createRunnerHistory } from "./history"
+import { listProject } from "./sessions/listing"
 import { createSessionSaves } from "./sessions/saves"
 import {
   cleanlyExited,
@@ -117,6 +118,12 @@ export type RunnerApi = Pick<
   // Not every runner has them (an older one doesn't): none are offered without.
   Partial<Pick<Runner, "forges" | "tour">>
 
+// What a terminal says while another window controls it and this one waits its turn.
+const openElsewhere: TerminalStatus = { state: "failed", message: "Open in another window" }
+
+// How long settling a window's saves and creates waits at most.
+const settleLimitMs = 3_000
+
 // The tour as the runner readies it, each call held as work the backend waits for.
 export const runnerTour = (
   tour: Runner["tour"],
@@ -150,6 +157,8 @@ export type RunnerBackendOptions = {
   // Where the app shows the Inbox count on the app icon.
   readonly badge?: Backend["badge"]
   readonly windowFocus?: Backend["windowFocus"]
+  // Where the app can open a project in a window of its own.
+  readonly projectWindows?: Backend["projectWindows"]
   // Where the window's own controls sit over the page's header (macOS).
   readonly windowControls?: Backend["windowControls"]
   readonly screenReader?: Backend["screenReader"]
@@ -264,6 +273,8 @@ type RunnerEntry = {
   closed: boolean
   // The surface's attachment while one is mounted.
   attachment: AttachedTerminal | undefined
+  // It has waited for another window to let go of it, and says so (`SurfaceRuntime.elsewhere`).
+  elsewhere?: boolean
   // What the adapter last reported, so each change reaches the store once.
   status: TerminalStatus
   process: string
@@ -305,6 +316,13 @@ export type SurfaceRuntime = {
   // Whether the terminal still exists and its session is the one on screen, so a screen
   // no view shows right now is kept for the next; one off screen is kept for a while.
   readonly shown: (key: TerminalKey) => boolean
+  // Whether this window shares the runner's terminals with others by project (project windows
+  // on): a terminal another window still controls, as it lets go of the project, is waited for
+  // rather than failed. Absent, or false, a terminal another window controls is failed.
+  readonly sharing?: () => boolean
+  // The terminal has waited some seconds for another window to let go of it: the surface shows
+  // that it is open in another window, and attaches once it is, its normal status returning.
+  readonly elsewhere?: (key: TerminalKey) => void
 }
 
 export type RunnerBackend = {
@@ -377,8 +395,8 @@ export const runnerBackend = (
 ): RunnerBackend => {
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? Date.now
-  const lostAtStart = lostTerminals(listing)
-  const runs = terminalRuns(listing)
+  const lostAtStart = new Set(lostTerminals(listing))
+  const runs = new Map(terminalRuns(listing))
   const leftovers = [...cleanlyExited(listing)]
   // When the runner came back as a new process, to spot one that keeps crashing.
   const restarts: number[] = []
@@ -400,6 +418,11 @@ export const runnerBackend = (
     return work
   }
   const inUse = terminalInUse((terminalId) => runner.terminals.active(terminalId))
+  // The project this window shows, told to the runner so an agent's request reaches the window
+  // that shows its project (see `terminals.showing`).
+  // The project this window told the runner it shows, while project windows are on.
+  let shownProject: string | null = null
+  const showing = terminalInUse((projectId) => runner.terminals.showing(projectId))
   const inSight = terminalsInSight((terminalIds) => runner.terminals.seen(terminalIds))
   // Every terminal a surface wants seen, told to the runner as it changes (see `terminals.seen`).
   const tellSight = (): void =>
@@ -1578,11 +1601,17 @@ export const runnerBackend = (
     close: (entry, key) => {
       entry.closed = true
       clearTimeout(entry.dwell)
-      closedHere.add(key.terminalId)
-      entries.delete(key.terminalId)
+      // Left out of a project read again, a terminal is gone or filed elsewhere now, not
+      // closed here: its shell, if it lives, is not ours to end, and its new entry stays.
+      if (!reading) closedHere.add(key.terminalId)
+      if (entries.get(key.terminalId) === entry) entries.delete(key.terminalId)
       // A removed project's terminals are closed by the runner, as it removes the project.
       // A deleted session's are too, as it removes the session.
-      if (!removedProjects.has(key.projectId) && !removedSessions.has(key.workspaceSessionId))
+      if (
+        !reading &&
+        !removedProjects.has(key.projectId) &&
+        !removedSessions.has(key.workspaceSessionId)
+      )
         void track(endShell(entry))
       // After the shell's end is under way, and once this commit is done: what it tells
       // its stores' readers, who may start a transaction of their own, as the companion's
@@ -1595,6 +1624,24 @@ export const runnerBackend = (
     },
   })
 
+  // Sends what changed and resolves once the runner has all of it and every create this window
+  // started has landed, within a few seconds, as before another window reads a project: a read
+  // over a terminal still being created would drop it from the layout.
+  const settleSaves = async (): Promise<void> => {
+    const landed = (async () => {
+      await saves.settle()
+      // eslint-disable-next-line no-await-in-loop -- Work started meanwhile is waited for too.
+      while (pending.size) await Promise.allSettled(pending)
+    })()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      landed,
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, settleLimitMs))),
+    ])
+    clearTimeout(timer)
+  }
+  // The project whose sessions this window may save, null for any (see `limitSaves`).
+  let saveScope: string | null = null
   // Every changed session is sent after a quiet spell, or at once on pagehide.
   const saves = createSessionSaves({
     save: (sessionId, state, visitedAt) => runner.sessions.save({ sessionId, state, visitedAt }),
@@ -1603,6 +1650,11 @@ export const runnerBackend = (
     track,
     halted: () => halted,
     delay: saveDelay,
+    // With project windows on only the sessions of the project this window shows.
+    allowed: (sessionId) =>
+      saveScope === null ||
+      latest?.projects.find((project) => project.history.some((each) => each.id === sessionId))
+        ?.id === saveScope,
     saved: listing.flatMap(({ sessions: listed }) =>
       listed.flatMap(({ session }) =>
         session.state === null
@@ -1615,10 +1667,14 @@ export const runnerBackend = (
   // Whether the first commit, which renders the page, has happened.
   let initialized = false
 
+  // Whether the commit under way puts a project the runner holds in place of this window's copy.
+  let reading = false
+
   const commit: Backend["commit"] = (workspace, actions) => {
     const initial = !initialized
     initialized = true
     latest = workspace
+    reading = actions.some((action) => action.type === "project/sync")
     for (const project of workspace.projects) {
       if (!asked.has(project.id)) void projectReady(project)
       for (const session of project.history)
@@ -1645,6 +1701,7 @@ export const runnerBackend = (
     )
     for (const sessionId of deleted) removedSessions.add(sessionId)
     registry.reconcile(workspace, actions)
+    reading = false
     for (const projectId of removed) void removeOnRunner(projectId)
     for (const sessionId of deleted) void removeSessionOnRunner(sessionId)
     // The person's renames and arrangements of sessions, as the workspace has them now.
@@ -1670,15 +1727,63 @@ export const runnerBackend = (
     if (!initial) queueMicrotask(reviveOnScreen)
   }
 
+  // Reads a project from the runner again, as a window that takes it on from another holds
+  // what the runner has now rather than the copy it loaded: what it keeps of the runner's terminals
+  // and sessions is brought up to date, and the project is handed back as a seed, for the page to
+  // put in place (`project/sync`). Undefined for a project the runner no longer has.
+  const syncProject: NonNullable<Backend["syncProject"]> = async (projectId) => {
+    // What this window has yet to send or create is not read over.
+    await settleSaves()
+    const project = (await runner.projects.list()).find((each) => each.id === projectId)
+    if (!project || halted) return undefined
+    const entry = await listProject(runner, project, newId, now)
+    if (!entry || halted) return undefined
+    const one: RunnerListing = [entry]
+    const terminals = entry.sessions.flatMap((each) => each.terminals)
+    for (const { id } of terminals) lostAtStart.delete(id)
+    for (const id of lostTerminals(one)) lostAtStart.add(id)
+    for (const [id, run] of terminalRuns(one)) runs.set(id, run)
+    for (const summary of terminals) runnerSummaries.set(summary.id, summary)
+    telemetry.update((held) => ({ ...held, ...runnerTelemetry(one, quickExitMs) }))
+    // It and its sessions exist on the runner: nothing creates them.
+    asked.add(project.id)
+    projects.set(project.id, created)
+    for (const { session } of entry.sessions) {
+      asked.add(session.id)
+      sessions.set(session.id, created)
+    }
+    saves.held(
+      entry.sessions.flatMap(({ session }) =>
+        session.state === null
+          ? []
+          : [[session.id, { state: session.state, visitedAt: session.visitedAt }] as const],
+      ),
+    )
+    return runnerSeed(one, quickExitMs).projects[0]
+  }
+
   const runtime: SurfaceRuntime = {
     entry: (key) => registry.get(key)?.entry,
     resized: (key, size) => {
       const entry = registry.get(key)?.entry
       if (entry) entry.size = size
     },
+    elsewhere: (key) => {
+      const entry = registry.get(key)?.entry
+      if (!entry || entry.closed || entry.elsewhere) return
+      entry.elsewhere = true
+      dispatch(statusAction(entry, openElsewhere))
+    },
     attached: (key, attachment) => {
       const entry = registry.get(key)?.entry
       if (entry) entry.attachment = attachment
+      // It was open in another window until now: its own status comes back.
+      if (entry?.elsewhere) {
+        entry.elsewhere = false
+        const summary = runnerSummaries.get(key.terminalId)
+        const back = summary && terminalActivity(summary, quickExitMs).status
+        if (back && back !== "clean") dispatch(statusAction(entry, back))
+      }
       return () => {
         if (entry?.attachment === attachment) entry.attachment = undefined
       }
@@ -1728,6 +1833,7 @@ export const runnerBackend = (
         entry.dwell = undefined
       }
     },
+    sharing: () => saveScope !== null,
     shown: (key) => {
       const entry = registry.get(key)?.entry
       return entry !== undefined && !entry.closed && onScreen(entry)
@@ -1836,6 +1942,7 @@ export const runnerBackend = (
       if (status.state === "connected") {
         saves.schedule()
         inUse.connected()
+        showing.connected()
         inSight.connected()
       }
     }
@@ -2005,6 +2112,27 @@ export const runnerBackend = (
     murmur: murmur.murmur,
     typeInto: screens.typeInto,
     activeTerminal: inUse.report,
+    settleSaves,
+    showingProject: (projectId, others) => {
+      // A project this window stops showing is let go of at once where another window may take
+      // it over: its screens detach, so that window can control its terminals, rather than the
+      // screens parking and keeping control for seconds or minutes. Alone, they stay warm.
+      if (
+        others === true &&
+        projectId !== null &&
+        shownProject !== null &&
+        shownProject !== projectId
+      )
+        screens.release((key) => key.projectId === shownProject)
+      shownProject = projectId
+      showing.report(projectId)
+    },
+    limitSaves: (projectId) => {
+      // What this window changed in the project it showed is sent first.
+      flush()
+      saveScope = projectId
+    },
+    syncProject,
     start,
     companions: createRunnerCompanions(runner.companions, {
       livePages: options.livePages === true,
@@ -2117,6 +2245,7 @@ export const runnerBackend = (
     ...(options.notices ? { notices: options.notices } : {}),
     ...(options.badge ? { badge: options.badge } : {}),
     ...(options.windowFocus ? { windowFocus: options.windowFocus } : {}),
+    ...(options.projectWindows ? { projectWindows: options.projectWindows } : {}),
     ...(options.windowControls ? { windowControls: options.windowControls } : {}),
     ...(options.screenReader ? { screenReader: options.screenReader } : {}),
     ...(options.panePicture ? { panePicture: options.panePicture } : {}),

@@ -1,3 +1,4 @@
+import type { InboxRow } from "@novadeck/core/inbox"
 import { useCallback, useEffect, useMemo, type ReactNode } from "react"
 
 import { AgentContextProvider } from "../inbox/agent-context"
@@ -10,7 +11,7 @@ import { anyAgentWorking } from "../projects/project-status"
 import { useDesktop } from "../shell/desktop"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { dingOf } from "./ding"
-import { clickNotice, noticeBoard } from "./inbox-pings"
+import { clickNotice, noticeBoard, rowOfNotice } from "./inbox-pings"
 import { watchInboxToasts } from "./inbox-toasts"
 import { watchMoveToasts } from "./move-toasts"
 import { currentState, modalOpen } from "./selectors"
@@ -23,23 +24,54 @@ import { focusWhenReady, watchShowToasts } from "./show-toasts"
 const NoticeClicks = (): null => {
   const { backend, commands, ui } = useWorkspaceServices()
   const opener = useInboxOpener()
-  const { peekInbox, reveal } = commands
+  const { peekInbox, reveal, handOffTerminal } = commands
   useEffect(
     () =>
-      backend.notices?.onClick((terminalId) =>
+      backend.notices?.onClick((terminalId) => {
         // The backend's rows, as the Inbox may hold the row back.
+        const rows = backend.inbox?.state.getSnapshot().items ?? []
+        const rowId = noticeBoard(backend.notices, dingOf(backend, ui))?.rowIdOf(terminalId)
+        // With project windows on, what is about a project goes to its window, which comes
+        // forward and does what a click does there; this window when it shows none.
+        if (handOffTerminal(terminalId, rowOfNotice(terminalId, rows, rowId)?.id)) return
         clickNotice(
           terminalId,
-          backend.inbox?.state.getSnapshot().items ?? [],
+          rows,
           {
-            open: (id, after) => opener?.((rows) => rows.find((row) => row.id === id), { after }),
+            open: (id, after) => opener?.((each) => each.find((row) => row.id === id), { after }),
             peekInbox,
             reveal,
           },
-          noticeBoard(backend.notices, dingOf(backend, ui))?.rowIdOf(terminalId),
-        ),
-      ),
-    [backend, ui, opener, peekInbox, reveal],
+          rowId,
+        )
+      }),
+    [backend, ui, opener, peekInbox, reveal, handOffTerminal],
+  )
+  return null
+}
+
+// Hears where another window sends this one: to a project, a terminal of it, or an Inbox
+// row's sheet. A project this window hasn't heard of, one made in another window after this
+// one loaded, is read from the runner first (`readProject`).
+const HandedPlaces = (): null => {
+  const { backend, commands } = useWorkspaceServices()
+  const opener = useInboxOpener()
+  const { peekInbox, showProjectHere } = commands
+  useEffect(
+    () =>
+      backend.projectWindows?.onNavigate((target) => {
+        const row =
+          target.rowId === undefined
+            ? undefined
+            : backend.inbox?.state.getSnapshot().items.find((each) => each.id === target.rowId)
+        if (!row || !opener) return void showProjectHere(target)
+        opener(
+          (rows) => rows.find((each) => each.id === row.id),
+          { after: peekInbox() },
+          { here: true },
+        )
+      }),
+    [backend, opener, peekInbox, showProjectHere],
   )
   return null
 }
@@ -101,6 +133,12 @@ export const InboxHost = ({
     },
     [workspace, select, reveal],
   )
+  // A row about a project another window shows opens its sheet there.
+  const { handOffRow } = commands
+  const routeAway = useCallback(
+    (row: InboxRow) => handOffRow({ id: row.id, terminalId: row.source.terminalId }),
+    [handOffRow],
+  )
   // Going to an Inbox row's terminal from the Inbox's list turns the sidebar to the terminals.
   const revealItem = useCallback(
     (terminalId: string) => reveal(terminalId, active ? "terminals" : undefined),
@@ -115,6 +153,7 @@ export const InboxHost = ({
       <InboxProvider
         inbox={inbox}
         reveal={revealItem}
+        routeAway={routeAway}
         phone={phone}
         working={working}
         active={active}
@@ -122,6 +161,7 @@ export const InboxHost = ({
       >
         {children}
         <NoticeClicks />
+        <HandedPlaces />
         <PlanTextProvider workspace={workspace} companions={backend.companions}>
           <InboxSheet active={active} />
         </PlanTextProvider>

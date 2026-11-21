@@ -74,7 +74,10 @@ export const screensOptions = (
   connection: runtime.connection,
   reconnected: () => runtime.connected(),
   classify: (error) =>
-    hasCode(error, "RESOURCE_LIMIT")
+    hasCode(error, "RESOURCE_LIMIT") ||
+    // With project windows, the window that showed the project lets go of the terminal a moment
+    // after this one asks for it: ask again until it has.
+    (hasCode(error, "CONTROL_IN_USE") && runtime.sharing?.() === true)
       ? "busy"
       : hasCode(error, "DISCONNECTED")
         ? "offline"
@@ -97,6 +100,9 @@ export const screensOptions = (
     resized: (key, size) => runtime.resized(key, size),
     stage: (key, stage) => runtime.screen(key, stage),
     lost: (key, error) => runtime.lost(key, error),
+    waiting: (key, error) => {
+      if (hasCode(error, "CONTROL_IN_USE")) runtime.elsewhere?.(key)
+    },
     attached: (key, stream) => runtime.attached(key, attachments.get(stream)!),
   },
 })

@@ -830,6 +830,22 @@ App:
   actions. "Not offered" boots a backend without the setting, so Preferences > Experimental shows
   the Agent worktrees row disabled, reading "Not available here."; "Offered" boots
   back to normal.
+- **Project windows:** the App section's group for the desktop app's project windows
+  (Preferences > Experimental > Project windows, which needs the experimental channel and the
+  switch on). "Offered, on Experimental" boots on the experimental channel with a backend that can
+  open windows; "Not offered" boots one that can't, so the row is disabled, reading "Not available
+  here."; "A second window, not the first" boots as a window that isn't the app's first, with no
+  welcome dialog, Agent Chat offer, voice or Murmur offer or what's-new card. The other windows
+  are pretended: "Another window shows the next project" and "Other windows show every other
+  project" put the quiet window mark and its "Shown in another window" tooltip on those projects in
+  the switcher and the pins bar, picking one swaps (the project this window leaves takes the mark),
+  and a project's right-click menu opens one in a window of its own ("Open in new window", not
+  offered for the project on screen); "No other window" clears them. "Another window sends this one
+  to the next project" plays the receiving side of a swap or hand-off; "Another window has the
+  voice" and "This window has the voice" move the voice (this window rings no ding without it).
+  The page's hand-offs to a pretend window go nowhere a page can see, so the demo only notes them
+  (`frontend/demo-debug/src/desktop/project-windows.ts`). Specs use `&windows=on` and
+  `&windows=extra` and the `projectWindows` handle of `support/backend.ts`.
 - **Forges:** the App section's group for the forge integrations (Preferences > Experimental >
   Forge integrations, which needs the experimental channel, and the pull request marks in
   Worktrees). The demo starts with GitHub signed in on github.com, GitLab installed but signed out on
@@ -1423,6 +1439,74 @@ opened later at their `zoomFactor` and again at `dom-ready`. Electron gives ever
 any window resize; the browser pane's views keep their own zoom. Nothing else zooms the page: the View menu carries no zoom role (so no Ctrl+- or
 Ctrl+0 is taken from a terminal on Linux or Windows), and Electron applies no pinch or Ctrl+wheel zoom. A browser has no `showScale`, so the row is hidden there and the
 browser's own zoom does it; the previews demo scales by CSS `zoom` instead.
+
+### Project windows
+
+With Preferences > Experimental > Project windows on (`projectWindows` in the preferences; the
+desktop app only, with Experimental on), the app can open several windows, each showing one project,
+and a project shows in at most one window; all windows are equal. Everything lives in the runner, so
+a window is another UI client of it. The main process keeps which window shows what
+(`apps/desktop/src/main/window/project-windows.ts`, pure over the window type, with its IPC in
+`project-windows-ipc.ts`); each page reports its project (`showProjectWindow`) and hears the
+projects the other windows show and whether it is the voice window (`onProjectWindows`, kept in
+the UI store's `windows`); the page decides at once what an action does:
+
+- **Open in new window** (a project's right-click menu in the switcher and the pins bar, not for the
+  project on screen) opens a window on it (`openProjectWindow`: its route is
+  `#/projects/<id>/sessions/_/_`, so the page takes the project's own session and view), or brings
+  forward the window that shows it. The app opens only on a project a page has told it knows
+  (`showProjectWindow`'s `known`) and at most 16 windows. There is no other way to open one.
+- **Swap.** Picking, in the switcher, a pin or its shortcut, a project another window shows is a handshake,
+  with no fixed waits: this window sends its saves (`Backend.settleSaves`, within `swapFlushMs`), then asks the
+  app to swap (`swapProjectWindow`, which resolves how it went), and the app has the other window send its own
+  (`onProjectWindowFlush`, answered by the page once its saves landed, `flushWaitMs` at most so a dead window
+  holds nothing up) before it sends that window to this window's former project and answers. Only then does this
+  window read the project from the runner (`Backend.syncProject`, then the core's `project/sync`) and switch, so
+  both windows start from what the other saved. A window that hadn't said what it shows can't give the other
+  anything: the app brings the other forward and this window stays (`forwarded`). The latest pick wins when
+  readings finish out of order. A project this window shows is never read over: its copy is the live one. A
+  read waits for this window's saves and creates to land (`Backend.settleSaves`), and one that can't be read or
+  built is logged and the window carries on with what it has. A project the window never heard of, made in
+  another window after it loaded, is learned the same way: no page reload.
+- **Saves.** With project windows on a window saves only changes to the sessions of the project it shows
+  (`Backend.limitSaves`, which sends what it changed before the limit moves; a change noted while allowed
+  is retried until it lands however the limit moves), the others' copies here being stale until it takes
+  them on, so two windows never overwrite each other's layouts.
+- **Routing.** What is about a project goes to its window, which comes forward and goes there
+  (`handOffToProjectWindow`): `reveal` (an Inbox row's "Go to terminal", a message link, a toast),
+  an Inbox row's sheet (`InboxProvider`'s `routeAway`), and a notification's click. A notification's click
+  always brings some window forward: the project's, else the one that raised it, else the voice's
+  (`clickNotice` in `window/voice.ts`). With none showing the project, the window acted in switches to
+  it as before. What isn't about a project (Preferences, search, dialogs) stays in the window acted in;
+  nothing changes a window on its own.
+- **Agents.** What an agent asks of the person goes to the window that shows the project of the terminal
+  that asked: the page tells the runner which project it shows (`terminals.showing`, while the switch is
+  on, lapsing with its connection) and an approval, a look at a page and `open_agent` go to that client,
+  else the one used last (its `terminals.active` or `showing` report came last), else the newest
+  (`ClientWindows`, `Followers.newest`), which is also what a client that says nothing gets. What an agent
+  does never raises a window: an `open_agent` with focus for a project another window shows is handed
+  over `quiet`, so that window goes there without coming forward or taking the system's focus. Only
+  the person's own actions (an Inbox row, a notification click, a swap, Open in new window) bring a window
+  forward. A request from a session the receiving window doesn't know (made after it loaded) is
+  answered "The terminal that asked isn't open in Novadeck."; with routing by project this mostly goes
+  away.
+- **One-time things** (the welcome, the Agent Chat offer, voice and Murmur offers, what's new) are left to
+  the app's first window: later ones get `DesktopApp.extraWindow` and `Backend.projectWindows.extra`.
+- **Noise.** Only the window used last (the voice) plays the ding (`createDing`'s `on`), raises
+  notifications and sets the badge (the main process drops the others' notices and badges and shows
+  the new voice's last count when the voice moves; a closing voice's notifications go with it). The
+  rules are pure in `window/voice.ts`, tested there.
+- **Restore.** With the switch on the main process keeps each window's project and bounds in
+  `windows.json` of the data folder (`window/saved-windows.ts`) and reopens them at the next launch; a
+  window closed while others remain leaves the list, a quit keeps the windows open at its start, and
+  the last window closing keeps the list as it stood before. Off, launch is as it was.
+- **Known limit.** "The window used last" (what a request with no window for its project goes to) moves
+  with the runner's `showing` and `active` reports, not with focus: a background window that reconnects
+  and reports becomes the last used, and a client that never reports (a `dev:web` tab) is never chosen.
+- **Title.** The document's title names the project while project windows are on, which the window shows.
+
+Preferences are one `localStorage` shared by the windows, which follow each other's changes through
+the `storage` event (`followSavedPreferences`).
 
 ### UI behaviour specs
 

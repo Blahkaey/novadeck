@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest"
 
 import {
   desktopBadgeOf,
+  parseProjectWindowShown,
+  projectWindowSwapOf,
+  parseProjectWindowsState,
+  parseProjectWindowTarget,
   parseUpdateOffer,
   parseWhatsNew,
   rendererPoolOf,
@@ -110,5 +114,84 @@ describe("what is new from an older host", () => {
       highlights: [item(1)],
     })
     expect(parseWhatsNew({ version: "1.5.0", highlights: [], headsUp: [item(1)] })).toBeUndefined()
+  })
+})
+
+describe("a place in a project handed to its window", () => {
+  it("is the project, with the terminal and the row when it names them", () => {
+    expect(parseProjectWindowTarget({ projectId: "p" })).toEqual({ projectId: "p" })
+    expect(parseProjectWindowTarget({ projectId: "p", terminalId: "t", rowId: "r" })).toEqual({
+      projectId: "p",
+      terminalId: "t",
+      rowId: "r",
+    })
+  })
+
+  it.each([
+    ["nothing", undefined],
+    ["no project", { terminalId: "t" }],
+    ["an empty project", { projectId: "" }],
+    ["a project with a control character", { projectId: "p\nq" }],
+    ["a terminal that is not text", { projectId: "p", terminalId: 4 }],
+    ["a row that is too long", { projectId: "p", rowId: "r".repeat(201) }],
+  ])("is nothing for %s", (_name, value) => {
+    expect(parseProjectWindowTarget(value)).toBeUndefined()
+  })
+})
+
+describe("a place an agent handed to a window", () => {
+  it("is marked quiet, which only a true mark keeps", () => {
+    expect(parseProjectWindowTarget({ projectId: "p", quiet: true })).toEqual({
+      projectId: "p",
+      quiet: true,
+    })
+    expect(parseProjectWindowTarget({ projectId: "p", quiet: "yes" })).toEqual({ projectId: "p" })
+  })
+})
+
+describe("what a window tells the app of its project", () => {
+  it("is the project, or none, and the projects its page knows", () => {
+    expect(parseProjectWindowShown({ projectId: "p", known: ["p", "q"] })).toEqual({
+      projectId: "p",
+      known: ["p", "q"],
+    })
+    expect(parseProjectWindowShown({ projectId: null })).toEqual({ projectId: null, known: [] })
+  })
+
+  it.each([
+    ["nothing", undefined],
+    ["a project that is not an id", { projectId: "", known: [] }],
+    ["a list that is not one", { projectId: "p", known: "p" }],
+    ["an id that is not text", { projectId: "p", known: [3] }],
+    ["more projects than a page may name", { projectId: "p", known: Array(257).fill("p") }],
+  ])("is nothing for %s", (_name, value) => {
+    expect(parseProjectWindowShown(value)).toBeUndefined()
+  })
+})
+
+describe("what the app says of its other windows", () => {
+  it("is the projects they show and whether this window has the voice", () => {
+    expect(parseProjectWindowsState({ elsewhere: ["a", "b"], voice: false })).toEqual({
+      elsewhere: ["a", "b"],
+      voice: false,
+    })
+  })
+
+  it.each([
+    ["no voice", { elsewhere: [] }],
+    ["a list that is not one", { elsewhere: "a", voice: true }],
+    ["an id that is not text", { elsewhere: [3], voice: true }],
+  ])("is nothing for %s", (_name, value) => {
+    expect(parseProjectWindowsState(value)).toBeUndefined()
+  })
+})
+
+describe("how a swap went", () => {
+  it("is one of the three answers, and `alone` for anything else", () => {
+    expect(projectWindowSwapOf("swapped")).toBe("swapped")
+    expect(projectWindowSwapOf("forwarded")).toBe("forwarded")
+    expect(projectWindowSwapOf("alone")).toBe("alone")
+    expect(projectWindowSwapOf(undefined)).toBe("alone")
+    expect(projectWindowSwapOf({ swapped: true })).toBe("alone")
   })
 })
