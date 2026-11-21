@@ -1,7 +1,7 @@
 import { todosLeft } from "@novadeck/core/notes"
+import { panelLabels } from "@novadeck/core/types"
 import { useCallback, useSyncExternalStore, type ComponentProps } from "react"
 
-import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 import { TodoBoard } from "./TodoBoard"
 

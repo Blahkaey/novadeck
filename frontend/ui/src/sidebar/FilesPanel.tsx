@@ -5,6 +5,7 @@ import {
   type FolderListing,
   type FilesProject,
 } from "@novadeck/core/files"
+import { panelLabels } from "@novadeck/core/types"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
 import { SubjectBar, SubjectDetail, SubjectName, SubjectSide } from "@novadeck/toolkit/SubjectBar"
@@ -71,7 +72,6 @@ import { FilesExcludeDialog } from "./FilesExcludeDialog"
 import { NameRow } from "./FilesNameRow"
 import { FilesStrip } from "./FilesStrip"
 import { NoteRow, TreeRow, type Pointed } from "./FilesTreeRows"
-import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 import { useFilesClipboard, type PasteChanges } from "./useFilesClipboard"
 import { useFocusOnceShown, focusMovable } from "./useFocusOnceShown"

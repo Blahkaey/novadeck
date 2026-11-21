@@ -1,4 +1,4 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal } from "@novadeck/core/roster"
 import type { Tile } from "@novadeck/core/types"
 
 import type { ReleaseLead } from "../terminals/window-menu"
@@ -12,7 +12,7 @@ import { currentState, currentTarget, sameTarget } from "./selectors"
 export const useReleaseLead = (tile: Tile): ReleaseLead | undefined => {
   const { backend } = useWorkspaceServices()
   const target = useWorkspaceState(currentTarget, sameTarget)
-  const leadId = isWindow(tile) ? null : (tile.ledBy ?? null)
+  const leadId = isTerminal(tile) ? (tile.ledBy ?? null) : null
   const lead = useWorkspaceState((workspace) =>
     leadId === null
       ? undefined
@@ -21,7 +21,7 @@ export const useReleaseLead = (tile: Tile): ReleaseLead | undefined => {
   const { releaseLead } = backend
   if (
     !releaseLead ||
-    isWindow(tile) ||
+    !isTerminal(tile) ||
     !tile.ledBy ||
     tile.state === "starting" ||
     tile.state === "exited" ||

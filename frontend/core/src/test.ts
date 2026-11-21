@@ -1,1 +1,1 @@
-export { describe as context, describe, expect, it } from "vitest"
+export { describe as context, describe, expect, expectTypeOf, it } from "vitest"

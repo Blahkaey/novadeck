@@ -29,13 +29,17 @@ import {
 } from "./items/transitions"
 import { emptyLayout, pruneCanvasLayout, spanTerminal } from "./layout/workspace-layout"
 import {
+  addPanel,
   addTerminal,
   createRoster,
+  hasPanel,
   hasTerminal,
   hasTile,
   hasWindow,
   listFirst,
   listUnderOpener,
+  panelTile,
+  removePanel,
   removeWindow,
   renameTerminal,
   reorderTerminals,
@@ -50,6 +54,7 @@ import type {
   CompanionWindowMeta,
   PreferencesValue,
   Project,
+  RailPanel,
   TerminalLayout,
   TerminalMetadata,
   TerminalRoster,
@@ -222,6 +227,10 @@ export type WorkspaceAction =
   // What the backend says of a window: there, renamed, or gone.
   | { type: "window/upsert"; target: WorkspaceTarget; window: CompanionWindowMeta }
   | { type: "window/remove"; target: WorkspaceTarget; windowId: string }
+  // The person opens a sidebar panel as a window on the stage, which comes into view selected,
+  // or closes that window. Only the UI keeps these: no backend reports them.
+  | { type: "panel/open"; target: WorkspaceTarget; panel: RailPanel }
+  | { type: "panel/close"; target: WorkspaceTarget; panel: RailPanel }
   | { type: "terminal/reorder"; target: WorkspaceTarget; tabOrder: string[] }
   | { type: "terminal/status"; target: WorkspaceTarget; terminalId: string; status: TerminalStatus }
   | {
@@ -658,6 +667,20 @@ export const workspaceReducer = (workspace: Workspace, action: WorkspaceAction):
           ? dropTile(state, action.windowId, removeWindow(state.roster, action.windowId))
           : state,
       )
+    case "panel/open":
+      return updateTarget(workspace, action.target, (state) => {
+        const tile = panelTile(action.panel)
+        return hasPanel(state.roster, tile.id)
+          ? state
+          : { ...state, roster: addPanel(state.roster, tile), selected: tile.id }
+      })
+    case "panel/close":
+      return updateTarget(workspace, action.target, (state) => {
+        const { id } = panelTile(action.panel)
+        return hasPanel(state.roster, id)
+          ? dropTile(state, id, removePanel(state.roster, id))
+          : state
+      })
     case "bar/open":
       return updateTarget(workspace, action.target, (state) => {
         const opened = withBar(state, action.terminalId, (bar) => raise(bar, action.key))

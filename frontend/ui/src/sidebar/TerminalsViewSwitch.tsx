@@ -1,9 +1,7 @@
-import type { TerminalsView } from "@novadeck/core/types"
+import { panelLabels, type TerminalsView } from "@novadeck/core/types"
 import { SegmentGroup } from "@novadeck/toolkit/SegmentGroup"
 import { Layers2, Terminal as TerminalIcon } from "lucide-react"
 import { useRef } from "react"
-
-import { panelLabels } from "./panel-labels"
 
 // The switch before the Terminals panel's title, between its two views: the open session's
 // terminals and the project's sessions, the one that shows chosen. Each view's header draws

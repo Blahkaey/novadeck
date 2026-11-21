@@ -9,7 +9,13 @@ import {
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { DragDropProvider } from "@dnd-kit/react"
 import { isSortable, useSortable } from "@dnd-kit/react/sortable"
-import { railPanelOf, railPanels, type RailPanel, type SidebarPanel } from "@novadeck/core/types"
+import {
+  panelLabels,
+  railPanelOf,
+  railPanels,
+  type RailPanel,
+  type SidebarPanel,
+} from "@novadeck/core/types"
 import { ToggleGroup, ToggleGroupItem } from "@novadeck/toolkit/ToggleGroup"
 import {
   FolderGit2,
@@ -23,7 +29,6 @@ import {
 import { useCallback, useLayoutEffect, useRef, useState, type ComponentProps } from "react"
 
 import { shortcutBindings, type ShortcutName } from "../interaction/shortcuts"
-import { panelLabels } from "../sidebar/panel-labels"
 import { BellDot } from "./BellDot"
 import { FlareDot, recentDropMs, useRecentDrop } from "./HistoryDot"
 import type { InboxBadge } from "./inbox-badge"

@@ -2,12 +2,15 @@ import { isOnBar } from "@novadeck/core/items"
 import { messagesKey, settle, type Bar, type BarKey } from "@novadeck/core/items/companion-bar"
 import { gridSpan } from "@novadeck/core/layout/workspace-layout"
 import type { RestoredView } from "@novadeck/core/seed"
-import type {
-  GridSpan,
-  TerminalLayout,
-  ViewMode,
-  WorkspaceSession,
-  WorkspaceState,
+import {
+  panelNamed,
+  railPanels,
+  type GridSpan,
+  type RailPanel,
+  type TerminalLayout,
+  type ViewMode,
+  type WorkspaceSession,
+  type WorkspaceState,
 } from "@novadeck/core/types"
 import { maxClientStateLength } from "@novadeck/protocol"
 
@@ -15,7 +18,9 @@ import { maxClientStateLength } from "@novadeck/protocol"
 // build cannot read starts the session fresh instead of breaking the load. Only how the
 // UI shows the session's terminals and windows, and how the person arranged each
 // terminal's bar, by id; the terminals, windows and items themselves are the runner's
-// own records.
+// own records. The panels open on the session's stage are written only when there are any,
+// so a session without them saves as it did before they could open there; an older build
+// reads past them, and its restore drops the `panel:` ids it doesn't know.
 const version = 2
 
 export type SavedSession = {
@@ -74,9 +79,18 @@ export const encodeSession = (
 ): string => {
   const { roster, layout, view, windowedView, selected } = session.state
   const bars = keptBars(session.state)
+  const panels = roster.panels.map((tile) => tile.panel)
   const encode = (): string => {
-    const saved: SavedSession = {
-      state: { order: roster.order, layout: settled(layout), view, windowedView, selected, bars },
+    const saved: { readonly state: Omit<RestoredView, "panels"> & Partial<RestoredView> } = {
+      state: {
+        order: roster.order,
+        layout: settled(layout),
+        view,
+        windowedView,
+        selected,
+        bars,
+        ...(panels.length ? { panels } : {}),
+      },
     }
     return JSON.stringify({ version, ...saved })
   }
@@ -160,6 +174,19 @@ const barsOf = (value: unknown): Record<string, Bar> =>
       )
     : {}
 
+// The panels a save had open on the stage, each once. A save from before they could open there
+// has none, and a name this build doesn't know as a rail panel, or a list it can't read, opens
+// none: the session's other state still loads.
+const panelsOf = (value: unknown): RailPanel[] => {
+  if (!Array.isArray(value)) return []
+  const named = value.flatMap((name): RailPanel[] => {
+    const panel = isString(name) ? panelNamed(name) : undefined
+    const rail = railPanels.find((each) => each === panel)
+    return rail ? [rail] : []
+  })
+  return [...new Set(named)]
+}
+
 // Reads what `encodeSession` wrote; undefined for anything else.
 export const decodeSession = (text: string | null): SavedSession | undefined => {
   if (text === null) return undefined
@@ -187,6 +214,7 @@ export const decodeSession = (text: string | null): SavedSession | undefined => 
       windowedView: state.windowedView as RestoredView["windowedView"],
       selected: state.selected,
       bars: barsOf(state.bars),
+      panels: panelsOf(state.panels),
     },
   }
 }

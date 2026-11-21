@@ -1,4 +1,4 @@
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isTerminal, tileName } from "@novadeck/core/roster"
 import {
   idleNote,
   pausedUntil,
@@ -140,8 +140,9 @@ export const WindowShell = ({
   } | null>(null)
   const ignoreDoubleClickUntil = useRef(0)
   const renaming = Boolean(rename)
-  const shell = isWindow(terminal) ? undefined : terminal
-  const label = terminalLabel(terminal.name, shell?.handle)
+  const shell = isTerminal(terminal) ? terminal : undefined
+  const name = tileName(terminal)
+  const label = terminalLabel(name, shell?.handle)
   // Its phase, the need mark after its name, and its note for assistive technology, from the
   // same derivation as its tab: what the agent needs of the person, that Novadeck can't hear
   // from it, that it is paused at its limit, what it waits on that wakes it, that it reported
@@ -174,9 +175,9 @@ export const WindowShell = ({
   // Said again once the limit it waits on resets, or its wake-up passes.
   useRenderAt(phase === "waiting" && shell ? nextWaitingChange(shell) : resets)
   const headerDoubleAction = onFlyTo
-  // The project window is named by its file, so its name is no rename's: a double-click on it
-  // is the header's own.
-  const nameRenames = !isProjectWindow(terminal)
+  // The project window is named by its file, and a panel's by its panel, so their name is no
+  // rename's: a double-click on it is the header's own.
+  const nameRenames = !isPanel(terminal) && !isProjectWindow(terminal)
   const header = (
     <header
       className="terminal-header flex shrink-0 touch-manipulation select-none flex-nowrap items-center justify-between whitespace-nowrap"
@@ -291,7 +292,7 @@ export const WindowShell = ({
             hidden={renaming}
           >
             <Heading hidden={renaming} data-terminal-name="">
-              {terminal.name}
+              {name}
             </Heading>
             {lead && !renaming && (
               <Tooltip
@@ -337,7 +338,7 @@ export const WindowShell = ({
           {rename && (
             <TerminalRenameInput
               id={terminal.id}
-              name={terminal.name}
+              name={name}
               label={label}
               value={rename.value}
               request={rename.request}

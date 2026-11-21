@@ -1,6 +1,6 @@
 import { itemIdOf } from "./items"
 import { messagesKey } from "./items/companion-bar"
-import { orderedTiles } from "./roster"
+import { addPanel, orderedIds, orderedTiles, panelTile } from "./roster"
 import { workspaceFromSeed, WorkspaceSeedError, type WorkspaceSeed, viewOf } from "./seed"
 import { context, describe, expect, it } from "./test"
 import { itemFixture, terminalFixture } from "./testing"
@@ -216,9 +216,74 @@ describe("workspace from a backend seed", () => {
         },
         defaults,
       ).projects[0]!.history[0]!.state
-      expect(seeded.roster).toEqual({ terminals: [kept], windows: [], order: ["01"] })
+      expect(seeded.roster).toEqual({ terminals: [kept], windows: [], panels: [], order: ["01"] })
       expect(seeded.selected).toBe("01")
       expect(seeded.layout.canvas.geometry).not.toHaveProperty("02")
+    })
+  })
+
+  context("with panels open on the stage", () => {
+    const seeded = (restored?: ReturnType<typeof viewOf>) =>
+      workspaceFromSeed(
+        {
+          projects: [
+            {
+              id: "one",
+              name: "one",
+              directory: "~/one",
+              sessions: [
+                {
+                  id: "s",
+                  name: "S",
+                  items: [],
+                  windows: [],
+                  terminals,
+                  ...(restored ? { restored } : {}),
+                },
+              ],
+            },
+          ],
+        },
+        defaults,
+      ).projects[0]!.history[0]!.state
+    const fresh = seeded()
+    const layout = {
+      canvas: { geometry: { "panel:notes": { position: { x: 5, y: 6 }, width: 300 } } },
+      hidden: { "panel:todo": true },
+      spans: { "panel:notes": { columns: 2, rows: 2 } },
+    }
+    const view = viewOf({
+      ...fresh,
+      view: "grid",
+      selected: "panel:notes",
+      layout,
+      roster: {
+        ...addPanel(addPanel(fresh.roster, panelTile("notes")), panelTile("todo")),
+        order: ["panel:notes", "01", "panel:todo", "02"],
+      },
+    })
+
+    it("saves them by name", () => {
+      expect(view.panels).toEqual(["notes", "todo"])
+      expect(viewOf(fresh).panels).toEqual([])
+    })
+
+    it("opens them again, with their places, layout and the selection", () => {
+      const state = seeded(view)
+      expect(state.roster.panels).toEqual([panelTile("notes"), panelTile("todo")])
+      expect(orderedIds(state.roster)).toEqual(["panel:notes", "01", "panel:todo", "02"])
+      expect(state.selected).toBe("panel:notes")
+      expect(state.layout).toEqual(layout)
+    })
+
+    it("drops what it kept of a panel no longer open, and hands its selection on", () => {
+      const state = seeded({ ...view, panels: ["todo"] })
+      expect(state.roster.panels).toEqual([panelTile("todo")])
+      expect(state.roster.order).toEqual(["01", "panel:todo", "02"])
+      expect(state.selected).toBe("01")
+      expect(state.layout.canvas.geometry).toEqual({})
+      expect(state.layout.spans).toEqual({})
+      expect(state.layout.hidden).toEqual({ "panel:todo": true })
     })
   })
 

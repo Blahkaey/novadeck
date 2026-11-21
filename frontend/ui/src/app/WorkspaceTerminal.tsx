@@ -18,7 +18,7 @@ import {
   runningLeads,
   terminalOrigins,
 } from "@novadeck/core/derivations"
-import { isWindow } from "@novadeck/core/roster"
+import { isPanel, isWindow } from "@novadeck/core/roster"
 import { createStore } from "@novadeck/core/store"
 import type { CompanionWindowMeta, TerminalMetadata, Tile } from "@novadeck/core/types"
 import { Avatar } from "@novadeck/items/Avatar"
@@ -551,8 +551,12 @@ export const WorkspaceTerminal = memo(
 )
 
 // Layouts call this for each terminal and window they place.
-export const renderTerminal = (tile: Tile, controls: TerminalLayoutControls): React.JSX.Element =>
-  isWindow(tile) ? (
+export const renderTerminal = (
+  tile: Tile,
+  controls: TerminalLayoutControls,
+): React.JSX.Element | null =>
+  // A panel's window is drawn in a later change.
+  isPanel(tile) ? null : isWindow(tile) ? (
     <WorkspaceWindow key={tile.id} window={tile} controls={controls} />
   ) : (
     <WorkspaceTerminal key={tile.id} terminal={tile} controls={controls} />

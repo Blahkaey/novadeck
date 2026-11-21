@@ -1,6 +1,6 @@
 import type { History } from "@novadeck/core/history"
 import type { Backend } from "@novadeck/core/port"
-import { isWindow } from "@novadeck/core/roster"
+import { isTerminal } from "@novadeck/core/roster"
 import type { Store } from "@novadeck/core/store"
 import type { Tile, Workspace } from "@novadeck/core/types"
 
@@ -46,9 +46,9 @@ export const watchHistoryDrops = (
 }
 
 // What closing a tile's terminal does, for its × tooltip: one that History keeps says it stays
-// there. A companion item's window isn't kept.
+// there. A companion item's window or a panel isn't kept.
 export const closeTip = (backend: Pick<Backend, "history">, tile: Tile): string =>
-  historyShown(backend) && !isWindow(tile) ? "Close · stays in History" : "Close"
+  historyShown(backend) && isTerminal(tile) ? "Close · stays in History" : "Close"
 
 // The words for a landed terminal: who closed it, for the History toggle's tooltip.
 export const dropWords = ({

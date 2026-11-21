@@ -1,5 +1,5 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
-import { isWindow, keepFoldsTogether } from "@novadeck/core/roster"
+import { isTerminal, keepFoldsTogether } from "@novadeck/core/roster"
 import type { Tile } from "@novadeck/core/types"
 import { useCallback } from "react"
 
@@ -141,13 +141,13 @@ export const useTeamLevel = (id: string): number =>
   useWorkspaceState((workspace) => leadChain(workspace, id).length)
 
 // What a lead's menu offers to fold its team or show it again; undefined for a terminal that
-// leads none, and for a window.
+// leads none, and for a window or a panel.
 export const useFoldTeam = (tile: Tile): FoldTeam | undefined => {
   const { ui } = useWorkspaceServices()
   const context = useWorkspaceState(currentContext)
   // Every terminal the fold hides, at any depth.
   const count = useWorkspaceState((workspace) => descendantsOf(workspace, tile.id).length)
   const folded = useUiState((state) => isFolded(state.foldedTeams, context, tile.id))
-  if (isWindow(tile) || !count) return undefined
+  if (!isTerminal(tile) || !count) return undefined
   return { count, folded, onToggle: () => toggleTeamFold(ui, context, tile.id) }
 }

@@ -3,7 +3,7 @@ import { Accessibility, Feedback, PointerActivationConstraints, PointerSensor } 
 import { DragDropProvider, useDraggable } from "@dnd-kit/react"
 import type { Team } from "@novadeck/core/derivations"
 import type { WindowPlace } from "@novadeck/core/layout/window-place"
-import { isWindow, orderBefore } from "@novadeck/core/roster"
+import { isTerminal, orderBefore, tileName } from "@novadeck/core/roster"
 import { terminalLabel } from "@novadeck/core/terminals/handle"
 import type { GridSpan, Tile } from "@novadeck/core/types"
 import { useDrag, useDragSession } from "@novadeck/items/drag-session"
@@ -283,7 +283,10 @@ const GridTile = memo(
         </div>
         <ResizeCorner
           id={terminal.id}
-          name={terminalLabel(terminal.name, isWindow(terminal) ? undefined : terminal.handle)}
+          name={terminalLabel(
+            tileName(terminal),
+            isTerminal(terminal) ? terminal.handle : undefined,
+          )}
           span={span}
           onResize={onResize}
         />

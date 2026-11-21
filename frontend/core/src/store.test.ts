@@ -90,7 +90,12 @@ describe("workspace commands", () => {
     }
     const terminalState = createTerminalState([terminal], "canvas", "canvas", { canvasLayout })
     expect(terminalState.layout.canvas).toBe(canvasLayout)
-    expect(terminalState.roster).toEqual({ terminals: [terminal], windows: [], order: [] })
+    expect(terminalState.roster).toEqual({
+      terminals: [terminal],
+      windows: [],
+      panels: [],
+      order: [],
+    })
   })
 
   it("adding a terminal selects it and leaves it for Grid and Canvas to arrange", () => {
@@ -118,7 +123,7 @@ describe("workspace commands", () => {
     expect(state(closed)).toEqual({
       ...seeded,
       selected: "",
-      roster: { terminals: [], windows: [], order: [] },
+      roster: { terminals: [], windows: [], panels: [], order: [] },
       layout: { canvas: { geometry: {} }, hidden: {}, spans: {} },
     })
     const delayedCanvas = workspaceReducer(closed, {

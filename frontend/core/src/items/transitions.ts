@@ -30,7 +30,7 @@ import {
 // leave it. The workspace reducer (`../state.ts`) applies them to the session an action
 // targets.
 
-// A terminal or window leaves the session, as `roster` no longer holds it: its layout
+// A terminal, window or panel leaves the session, as `roster` no longer holds it: its layout
 // goes, and a selection on it passes to its neighbor in the sidebar.
 export const dropTile = (state: WorkspaceState, id: string, roster: WorkspaceState["roster"]) => {
   const tiles = orderedTiles(state.roster)

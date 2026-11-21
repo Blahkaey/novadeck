@@ -1,3 +1,4 @@
+import { panelLabels } from "@novadeck/core/types"
 import type { Work, WorkClosing } from "@novadeck/core/works"
 import { ConfirmDialog } from "@novadeck/toolkit/ConfirmDialog"
 import { SidebarItem, sidebarListClasses } from "@novadeck/toolkit/SidebarItem"
@@ -25,7 +26,6 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState, memo } from "react"
 
-import { panelLabels } from "./panel-labels"
 import { SidebarPanel } from "./SidebarPanel"
 import {
   changeRows,
