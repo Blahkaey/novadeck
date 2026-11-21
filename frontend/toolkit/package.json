@@ -35,6 +35,7 @@
     "./overlay.css": "./src/overlay.css",
     "./Popover": "./src/Popover.tsx",
     "./Portal": "./src/Portal.tsx",
+    "./PortalInto": "./src/PortalInto.tsx",
     "./presence": "./src/presence.ts",
     "./Progress": "./src/Progress.tsx",
     "./progress.css": "./src/progress.css",

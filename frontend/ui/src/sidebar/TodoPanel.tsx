@@ -17,21 +17,25 @@ const minute = (): number => Math.floor(Date.now() / nowEveryMs) * nowEveryMs
 // against the time it is as the panel shows, and every minute while it does.
 export const TodoPanel = ({
   active,
+  showing,
   onClose,
   ...board
 }: Omit<ComponentProps<typeof TodoBoard>, "now"> & {
+  // Whether this is the sidebar's panel now.
   active: boolean
+  // Whether the board is in sight: its clock ticks only then.
+  showing: boolean
   onClose: () => void
 }): React.JSX.Element => {
   const left = todosLeft(board.notes, board.projectId)
   // Read as it draws, as it does once shown again; while shown, every minute too.
   const ticks = useCallback(
     (notify: () => void) => {
-      if (!active) return () => {}
+      if (!showing) return () => {}
       const timer = setInterval(notify, nowEveryMs)
       return () => clearInterval(timer)
     },
-    [active],
+    [showing],
   )
   const now = useSyncExternalStore(ticks, minute)
   return (

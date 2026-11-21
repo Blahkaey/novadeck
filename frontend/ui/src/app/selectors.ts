@@ -1,14 +1,16 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
 import type { Item } from "@novadeck/core/items"
 import { activeProject, activeSession } from "@novadeck/core/state"
-import type {
-  TerminalMetadata,
-  Tile,
-  ViewMode,
-  WindowedView,
-  Workspace,
-  WorkspaceState,
-  WorkspaceTarget,
+import {
+  railPanelOf,
+  type RailPanel,
+  type TerminalMetadata,
+  type Tile,
+  type ViewMode,
+  type WindowedView,
+  type Workspace,
+  type WorkspaceState,
+  type WorkspaceTarget,
 } from "@novadeck/core/types"
 
 import { sidebarVisible, type FocusPreview } from "../shell/shell-state"
@@ -128,9 +130,15 @@ export const modalOpen = (ui: UiState): boolean =>
   ui.leaving !== null ||
   ui.recent.switcher?.mode === "click"
 
-// Whether the sidebar shows the Inbox's panel.
+// Whether a panel of the rail is in sight, which is when it reads, follows and ticks, and when
+// what it lists counts as seen: while the sidebar shows, open on it (on either view of the
+// Terminals panel for its toggle). `desktop` is asked only when the route names the panel.
+export const panelShowing = (ui: UiState, panel: RailPanel, desktop: () => boolean): boolean =>
+  railPanelOf(ui.location.route.panel) === panel && sidebarVisible(ui.shell, desktop())
+
+// Whether the Inbox's panel is in sight.
 export const inboxShown = (ui: UiState, desktop: () => boolean): boolean =>
-  ui.location.route.panel === "inbox" && sidebarVisible(ui.shell, desktop())
+  panelShowing(ui, "inbox", desktop)
 
 // Whether a toast may show now: the page has the person's focus, they want to hear what
 // needs them, and the Inbox isn't what they look at. (The toasts also skip an item of the

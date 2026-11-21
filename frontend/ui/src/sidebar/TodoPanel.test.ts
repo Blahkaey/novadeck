@@ -43,6 +43,7 @@ const show = (active: boolean) => {
     notes: [done],
     failed: false,
     active: shown,
+    showing: shown,
     onClose: () => {},
     onAdd: () => {},
     onChange: () => {},

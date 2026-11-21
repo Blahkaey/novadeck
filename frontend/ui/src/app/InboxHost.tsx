@@ -48,13 +48,13 @@ const NoticeClicks = (): null => {
 
 // Gives the app below it the backend's Inbox: its list, and the sheets that open beside
 // it, which read the context of a row's agent from the backend's conversations and
-// messages. The list is a sidebar panel (`shell/WorkspaceSidebar.tsx`); on a phone it and
+// messages. The list is a sidebar panel (`InboxSection.tsx`); on a phone it and
 // a sheet take the screen in turn, so the sidebar's drawer is shut while a sheet is open.
 export const InboxHost = ({
   active,
   children,
 }: {
-  // Whether the sidebar shows the Inbox's panel.
+  // Whether the Inbox's panel is in sight (`panelShowing`).
   readonly active: boolean
   readonly children: ReactNode
 }): React.JSX.Element => {

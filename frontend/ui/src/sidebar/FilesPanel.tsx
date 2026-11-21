@@ -164,7 +164,7 @@ const FilesPanelView = ({
   roster,
   squads,
   active,
-  visible,
+  showing,
   onHide,
 }: {
   // What the demo's agents changed in the project, laid over its files; a runner has none.
@@ -205,11 +205,10 @@ const FilesPanelView = ({
   squads: readonly Squad[]
   // Whether this is the sidebar's panel now.
   active: boolean
-  // Whether the sidebar itself is shown, not collapsed.
-  visible: boolean
+  // Whether the panel is in sight: it reads, watches and lights agents only then.
+  showing: boolean
   onHide: () => void
 }): React.JSX.Element => {
-  const showing = active && visible
   const platform = currentPlatform()
   const [listings, setListings] = useState<Listings>(noListings)
   const { editing, reread: rereadExclude } = useProjectExclude(projectExclude, showing)

@@ -1,3 +1,4 @@
+import { afterEach } from "vitest"
 import { page, userEvent, type Locator } from "vitest/browser"
 
 import { pressShortcut } from "../support/keyboard"
@@ -293,6 +294,97 @@ describe("the Terminals panel's views", () => {
         .map((toggle) => toggle.getAttribute("aria-label")!.split(",")[0])
       expect(order.slice(0, 2)).toEqual(["Inbox", "Terminals"])
       expect(order).not.toContain("Sessions")
+    })
+  })
+})
+
+// The agents demo keeps the person's notes and the terminals they closed.
+const agents = "/?demo=agents"
+const drawer = (name: string): Locator => page.getByRole("dialog", { name })
+const noteField = (): Locator => page.getByRole("textbox", { name: "Add a note…" })
+const historySearch = (): Locator => page.getByRole("searchbox", { name: "Find a closed terminal" })
+const closedRows = (): Locator =>
+  page.getByRole("list", { name: "Closed terminals" }).getByRole("button", { name: /^Restore / })
+const topOf = (locator: Locator): number => locator.element().getBoundingClientRect().top
+
+describe("what a panel holds", () => {
+  afterEach(async () => {
+    await page.viewport(1440, 900)
+  })
+
+  context("when another panel shows and the first comes back", () => {
+    it("keeps the note being written", async () => {
+      await openWorkspace(agents)
+      await sidebarPanel("Notes").click()
+      await noteField().fill("Check the refund flow")
+
+      await sidebarPanel("History").click()
+      await expect.element(sidebar()).toHaveAccessibleName("History")
+      await sidebarPanel("Notes").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("Notes")
+      await expect.element(noteField()).toHaveValue("Check the refund flow")
+    })
+  })
+
+  context("when the sidebar is hidden and shown again", () => {
+    it("keeps the list where it was scrolled to", async () => {
+      await page.viewport(1440, 500)
+      await openWorkspace(agents)
+      await sidebarPanel("History").click()
+      await expect.element(closedRows().last()).toBeInTheDocument()
+      const first = topOf(closedRows().first())
+      closedRows().last().element().scrollIntoView({ block: "end" })
+      const scrolled = topOf(closedRows().last())
+      expect(topOf(closedRows().first())).toBeLessThan(first)
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(sidebar()).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(sidebar()).toHaveAccessibleName("History")
+      await expect.poll(() => topOf(closedRows().last())).toBeCloseTo(scrolled, 0)
+    })
+  })
+
+  context("when the phone's drawer closes and opens again", () => {
+    it("keeps the note being written and the History search", async () => {
+      await page.viewport(390, 800)
+      await openWorkspace(agents)
+      await sidebarPanel("Notes").click()
+      await noteField().fill("Check the refund flow")
+      await sidebarPanel("History").click()
+      await historySearch().fill("tax")
+      await expect.element(page.getByRole("heading", { name: /^History 1\/14$/ })).toBeVisible()
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(drawer("History")).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(drawer("History")).toBeVisible()
+      await expect.element(page.getByRole("button", { name: "Hide history" })).toHaveFocus()
+      await expect.element(historySearch()).toHaveValue("tax")
+      await expect.element(page.getByRole("heading", { name: /^History 1\/14$/ })).toBeVisible()
+      await sidebarPanel("Notes").click()
+      await expect.element(noteField()).toHaveValue("Check the refund flow")
+    })
+
+    it("keeps the list where it was scrolled to", async () => {
+      await page.viewport(390, 500)
+      await openWorkspace(agents)
+      await sidebarPanel("History").click()
+      await expect.element(closedRows().last()).toBeInTheDocument()
+      const first = topOf(closedRows().first())
+      closedRows().last().element().scrollIntoView({ block: "end" })
+      const scrolled = topOf(closedRows().last())
+      expect(topOf(closedRows().first())).toBeLessThan(first)
+
+      await page.getByRole("button", { name: "Hide history" }).click()
+      await expect.element(drawer("History")).not.toBeInTheDocument()
+      await sidebarPanel("History").click()
+
+      await expect.element(drawer("History")).toBeVisible()
+      await expect.poll(() => topOf(closedRows().last())).toBeCloseTo(scrolled, 0)
     })
   })
 })

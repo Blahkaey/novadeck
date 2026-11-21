@@ -4,7 +4,8 @@ import { forgetWidths, fontsOf, noFonts, sameFonts, type Fonts } from "./files-f
 
 // The tree's width and the fonts, which decide how many chips a row has room for; the sidebar is
 // resizable, so a ResizeObserver follows the width. Unknown (nothing folds) until measured, and
-// while the panel is hidden (a width of zero).
+// while the panel is hidden (a width of zero). Out of a document, as a parked panel is, nothing is
+// measured, and the tree keeps what it had for when it shows again.
 export const useTreeMeasure = (
   tree: HTMLElement | null,
 ): { readonly width: number | undefined; readonly fonts: Fonts } => {
@@ -14,6 +15,7 @@ export const useTreeMeasure = (
     const element = tree
     if (!element) return undefined
     const measure = (): void => {
+      if (!element.isConnected) return
       setWidth(element.clientWidth > 0 ? element.clientWidth : undefined)
       const next = fontsOf(element)
       setFonts((known) => (sameFonts(known, next) ? known : next))

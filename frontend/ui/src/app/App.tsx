@@ -22,6 +22,7 @@ import { cancelTerminalTransition } from "../layouts/transition"
 import { elsewhereSessionsText } from "../projects/session-marks"
 import { useDesktop } from "../shell/desktop"
 import { HistoryDropNotice } from "../shell/HistoryDot"
+import { createPanelNodes, PanelNodesContext } from "../shell/panel-nodes"
 import { sidebarVisible } from "../shell/shell-state"
 import { readSidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
 import { SidebarRail } from "../shell/SidebarRail"
@@ -44,6 +45,8 @@ import { HeaderSection } from "./HeaderSection"
 import { dropWords } from "./history-drops"
 import { InboxHost } from "./InboxHost"
 import { MoveSessionsProvider } from "./move-to"
+import { PanelInstances } from "./PanelInstances"
+import { usePanelShowing } from "./panels-shown"
 import { historyShown, filesShown, notesShown } from "./routing"
 import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
@@ -281,6 +284,9 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   const view = useWorkspaceState((workspace) => currentState(workspace).view)
   // The Terminals list on screen, which the team wire draws beside.
   const [tabList] = useState(createTabListStore)
+  // Where each panel is drawn once and shown from, by the sidebar.
+  const [panelNodes] = useState(createPanelNodes)
+  const inboxShowing = usePanelShowing("inbox")
   const voice = useDictationController(services)
   useKeyboard(voice?.dictation)
   const { backend } = services
@@ -315,7 +321,7 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   return (
     <DictationContext.Provider value={voice}>
       <TourProvider>
-        <InboxHost active={sidebarPanel === "inbox" && shell.sidebarVisible}>
+        <InboxHost active={inboxShowing}>
           <main
             className="workspace flex h-dvh min-h-100 flex-col overflow-hidden"
             data-zen={zen}
@@ -332,45 +338,48 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
             <HeaderSection />
             <TabListContext.Provider value={tabList}>
               <MoveSessionsProvider>
-                <div className="workspace-body relative flex min-h-0 flex-1">
-                  {sidebarRail()}
-                  <TeamWireSection
-                    shown={
-                      !zen &&
-                      !sidebarCollapsed &&
-                      shell.sidebarVisible &&
-                      sidebarPanel === "terminals"
-                    }
-                    tabList={tabList}
-                  />
-                  <WorkspacePanels
-                    collapsed={zen || sidebarCollapsed}
-                    mobileOpen={!zen && sidebar}
-                    onMobileOpenChange={(open) => {
-                      if (!open) hideSidebar()
-                    }}
-                    mobileRail={sidebarRail(true)}
-                    mobileLabel={panelLabels[sidebarPanel]}
-                    // The Inbox's list and the Todo board's three columns take the whole width.
-                    mobileWide={sidebarPanel === "inbox" || sidebarPanel === "todo"}
-                    mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
-                    sidebar={<SidebarSection />}
-                  >
-                    <WorkspaceStage canvas={canvas} />
-                  </WorkspacePanels>
-                  {zen && (
-                    <ZenDockWithBadge
-                      view={view}
-                      enabledViews={enabledViews}
-                      onCreate={() => add()}
-                      onViewChange={(next) => {
-                        if (next !== view) changeView(next)
-                      }}
-                      onInbox={() => toggleSidebar("inbox")}
-                      onExit={exitZen}
+                <PanelNodesContext value={panelNodes}>
+                  <div className="workspace-body relative flex min-h-0 flex-1">
+                    {sidebarRail()}
+                    <TeamWireSection
+                      shown={
+                        !zen &&
+                        !sidebarCollapsed &&
+                        shell.sidebarVisible &&
+                        sidebarPanel === "terminals"
+                      }
+                      tabList={tabList}
                     />
-                  )}
-                </div>
+                    <WorkspacePanels
+                      collapsed={zen || sidebarCollapsed}
+                      mobileOpen={!zen && sidebar}
+                      onMobileOpenChange={(open) => {
+                        if (!open) hideSidebar()
+                      }}
+                      mobileRail={sidebarRail(true)}
+                      mobileLabel={panelLabels[sidebarPanel]}
+                      // The Inbox's list and the Todo board's three columns take the whole width.
+                      mobileWide={sidebarPanel === "inbox" || sidebarPanel === "todo"}
+                      mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
+                      sidebar={<SidebarSection />}
+                    >
+                      <WorkspaceStage canvas={canvas} />
+                    </WorkspacePanels>
+                    <PanelInstances />
+                    {zen && (
+                      <ZenDockWithBadge
+                        view={view}
+                        enabledViews={enabledViews}
+                        onCreate={() => add()}
+                        onViewChange={(next) => {
+                          if (next !== view) changeView(next)
+                        }}
+                        onInbox={() => toggleSidebar("inbox")}
+                        onExit={exitZen}
+                      />
+                    )}
+                  </div>
+                </PanelNodesContext>
               </MoveSessionsProvider>
             </TabListContext.Provider>
             <FooterSection />

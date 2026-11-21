@@ -1116,7 +1116,9 @@ A rail icon or sidebar shortcut opens or switches to its panel. Pressing it agai
 panel goes back one step, to the panel you were on just before, so a look at the Inbox or
 History returns to where you were; back there, or on the panel the sidebar opened on, it hides
 the sidebar. A rail icon's tooltip says where the next press goes. Hiding the sidebar by its
-shortcut leaves typing in the terminal.
+shortcut leaves typing in the terminal. A panel stays as you left it while another shows or the
+sidebar is hidden, on a narrow window too, where the sidebar opens over the workspace: a note
+you were writing, a search, and where its list was scrolled are there when you come back.
 
 Hold Ctrl while pressing Tab to choose a terminal, then release Ctrl to switch.
 While navigating Grid and Canvas, the arrow keys select the nearest terminal on that

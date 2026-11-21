@@ -51,6 +51,7 @@ const show = (
     connections: options.connections,
     iconOf: () => null,
     active: true,
+    showing: true,
     onClose: () => {},
     onRestore,
     onReveal: () => {},
@@ -60,7 +61,7 @@ const show = (
   const page = render(createElement(HistoryPanel, props))
   // The panel again with other rows, as the backend reports them, or hidden and shown.
   const listing = (next: readonly ClosedTerminal[], active = true) =>
-    page.rerender(createElement(HistoryPanel, { ...props, rows: next, active }))
+    page.rerender(createElement(HistoryPanel, { ...props, rows: next, active, showing: active }))
   const row = (name: string) =>
     page.container.querySelector<HTMLElement>(`[data-history-row="${name}"]`)!
   const select = (name: string) => row(name).querySelector<HTMLButtonElement>("button")!

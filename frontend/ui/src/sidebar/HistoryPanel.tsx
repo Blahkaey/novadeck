@@ -213,6 +213,7 @@ const HistoryPanelView = ({
   connections,
   iconOf,
   active,
+  showing,
   onClose,
   onRestore,
   onReveal,
@@ -225,7 +226,10 @@ const HistoryPanelView = ({
   // The agents the backend can connect, where it has them.
   connections: readonly AgentConnection[] | undefined
   iconOf: (row: ClosedTerminal) => ReactNode
+  // Whether this is the sidebar's panel now.
   active: boolean
+  // Whether the panel is in sight: the rows are read only then.
+  showing: boolean
   onClose: () => void
   onRestore: (row: ClosedTerminal) => void
   // Goes to the terminal that holds a conversation, by its handle.
@@ -252,10 +256,10 @@ const HistoryPanelView = ({
     if (rows.length === 0) setTyped("")
   }
   // A panel shown again says nothing of a removal that failed before it was hidden.
-  const [wasActive, setWasActive] = useState(active)
-  if (wasActive !== active) {
-    setWasActive(active)
-    if (!active) setUnremoved(null)
+  const [wasShowing, setWasShowing] = useState(showing)
+  if (wasShowing !== showing) {
+    setWasShowing(showing)
+    if (!showing) setUnremoved(null)
   }
   // Asks the backend to delete rows. When it couldn't, they stay, and a line says so.
   const remove = (taken: readonly ClosedTerminal[], failure: Unremoved): void => {
@@ -267,7 +271,7 @@ const HistoryPanelView = ({
   // The rows are read when the panel opens, so what the runner checked is what shows.
   // And again when the window is looked at, as another window may have changed what a row needs.
   useEffect(() => {
-    if (!active) return
+    if (!showing) return
     let current = true
     const read = (): void => {
       list().then(
@@ -285,7 +289,7 @@ const HistoryPanelView = ({
       current = false
       window.removeEventListener("focus", read)
     }
-  }, [active, list])
+  }, [showing, list])
   const matches = rows.filter((row) => rowMatches(row, typed))
   const searching = typed.trim() !== ""
   const clearable = rows.filter(removable)

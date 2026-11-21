@@ -252,7 +252,7 @@ const mount = async (
   changing: Changing = {},
   checkout?: Checkout,
 ) => {
-  let visible = true
+  let showing = true
   let turn = 0
   const props = (next: FilesProject | undefined, handle: string | undefined) => ({
     project: next,
@@ -271,7 +271,7 @@ const mount = async (
     roster: agents.roster,
     squads: agents.squads,
     active: true,
-    visible,
+    showing,
     onHide: () => {},
   })
   const view = render(createElement(FilesPanel, props(project, selectedHandle)))
@@ -292,7 +292,7 @@ const mount = async (
     await settle()
   }
   const show = async (next: boolean): Promise<void> => {
-    visible = next
+    showing = next
     await redraw()
   }
   return {
@@ -1049,7 +1049,7 @@ describe("The Files panel", () => {
           roster: [],
           squads: [],
           active: false,
-          visible: true,
+          showing: false,
           onHide: () => {},
         }),
       )
@@ -3584,7 +3584,7 @@ describe("The Files panel", () => {
             roster: [],
             squads: [],
             active: true,
-            visible: true,
+            showing: true,
             onHide: () => {},
           }),
         ),

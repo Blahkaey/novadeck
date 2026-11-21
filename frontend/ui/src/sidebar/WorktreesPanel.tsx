@@ -535,7 +535,7 @@ const WorktreesPanelView = ({
   titles,
   selectedId,
   active,
-  watching,
+  showing,
   onClose,
   onSelect,
   canOpenFile,
@@ -556,9 +556,10 @@ const WorktreesPanelView = ({
   titles: ReadonlyMap<string, string>
   // The selected terminal, where a work with no owner is shown.
   selectedId: string | undefined
+  // Whether this is the sidebar's panel now.
   active: boolean
-  // The panel is the one shown: the works are followed only then.
-  watching: boolean
+  // Whether the panel is in sight: the works are followed only then.
+  showing: boolean
   onClose: () => void
   // Shows a work on the bar of the terminal named (its owner, or where it has none, or its
   // owner is closed, the selected one); rejects with why it can't.
@@ -585,7 +586,7 @@ const WorktreesPanelView = ({
     title: string
     text: string
   } | null>(null)
-  useEffect(() => (watching ? watch() : undefined), [watching, watch])
+  useEffect(() => (showing ? watch() : undefined), [showing, watch])
   const now = useMinute()
   const rows = useMemo(
     () => changeRows(works, titles, now, handles, forges),

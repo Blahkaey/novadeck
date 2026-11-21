@@ -406,12 +406,14 @@ export const TodoBoard = ({
   const full = notesFull(notes.filter((note) => note.projectId === projectId).length)
   const root = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  // Measured only while the board is in a document: parked out of one, as while the phone's
+  // drawer is closed, it measures nothing, and keeps the width it had for when it shows again.
   useLayoutEffect(() => {
     const board = root.current
     if (!board) return undefined
-    setWidth(board.getBoundingClientRect().width)
+    if (board.isConnected) setWidth(board.getBoundingClientRect().width)
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setWidth(entry.contentRect.width)
+      if (entry && board.isConnected) setWidth(entry.contentRect.width)
     })
     observer.observe(board)
     return () => observer.disconnect()
