@@ -1,21 +1,21 @@
 import type { PullRequest } from "@novadeck/protocol"
 import { z } from "zod"
 
+import { noticeText } from "../messaging/notice-format.js"
 import { unansweredCalls, type Call } from "../shell/reports.js"
 import type { ApprovalOutcome } from "../terminals/approvals.js"
 import { callerOf } from "../terminals/callers.js"
-import { notice } from "../terminals/closes.js"
 import { bareHandle, mention } from "../terminals/handles.js"
 import type { LeadsHost } from "../terminals/leads.js"
 import { peerOf } from "../terminals/peers-host.js"
 import type { Record } from "../terminals/record.js"
 import type { WorktreeRecord } from "./records.js"
-import type { Worktrees } from "./worktrees.js"
+import type { OriginBranch, Worktrees } from "./worktrees.js"
 
 /** What the worktree calls need of the runner. */
 export type WorktreeCallsHost = Pick<
   LeadsHost,
-  "records" | "stopping" | "messaging" | "peers" | "approvals"
+  "records" | "stopping" | "messaging" | "peers" | "approvals" | "agentMode" | "sleepers"
 > & {
   /** The service; none where the runner keeps no ownership (some tests). */
   readonly worktrees: () => Worktrees | undefined
@@ -88,30 +88,59 @@ const read = <T>(
 /** What agents are told when a worktree's ownership changes hands. */
 export const worktreeNotice = {
   taken: (path: string, branch: string): string =>
-    notice + `The user approved: you now own the worktree ${path} on branch ${branch}.`,
+    noticeText("Worktrees", {
+      facts: `The user approved: you now own the worktree on branch ${branch}.`,
+      details: [path],
+    }),
   lost: (taker: string, path: string, branch: string): string =>
-    notice +
-    `The user let ${mention(taker)} take your worktree ${path} (branch ${branch}). It is no ` +
-    "longer yours: don't change files there, and don't close it.",
+    noticeText("Worktrees", {
+      facts: `The user let ${mention(taker)} take your worktree on branch ${branch}. It is no longer yours.`,
+      details: [path],
+      actions: ["Don't change files there, and don't close it."],
+    }),
   declined: (path: string): string =>
-    notice + `The user did not let you take the worktree ${path}: it stays with its owner.`,
+    noticeText("Worktrees", {
+      facts: "The user did not let you take the worktree: it stays with its owner.",
+      details: [path],
+    }),
   off: (path: string): string =>
-    notice +
-    `Nothing changed: agent worktrees were turned off before the user answered the ask to take ${path}.`,
+    noticeText("Worktrees", {
+      facts:
+        "Nothing changed: agent worktrees were turned off before the user answered the ask to take this worktree.",
+      details: [path],
+    }),
   gone: (path: string): string =>
-    notice +
-    `Nothing changed: Novadeck's window went away before the user answered the ask to take ` +
-    `the worktree ${path}. Ask again if it still should.`,
+    noticeText("Worktrees", {
+      facts:
+        "Nothing changed: Novadeck's window went away before the user answered the ask to take " +
+        "the worktree.",
+      details: [path],
+      actions: ["Ask again if it still should."],
+    }),
   vanished: (path: string): string =>
-    notice +
-    `You or the worktree's owner closed before the user answered, so ${path} didn't change hands.`,
+    noticeText("Worktrees", {
+      facts:
+        "You or the worktree's owner closed before the user answered, so it didn't change hands.",
+      details: [path],
+    }),
   moved: (path: string): string =>
-    notice +
-    `The user approved, but nothing changed: the worktree ${path} changed owner meanwhile.`,
+    noticeText("Worktrees", {
+      facts: "The user approved, but nothing changed: the worktree changed owner meanwhile.",
+      details: [path],
+    }),
+  // Where agents decide for themselves (Swarm), nobody approved it: its owner hears of it so.
+  lostNow: (taker: string, path: string, branch: string): string =>
+    noticeText("Worktrees", {
+      facts: `${mention(taker)} took your worktree on branch ${branch}. It is no longer yours.`,
+      details: [path],
+      actions: ["Don't change files there, and don't close it."],
+    }),
   given: (giver: string, path: string, branch: string): string =>
-    notice +
-    `${mention(giver)} gave you the worktree ${path} on branch ${branch}: you own it now. Work ` +
-    "there with absolute paths and git -C.",
+    noticeText("Worktrees", {
+      facts: `${mention(giver)} gave you its worktree on branch ${branch}. It's yours now.`,
+      details: [path],
+      actions: ["Work there with absolute paths and git -C."],
+    }),
 }
 
 /** The sentence a taken worktree is answered with, or the ask. */
@@ -122,12 +151,18 @@ export type WorktreeAnswer =
       readonly branch: string
       /** open_worktree: the branch existed and was checked out. */
       readonly existing?: boolean
+      /** open_worktree: what origin has of a branch only origin had (see `OriginBranch`). */
+      readonly origin?: OriginBranch
+      /** open_worktree: the new branch tracks origin's. */
+      readonly tracking?: boolean
       /** open_worktree: instruction files at its top. */
       readonly instructions?: readonly string[]
       /** take_worktree: it was yours already. */
       readonly already?: true
       /** take_worktree: the person was asked; the worktree isn't yours yet. */
       readonly asked?: true
+      /** take_worktree: another terminal owned it; it is yours now, and the handle of its former owner. */
+      readonly from?: string
       /** The handle of the terminal asked about, or given to. */
       readonly owner?: string
       /** close_worktree: where the uncommitted work was kept. */
@@ -197,6 +232,8 @@ export class WorktreeCalls {
       path: opened.path,
       branch: opened.branch,
       existing: opened.existing,
+      ...(opened.origin !== undefined && { origin: opened.origin }),
+      ...(opened.tracking !== undefined && { tracking: opened.tracking }),
       instructions: opened.instructions,
     }
   }
@@ -214,12 +251,56 @@ export class WorktreeCalls {
       path: read1.request.path,
     })
     if (!taken.ok) return taken
-    if ("approval" in taken) return this.ask(call, record, service, taken.approval)
+    if ("approval" in taken)
+      return this.host.agentMode() === "swarm"
+        ? this.takeNow(call, record, service, taken.approval)
+        : this.ask(call, record, service, taken.approval)
     return {
       ok: true,
       path: taken.path,
       branch: taken.branch,
       ...(taken.already && { already: true as const }),
+    }
+  }
+
+  /** The terminal that owns a worktree, running or asleep: a message to a sleeper wakes it. */
+  private ownerOf(
+    ownerId: string,
+  ): { readonly summary: { readonly id: string; readonly handle: string } } | undefined {
+    return this.host.records().get(ownerId) ?? this.host.sleepers().peer(ownerId)
+  }
+
+  /**
+   * Where agents decide for themselves (Swarm), the caller takes a worktree another terminal
+   * owns at once; the owner, if it still runs, is told.
+   */
+  private async takeNow(
+    call: Call,
+    caller: Record,
+    service: Worktrees,
+    row: WorktreeRecord,
+  ): Promise<WorktreeAnswer> {
+    const ownerId = row.terminalId!
+    const { path, branch } = row
+    if (!(await service.transfer(path, ownerId, call.terminalId)))
+      return refused(`The worktree ${path} changed owner meanwhile, so nothing changed.`)
+    const owner = this.ownerOf(ownerId)
+    if (owner) {
+      // A sleeping owner hears of it when the notice wakes it.
+      this.host
+        .messaging()
+        .notice(ownerId, worktreeNotice.lostNow(caller.summary.handle, path, branch), {
+          always: true,
+        })
+      // The notice names the taker, and the answer the owner: each handle is the other's to use.
+      this.host.peers().introduce(ownerId, call.terminalId)
+      this.host.peers().introduce(call.terminalId, ownerId)
+    }
+    return {
+      ok: true,
+      path,
+      branch,
+      ...(owner && { from: owner.summary.handle }),
     }
   }
 
@@ -237,7 +318,7 @@ export class WorktreeCalls {
           : "A question about that worktree's owner is still waiting for the user's answer, so " +
               "nothing changed. Try again once it is answered.",
       )
-    const owner = this.host.records().get(ownerId)
+    const owner = this.ownerOf(ownerId)
     const tell = (id: string, text: string) =>
       this.host.messaging().notice(id, text, { always: true })
     const { path, branch } = row
@@ -259,8 +340,8 @@ export class WorktreeCalls {
           if (!(await service.transfer(path, ownerId, call.terminalId)))
             return tell(call.terminalId, worktreeNotice.moved(path))
           tell(call.terminalId, worktreeNotice.taken(path, branch))
-          // Its old owner's agent, if it still runs, learns on its next turn.
-          if (this.host.records().has(ownerId)) {
+          // Its old owner's agent, if it still runs or sleeps, learns on its next turn or wake.
+          if (this.ownerOf(ownerId)) {
             tell(ownerId, worktreeNotice.lost(caller.summary.handle, path, branch))
             // The notice names the taker, so its handle is the old owner's to use.
             this.host.peers().introduce(ownerId, call.terminalId)

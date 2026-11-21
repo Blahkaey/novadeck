@@ -8,7 +8,7 @@ import type { SandboxState } from "@novadeck/core/desktop/sandbox"
 import type { UpdateOffer, WhatsNew } from "@novadeck/core/desktop/update"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { Backend } from "@novadeck/core/port"
-import { orderedTiles } from "@novadeck/core/roster"
+import { hasTile, orderedTiles } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import { createStore, type MutableStore, type Store } from "@novadeck/core/store"
 import type { PreferencesValue, Workspace } from "@novadeck/core/types"
@@ -23,7 +23,7 @@ import { initialShell, resetPresentation, type ShellState } from "../shell/shell
 import { writeSidebarCollapsed, writeWindowedView } from "../shell/shell-storage"
 import type { LeaveAsk } from "../terminals/leave-edits"
 import type { MoveAsk, MoveNotice, MovePick } from "../terminals/move-state"
-import { nextRecent, visibleSwitcher, type RecentSwitcher } from "../terminals/recent"
+import { nextRecent, visibleSwitcher, withoutGone, type RecentSwitcher } from "../terminals/recent"
 import type { RenameSession } from "../terminals/rename-state"
 import { noFoldedTeams, writeFoldedTeams, type FoldedTeams } from "../terminals/team-fold"
 import { noUnread, type Unread, type Viewing } from "../terminals/unread-state"
@@ -319,16 +319,22 @@ export const keepProjectArrangement = (
   })
 }
 
-// Closes the switcher once a dialog opens or the session changes under it.
+// Closes the switcher once a dialog opens or the session changes under it, and lets go of
+// the rows of terminals that close while it shows, so none it offers is gone.
 export const watchSwitcher = (workspace: Store<Workspace>, ui: UiStore): (() => void) => {
   const check = (): void => {
     const { recent, location } = ui.getSnapshot()
     if (!recent.switcher) return
-    const context = currentContext(workspace.getSnapshot())
-    if (visibleSwitcher(recent.switcher, context, location.route.dialog)) return
+    const snapshot = workspace.getSnapshot()
+    const context = currentContext(snapshot)
+    const { roster } = currentState(snapshot)
+    const switcher = visibleSwitcher(recent.switcher, context, location.route.dialog)
+      ? withoutGone(recent.switcher, (id) => hasTile(roster, id))
+      : null
+    if (switcher === recent.switcher) return
     ui.update((state) => ({
       ...state,
-      recent: { ...state.recent, switcher: null },
+      recent: { ...state.recent, switcher },
     }))
   }
   const stops = [workspace.subscribe(check), ui.subscribe(check)]
@@ -412,6 +418,12 @@ export const switchOffWorktrees = (worktrees: Backend["worktrees"]): void => {
   if (worktrees?.enabled.getSnapshot()) worktrees.set(false)
 }
 
+// Turns the agent modes switch off where it is on, as the Experimental switch going off does:
+// the runner then has agents work as a Herd, and the saved pick stays for when it goes on again.
+export const switchOffAgentModes = (agentModes: Backend["agentModes"]): void => {
+  if (agentModes?.enabled.getSnapshot()) agentModes.set(false)
+}
+
 // Switches every forge integration off where it is on, as the Experimental switch going off does,
 // for the same reason.
 // A forge being switched (on, as far as anyone knows) goes off too: its switch lands after.
@@ -421,17 +433,22 @@ export const switchOffForges = (forges: Backend["forges"]): void => {
 }
 
 // The Experimental features a backend keeps as settings, which all go off with the switch.
-export type ExperimentalFeatures = Pick<Backend, "worktrees" | "forges">
+export type ExperimentalFeatures = Pick<Backend, "worktrees" | "forges" | "agentModes">
 
-export const switchOffExperimental = ({ worktrees, forges }: ExperimentalFeatures): void => {
+export const switchOffExperimental = ({
+  worktrees,
+  forges,
+  agentModes,
+}: ExperimentalFeatures): void => {
   switchOffWorktrees(worktrees)
+  switchOffAgentModes(agentModes)
   switchOffForges(forges)
 }
 
 // Asks the backend once, as the workspace comes up, whether the desktop app follows experimental
 // builds, which is what turns IS_EXPERIMENTAL on, through `set`. A desktop app that fails to say
-// leaves it off. A channel found stable, or unreadable, also turns agent worktrees and forge
-// integrations off.
+// leaves it off. A channel found stable, or unreadable, also turns agent worktrees, agent modes and
+// forge integrations off.
 export const watchExperimental = (
   updates: Backend["updates"],
   set: (on: boolean) => void,

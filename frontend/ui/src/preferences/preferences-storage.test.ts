@@ -48,6 +48,45 @@ describe("readPreferences", () => {
     }
   })
 
+  it("keeps a saved text size in range, brings one out of range to the nearest, and defaults a non-number", () => {
+    expect(readPreferences().fontSize).toBe(13)
+    for (const [saved, size] of [
+      [12, 12],
+      [13, 13],
+      [15, 15],
+      [10, 10],
+      [32, 32],
+      [9, 10],
+      [-4, 10],
+      [33, 32],
+      [500, 32],
+      [14.4, 14],
+      ["20", 13],
+      [null, 13],
+    ] as const) {
+      localStorage.setItem(preferencesStorageKey, JSON.stringify({ fontSize: saved }))
+
+      expect(readPreferences().fontSize).toBe(size)
+    }
+  })
+
+  it("keeps a saved terminal font family, and reads anything else as the bundled font", () => {
+    expect(readPreferences().fontFamily).toBe("")
+    for (const [saved, family] of [
+      ["Fira Code", "Fira Code"],
+      ["  Menlo  ", "Menlo"],
+      ["", ""],
+      ["Bad\nName", ""],
+      ["x".repeat(201), ""],
+      [3, ""],
+      [null, ""],
+    ] as const) {
+      localStorage.setItem(preferencesStorageKey, JSON.stringify({ fontFamily: saved }))
+
+      expect(readPreferences().fontFamily).toBe(family)
+    }
+  })
+
   it("follows the theme's sound unless a sound the app has is saved", () => {
     expect(readPreferences().soundChoice).toBe("theme")
     for (const [saved, choice] of [
@@ -119,5 +158,45 @@ describe("readPreferences", () => {
     expect(readPreferences().onboardingTour).toBe(false)
     localStorage.setItem(preferencesStorageKey, JSON.stringify({ onboardingTour: true }))
     expect(readPreferences().onboardingTour).toBe(true)
+  })
+
+  it("reads screen reader support, Automatic where it was never saved or is unknown", () => {
+    const saveSupport = (screenReader: unknown): void =>
+      localStorage.setItem(preferencesStorageKey, JSON.stringify({ screenReader }))
+    expect(readPreferences().screenReader).toBe("auto")
+    for (const choice of ["auto", "on", "off"]) {
+      saveSupport(choice)
+      expect(readPreferences().screenReader).toBe(choice)
+    }
+    for (const unknown of ["always", true, 1, null]) {
+      saveSupport(unknown)
+      expect(readPreferences().screenReader).toBe("auto")
+    }
+  })
+})
+
+describe("the app's scale", () => {
+  const saveScale = (appScale: unknown): void =>
+    localStorage.setItem(preferencesStorageKey, JSON.stringify({ appScale }))
+
+  it("is 100% where it was never saved", () => {
+    expect(readPreferences().appScale).toBe(100)
+  })
+
+  it("reads each scale the Preferences offer, and keeps it through a save", () => {
+    for (const scale of [80, 90, 100, 110, 125, 150, 175, 200]) {
+      saveScale(scale)
+      expect(readPreferences().appScale).toBe(scale)
+    }
+    saveScale(150)
+    writePreferences({ ...readPreferences(), fontSize: 15 })
+    expect(JSON.parse(localStorage.getItem(preferencesStorageKey)!).appScale).toBe(150)
+  })
+
+  it("clamps a scale the app doesn't offer to 100%", () => {
+    for (const bad of [0, 50, 79, 105, 400, -100, "200", 1.5, null, Number.NaN, {}]) {
+      saveScale(bad)
+      expect(readPreferences().appScale).toBe(100)
+    }
   })
 })

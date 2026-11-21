@@ -28,6 +28,7 @@ import { describe, expect, it as base } from "../test.js"
 import { fakeClock } from "../testing/clock.js"
 import { sealed as sealedText } from "../testing/sealing.js"
 import type { ClosedRecord } from "./closed.js"
+import { effectiveAgentMode } from "./settings.js"
 import {
   EarlierWorkspaceError,
   refusedByTable,
@@ -259,7 +260,7 @@ describe("workspace metadata", () => {
     expect(first.id).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/)
     const database = new DatabaseSync(path)
     try {
-      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(20)
+      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(22)
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([])
       expect(() =>
         database
@@ -495,13 +496,13 @@ describe("workspace metadata", () => {
     const path = join(directory(), "workspace.sqlite")
     const future = new DatabaseSync(path)
     future.exec(
-      "CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('saved'); PRAGMA user_version = 21",
+      "CREATE TABLE future_data (value TEXT); INSERT INTO future_data VALUES ('saved'); PRAGMA user_version = 23",
     )
     future.close()
     expect(() => new WorkspaceStore(path)).toThrow(/newer/)
     const database = new DatabaseSync(path)
     try {
-      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(21)
+      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(23)
       expect(database.prepare("SELECT value FROM future_data").get()?.value).toBe("saved")
     } finally {
       database.close()
@@ -553,7 +554,7 @@ describe("workspace metadata", () => {
     new WorkspaceStore(path).close()
     const database = new DatabaseSync(path)
     try {
-      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(20)
+      expect(database.prepare("PRAGMA user_version").get()?.user_version).toBe(22)
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([])
       // Every old table is gone, and so are the old names.
       expect(Object.keys(rowsOf(database)).toSorted()).toEqual(
@@ -1946,8 +1947,8 @@ describe("workspace metadata", () => {
       // and adds a step in store.ts's migrations, from schemas/<version before>.sql, which
       // is added for it. Then record the new digest here.
       expect({ version, digest }).toEqual({
-        version: 20,
-        digest: "4173634bba300e930ea99da3744a2bca94f8af4f4960e8b36ec9c9bdaeb1a861",
+        version: 22,
+        digest: "737303c3e7fe71b9d3b3beb2937b4564939196ec7dd0a8670a82f753ae504e22",
       })
     } finally {
       database.close()
@@ -2127,6 +2128,125 @@ main...feature', 'changes', '/p',
     }
     migrated.saveItem(pdf)
     expect(migrated.item("report")).toEqual(pdf)
+    migrated.close()
+    const fresh = join(directory(), "fresh.sqlite")
+    new WorkspaceStore(fresh).close()
+    const [carried, created] = [path, fresh].map((file) => {
+      const database = new DatabaseSync(file)
+      try {
+        return normalisedSchemaOf(database)
+      } finally {
+        database.close()
+      }
+    })
+    expect(carried).toEqual(created)
+  })
+
+  it("lets items be folders in the step from 20, keeping the items, PDFs and order", ({
+    directory,
+  }) => {
+    const path = join(directory(), "workspace.sqlite")
+    const old = new DatabaseSync(path)
+    old.exec(`${readFileSync(new URL("schemas/20.sql", import.meta.url), "utf8")}
+      PRAGMA user_version = 20;
+      INSERT INTO projects (position, id, name, cwd) VALUES (1, 'p', 'P', '/p');
+      INSERT INTO sessions (position, id, project_id, name) VALUES (1, 's', 'p', 'S');
+      INSERT INTO terminals (rowid, id, session_id, handle, cwd, agent_reports, prompted_at,
+        saved_at) VALUES (1, 't', 's', 'moth', '/p', '{}', 0, 0);
+      INSERT INTO companion_items (rowid, id, session_id, terminal_id, window_id, pointer_key,
+        kind, path, name, detail, secret, shown_by, from_terminal, from_handle, version,
+        open_asked, shown_at, compare_base, compare_head)
+        VALUES (7, 'compare', 's', 't', NULL, 'changes:/p
+main...feature', 'changes', '/p',
+          'Compare · feature', '', 0, 'agent', 't', 'moth', 2, 0, 20, 'main', 'feature'),
+          (5, 'report', 's', 't', NULL, '/p/report.pdf', 'pdf', '/p/report.pdf', 'report.pdf', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL),
+          (6, 'render', 's', 't', NULL, '/p/render', 'file', '/p/render', 'render', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL);`)
+    old.close()
+    const migrated = new WorkspaceStore(path)
+    expect(
+      migrated
+        .barItems("t")
+        .map(({ id, kind, version, compare }) => ({ id, kind, version, compare })),
+    ).toEqual([
+      { id: "report", kind: "pdf", version: 1, compare: undefined },
+      { id: "render", kind: "file", version: 1, compare: undefined },
+      { id: "compare", kind: "changes", version: 2, compare: { base: "main", head: "feature" } },
+    ])
+    const folder: ItemRecord = {
+      ...migrated.item("render")!,
+      kind: "folder",
+      pointerKey: "/p/render",
+      detail: "/p/render",
+      version: 2,
+    }
+    migrated.saveItem(folder)
+    expect(migrated.item("render")).toEqual(folder)
+    migrated.close()
+    const fresh = join(directory(), "fresh.sqlite")
+    new WorkspaceStore(fresh).close()
+    const [carried, created] = [path, fresh].map((file) => {
+      const database = new DatabaseSync(file)
+      try {
+        return normalisedSchemaOf(database)
+      } finally {
+        database.close()
+      }
+    })
+    expect(carried).toEqual(created)
+  })
+
+  it("lets items be 3D models in the step from 21, keeping the items, folders and order", ({
+    directory,
+  }) => {
+    const path = join(directory(), "workspace.sqlite")
+    const old = new DatabaseSync(path)
+    old.exec(`${readFileSync(new URL("schemas/21.sql", import.meta.url), "utf8")}
+      PRAGMA user_version = 21;
+      INSERT INTO projects (position, id, name, cwd) VALUES (1, 'p', 'P', '/p');
+      INSERT INTO sessions (position, id, project_id, name) VALUES (1, 's', 'p', 'S');
+      INSERT INTO terminals (rowid, id, session_id, handle, cwd, agent_reports, prompted_at,
+        saved_at) VALUES (1, 't', 's', 'moth', '/p', '{}', 0, 0);
+      INSERT INTO companion_items (rowid, id, session_id, terminal_id, window_id, pointer_key,
+        kind, path, name, detail, secret, shown_by, from_terminal, from_handle, version,
+        open_asked, shown_at, compare_base, compare_head)
+        VALUES (7, 'compare', 's', 't', NULL, 'changes:/p
+main...feature', 'changes', '/p',
+          'Compare · feature', '', 0, 'agent', 't', 'moth', 2, 0, 20, 'main', 'feature'),
+          (5, 'part', 's', 't', NULL, '/p/part.stl', 'file', '/p/part.stl', 'part.stl', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL),
+          (9, 'report', 's', 't', NULL, '/p/report.pdf', 'pdf', '/p/report.pdf', 'report.pdf', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL),
+          (6, 'clip', 's', 't', NULL, '/p/demo.mp4', 'video', '/p/demo.mp4', 'demo.mp4', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL),
+          (8, 'voice', 's', 't', NULL, '/p/voice.mp3', 'audio', '/p/voice.mp3', 'voice.mp3', '', 0,
+          'agent', 't', 'moth', 1, 1, 20, NULL, NULL),
+          (4, 'render', 's', 't', NULL, '/p/render', 'folder', '/p/render', 'render', '/p/render', 0,
+          'agent', 't', 'moth', 2, 1, 20, NULL, NULL);`)
+    old.close()
+    const migrated = new WorkspaceStore(path)
+    expect(
+      migrated
+        .barItems("t")
+        .map(({ id, kind, version, compare }) => ({ id, kind, version, compare })),
+    ).toEqual([
+      // A model shown before is a file until its next show.
+      { id: "render", kind: "folder", version: 2, compare: undefined },
+      { id: "part", kind: "file", version: 1, compare: undefined },
+      { id: "clip", kind: "video", version: 1, compare: undefined },
+      { id: "compare", kind: "changes", version: 2, compare: { base: "main", head: "feature" } },
+      { id: "voice", kind: "audio", version: 1, compare: undefined },
+      { id: "report", kind: "pdf", version: 1, compare: undefined },
+    ])
+    const model: ItemRecord = {
+      ...migrated.item("part")!,
+      kind: "model",
+      detail: "1.2 MB STL",
+      version: 2,
+    }
+    migrated.saveItem(model)
+    expect(migrated.item("part")).toEqual(model)
     migrated.close()
     const fresh = join(directory(), "fresh.sqlite")
     new WorkspaceStore(fresh).close()
@@ -2590,6 +2710,34 @@ describe("saved terminals", () => {
     expect(reopened.terminal(terminal.id)?.transcript).toBeNull()
     reopened.removeTerminal(terminal.id)
     expect(reopened.terminal(terminal.id)).toBeUndefined()
+  })
+
+  it("reads back a work kept without the folders written in, as one that lists them", ({
+    directory,
+    kept,
+  }) => {
+    const path = join(directory(), "workspace.sqlite")
+    const first = kept(path)
+    const old = keptTerminal(first, "session", "owl")
+    const newer = keptTerminal(first, "session", "fox")
+    const asStored = { session: "claude:abc", first: null, latest: null, folders: {}, activeAt: 1 }
+    const wrote = [{ folder: "/tmp/out", at: 5 }]
+    for (const [id, work] of [
+      [old, asStored],
+      [newer, { ...asStored, wrote }],
+    ] as const) {
+      const {
+        savedAt: _saved,
+        handleGivenAt: _given,
+        interruptions: _kept,
+        ...terminal
+      } = first.terminal(id)!
+      first.saveTerminal({ ...terminal, work })
+    }
+    first.close()
+    const reopened = kept(path)
+    expect(reopened.terminal(old)?.work).toEqual(asStored)
+    expect(reopened.terminal(newer)?.work).toEqual({ ...asStored, wrote })
   })
 
   it("forgets every transcript that is not sealed, scrubbing the file and its log", ({
@@ -3327,6 +3475,8 @@ describe("saved terminals", () => {
       inboxHistory: [],
       hibernateAfterMinutes: 60,
       worktrees: false,
+      agentModes: false,
+      agentMode: "herd",
     })
     workspace.settings.saveRunner({ transcripts: false })
     workspace.settings.saveRunner({ welcomed: true })
@@ -3338,6 +3488,8 @@ describe("saved terminals", () => {
       inboxHistory: [],
       hibernateAfterMinutes: 60,
       worktrees: false,
+      agentModes: false,
+      agentMode: "herd",
     })
   })
 
@@ -3353,6 +3505,37 @@ describe("saved terminals", () => {
     // A value that can't be read is the default, not off.
     workspace.settings.saveRunner({ hibernateAfterMinutes: 0 })
     expect(workspace.settings.runner().hibernateAfterMinutes).toBe(60)
+  })
+
+  it("keep how agents work together, Herd until another is picked", ({ kept }) => {
+    const workspace = kept()
+    expect(workspace.settings.runner().agentMode).toBe("herd")
+    workspace.settings.saveRunner({ agentMode: "solo" })
+    expect(workspace.settings.runner().agentMode).toBe("solo")
+    workspace.settings.saveRunner({ agentMode: "swarm" })
+    expect(workspace.settings.runner().agentMode).toBe("swarm")
+    workspace.settings.saveRunner({ agentMode: "herd" })
+    expect(workspace.settings.runner().agentMode).toBe("herd")
+    // A mode a newer build saved, which this one doesn't know, reads as Herd.
+    workspace.settings.saveRunner({ agentMode: "hive" as "herd" })
+    expect(workspace.settings.runner().agentMode).toBe("herd")
+  })
+
+  it("keep whether Solo and Swarm may be picked, off until turned on, and what then counts", ({
+    kept,
+  }) => {
+    const workspace = kept()
+    expect(workspace.settings.runner().agentModes).toBe(false)
+    workspace.settings.saveRunner({ agentMode: "swarm" })
+    // Off, the saved pick doesn't count, but stays.
+    expect(effectiveAgentMode(workspace.settings.runner())).toBe("herd")
+    expect(workspace.settings.runner().agentMode).toBe("swarm")
+    workspace.settings.saveRunner({ agentModes: true })
+    expect(workspace.settings.runner().agentModes).toBe(true)
+    expect(effectiveAgentMode(workspace.settings.runner())).toBe("swarm")
+    workspace.settings.saveRunner({ agentModes: false })
+    expect(effectiveAgentMode(workspace.settings.runner())).toBe("herd")
+    expect(workspace.settings.runner().agentMode).toBe("swarm")
   })
 
   it("keep whether agents get worktrees, off until turned on", ({ kept }) => {
@@ -3493,6 +3676,8 @@ describe("the messages", () => {
       inboxHistory: [],
       hibernateAfterMinutes: 60,
       worktrees: false,
+      agentModes: false,
+      agentMode: "herd",
     })
     expect(reopened.terminalIdentity("a")).toMatchObject({ handle: "moth" })
     expect(reopened.terminalIdentity("b")).toBeUndefined()

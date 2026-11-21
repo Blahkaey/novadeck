@@ -5,9 +5,12 @@ import { setTimeout as sleep } from "node:timers/promises"
 
 import type { PlanSource } from "@novadeck/harness-core/events"
 import {
+  isHtmlPath,
   companionLimits,
   onThisMachine,
   pageKey,
+  modelLimits,
+  pageLimits,
   pdfLimits,
   titleFrom,
   videoLimits,
@@ -15,6 +18,7 @@ import {
 import type {
   AgentName,
   ChangeFileDiff,
+  ChangeRange,
   CompanionChange,
   CompanionItem,
   CompanionWindow,
@@ -24,13 +28,17 @@ import type {
   PageTrouble,
   PlanSaveResult,
   FilePart,
+  FolderMatch,
+  WroteFolder,
 } from "@novadeck/protocol"
+import { bytesText } from "@novadeck/protocol/text"
 import { KeyedChanges } from "@novadeck/wire/server"
 
 import { waitAfter } from "../checkouts/git.js"
 import { mainBranch } from "../checkouts/repository.js"
 import { Snapshots } from "../checkouts/snapshots.js"
 import { DomainError } from "../errors.js"
+import { harnesses } from "../harnesses/registry.js"
 import { logs } from "../log.js"
 import { agentLabel } from "../messaging/messages.js"
 import { mention } from "../terminals/handles.js"
@@ -41,22 +49,30 @@ import {
   formatOf,
   hashOf,
   loadFile,
+  discoverModel,
+  filesStamps,
+  type ModelLoad,
   loadPdf,
   loadPlan,
   loadPlayed,
   maxImageBytes,
   pageAt,
+  modelStamp,
   partsOf,
   planTitle,
+  pageStamps,
   pointAt,
   probe,
+  readPageFile,
   readPart,
   type PlanText,
   type Pointed,
 } from "./content.js"
 import { loadText, saveText, type SaveFolders } from "./editing.js"
+import { FolderWatch, loadFolder, placeOfFolder, readFolderPart } from "./folder.js"
 import { findRepository, LayerReader, type ReadMarks } from "./layers.js"
 import { PageLooks } from "./looks.js"
+import { expandHome, matchFolders, wroteFolders } from "./path-field.js"
 import type { Compare, ItemRecord, ItemRecords, WindowRecord } from "./records.js"
 import { remoteCompare } from "./remote-compare.js"
 import {
@@ -69,7 +85,7 @@ import {
   type RequestFailure,
   type ShowRequest,
 } from "./request.js"
-import { secrets } from "./secrets.js"
+import { folderSecrets, secrets } from "./secrets.js"
 import { ShellTails, shellsDetail, type PlaceShells } from "./shell-output.js"
 
 const log = logs.for("companions")
@@ -85,6 +101,13 @@ export type TerminalPlace = {
   readonly project: string | undefined
   /** The transcript of the agent session it runs, where its hooks named one. */
   readonly transcript?: string | null
+  /**
+   * The folders its agent session wrote a file in outside the folder it works in, each with
+   * when it last did, the latest first, and the harness that session is of; absent where
+   * it wrote none (see `Work.wrote`).
+   */
+  readonly wrote?: readonly { readonly folder: string; readonly at: number }[]
+  readonly agent?: AgentName
   /**
    * The background shells of the agent bound in it, with the agent's name; undefined where
    * none is bound. What a shells item shows, and what makes and updates it.
@@ -103,6 +126,10 @@ type CompanionOptions = {
   readonly records: ItemRecords
   /** A terminal the runner keeps, running or saved; undefined once it is closed. */
   readonly terminal: (terminalId: string) => TerminalPlace | undefined
+  /** The folders every harness keeps for itself, which its agents' writes there are not listed from. */
+  readonly harnessBookkeeping?: () => Promise<readonly string[]>
+  /** The terminals the runner keeps in a session, as `terminal` tells them. */
+  readonly terminals?: (sessionId: string) => readonly TerminalPlace[]
   /** The folder of a session's project, which the person's project window opens files from; undefined for an unknown session. */
   readonly project: (sessionId: string) => string | undefined
   /** The folder agents' worktrees live in, whose files the person never saves; `worktreesRoot()` where omitted. */
@@ -119,6 +146,10 @@ type CompanionOptions = {
   readonly environment?: () => NodeJS.ProcessEnv
   /** How often `content` looks at what an item points at, in milliseconds. */
   readonly pollMs?: number
+  /** How long a folder waits for a change its watch may not tell; see `folderPolls`. */
+  readonly folderPolls?: { readonly safety: number; readonly unwatched: number }
+  /** For tests: run between the steps of a folder's read, to change the folder there. */
+  readonly folderSteps?: { readonly afterPlacing?: () => void; readonly afterReading?: () => void }
   /**
    * Remote refs: makes a repository's current for a caller that waits at most `ms` (the fetch
    * itself carries on), and tells when it was last fetched and why a fetch failed. Without it
@@ -179,12 +210,6 @@ type Pointer = Pick<
   | "compare"
 >
 
-const size = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
 /**
  * A path's real path, as `realpath` gives it while it exists; for one that doesn't, the
  * real path of its deepest existing ancestor with the rest appended, so a path through
@@ -203,6 +228,16 @@ const inside = (folder: string, path: string): boolean => {
   const route = relative(folder, path)
   return route !== "" && !isAbsolute(route) && route.split(sep)[0] !== ".."
 }
+
+// The kinds of an item that points at a file, which `repoint` can aim at another of its kind.
+const fileKinds: ReadonlySet<ItemRecord["kind"]> = new Set([
+  "image",
+  "video",
+  "audio",
+  "pdf",
+  "model",
+  "file",
+])
 
 // How many failed reads in a row a change keeps its last good content through.
 const changesFailures = 2
@@ -285,11 +320,24 @@ const wireWindow = (window: WindowRecord): CompanionWindow => ({
 })
 
 /** What a content reader compares to tell whether to yield again. */
+// A model's files beside it are its content too: one of them written again is a change.
+// A model's read, kept by item and by whether the person's yes went with it.
+const modelKey = (id: string, reveal: boolean): string => `${id}|${reveal ? "revealed" : "held"}`
+
 const keyOf = (content: ItemContent): string =>
-  content.state === "ready" ? `ready:${content.stamp}` : `${content.reason}:${content.size}`
+  content.state === "ready"
+    ? `ready:${content.stamp}${content.content.kind === "model" ? `|${content.content.files.map((file) => file.stamp).join(",")}` : ""}`
+    : `${content.reason}:${content.size}`
 
 /** How recent a plan's own timestamp must be for it to count as written live. */
 const LIVE_PLAN_MS = 60_000
+
+// A folder is read at most about four times a second, and where nothing tells it changed, every
+// few seconds.
+const folderGapMs = 250
+// How long a folder waits for a change its watch may not tell (a share, a link retargeted, a file
+// written in a folder inside it), and while the watch isn't working at all.
+export const folderPolls = { safety: 20_000, unwatched: 3_000 } as const
 
 /**
  * What agents show and the person attaches beside terminals, kept as pointers: each item
@@ -303,6 +351,7 @@ const LIVE_PLAN_MS = 60_000
 export class CompanionItems {
   private readonly records: ItemRecords
   private readonly pollMs: number
+  private readonly folderPolls: NonNullable<CompanionOptions["folderPolls"]>
   private readonly changesMs: number
   /** What changes items read their layers and files' diffs with. */
   private readonly layers: LayerReader
@@ -321,8 +370,15 @@ export class CompanionItems {
   private readonly dismissed = new Set<string>()
   /** The shells each terminal's item has counted, so one started since is told from news of the others. */
   private readonly shellIds = new Map<string, ReadonlySet<string>>()
+  /** The names a folder item's top held when it was last read, so what came since is told. */
+  private readonly folderNames = new Map<string, ReadonlySet<string>>()
+  /**
+   * The latest read of each folder item's top that began, by a number: followers of one folder
+   * read it alike and may finish out of order, and only the newest read tells what came.
+   */
+  private readonly folderReads = new Map<string, number>()
   /** The ends of shells' output files, read for their items. */
-  private readonly tails = new ShellTails()
+  private readonly tails = new ShellTails(() => secrets(this.environment()))
   /**
    * What each item's latest show carries out, with that show's version: the element a page
    * brings into view, or the second a video starts at. Only that show carries it out, so it
@@ -332,6 +388,17 @@ export class CompanionItems {
     string,
     { readonly version: number; readonly scroll?: string; readonly at?: number }
   >()
+  /**
+   * The files each model item's content lists, with the model's stamp then, so a part by name
+   * is read from what was listed; only for a model that isn't held, as a revealed one isn't kept.
+   */
+  private readonly modelFiles = new Map<string, ModelLoad>()
+  /**
+   * The files each web page item's pane has read from beside the page, by their real paths, as
+   * the client found them in the page: their stamps join the page's own, so one written again
+   * is a change of the item. Held for the page it was read for, and few.
+   */
+  private readonly pageFiles = new Map<string, { page: string; paths: Set<string> }>()
   /** Agents' looks at pages, on their way to the client. */
   private readonly looks = new PageLooks()
   private readonly lookMs: number
@@ -343,6 +410,7 @@ export class CompanionItems {
   constructor(private readonly options: CompanionOptions) {
     this.records = options.records
     this.pollMs = options.pollMs ?? 500
+    this.folderPolls = options.folderPolls ?? folderPolls
     this.changesMs = options.changesMs ?? 2000
     this.lookMs = options.lookMs ?? defaultLookMs
     this.ownSnapshots = options.snapshots
@@ -519,7 +587,7 @@ export class CompanionItems {
     if (this.stopping) throw new DomainError("CLOSING")
     const place = this.place(input.terminalId)
     const pointed = await this.pointer(place, {
-      file: { path: input.path, ...(input.lines && { lines: input.lines }) },
+      file: { path: expandHome(input.path), ...(input.lines && { lines: input.lines }) },
       ...(input.title !== undefined && { title: input.title }),
     })
     if (!pointed.ok) throw new DomainError("INVALID_FILE", pointed.reason)
@@ -529,6 +597,102 @@ export class CompanionItems {
     })
     if (!kept) throw new DomainError("TERMINAL_NOT_FOUND")
     return wireItem(kept.item)
+  }
+
+  /**
+   * The folders a path typed for a terminal's folder tab may be (see `companions.folders`);
+   * TERMINAL_NOT_FOUND for a terminal not kept.
+   */
+  async folders(input: {
+    readonly terminalId: string
+    readonly path: string
+  }): Promise<FolderMatch[]> {
+    const place = this.place(input.terminalId)
+    const shown = new Set(
+      this.records
+        .items(place.sessionId)
+        .flatMap((item) => (item.kind === "folder" && item.path !== null ? [item.path] : [])),
+    )
+    return matchFolders(input.path, place.cwd, folderSecrets(this.environment()), shown)
+  }
+
+  /**
+   * The folders outside the project that the agents of a terminal's session wrote in (see
+   * `companions.wroteTo`); TERMINAL_NOT_FOUND for a terminal not kept.
+   */
+  async wroteTo(input: { readonly terminalId: string }): Promise<WroteFolder[]> {
+    const place = this.place(input.terminalId)
+    const wrote = (this.options.terminals?.(place.sessionId) ?? []).flatMap(
+      ({ wrote: folders = [], agent, handle, cwd, transcript }) => {
+        if (agent === undefined) return []
+        // The folders its session's own home keeps, which a home moved for it alone names.
+        const own = transcript ? (harnesses[agent].bookkeepingOf?.(transcript) ?? []) : []
+        return folders.map((each) => ({ ...each, handle, agent, cwd, own }))
+      },
+    )
+    return wroteFolders(
+      wrote,
+      place.project,
+      folderSecrets(this.environment()),
+      (await this.options.harnessBookkeeping?.()) ?? [],
+    )
+  }
+
+  /**
+   * Points a file's item at another file of its own kind, as the person steps through a
+   * folder's files: the same item, holder and id, with a later version, theirs now, and
+   * asked open. The pointer is built as `attach` builds it, so a file that may hold secrets
+   * opens onto its gate. What the item's bar held under the new pointer is replaced. A path
+   * is absolute, or from the folder of the file the item points at now. NOT_FOUND for an
+   * unknown item, CONFLICT for a project window's item, INVALID_FILE, saying why, for an
+   * item that is no file, or a path that is no file or is one of another kind.
+   */
+  async repoint(input: { readonly itemId: string; readonly path: string }): Promise<CompanionItem> {
+    if (this.stopping) throw new DomainError("CLOSING")
+    const before = this.item(input.itemId)
+    this.keepInProject(before)
+    if (!fileKinds.has(before.kind) || before.path === null)
+      throw new DomainError("INVALID_FILE", "Only a file's item can be pointed at another file.")
+    const pointed = await pointAt(input.path, dirname(before.path), this.environment())
+    if (!pointed.ok) throw new DomainError("INVALID_FILE", pointed.reason)
+    if (pointed.kind !== before.kind)
+      throw new DomainError(
+        "INVALID_FILE",
+        pointed.kind === "folder"
+          ? "A folder can't stand in for a file."
+          : `That file's kind is ${JSON.stringify(pointed.kind)}, not ${JSON.stringify(before.kind)}.`,
+      )
+    // Read while the file was looked at: the item may have been closed or moved on meanwhile.
+    if (this.stopping) throw new DomainError("CLOSING")
+    const current = this.item(input.itemId)
+    this.keepInProject(current)
+    const pointer = this.filePointer(
+      pointed,
+      input.path,
+      dirname(before.path),
+      this.options.project(current.sessionId),
+    )
+    const same =
+      current.terminalId === null
+        ? undefined
+        : this.records
+            .barItems(current.terminalId)
+            .find((item) => item.pointerKey === pointer.pointerKey && item.id !== current.id)
+    // The bar holds one item to a pointer, so the one already there gives way to this.
+    const replaced = same && this.records.removeItem(same.id)
+    if (replaced) this.removed(replaced.item, replaced.window)
+    const item: ItemRecord = {
+      ...current,
+      ...pointer,
+      by: "person",
+      version: current.version + 1,
+      openAsked: true,
+      shownAt: Date.now(),
+      observedAt: null,
+    }
+    this.save(item)
+    this.sink?.gone(current)
+    return wireItem(item)
   }
 
   /**
@@ -704,6 +868,8 @@ export class CompanionItems {
     if (folder === undefined) throw new DomainError("NOT_FOUND", "Session not found")
     const pointed = await pointAt(input.path, folder, this.environment())
     if (!pointed.ok) throw new DomainError("INVALID_FILE", pointed.reason)
+    if (pointed.kind === "folder")
+      throw new DomainError("INVALID_FILE", "A folder opens in a terminal's pane, not in a window.")
     if (this.stopping) throw new DomainError("CLOSING")
     const pointer = this.filePointer(pointed, input.path, folder, folder)
     const own = this.records.windows(input.sessionId).find((window) => window.home === "project")
@@ -878,7 +1044,12 @@ export class CompanionItems {
     {
       reveal,
       edit = false,
-    }: { readonly reveal?: string | undefined; readonly edit?: boolean | undefined },
+      within,
+    }: {
+      readonly reveal?: string | undefined
+      readonly edit?: boolean | undefined
+      readonly within?: string | undefined
+    } = {},
     signal?: AbortSignal,
   ): AsyncGenerator<ItemContent> {
     if (this.stopping) throw new DomainError("CLOSING")
@@ -899,13 +1070,24 @@ export class CompanionItems {
       while (!reader.signal.aborted) {
         const item = this.records.item(itemId)
         if (!item) return
+        // A folder is listed as it changes until the item is something else (a path shown again
+        // as a file, or the reverse), when what was read of it before is read afresh.
+        if (item.kind === "folder") {
+          yield* this.folderContent(itemId, within ?? "", reader.signal)
+          probed = undefined
+          sent = undefined
+          continue
+        }
         const live = this.live(item)
         const lines = item.lines ? `${item.lines.from}-${item.lines.to}` : ""
         // A change has no one file to stat, nor have shells (their files are several): both
         // are read afresh each time.
         const probing = item.kind !== "changes" && item.kind !== "shells"
         // eslint-disable-next-line no-await-in-loop -- Each look follows the one before.
-        const stamp = probing ? await probe(item, live) : String(Date.now())
+        const stamp = probing
+          ? // eslint-disable-next-line no-await-in-loop -- As above.
+            `${await probe(item, live)}${item.kind === "model" ? await this.besideStamps(item, reveal) : ""}${await this.pageStamp(item)}`
+          : String(Date.now())
         const now = probing ? `${item.version}|${item.path}|${lines}|${stamp}` : stamp
         if (now !== probed) {
           const began = Date.now()
@@ -950,6 +1132,77 @@ export class CompanionItems {
       readers.delete(reader)
       if (readers.size === 0 && this.readers.get(itemId) === readers) this.readers.delete(itemId)
     }
+  }
+
+  /**
+   * A folder item's listing of the folder `within` names, read again as the folder changes: its
+   * own watch, a few events as one, and at most about four reads in a second; where the
+   * watch tells nothing (a network share), every few seconds. Files that came to its top since
+   * it was first read make the item new, which the taskbar marks.
+   */
+  private async *folderContent(
+    itemId: string,
+    within: string,
+    signal: AbortSignal,
+  ): AsyncGenerator<ItemContent> {
+    const watcher = new FolderWatch()
+    let sent: string | undefined
+    try {
+      while (!signal.aborted) {
+        const item = this.records.item(itemId)
+        if (item?.kind !== "folder") return
+        const began = Date.now()
+        // The watch is armed before the folder is read, so a change in between is told; read again
+        // where what is read is not what was armed (replaced meanwhile).
+        // eslint-disable-next-line no-await-in-loop -- Each read follows the change before it.
+        const place = await placeOfFolder(item, within, this.environment())
+        if (signal.aborted) return
+        watcher.follow(place?.dir, place?.ino)
+        this.options.folderSteps?.afterPlacing?.()
+        // Only a read of the top counts what came (a subfolder's read is another folder's), and
+        // of those only the newest, so two followers of the top can't count one file twice.
+        const top = within === ""
+        const read = top ? (this.folderReads.get(itemId) ?? 0) + 1 : 0
+        if (top) this.folderReads.set(itemId, read)
+        // eslint-disable-next-line no-await-in-loop -- As above.
+        const { content, ino } = await loadFolder(item, within, this.environment())
+        if (signal.aborted) return
+        this.options.folderSteps?.afterReading?.()
+        // Replaced meanwhile: what is read isn't what the watch was armed on, so it is armed anew.
+        // A folder that couldn't be read (no permission) says no folder, which isn't another one.
+        const replaced = ino !== undefined && ino !== place?.ino
+        if (replaced) watcher.follow(undefined)
+        if (top && this.folderReads.get(itemId) === read) this.folderArrivals(item, content)
+        const key = `${item.version}|${item.path}|${keyOf(content)}`
+        if (key !== sent) {
+          sent = key
+          yield content
+        }
+        // eslint-disable-next-line no-await-in-loop -- As above.
+        await sleep(Math.max(0, folderGapMs - (Date.now() - began)), undefined, { signal }).catch(
+          () => {},
+        )
+        if (replaced) continue
+        // eslint-disable-next-line no-await-in-loop -- As above.
+        await watcher.wait(this.folderPolls, signal)
+      }
+    } finally {
+      watcher.close()
+    }
+  }
+
+  /** Makes a folder item new, as an item shown again is, once files came to its top. */
+  private folderArrivals(item: ItemRecord, content: ItemContent): void {
+    if (content.state !== "ready" || content.content.kind !== "folder") return
+    const { entries, truncated } = content.content
+    const names = new Set(entries.map(({ name }) => name))
+    const known = this.folderNames.get(item.id)
+    this.folderNames.set(item.id, names)
+    if (known === undefined || truncated) return
+    if (![...names].some((name) => !known.has(name))) return
+    const now = this.records.item(item.id)
+    if (!now) return
+    this.save({ ...now, version: now.version + 1, openAsked: false, shownAt: Date.now() })
   }
 
   private changesWait(took: number): number {
@@ -1273,13 +1526,16 @@ export class CompanionItems {
       return failure(
         "Only a video or a recording starts at a second; give at only for a video or audio file.",
       )
+    if (lines !== undefined && pointed.kind === "folder")
+      return failure("A folder has no lines to point at; give lines only for a text file.")
     return {
       ok: true,
       tooLarge:
         (pointed.kind === "image" && pointed.size > maxImageBytes) ||
         ((pointed.kind === "video" || pointed.kind === "audio") &&
           pointed.size > videoLimits.bytes) ||
-        (pointed.kind === "pdf" && pointed.size > pdfLimits.bytes),
+        (pointed.kind === "pdf" && pointed.size > pdfLimits.bytes) ||
+        (pointed.kind === "model" && pointed.size > modelLimits.bytes),
       pointer: this.filePointer(pointed, path, place.cwd, place.project, {
         ...(request.title !== undefined && { title: request.title }),
         ...(lines && { lines }),
@@ -1301,7 +1557,7 @@ export class CompanionItems {
     // A held file goes by its own name, so the person sees what they would open.
     const name = pointed.secret
       ? basename(pointed.path)
-      : (shown.title ?? basename(resolve(cwd, given)))
+      : (shown.title ?? (basename(resolve(cwd, given)) || pointed.path))
     return {
       pointerKey: pointed.path,
       kind: pointed.kind,
@@ -1364,7 +1620,7 @@ export class CompanionItems {
 
   /**
    * How a file is described: an image, a video, a recording or a PDF by its size and format,
-   * a text file by its path and lines.
+   * a 3D model by its format and size, a text file by its path and lines.
    */
   private detail(
     pointed: Pointed,
@@ -1376,10 +1632,12 @@ export class CompanionItems {
       pointed.kind === "image" ||
       pointed.kind === "video" ||
       pointed.kind === "audio" ||
-      pointed.kind === "pdf"
+      pointed.kind === "pdf" ||
+      pointed.kind === "model"
     ) {
-      return `${size(pointed.size)} ${formatOf(pointed.path)}`
+      return `${bytesText(pointed.size)} ${formatOf(pointed.path)}`
     }
+    if (pointed.kind === "folder") return tail(pointed.path, companionLimits.detail)
     const shown = project && inside(project, pointed.path) ? relative(project, pointed.path) : given
     const range = lines ? ` · lines ${lines.from}–${lines.to}` : ""
     return `${tail(shown, companionLimits.detail - range.length)}${range}`
@@ -1634,13 +1892,87 @@ export class CompanionItems {
     readonly stamp: string
     readonly offset: number
     readonly reveal?: string | undefined
+    readonly file?: string | undefined
+    readonly path?: string | undefined
   }): Promise<FilePart> {
     if (this.stopping) throw new DomainError("CLOSING")
     const item = this.item(input.itemId)
+    if (input.path !== undefined) {
+      if (item.kind !== "folder") throw new DomainError("NOT_FOUND", "That item isn't a folder")
+      return readFolderPart(item, { ...input, path: input.path }, this.environment())
+    }
+    // A file beside a web page, by its name from the page's folder.
+    if (
+      input.file !== undefined &&
+      item.kind === "file" &&
+      item.path !== null &&
+      isHtmlPath(item.path)
+    ) {
+      const { part, path } = await readPageFile(item, input.file, input.offset, this.environment())
+      if (path !== undefined) this.pageRead(item, path)
+      return part
+    }
     const largest = partsOf[item.kind]
     if (largest === undefined) throw new DomainError("NOT_FOUND", "That item isn't read in parts")
     const reveal = input.reveal !== undefined && input.reveal === item.path
+    if (input.file !== undefined) {
+      const beside =
+        item.kind === "model" ? await this.modelFile(item, input.file, reveal) : undefined
+      if (!beside) throw new DomainError("NOT_FOUND", "That file isn't one the model names")
+      // Never shown when it may hold secrets, as the model's own reveal doesn't reach it.
+      return readPart(
+        { path: beside.path, secret: false },
+        input,
+        false,
+        largest,
+        this.environment(),
+      )
+    }
     return readPart(item, input, reveal, largest, this.environment())
+  }
+
+  /**
+   * A file a model's content lists, by its name there: kept while the model is as it was when
+   * it was read, and read again once it isn't. A model read with the person's yes is kept
+   * apart from one read without, so a held model's files are never reached by the other.
+   */
+  private async modelFile(
+    item: ItemRecord,
+    name: string,
+    reveal: boolean,
+  ): Promise<{ readonly path: string } | undefined> {
+    const kept = this.modelFiles.get(modelKey(item.id, reveal))
+    if (kept?.content.state === "ready" && kept.content.stamp === (await modelStamp(item)))
+      return kept.files.get(name)
+    const model = await discoverModel(item, reveal, this.environment())
+    if (model.content.state !== "ready") return undefined
+    this.modelFiles.set(modelKey(item.id, reveal), model)
+    return model.files.get(name)
+  }
+
+  /** Notes that a web page's pane read `path` from beside it, so its changes are the page's. */
+  private pageRead(item: ItemRecord, path: string): void {
+    if (item.path === null) return
+    const known = this.pageFiles.get(item.id)
+    const held = known?.page === item.path ? known : { page: item.path, paths: new Set<string>() }
+    this.pageFiles.set(item.id, held)
+    if (held.paths.size < pageLimits.files) held.paths.add(path)
+  }
+
+  /** The stamps of the files a web page's pane read from beside it, as they are now. */
+  private async pageStamp(item: ItemRecord): Promise<string> {
+    const held = this.pageFiles.get(item.id)
+    if (item.kind !== "file" || held?.page !== item.path || held.paths.size === 0) return ""
+    return `|${(await pageStamps(held.paths)).join(",")}`
+  }
+
+  /** The stamps of the files beside a model as its last read listed them, as they are now. */
+  private async besideStamps(item: ItemRecord, reveal: string | undefined): Promise<string> {
+    const kept = this.modelFiles.get(
+      modelKey(item.id, reveal !== undefined && reveal === item.path),
+    )
+    if (!kept) return ""
+    return `|${(await filesStamps(kept.files)).join(",")}`
   }
 
   /**
@@ -1655,6 +1987,17 @@ export class CompanionItems {
     // A compare's reads are its own: the checkout's are kept only for what its work changes.
     if (compare) this.layers.markCompare(root, compare, listed.path, listed.blob)
     else await this.options.reads?.mark(root, listed.path, listed.blob)
+  }
+
+  /** The files a selection of layers changed as one range (see `companions.changeRange`). */
+  async changeRange(input: {
+    readonly itemId: string
+    readonly layers: readonly string[]
+  }): Promise<ChangeRange> {
+    const { root, compare } = await this.changeRoot(input.itemId)
+    const read = await this.layers.range(root, input.layers, compare)
+    if (!read.ok) throw new Error(read.reason)
+    return read.range
   }
 
   private read(
@@ -1687,7 +2030,26 @@ export class CompanionItems {
     if (item.kind === "video" || item.kind === "audio")
       return loadPlayed(item, reveal, { shown: item.version, at: cued?.at }, this.environment())
     if (item.kind === "pdf") return loadPdf(item, reveal, this.environment())
-    return loadFile(item, reveal, this.environment())
+    if (item.kind === "model")
+      return discoverModel(item, reveal, this.environment()).then((model) => {
+        if (model.content.state === "ready") this.modelFiles.set(modelKey(item.id, reveal), model)
+        return model.content
+      })
+    if (item.kind === "folder")
+      return loadFolder(item, "", this.environment()).then(({ content }) => content)
+    return this.readFile(item, reveal)
+  }
+
+  /**
+   * A file as it reads now. A web page's stamp carries those of the files its pane drew it with
+   * (a digest of them, as a stamp is short), so a stylesheet saved beside it reads as a change.
+   */
+  private async readFile(item: ItemRecord, reveal: boolean): Promise<ItemContent> {
+    const content = await loadFile(item, reveal, this.environment())
+    const beside = content.state === "ready" ? await this.pageStamp(item) : ""
+    return beside === "" || content.state !== "ready"
+      ? content
+      : { ...content, stamp: `${content.stamp}|${hashOf(beside)}` }
   }
 
   private changed(item: ItemRecord): void {
@@ -1696,6 +2058,11 @@ export class CompanionItems {
 
   private removed(item: ItemRecord, window: WindowRecord | undefined): void {
     this.cues.delete(item.id)
+    this.modelFiles.delete(modelKey(item.id, false))
+    this.modelFiles.delete(modelKey(item.id, true))
+    this.pageFiles.delete(item.id)
+    this.folderNames.delete(item.id)
+    this.folderReads.delete(item.id)
     this.sink?.gone(item)
     for (const reader of this.readers.get(item.id) ?? []) reader.abort()
     this.emit(

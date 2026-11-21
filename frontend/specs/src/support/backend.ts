@@ -18,6 +18,7 @@ import {
   type UpdateScenario,
   type UpdateScenarioKey,
 } from "@novadeck/demo-debug/desktop/scenarios"
+import { createDemoScreenReader } from "@novadeck/demo-debug/desktop/screen-reader"
 import { createDemoUninstall, uninstallScenarios } from "@novadeck/demo-debug/desktop/uninstall"
 import { createDemoUpdates } from "@novadeck/demo-debug/desktop/updates"
 import { addressParams } from "@novadeck/demo/address"
@@ -26,7 +27,10 @@ import { isDemoFiles } from "@novadeck/demo/files"
 import { isDemoInbox } from "@novadeck/demo/inbox"
 import { demoInboxRowsAll } from "@novadeck/demo/inbox/fixtures"
 import { demoResolved, demoResolvedRows } from "@novadeck/demo/inbox/resolved"
+import { demoTerminalId } from "@novadeck/demo/samples"
+import type { SampleArtifact } from "@novadeck/demo/showcase/artifacts"
 import { createShowcaseDemo } from "@novadeck/demo/showcase/demo"
+import { isShowcase } from "@novadeck/demo/showcase/simulation"
 import { createDemo } from "@novadeck/demo/variants"
 import { babciaCuesOf, type BabciaCues } from "@novadeck/demo/videos/babcia"
 import { visitorDemo } from "@novadeck/demo/visitor/index"
@@ -112,6 +116,29 @@ const requestedSandbox = (): SandboxState | undefined => {
   if (sandbox === "off-unfixed") return { sandboxed: false, fix: "" }
   return undefined
 }
+
+// Specs open the demo as a desktop app that says whether a screen reader runs with
+// `?screenReader=running` or `?screenReader=none`; without it, nothing tells, as in a browser.
+// The stand-ins the page's backends were made with, which `setScreenReaderRunning` drives: a
+// page may make more than one backend.
+const screenReaderStandIns: ReturnType<typeof createDemoScreenReader>[] = []
+
+/** Says to the page that a screen reader started or stopped, as the desktop app does. */
+export const setScreenReaderRunning = (running: boolean): void => {
+  if (!screenReaderStandIns.length) throw new Error("Open the workspace with ?screenReader= first")
+  for (const standIn of screenReaderStandIns) standIn.set(running)
+}
+
+const requestedScreenReader = (): boolean | undefined => {
+  const reader = addressParams().get("screenReader")
+  if (reader === "running") return true
+  if (reader === "none") return false
+  return undefined
+}
+
+// Specs open the demo as a desktop app that scales its windows with `?scale=desktop`; the
+// scales it was told, as fractions, are `scalesShown`. Without it, nothing scales, as in a browser.
+export const scalesShown: number[] = []
 
 // Specs open the demo on a portable copy with `?portable=` one of the debug panel's
 // portable scenarios (see @novadeck/demo-debug/desktop/scenarios). Installing takes no time there,
@@ -469,6 +496,21 @@ export const worktreeDiff = {
   },
 }
 
+/**
+ * The showcase's Build Studio agent shows `sample` in its pane, as its `show` would (the debug
+ * panel's way of showing a sample): it opens at once.
+ */
+export const buildStudioShows = (sample: SampleArtifact): void => {
+  const session = { projectId: "studio", workspaceSessionId: "initial" }
+  for (const { backend } of started)
+    if (backend.companions && isShowcase(backend.companions))
+      backend.companions.present(
+        { ...session, terminalId: demoTerminalId(session, 1) },
+        "moth",
+        sample,
+      )
+}
+
 /** The backend reports that the terminal named `name` now works for the one named `lead`, in
  * the session that has both: it joins that lead's team, or forms one with it. */
 export const joinTeam = (name: string, lead: string): void => {
@@ -484,6 +526,27 @@ export const joinTeam = (name: string, lead: string): void => {
             target: { projectId: project.id, workspaceSessionId: session.id },
             terminalId: worker.id,
             ledBy: leader.id,
+          },
+        ])
+      }
+}
+
+/** The backend reports the agent of the terminal `terminalId` (of the project's first session
+ * that has it) as working, with the time it last wrote words where `wordsAt` is given. */
+export const agentWorks = (terminalId: string, wordsAt?: number): void => {
+  for (const { sink, seed } of started)
+    for (const project of seed.projects)
+      for (const session of project.sessions) {
+        if (!session.terminals.some((each) => each.id === terminalId)) continue
+        sink.dispatch([
+          {
+            type: "terminal/status",
+            target: { projectId: project.id, workspaceSessionId: session.id },
+            terminalId,
+            status: {
+              state: "running",
+              agent: { working: true, ...(wordsAt === undefined ? {} : { wordsAt }) },
+            },
           },
         ])
       }
@@ -563,7 +626,15 @@ const plainSpecBackend = (): ReturnType<typeof createDemoBackend> => {
   )
   const uninstall = requestedUninstall()
   const withSandbox = sandbox ? { ...demo, sandbox: createDemoSandbox(sandbox) } : demo
-  const withUninstall = uninstall ? { ...withSandbox, uninstall } : withSandbox
+  const reader = requestedScreenReader()
+  const standIn = reader === undefined ? undefined : createDemoScreenReader(reader)
+  if (standIn) screenReaderStandIns.push(standIn)
+  const withReader = standIn ? { ...withSandbox, screenReader: standIn.screenReader } : withSandbox
+  const withScale =
+    addressParams().get("scale") === "desktop"
+      ? { ...withReader, showScale: (scale: number) => void scalesShown.push(scale) }
+      : withReader
+  const withUninstall = uninstall ? { ...withScale, uninstall } : withScale
   return portable
     ? {
         ...withUninstall,
@@ -578,6 +649,8 @@ const plainSpecBackend = (): ReturnType<typeof createDemoBackend> => {
  * though an earlier spec or an earlier page of its own made more.
  */
 export const forgetEarlierPages = (): void => {
+  screenReaderStandIns.length = 0
+  scalesShown.length = 0
   approvalBackends.length = 0
   made.length = 0
   desktops.length = 0

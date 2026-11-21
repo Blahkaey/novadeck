@@ -20,8 +20,7 @@ import { describe, expect, it } from "../test.js"
 import { adapterFolder } from "../testing/adapters.js"
 import { harnesses } from "./registry.js"
 
-const delivery =
-  '<novadeck-messages note="…">\n<message id="m-1">"hi" & bye</message>\n</novadeck-messages>'
+const delivery = '<novadeck-messages>\n<message id="m-1">"hi" & bye</message>\n</novadeck-messages>'
 
 // Each answer is one line of JSON the harness reads.
 const line = (text: string): unknown => {
@@ -117,8 +116,13 @@ describe("each harness's messaging profile", () => {
 
 describe("a continuation's prompt", () => {
   it("is a delivery's, in any harness, never the person's", () => {
-    expect(continuationPrompt(`text\n${delivery}`)).toBe(true)
+    expect(continuationPrompt(delivery)).toBe(true)
+    expect(continuationPrompt(`\n${delivery}`)).toBe(true)
     expect(continuationPrompt("Review the Novadeck notice")).toBe(false)
+  })
+
+  it("is not the person's words that quote a delivery", () => {
+    expect(continuationPrompt(`What does this mean?\n${delivery}`)).toBe(false)
   })
 })
 
@@ -147,7 +151,8 @@ describe("a doorbell prompt", () => {
       prompt: "fix the build",
     })
     expect(withoutDoorbell(`half ${bell} typed`)).toBe("half typed")
-    expect(promptStart(base, `go on\n${delivery}`)).toMatchObject({ cause: "harness" })
+    expect(promptStart(base, delivery)).toMatchObject({ cause: "harness" })
+    expect(promptStart(base, `go on\n${delivery}`)).toMatchObject({ cause: "prompt" })
     expect(promptStart(base, "anything", true)).toMatchObject({ cause: "harness" })
   })
 

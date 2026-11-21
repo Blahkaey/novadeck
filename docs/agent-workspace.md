@@ -258,22 +258,30 @@ the terminal (inside its window; in a window 864px wide or less, as every Canvas
 Nothing opens on its own unless the user asked for it; everything else waits in the
 taskbar, marked new.
 
-What belongs there is a deliverable: something made to be looked at (an image or
-screenshot, a rendered page or dev server, a report, mockup, diagram or generated
-document, the one file the user asked for, or whatever they ask to see), shown once it
-is done, with `open` so it opens at once; without `open` for anything supporting, which
-waits marked new. A page is one the agent serves or just deployed, such as a dev server
+What belongs there is a deliverable: a file or page the task itself calls for that the
+agent's reply can't carry, made to be looked at (an image or screenshot, a rendered page or dev server, a mockup or diagram, a
+rendered document such as a PDF, the one file the user asked for, or an existing file or page, or the working tree's changes, that they ask to see), shown
+once it is done, with `open` so it opens at once; without `open` for anything supporting, which
+waits marked new. It is defined by what the task calls for and the reply can't carry, not by kinds of
+document: when the list named "a report" or "a generated document", agents wrote answers
+that belonged in their reply to a file just to show them, and with "the task calls for"
+alone, a task asking for a write-up still read as asking for a file. Asking to see is
+bounded the same way: "or whatever they ask to see" turned "show me the plan" into edits made
+only to have a diff to show, so it is an existing file or page, or the working tree's changes,
+that they ask to see, and what the reply
+can carry stays there. A page is one the agent serves or just deployed, such as a dev server
 or a preview: a link to someone else's site often wants a sign-in in the pane and helps
 little there, so it goes in the agent's reply unless the user asks to see it in the pane. A source file counts while it is the one
 the user and the agent work on together; the files a change touches on the way do not,
-and the user reads those in the diff. Every harness hears this two ways, as no plugin ships a skill: the `show` tool's
+and a change is shown as its diff. The diff is shown when there is a change to show, not
+after every piece of work by rule. Every harness hears this two ways, as no plugin ships a skill: the `show` tool's
 own description carries the rule, which every harness reads alike from `tools/list`,
 and the runner's prompt-time hook adds Novadeck's companion notice, one paragraph, at
 the first turn the person's prompt or the doorbell begins in each root session, and after a compaction
 (`companionNotice` in `terminals/nudges.ts`; it rides with the summary nudge but a
 `describe` never clears it; see [Agent messaging](agent-messaging.md), "Nudges"), with
-the Inbox notice beside it (`inboxNotice`): the person rarely watches the terminal, so
-a question the agent's turn ends waiting on goes to the Inbox: through the harness's own
+the Inbox notice beside it (`inboxNotice`): the Inbox shows the person a copy when
+they're away from the terminal, so a question the agent's turn ends waiting on goes there: through the harness's own
 question tool where the agent would use one, which the Inbox shows as it is, else with
 `ask`. A
 worker another agent runs by briefs alone hears them at the person's first prompt there,
@@ -295,13 +303,17 @@ through the backend's seed and actions, as terminals do; the person's moves are
 workspace actions the backend makes so. The pane loads content through the backend
 port's optional `companions` capability (`frontend/core/src/items.ts`):
 
-| `companions`                                    | What it carries                                                                                                  |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `follow(target, itemId, { reveal, edit? }, on)` | What an item holds now, then again as it changes: ready with a stamp, or why not; with `edit`, a text file whole |
-| `save(target, itemId, text, basedOn, path?)`    | The user's edit written to the plan file, or the project window's file, unless it changed since stamp `basedOn`  |
-| `openInProject?(target, path, windowId)`        | A file the person opened from Files, in the project window; absent where it can't be                             |
-| `changeFile?(target, itemId, path, layers)`     | One file of a change for the layers selected: its diff and both sides' text; absent where it can't be            |
-| `changeRead?(target, itemId, path)`             | The person read a file of a change: the content's `read` names it until it changes; absent where it can't be     |
+| `companions`                                             | What it carries                                                                                                                                      |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `follow(target, itemId, { reveal, edit?, within? }, on)` | What an item holds now, then again as it changes: ready with a stamp, or why not; with `edit`, a text file whole; with `within`, a subfolder listing |
+| `save(target, itemId, text, basedOn, path?)`             | The user's edit written to the plan file, or the project window's file, unless it changed since stamp `basedOn`                                      |
+| `openInProject?(target, path, windowId)`                 | A file the person opened from Files, in the project window; absent where it can't be                                                                 |
+| `changeFile?(target, itemId, path, layers)`              | One file of a change for the layers selected: its diff and both sides' text; absent where it can't be                                                |
+| `changeRead?(target, itemId, path)`                      | The person read a file of a change: the content's `read` names it until it changes; absent where it can't be                                         |
+| `repoint?(target, itemId, path)`                         | A file's item shown another file of its kind, as stepping through a folder does; absent where it can't be                                            |
+| `changeRange?(target, itemId, layers)`                   | The files the layers selected changed as one range, with the range's own counts; absent where it can't be                                            |
+| `folders?(target, terminalId, path)`                     | The folders a typed path may be, for a folder view's path field; absent where it can't be                                                            |
+| `wroteTo?(target, terminalId)`                           | The folders outside the project agents wrote in, with who, which harness and when; absent where it can't be                                          |
 
 A file that may hold secrets is `secret` until the person asks to see it, and `reveal` is the path
 they asked for: the item re-pointed to another file reads `secret` again.
@@ -330,8 +342,21 @@ inside a quoted record, so the table starts at the first line from which the row
 there; a quote never closed in a file shown whole, or open longer in a part, reads as text
 from its record on, as a TSV's inch mark. Each
 column's decimal mark is the one all its numbers read with (a comma first in a semicolon file),
-and digits led by a zero (IDs, postcodes) are text. A
-file with a preview opens on it, with a Show source tool in the pane's row (Ctrl+Shift+V, ⌘⇧V
+and digits led by a zero (IDs, postcodes) are text.
+An HTML file (`.html`, `.htm`) is drawn as the web page it is (`previews/html.tsx`, `HtmlViewer.tsx`;
+its frame and viewer load only when one shows). The runner reads it whole like a data file (up
+to 2 MiB; one cut short shows its source, saying so), and the viewer reads the stylesheets,
+pictures and fonts it names, and what those name in turn (`@import`, `url()`), by their names
+from the page's folder, through `companions.part` with `file` (a page's own: any style, picture
+or font in the page's folder or under it, `..` and links out of it refused, never one that may
+hold secrets; at most 64 files, 16 MiB each and 32 MiB all told). The page is then built from them
+(`libraries/viewers/src/html/page.ts`: stylesheets as `<style>`, pictures and fonts as data
+addresses, scripts, frames, plugins, `<base>` and refreshes taken out) and drawn in the viewers'
+sandboxed frame (see SECURITY.md), so nothing in the page runs and nothing it names beyond those
+files is fetched. A file the page was drawn with is part of the item's content: the runner adds
+the stamps of the files the pane read to the page's own, so saving a stylesheet beside it, as well
+as the page, draws it again; a page that comes out the same as the one drawn is left alone. A file
+with a preview opens on it, with a Show source tool in the pane's row (Ctrl+Shift+V, ⌘⇧V
 on a Mac, from anywhere in the file) that switches it to the bare file in the code viewer and
 back. A preview's own tools join the row before it (`usePreviewTools`); one that can't read its
 file says so in its body, the switch still there. The choice is the item's, for the file it
@@ -381,18 +406,22 @@ A change (the `changes` item kind) is read-only and has two views, in `frontend/
 on the pane's own ground (`--pane-bg`). The **list view** is where it opens: a row for the work
 not committed yet ("Uncommitted") and one for each commit since the merge base with main, newest
 first (short hash, subject, time, `+N −N`), then a "Files" tree, as the Files panel draws its
-own, of what the selected rows changed together (their counts added up, names coloured by how the
-file changed, folders with guides), and a hint line saying what a click does. All rows are
+own, of what the selected rows changed together (for one row its own counts, for a range or all of
+them the range's own as git lists it, names coloured by how the file changed, folders with guides), and a hint line saying what a click does. All rows are
 selected to start; the selection is a 2px `--color-strong` rail on a row's left edge, joined across
 selected neighbours, growing and shrinking by scale and opacity and sliding its ends over
 `--motion-state` (none under reduced motion). A click on a row keeps only that row, a click on
-another row keeps only that one instead, and clicking the row kept alone is all again: a selection
-is all the rows or one (`selection.ts`). A file the person opened is gray in the tree, in
+another row keeps only that one instead, and clicking the row kept alone is all again. A
+Shift+click (or Shift+Enter) takes every row from the row clicked last (the anchor) to it, either
+way, and another moves the range's end from the same anchor; with no row kept it is a click, and a
+range of every row is all again, so later commits show too. A selection is all the rows, one, or
+one unbroken range (`selection.ts`), whose files `changeRange` lists. A file the person opened is gray in the tree, in
 any selection, until the file changes again: the runner keeps it read (`changeRead`, in the
 content's `read`), across restarts, and the pane grays it at once until the content comes again. One click on a file unfolds what it changed under its row, one file
 at a time, as `.terminal-tab-branches` unfold a terminal tab's subagents (├ └ rows with the
-tab's own fold and transition), each a fact (where the change sits, `+N −N`); a double click, or
-Enter, opens the file. The **file view** is the row grown into a plain heading (‹ back, the folder
+tab's own fold and transition), each a fact (where the change sits, `+N −N`), with "Open diff ›" under them; that, a double click,
+Enter, or the `›` at the row's end (shown where the pointer is, on the unfolded row, and always
+where nothing hovers) opens the file. The **file view** is the row grown into a plain heading (‹ back, the folder
 dim and the name in body type, the file's counts, ⌃ ⌄ and "N of M" within the selection), a line of
 what the file came to, and its changes, each headed by where it sits ("2/4 in requireUser()", "new
 refreshSession()") and the lines it spans; a change past 36 rows shows its start and end with
@@ -585,7 +614,92 @@ with every safety check again at that time:
   browser show it alike: only its pages are drawn, so a link in it goes nowhere, no form or
   script it carries runs, and nothing it names is fetched. It opens fitted to the pane's width, and keeps its page and zoom across views,
   windows and a rewrite of the file; one over 128 MB loads as too large to preview, and one
-  locked with a password, or that isn't a PDF pdf.js can read, says so in the pane. Showing the same file or page again updates the item on the agent's own
+  locked with a password, or that isn't a PDF pdf.js can read, says so in the pane.
+  A 3D model (`.glb`, `.gltf`, `.stl`, `.obj`, `.ply`, `.3mf`, kind `model`) is read the same
+  way, with the files beside it that it names (a glTF's buffers and textures, an OBJ's material
+  libraries and theirs, in its folder, none that may hold secrets, none at an address of its
+  own), and drawn with three.js in the same kind of frame: it opens fitted on a grid, turns,
+  moves and zooms, toggles wireframe and flat shading, plays a glTF's animation, and gives its
+  size in millimetres where its format has units. Rewritten, as a CAD loop writes it again, it's
+  drawn from where the person was looking; one over 256 MB with its files loads as too large to
+  preview. Its peek is a still of it.
+  A folder (`show {"file": {"path": "<dir>/"}}`, or the person's "Open in the pane" on a
+  Files panel row, kind `folder`) is listed, read-only, as a grid of thumbnails or a list
+  (newest first, or by name or size): the runner reads its entries (name, kind by extension
+  (an `.obj` by its first bytes too, so a compiled object file is a plain file, not a model),
+  size, modified time, and what a folder inside holds), watches it with the file system's own
+  watch (a few events together, at most about four reads a second; a folder deleted and made again
+  is watched anew), plus a poll for what a watch can't tell, as on a share or under a link that was
+  retargeted: every 20 s while the watch works, and every 3 s where it can't watch at
+  all, as for a folder that is gone, which is polled for until it is back. It pushes the listing again as files land, which the pane draws on top, or
+  holds in a "N new files" pill while the pointer is in the grid; a file whose size is
+  changing shows the Files panel's write cursor. A folder with files landing behind another tab
+  makes its taskbar icon new. Double-clicking a folder goes into it in the same tab, never above
+  the one that was opened (the crumbs start there); double-clicking a file opens it as an item
+  of its own kind on the terminal's bar (`companions.attach`), as if shown, so it goes to that
+  kind's group. An entry's menu (right-click, the menu key or Shift+F10) offers Open,
+  Open as text, Quick look and Copy path; a folder's has Open and Copy path, and a secret or a link
+  out only Copy path. Open as text, and Alt+double-click, open a file on its source (the file
+  preview's "Show source" switch, kept per file as that switch keeps it): only a file whose type
+  has a preview with a source, by its name (Markdown `.md` and `.markdown`, tables `.csv` and `.tsv`, and
+  data `.json`, `.jsonl` and YAML), has it, and any other opens as usual. Space
+  is a quick look, a floating peek over the pane that opens no tab: an image larger, a video's
+  first frame and length, a kind registered through `registerEntryThumb` by its renderer, and
+  for anything else (text, a PDF, a recording, a file too large, a secret) its icon, kind, size and
+  when it changed; it reads files only as the thumbnails do (never text or a PDF's content). ← and
+  → step through the files (folders skipped), Enter opens the file in a tab, Space or Escape or a
+  click outside closes it, and focus goes back to the folder. It is transient, not modal: a press or focus outside it, or its file going or the folder
+  changing, ends it (a click into the terminal keeps the focus it took), Tab stays in it, Backspace
+  and Alt+Up, which would go up behind it, do nothing, and a key held down (Escape too) acts once. When the pane covers its terminal, a folder's entries keep only Space (the look); any other letter
+  typed there still uncovers the pane and goes to the terminal, Backspace and the arrows were never
+  characters, and Escape hides the pane unless a look is up, which keeps all its keys (`data-pane-keys`
+  in `homes/terminal/cover-keys.ts`; the folder's is `"space"`). Nothing in it is harness-specific.
+  "Show in Files" isn't offered, because Novadeck has no reveal-in-system action for a path yet.
+  A file open on a bar's pane or in an undocked window (an image, video, recording,
+  PDF or text file; not the project window's, which keeps its one file) that lies under the top of
+  a folder item of the same session, on any bar or in a window (the one on the file's own holder if
+  there is one, else the deepest top), has ‹ and › in the row's tools, which step it
+  to the folder's previous or next file of the same kind: in the folder's own sort (newest first
+  unless the person changed it), never a folder, a file that may hold secrets, a link out or a link
+  that stays inside (each file once), or what is no regular file; they show only once the file's
+  place among them is known, and not round the ends, where they show off. A step that fails says
+  so in a line under the viewer ("Couldn't open b.png: …"). Stepping points the same item at that file
+  (`companions.repoint`), so no tab comes or goes and the pane stays in its group; what the bar
+  held under the new file's pointer goes. The listing it steps through is one the file follows
+  for itself, beside the folder tab's, which stays where it was. ← and → step an image,
+  unless it is zoomed in and pans; a video and a recording seek by them, a PDF turns pages, and
+  a text file's caret, scroll and data tree move by them, so those step by the tools only.
+  "Show in <folder>" brings the folder item forward, in the folder the file sits in, with the file
+  selected and scrolled into view (a file in a window has no such tool, as a window can't bring
+  another item forward). ← and → work with focus anywhere in the pane or window, the tool row
+  included, and the pane takes focus back when the viewer that held it is drawn again for the
+  next file. None of it is specific to a harness. Thumbnails of images up to 2 MiB, and of videos up to 24 MiB (their first frame
+  and length, drawn by the page), are read through `companions.part` with the file's own stamp,
+  lazily and nearest first; a PDF, a recording and a text file show their kind's icon. It is
+  the same for Claude Code, Codex and Antigravity, as the runner reads the folder. Secrets
+  follow `companions/secrets.ts`: a folder that may hold secrets (by its name, by what lies under it, as gcloud's, or as one the person's environment moves a tool's logins to, as `GNUPGHOME`; judged by the name it is asked by, each name its links lead through and where it leads, so a `.ssh` that links to `keys` is one, and so is a `stuff` that links to that `.ssh`) is refused (`show` answers
+  with why, and nothing in it is listed), a secret file or folder inside one is named and
+  flagged, never opened, counted, read or given a thumbnail, and a symbolic link that leaves
+  the opened folder is listed as a link and never followed. Of a folder holding more than 2000
+  entries, the first 2000 by name are listed and the pane says so.
+  The first line's path is typed over with Ctrl+L (Cmd+L on a Mac) while the folder view has
+  focus, or a click on the path's text (a crumb still goes to its folder): the line becomes a text
+  field holding the folder's absolute path, selected. Escape, or focus leaving, puts the crumbs
+  back. Enter opens the typed path as a new tab on the terminal's bar through `companions.attach`,
+  with its own top, so Up still stops at what was opened: a folder opens as a folder, a file in
+  its kind's group, a path that is neither shows the runner's reason (`INVALID_FILE`) under the
+  field, and `~` is the person's home. Under it a floating list, a combobox (up and down move,
+  Enter opens the highlighted one, Tab completes it into the field), offers in this order,
+  each group only when it has something: the folders the typed text may be
+  (`companions.folders`, none until the text is changed from the folder's own path); folders an
+  agent showed in the session, with its handle and how long ago (the workspace's items, by an
+  agent); folders agents wrote in outside the project (`companions.wroteTo`: the handle, the
+  harness and how long ago, from the `file-touched` events of Claude Code, Codex and
+  Antigravity alike, named in `work.wrote`, which keeps the latest 20 folders outside the one
+  the terminal works in, with the time, in the terminal's own record so it outlives a restart;
+  what a shell command wrote is told by no harness and is not listed); and folders the person
+  opened in the session. The suggestions come from the session's items as they stand when the
+  field opens; nothing new is stored for them. Showing the same file or page again updates the item on the agent's own
   bar, or else the latest it showed that the person moved into a window or onto another
   bar, where it stays. Items are told apart by a file's real path or a page's `pageKey`
   (`protocol/src/pages.ts`): its address without the fragment, or for a server on this
@@ -627,7 +741,7 @@ with every safety check again at that time:
   linked worktree on a branch (worktrees of one repository share their folder's name),
   unless a title is given; showing it again updates it. Its detail counts the files the change
   as a whole differs from main by and their lines (the net, not its layers added up), and follows each read the pane triggers. The content
-  (`companions.content`) is each layer's files with their counts, and the whole change's own list of files (the net), not their diffs; for every layer selected the pane reads that list, and for one layer that layer's own files: it is read
+  (`companions.content`) is each layer's files with their counts, and the whole change's own list of files (the net), not their diffs; for every layer selected the pane reads that list, and for one layer that layer's own files, and for a range of two or more `companions.changeRange`'s list (the layers' files added up until it answers, or where the backend can't): it is read
   with git at the start and again about every 2 seconds while followed, and sent only
   when it changed. One file's diff for a selection of layers is `companions.changeFile`: the
   selection is one range, diffed from the oldest layer's parent to the newest (the uncommitted
@@ -635,7 +749,10 @@ with every safety check again at that time:
   work as the range's end holds it merged in (in memory) where the parent lacks it, so the range
   shows its own work only; only a range that reaches the oldest layer starts at the merge base
   (for the newest layer's commit, where that commit left main), so the whole of it is
-  `git diff main...HEAD`.
+  `git diff main...HEAD`. `companions.changeRange` lists the files of a run of layers over the
+  same span, git's own listing for the range (a file added and dropped inside it is not there, a
+  rename is one row, the counts are the range's) up to the file bound, with `truncated` where more
+  exist; in a compare, of the compare's layers.
 
   A **compare** is a changes item of two refs an agent names, for a person who asks to see a
   branch's commits, a run of commits or two branches side by side: `show { changes: { base?,
@@ -740,7 +857,7 @@ with every safety check again at that time:
   that no terminal's current checkout is the worktree with its agent working or a command running),
   so it can't race an agent's take, give or close; a command run elsewhere with `git -C` into it is
   not seen. The trash button waits while `working`. A refusal (`CONFLICT`, with the service's reason: git
-  status unreadable, submodules) shows above the list, as does a work that can't be shown; a
+  status unreadable, submodules, a git repository of its own inside that holds work) shows above the list, as does a work that can't be shown; a
   worktree an agent closed meanwhile counts as closed. A work whose owner is closed (in History)
   shows on the selected terminal's bar. With no works the list says what appears there. The panel
   and its rail toggle show only while Preferences → Experimental → Agent worktrees is
@@ -805,8 +922,9 @@ with every safety check again at that time:
   name and the old one of a rename, tracked or not) carry no hunks and no text: they are
   listed by name with their counts, and `changeFile` never reads them. v1 has no way to
   reveal either. An untracked file that may hold secrets (a stray `.env`) is never read or
-  hashed into the snapshot, but the uncommitted layer, the change's own list of files and
-  `changeFile`'s run over a range that takes it in name it, `added` and `secret`, with no counts.
+  hashed into the snapshot, but the uncommitted layer, the change's own list of files,
+  `changeRange`'s list and `changeFile`'s run over a range that takes it in name it, `added` and
+  `secret`, with no counts.
 
   The runner finds `git` once on the PATH (absolute entries only) and runs it with a
   fixed argument list, no shell, in the repository, for at most 5 seconds, ending its
@@ -933,14 +1051,24 @@ with every safety check again at that time:
   common dir, branch, the commit it `base`d on, project, owner terminal (plain text: a live
   terminal or one in History, null once orphaned), whether it was `adopted` and whether Novadeck made
   its branch (`branch_made`). A terminal may own several, and ownership moves only through agents.
-  - **`open_worktree({ branch, repo?, from?, group? })`** runs `git worktree add -b` from
-    `from` (left out: the checkout's `HEAD`, or the remote's main when the checkout is on the local
-    branch that main is, as `main` for `origin/main`, and `HEAD` is a strict ancestor of it, so a stale
-    checkout doesn't make a stale branch; a feature branch, a `HEAD` ahead or diverged, or no main
-    keeps `HEAD`; main is fetched first, before the service's queue and not if it was fetched in the last
-    minute, and the call waits at most five seconds for it: the fetch keeps its usual time limit and
-    carries on in the background, and a remote that is slow or fails leaves the cached main, so creating
-    never waits on the network), or checks out the branch if it exists, with 60 seconds,
+  - **`open_worktree({ branch, repo?, from?, group? })`** checks out the branch if it exists
+    locally, or runs `git worktree add -b` from `from`. Left out, `from` is origin's branch of that
+    name where `refs/remotes/origin/<branch>` exists, which the new branch then tracks
+    (`git branch --set-upstream-to`), as a teammate's pull request branch, fetched but never checked
+    out, is; else the remote's main when the checkout is on the local branch that main is, as `main`
+    for `origin/main`, and `HEAD` is a strict ancestor of it, so a stale checkout doesn't make a stale
+    branch; else the checkout's `HEAD` (a feature branch, a `HEAD` ahead or diverged, or no main).
+    Only `origin` is looked at, the one remote Novadeck fetches. With no local branch and no `from`,
+    origin is fetched first, before the service's queue and not if it was fetched in the last minute,
+    and the call waits at most five seconds for it: the fetch keeps its usual time limit and carries
+    on in the background, and a remote that is slow or fails leaves the cached refs, so creating
+    never waits long on the network. As that fetch prunes nothing, origin is then asked whether it
+    still has the branch (`git ls-remote --exit-code`, as briefly): a branch it no longer has (one
+    deleted after its merge) is passed over, and the new branch starts as above; where origin can't
+    be asked, the cached `origin/<branch>` is used. The answer says which (`origin`: `current`,
+    `unchecked` or `gone`), and whether the branch tracks origin's (`tracking`, false where git
+    couldn't set the upstream, which the answer says too). A name `git check-ref-format --branch`
+    refuses is refused before any of this, with nothing fetched. It runs with 60 seconds,
     and `core.longpaths` on Windows, after `git check-ref-format --branch`. It answers the path,
     the branch and the paths of AGENTS.md, CLAUDE.md and GEMINI.md at the worktree's top, and
     tells the agent to read them, as no harness loads them from an added folder.
@@ -973,7 +1101,15 @@ with every safety check again at that time:
     not kept) as a commit at `refs/novadeck/kept/<branch>-work-<sha>`, and commits only a
     detached HEAD or a stopped rebase reaches at `…-head-<sha>`, then removes the folder. The
     branch goes only if Novadeck created it and the main branch holds all of it. A worktree
-    whose status git couldn't read, or that has submodules, is never removed, forced or not.
+    whose status git couldn't read, that has submodules, or that holds an untracked folder which is
+    a git repository of its own holding work no remote has, is never removed, forced or not. A
+    nested repository is any untracked folder `git ls-files --others --exclude-standard` lists as a
+    folder, at any depth (read as it streams, keeping only those, so a huge untracked tree never
+    passes the listing's cap): a commit could keep one only as a gitlink, none of its files or
+    commits. One holds work unless it is clean (no uncommitted or untracked file), has no stash and
+    no submodule checked out, and every commit of its HEAD and its local branches is on one of its
+    remote-tracking branches as last fetched; anything git can't read counts as work. The refusal
+    names the first that holds work, and what. A clone with nothing to lose goes with the folder.
     The row goes last. A `git worktree remove` that stops partway (on Windows, a file in the
     folder still held for a moment) deletes git's record of the worktree even where the folder
     wouldn't go, so where git's own listing no longer has it, Novadeck deletes what is left
@@ -983,9 +1119,10 @@ with every safety check again at that time:
     Every `path` may be a folder inside the worktree. Only a worktree of
     the project's repositories, and not locked, is adopted.
   - **At the runner's start** every row is checked: a folder that is gone is pruned from its
-    repository and its row deleted, an owner that exists neither live nor in History leaves
+    repository (its own entry only, found by the path in the entry's `gitdir`, which git 2.48's
+    `worktree.useRelativePaths` writes relative to the entry's folder) and its row deleted, an owner that exists neither live nor in History leaves
     the worktree orphaned. Removing a project removes its worktrees first, the same way as
-    `force`, before the rows cascade away. Nothing here watches git for worktrees made
+    `force`, before the rows cascade away; one `force` can't remove stays on disk, and is logged. Nothing here watches git for worktrees made
     another way.
   - **Cleanup** (`worktrees/cleanup.ts`) removes worktrees nobody needs, in the service's queue
     and whatever the switch says. _Merged_ is the Worktrees panel's test (HEAD in main, or merging it
@@ -1004,8 +1141,8 @@ with every safety check again at that time:
     running terminal was restored from doesn't either: its worktrees wait for that restore, which
     hands them over once confirmed), its worktrees are removed with `force`
     semantics: uncommitted work and a detached HEAD are kept on `refs/novadeck/kept/` refs and an
-    unmerged branch is kept. If git couldn't read the worktree, it has submodules or an agent
-    works in it, the row is orphaned instead, the folder stays, and a warning is logged. Each
+    unmerged branch is kept. If git couldn't read the worktree, it has submodules or a git
+    repository of its own inside that holds work, or an agent works in it, the row is orphaned instead, the folder stays, and a warning is logged. Each
     automatic removal is logged at info level (`worktrees.cleaned`); no agent is told. Cleanup
     runs when a terminal is closed for good (`Terminals.forget`), at the runner's start after the
     reconcile above (which orphans rows whose owner is gone, so a merged one among them goes at
@@ -1078,15 +1215,25 @@ with every safety check again at that time:
   gives each one no preload or Node, a sandbox, and the `persist:novadeck-pages`
   session, kept on disk apart from the app's so a sign-in lasts in every page and
   after a restart, where every permission and download is refused and no file loads.
-  Its own links and redirects go only to http(s) addresses. A window it opens goes
-  through only right after the person clicked or typed in it, one each, so a page can't
-  open tabs on its own: a popup the page sized, as a sign-in's, opens in a window of the
-  app on the same session, guarded the same way, so the sign-in lands there; anything
+  Its own links and redirects go only to http(s) addresses, and so does an address the
+  person types in the pane's address field, at the start of its tools: one with no scheme
+  goes over https, or over http to this machine or its network (`localhost:5173`), and
+  one naming a user or password, or with any other scheme, goes nowhere; where pages don't
+  load live, what they type opens in their browser. A window it opens goes through only
+  right after the person clicked or typed in it, one each, so a page can't open tabs on
+  its own: a popup the page sized, as a sign-in's, opens in a window of the app on the
+  same session, guarded the same way, so the sign-in lands there; anything
   else opens in the person's browser. A frame from another site in the page can take
   that one window, as Electron doesn't say which frame opened it. A passkey sign-in
   that names no passkey asks the person which, when more than one fits
-  (`libraries/viewers/src/browser/host.ts`). Where the host can't, as the web version, a
-  page is a link to open in the browser. Each show of a page loads it afresh: the
+  (`libraries/viewers/src/browser/host.ts`). A right-click or the menu key on the page
+  opens Novadeck's own menu, not the browser's: a field's Cut, Copy, Paste and Select
+  all, Copy on a selection, a link's address to copy, or open in the browser, and the page
+  to open in the browser; going back, forward and reloading are the pane's tools, and its
+  address is the address bar's (`frontend/items/src/kinds/page/page-menu.ts`, which leaves
+  a first group for what a later feature offers there). Where the host can't, as the web
+  version, a page is a link to open in the browser, and a snapshot's menu has only the page
+  to open in the browser. Each show of a page loads it afresh: the
   page's content carries `shown`, its item's version, and a later one reloads it, past
   the cache so changed styles and scripts show too, or loads the address it was shown at
   if the person went to another document. Shown at a

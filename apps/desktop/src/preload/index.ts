@@ -36,6 +36,7 @@ import {
   apiUrlArgumentPrefix,
   webglContextsArgumentPrefix,
   appearanceChannel,
+  scaleChannel,
   badgeChannel,
   directoryPickerChannel,
   dismissWhatsNewChannel,
@@ -56,6 +57,7 @@ import {
   pageLookChannel,
   pagePictureChannel,
   pagePhoneChannel,
+  pageZoomChannel,
   panePictureChannel,
   portableChannel,
   rendererPoolChannel,
@@ -75,7 +77,17 @@ import {
   whatsNewChannel,
   windowFocusChannel,
   windowFocusRequestChannel,
+  screenReaderChannel,
+  screenReaderRequestChannel,
+  tellsScreenReader,
+  windowControlsSide,
+  windowControlsChannel,
+  windowControlsPlaceChannel,
 } from "../bridge.js"
+import { captionView, relayCaptionRoom } from "./caption-room.js"
+
+// The edge of the page's top the window's own controls sit over, if they sit over it.
+const controlsSide = windowControlsSide(process.platform)
 
 const argument = process.argv.find((value) => value.startsWith(apiUrlArgumentPrefix))
 
@@ -229,12 +241,17 @@ const bridge = {
     const path: unknown = await ipcRenderer.invoke(directoryPickerChannel)
     return typeof path === "string" ? path : null
   },
-  // Only the two fields cross; the main process checks them.
+  // Only the three fields cross; the main process checks them.
   showAppearance: (appearance) => {
     ipcRenderer.send(appearanceChannel, {
       scheme: appearance?.scheme,
       ground: appearance?.ground,
+      ink: appearance?.ink,
     })
+  },
+  // Only a number crosses; the main process clamps it.
+  showScale: (scale) => {
+    ipcRenderer.send(scaleChannel, typeof scale === "number" ? scale : undefined)
   },
   beforeQuit: (save) => {
     beforeQuit = save
@@ -283,6 +300,51 @@ const bridge = {
       ipcRenderer.removeListener(windowFocusChannel, relay)
     }
   },
+  // Only where the app can tell whether a screen reader runs (macOS, Windows, Linux); elsewhere
+  // the page hears nothing and keeps a reader's text. Only a boolean comes back; the request makes
+  // the main process answer with the current one, as a reader may have started before the page
+  // listened, or the page loaded again.
+  ...(tellsScreenReader(process.platform)
+    ? {
+        onScreenReader: (listener: (running: boolean) => void) => {
+          const relay = (_event: unknown, running: unknown): void => {
+            if (typeof running === "boolean") listener(running)
+          }
+          ipcRenderer.on(screenReaderChannel, relay)
+          ipcRenderer.send(screenReaderRequestChannel)
+          return () => {
+            ipcRenderer.removeListener(screenReaderChannel, relay)
+          }
+        },
+      }
+    : {}),
+  // Only where the window's controls sit over the page (macOS at its start, Windows at its end).
+  // Only a finite number comes back; the main process answers each placing with the room the
+  // controls take, as the page places them first thing when it starts listening, or loaded
+  // again. Windows' room is the page's own measure where it has one (./caption-room.ts).
+  ...(controlsSide
+    ? {
+        windowControlsSide: controlsSide,
+        onWindowControls: (listener: (inset: number) => void) => {
+          const caption =
+            controlsSide === "end" ? relayCaptionRoom(captionView(window), listener) : undefined
+          const relay = (_event: unknown, inset: unknown): void => {
+            if (typeof inset !== "number" || !Number.isFinite(inset)) return
+            if (caption) caption.report(inset)
+            else listener(inset)
+          }
+          ipcRenderer.on(windowControlsChannel, relay)
+          return () => {
+            caption?.stop()
+            ipcRenderer.removeListener(windowControlsChannel, relay)
+          }
+        },
+        placeWindowControls: (middle: number | null) => {
+          if (middle === null || (typeof middle === "number" && Number.isFinite(middle)))
+            ipcRenderer.send(windowControlsPlaceChannel, middle)
+        },
+      }
+    : {}),
   // Only a terminal id comes back.
   onNoticeClick: (listener) => {
     const relay = (_event: unknown, id: unknown): void => {
@@ -432,6 +494,8 @@ const bridge = {
   // Only whether it did comes back; the main process checks the page is one of this page's.
   pagePhone: async (page, phone) =>
     (await ipcRenderer.invoke(pagePhoneChannel, page, phone)) === true,
+  pageZoom: async (page, factor) =>
+    (await ipcRenderer.invoke(pageZoomChannel, page, factor)) === true,
   // A file's path names it for a runner on this machine alone: a remote one is sent a copy,
   // as a browser's is.
   pathForFile: (file) => {

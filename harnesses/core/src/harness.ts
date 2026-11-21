@@ -10,7 +10,13 @@ import type { BoxProfile } from "@novadeck/tui-input/box"
 
 import type { Conversation, ConversationScan, Known } from "./conversation.js"
 import type { DialogAdapter } from "./dialogs.js"
-import type { HarnessEvent, LimitsCover, PlanSource, PromptShown } from "./events.js"
+import type {
+  HarnessEvent,
+  LimitsCover,
+  PlanSource,
+  PromptShown,
+  SessionObserved,
+} from "./events.js"
 import type { Dialect } from "./hook-command.js"
 import type { Report } from "./report.js"
 import type { Shape } from "./shapes.js"
@@ -95,6 +101,17 @@ export type Harness = {
    * Empty where the path says nothing.
    */
   readonly planFoldersOf?: (transcript: string) => readonly string[]
+  /**
+   * The folders under its home that it writes for itself (its plans, memory, conversations,
+   * logs), not for the person: what an agent writes there is no work the person asked for, and
+   * what it writes elsewhere in its home (a skill, a settings file) is.
+   */
+  readonly bookkeeping?: (install: Install) => readonly string[]
+  /**
+   * The same folders for one session, from the path of its transcript, as `planFoldersOf`:
+   * a terminal started with another home keeps them there. Empty where the path says nothing.
+   */
+  readonly bookkeepingOf?: (transcript: string) => readonly string[]
   /**
    * Whether a conversation of this id can still be found in its files, by `stat` and
    * `readdir` alone: it never opens one. `gone` only where the file is missing from a folder
@@ -355,6 +372,13 @@ export type Harness = {
     holds?: (path: string) => Promise<boolean | undefined>,
   ) => Promise<boolean>
   /**
+   * Whether a session its hooks name is one the harness keeps beside its root, never the
+   * terminal's own, though its start names a transcript as a root's does: Codex's `/side`
+   * conversation from 0.171.0, whose rollout says so. Its `session-observed` binds nothing and
+   * names no new root. Where omitted, every session its hooks name may.
+   */
+  readonly aside?: (event: SessionObserved) => Promise<boolean>
+  /**
    * The variables of its process that say where it lives and which program it runs (as
    * Codex's `CODEX_HOME`), read from the terminal's own process where the platform tells,
    * for asking it about its hooks and sessions.
@@ -372,8 +396,9 @@ export type Harness = {
   /**
    * Follows one of a bound session's subagents, by its id, in its own sources, for what
    * ends its turn that no hook reports, as Codex's rollout records a request dismissed
-   * with Esc: from `since`, when its oldest request still waiting was asked, until
-   * `signal` aborts. Novadeck follows it only while that subagent's request waits.
+   * with Esc: from `since` until `signal` aborts. Novadeck follows it while that
+   * subagent's request waits, from when its oldest still waiting was asked, or, where
+   * `watchesRunning` says, for as long as it runs, from its start.
    */
   readonly watchActor?: (
     run: Run,
@@ -382,7 +407,37 @@ export type Harness = {
     signal: AbortSignal,
     emit: (event: HarnessEvent) => void,
   ) => Promise<void>
+  /**
+   * Whether `watchActor` follows every running subagent, not only one with a request
+   * waiting: where a subagent's turn may end in its own sources alone, as a Codex
+   * subagent's aborts when the root closes it.
+   */
+  readonly watchesRunning?: true
+  /**
+   * What it runs apart from any one terminal's processes, shared with the person's other
+   * sessions, which a terminal's close leaves running though its agent started it, as Claude
+   * Code's background service.
+   */
+  readonly apart?: Apart
 }
+
+/**
+ * A process a harness runs apart from a terminal, named as the harness recorded it, so it
+ * is known only while its pid still names it: `start` as Linux's /proc/<pid>/stat holds it
+ * (clock ticks since boot) or as macOS's `ps -o lstart` gives it in UTC.
+ */
+export type ApartProcess = { readonly pid: number; readonly start: string }
+
+/**
+ * Read as a terminal closes, before its agent is hung up, from the harness's own files,
+ * never written: the processes the close leaves, with all they run, though the agent started
+ * them and they still lead back to it. `transcript` is the closed session's: it says where the
+ * harness kept its files for that terminal, which its shell may have moved from where the
+ * runner would look. Without it, none.
+ */
+export type Apart = (closed: {
+  readonly transcript?: string | undefined
+}) => Promise<readonly ApartProcess[]>
 
 /**
  * What a harness knows of agents' messaging (see docs/agent-messaging.md): what its hooks

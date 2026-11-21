@@ -1,4 +1,6 @@
+import type { ScreenText } from "@novadeck/emulator/headless"
 import type { RequestFacts } from "@novadeck/harness-core/dialogs"
+import { loadProbe } from "@novadeck/harness-core/testing/probes"
 import { describe, expect, it } from "vitest"
 
 import { dialogs } from "./dialogs.js"
@@ -879,5 +881,106 @@ describe("Claude Code's Chat about this", () => {
         facts,
       ),
     ).toBeUndefined()
+  })
+})
+
+describe("Claude Code's AskUserQuestion held below a scrolled fullscreen view", () => {
+  // Probed on 2.1.328 (`e2e/probes/fullscreen-scrolled.e2e.ts`): with `"tui": "fullscreen"`,
+  // a dialog that comes while the transcript is scrolled up stays out of sight, and only a
+  // pill on the last row says it waits.
+  const { facts, states } = loadProbe<{
+    facts: {
+      question: { name: string; input: unknown }
+      permission: { name: string; input: unknown }
+    }
+    states: Record<string, ScreenText>
+  }>(import.meta.dirname, "fullscreen-scrolled.probe.json")
+  const rows = (name: string) => [...states[name]!.rows]
+  const asking: RequestFacts = {
+    kind: "question",
+    tool: facts.question.name,
+    input: facts.question.input,
+    cwd: null,
+  }
+  const CtrlEnd = "\x1b[1;5F"
+
+  it.each(["questionHidden", "questionHiddenNarrow", "questionHiddenAgain"])(
+    "reads the question from what the hook asked, at %s",
+    (state) => {
+      const hidden = need(dialogs.read(rows(state), asking))
+      const shown = need(dialogs.read(rows("questionRevealed"), asking))
+      // The card the person answers is the one the dialog will show.
+      expect(hidden.dialog).toEqual(shown.dialog)
+      expect(hidden.dialog).toMatchObject({
+        type: "questions",
+        questions: [
+          { header: "Merge", options: [{ label: "Merge when green (Recommended)" }, {}] },
+        ],
+      })
+    },
+  )
+
+  it("says how to bring it into view, and leaves the keys to the read once it shows", () => {
+    const hidden = need(dialogs.read(rows("questionHidden"), asking))
+    expect(hidden.reveal).toBe(CtrlEnd)
+    expect(hidden.keys(answer(["2"]))).toBeUndefined()
+    expect(hidden.answered(rows("questionAnswered"))).toBe(false)
+    // Scrolled in, as the driver's Ctrl+End does, it reads as ever, with its own keys.
+    const shown = need(dialogs.read(rows("questionRevealed"), asking))
+    expect(shown.reveal).toBeUndefined()
+    expect(pressed(shown.keys(answer(["2"])))).toEqual(["2"])
+    // Enter on the hidden dialog scrolls it in too, answering nothing.
+    expect(need(dialogs.read(rows("questionEnterWhileHidden"), asking)).reveal).toBeUndefined()
+  })
+
+  it("offers no card the shown dialog would refuse: a list longer than one digit reaches", () => {
+    const input = asking.input as { questions: { options: unknown[] }[] }
+    const long = {
+      ...asking,
+      input: {
+        questions: [
+          {
+            ...input.questions[0],
+            options: Array.from({ length: 8 }, (_, n) => ({
+              label: `Option ${n + 1}`,
+              description: "",
+            })),
+          },
+        ],
+      },
+    }
+    expect(dialogs.read(rows("questionHidden"), long)).toBeUndefined()
+  })
+
+  it("reads the question under macOS's pill, whose hint names fn+↓", () => {
+    const mac = rows("questionHidden")
+    const last = mac.findLastIndex((each) => each !== "")
+    mac[last] = mac[last]!.replace(
+      "Waiting for your answer (ctrl+End) ↓",
+      "Waiting for your answer · fn+↓ to scroll",
+    )
+    expect(need(dialogs.read(mac, asking)).reveal).toBe(CtrlEnd)
+  })
+
+  // The pill doesn't say whose dialog it holds: a question's facts read on a permission's
+  // pill too. Which of several pending requests may read from it is the tracker's to settle.
+  it("reads the question from any pill, its own or not", () => {
+    expect(dialogs.read(rows("permissionHidden"), asking)).toBeDefined()
+  })
+
+  it("reads nothing once Escape set the hidden question aside, the view still up", () => {
+    expect(dialogs.read(rows("questionEscapeWhileHidden"), asking)).toBeUndefined()
+  })
+
+  it("reads no other request's dialog from the pill", () => {
+    const permission: RequestFacts = {
+      kind: "permission",
+      tool: facts.permission.name,
+      input: facts.permission.input,
+      cwd: null,
+    }
+    expect(dialogs.read(rows("permissionHidden"), permission)).toBeUndefined()
+    // Its own screen, scrolled into view, reads as ever.
+    expect(dialogs.read(rows("permissionRevealed"), permission)).toBeDefined()
   })
 })

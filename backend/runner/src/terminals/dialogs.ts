@@ -21,6 +21,7 @@ import { logs } from "../log.js"
 import { cut } from "../text.js"
 import { DialogDiagnostics, type RawWhy, type Subject } from "./dialog-diagnostics.js"
 import { DialogSaves } from "./dialog-saves.js"
+import type { SeenTerminals } from "./seen.js"
 
 const log = logs.for("dialogs")
 
@@ -61,6 +62,13 @@ export type DialogsHost = {
   readonly clear: (terminalId: string, ref: string) => void
   /** Some request's dialog changed. */
   readonly changed: (terminalId: string) => void
+  /** Whether other work holds the terminal's input box (a prompt, a message, an answer). */
+  readonly busy: (terminalId: string) => boolean
+  /**
+   * Presses keys in the terminal's agent as the person's, through the bookkeeping their own
+   * keys get; false once the terminal is gone.
+   */
+  readonly press: (terminalId: string, data: string) => boolean
 }
 
 export type DialogsOptions = {
@@ -86,6 +94,18 @@ export type DialogsOptions = {
   readonly rawLatestMs?: number
   /** Where a person's "Save for debugging" puts a raw dialog; see `DialogSaves`. */
   readonly saves?: string
+  /**
+   * Which terminals a client has in sight. A dialog held out of view is scrolled into view
+   * (`DialogAdapter.reveal`) only for a terminal none has; without it, every terminal is unseen.
+   */
+  readonly seen?: SeenTerminals
+  /**
+   * How long a terminal must have gone unseen before a held dialog is scrolled into view, in
+   * milliseconds, from the runner's start, from the last time a client had it in sight, and
+   * from a connection's release: a window that reloads or reconnects reports what it looks
+   * at only after a moment.
+   */
+  readonly graceMs?: number
 }
 
 /**
@@ -94,15 +114,26 @@ export type DialogsOptions = {
  */
 export const identified = (
   dialog: AnswerableDialog,
+  held = false,
 ): Exclude<RequestDialog, { type: "raw" }> | undefined => {
   const shown = clamped(dialog)
   if (!shown) return undefined
-  const id = createHash("sha256").update(JSON.stringify(shown)).digest("hex").slice(0, 16)
+  // The same dialog held out of view is another read, answered after it is brought into view.
+  const id = createHash("sha256")
+    .update(JSON.stringify(held ? [shown, "held"] : shown))
+    .digest("hex")
+    .slice(0, 16)
   const identity = { ...shown, id }
   // Whatever an adapter read, only what the protocol takes is shown.
   const parsed = requestDialog.safeParse(identity)
   return parsed.success && parsed.data.type !== "raw" ? parsed.data : undefined
 }
+
+/** A read's dialog as the protocol shows it, its fingerprint telling whether it is held out of view. */
+export const identifiedRead = (
+  read: DialogRead,
+): Exclude<RequestDialog, { type: "raw" }> | undefined =>
+  identified(read.dialog, read.reveal !== undefined)
 
 // What the protocol allows of each string an adapter reads for display, by field name.
 const displayLimits: { readonly [key: string]: number } = dialogTextLimits
@@ -193,6 +224,8 @@ type State = {
   since: number
   rows: readonly string[]
   columns: number
+  /** Where its cursor was on that screen, which tells a split screen's pane in focus. */
+  cursor: { readonly row: number; readonly column: number } | undefined
   /** What each request's dialog said as last announced. */
   announced: Map<string, string>
   timer: NodeJS.Timeout | undefined
@@ -205,6 +238,13 @@ type State = {
   failed: boolean
   /** Since when a request waits and none reads; undefined where one does, or none waits. */
   unread: number | undefined
+  /** The screen that keys were last pressed on to bring a held dialog into view, until it ends. */
+  revealed: string | undefined
+  /**
+   * The requests keys were pressed for on a screen that kept moving, or with an adapter whose
+   * keys toggle: none is pressed for twice.
+   */
+  revealedFor: Set<string>
 }
 
 /**
@@ -214,7 +254,9 @@ type State = {
  * (or the harness has no adapter); null until then. It also raises the requests only the
  * screen tells, as Codex's plan prompt, and lets them go once their screen is. Looks
  * again as the screen or the requests change, throttled, and announces only real
- * changes. It presses nothing. Knows nothing of how any harness draws its screen.
+ * changes. It presses only what an adapter's `reveal` says, to bring a dialog held out of
+ * view into view on a terminal no client has in sight. Knows nothing of how any harness draws
+ * its screen.
  */
 /**
  * What `read` gives, or undefined where it throws: logged once while the terminal waits, as
@@ -244,6 +286,8 @@ export class Dialogs {
   private readonly rawLatestMs: number
   private readonly diagnostics: DialogDiagnostics
   private readonly saves: DialogSaves
+  private readonly seen: SeenTerminals | undefined
+  private readonly graceMs: number
 
   constructor(
     private readonly host: DialogsHost,
@@ -257,6 +301,15 @@ export class Dialogs {
     this.rawStillMs = options.rawStillMs ?? 1_500
     this.rawAgeMs = options.rawAgeMs ?? 2_000
     this.rawLatestMs = options.rawLatestMs ?? 6_000
+    this.seen = options.seen
+    this.graceMs = options.graceMs ?? 5_000
+    // A terminal turning seen ends its held dialog's spell; turning unseen is a look at it.
+    this.seen?.subscribe((terminalId, seen) => {
+      const state = this.states.get(terminalId)
+      if (!state) return
+      if (seen) state.revealed = undefined
+      else this.changed(terminalId)
+    })
   }
 
   /** The terminal's screen or requests changed: its dialogs are looked at again soon. */
@@ -419,6 +472,7 @@ export class Dialogs {
         since: this.now(),
         rows: [],
         columns: 80,
+        cursor: undefined,
         announced: new Map(),
         timer: undefined,
         lastLook: 0,
@@ -427,6 +481,8 @@ export class Dialogs {
         answering: 0,
         failed: false,
         unread: undefined,
+        revealed: undefined,
+        revealedFor: new Set(),
       }
       this.states.set(terminalId, state)
     }
@@ -496,6 +552,7 @@ export class Dialogs {
     }
     state.rows = rows
     state.columns = screen.columns
+    state.cursor = screen.cursor
     if (state.answering > 0) return
     const settled = now - state.since >= this.settleMs
     let waiting = false
@@ -516,11 +573,19 @@ export class Dialogs {
         if (held) this.host.clear(terminalId, held.ref)
         this.host.ask(terminalId, seen)
       } else if (!seen && held) {
-        if (settled) this.host.clear(terminalId, held.ref)
-        else waiting = true
+        // Hidden is not gone: a view of the harness's own may hold it out of sight (Codex's
+        // `/diff` pager), and closing that view shows it again, the same request. It keeps
+        // its ref while the adapter says one holds a dialog out of view (`reveal`).
+        // Looked at again as the screen changes, as that view closes.
+        const hidden =
+          found?.reveal !== undefined && attempt(state, () => found.reveal!(rows)) !== undefined
+        if (!hidden && settled) this.host.clear(terminalId, held.ref)
+        else if (!hidden) waiting = true
       }
     }
     const requests = this.host.pending(terminalId)?.requests ?? []
+    for (const ref of state.revealedFor)
+      if (!requests.some((each) => each.ref === ref)) state.revealedFor.delete(ref)
     const live = new Set(requests.map(({ ref }) => ref))
     for (const ref of state.entries.keys()) if (!live.has(ref)) state.entries.delete(ref)
     this.diagnostics.prune(terminalId, live)
@@ -530,7 +595,12 @@ export class Dialogs {
       const entry = state.entries.get(request.ref)
       if (entry?.locked || entry?.done) continue
       const read: DialogRead | undefined = adapter?.read(rows, request.facts)
-      if (read && identified(read.dialog)) reads.push({ request, read })
+      // A read from the facts alone names no dialog on screen: it counts for the only request.
+      // Requests answered already are gone from the screen, as the answer driver counts them.
+      const sole =
+        read?.reveal === undefined ||
+        requests.every(({ ref }) => ref === request.ref || state.entries.get(ref)?.done === true)
+      if (read && sole && identifiedRead(read)) reads.push({ request, read })
       else unread.push(request)
     }
     // A request whose dialog is raw for good still shows on screen as the dialog it was: it
@@ -539,7 +609,9 @@ export class Dialogs {
     for (const request of requests) {
       if (state.entries.get(request.ref)?.locked && !state.entries.get(request.ref)?.done) {
         const read = adapter?.read(rows, request.facts)
-        if (read && identified(read.dialog)) ghosts.push({ request, read })
+        // One held out of view is not on screen to be mistaken for.
+        if (read && read.reveal === undefined && identified(read.dialog))
+          ghosts.push({ request, read })
       }
     }
     const recognised = reads.length > 0
@@ -552,13 +624,13 @@ export class Dialogs {
     const alike = keyed.every(
       ({ request, read }) =>
         twin(request, keyed[0]!.request) &&
-        identified(read.dialog)?.id === identified(keyed[0]!.read.dialog)?.id,
+        identifiedRead(read)?.id === identifiedRead(keyed[0]!.read)?.id,
     )
     for (const { request, read } of reads) {
       const clear = read.prompt ? keyed.length === 0 : alike
       state.entries.set(request.ref, {
         dialog: clear
-          ? identified(read.dialog)!
+          ? identifiedRead(read)!
           : { type: "raw", text: rawText(rows), reason: "unrecognized" },
       })
       if (!clear) this.unread(terminalId, state, request.ref, "clash")
@@ -607,8 +679,61 @@ export class Dialogs {
       this.unread(terminalId, state, request.ref, adapter ? "unrecognized" : "unsupported")
     }
     this.announce(terminalId, state)
+    if (unread.length === 0 || recognised) state.revealed = undefined
+    else {
+      const after = this.reveal(terminalId, state, found, unread[0]!)
+      if (after > 0) wake = Math.max(wake, this.now() + after - 10)
+    }
     if (waiting) wake = Math.max(wake, state.since + this.settleMs)
     if (wake > 0) this.later(terminalId, state, wake - this.now() + 10)
+  }
+
+  /**
+   * Brings a dialog its harness holds out of view into view, for a terminal nobody has in
+   * sight, once for each screen it is held on: the keys of the adapter's `reveal`, which
+   * answer nothing, pressed as the person's would be once the screen is still (or, where it
+   * keeps moving, as a turn's timer ticks beside a dialog held out of view, once a request
+   * has waited unread as long as one's raw text waits at most, and only once for it; keys that
+   * toggle, `DialogAdapter.revealToggles`, only once for each request on any screen), no other
+   * work holds the terminal's input, and the terminal has been unseen for the grace period (a
+   * window that reloads or reconnects says what it looks at only a moment later). Gives how
+   * long to wait before looking again, in milliseconds; 0 for no need to.
+   */
+  private reveal(
+    terminalId: string,
+    state: State,
+    adapter: DialogAdapter | undefined,
+    request: Waiting,
+  ): number {
+    const keys = adapter?.reveal
+      ? attempt(state, () => adapter.reveal!(state.rows, state.cursor))
+      : undefined
+    if (keys === undefined) {
+      // No longer held out of view: the next spell may press again.
+      state.revealed = undefined
+      return 0
+    }
+    if (this.seen?.has(terminalId) || state.revealed === state.text) return 0
+    const now = this.now()
+    const still = this.settleMs - (now - state.since)
+    const pressedFor = state.revealedFor.has(request.ref)
+    const toggles = adapter?.revealToggles?.includes(keys) === true
+    if (pressedFor && toggles) return 0
+    if (still > 0) {
+      if (pressedFor) return still
+      const moving = (state.unread ?? now) + this.rawLatestMs - now
+      if (moving > 0) return Math.min(still, moving)
+    }
+    const unseen = this.seen ? this.graceMs - this.seen.unseenFor(terminalId) : 0
+    if (unseen > 0) return unseen
+    // A prompt, message or answer under way holds the input box: looked at again soon.
+    if (this.host.busy(terminalId)) return 250
+    state.revealed = state.text
+    if (still > 0 || toggles) state.revealedFor.add(request.ref)
+    if (!this.host.press(terminalId, keys)) return 0
+    const subject = this.subject(terminalId, state, request.ref)
+    if (subject) this.diagnostics.revealed(subject)
+    return 0
   }
 
   /** Tells the manager when any request's dialog differs from what it last told. */

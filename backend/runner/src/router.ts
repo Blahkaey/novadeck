@@ -26,6 +26,7 @@ import type { Feedback } from "./messaging/feedback.js"
 import type { Murmur } from "./murmur/service.js"
 import type { ActiveTerminals } from "./terminals/active.js"
 import type { Terminals } from "./terminals/index.js"
+import type { SeenTerminals } from "./terminals/seen.js"
 import type { Uploads } from "./terminals/uploads.js"
 import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
@@ -148,6 +149,8 @@ export const createRouter = (options: {
   closing: () => boolean
   /** Which terminals the people at the clients use; without it, reports of them are ignored. */
   activity?: Pick<ActiveTerminals, "report">
+  /** Which terminals the clients have in sight; without it, reports of them are ignored. */
+  seen?: Pick<SeenTerminals, "report">
   /** The runner settings were saved. */
   settingsSaved?: () => void
   /** Novadeck's tour; without it, starting one is a CONFLICT. */
@@ -284,6 +287,9 @@ export const createRouter = (options: {
       active: api.terminals.active.handler(({ input, context }) =>
         options.activity?.report(context.session.id, input.terminalId),
       ),
+      seen: api.terminals.seen.handler(({ input, context }) =>
+        options.seen?.report(context.session.id, input.terminalIds),
+      ),
       write: api.terminals.write.handler(({ input, context }) =>
         terminals.write(input, context.session.id),
       ),
@@ -393,6 +399,7 @@ export const createRouter = (options: {
           yield await withSkill(content, store.item(input.itemId)?.plan?.agent)
       }),
       changeFile: api.companions.changeFile.handler(({ input }) => items.changeFile(input)),
+      changeRange: api.companions.changeRange.handler(({ input }) => items.changeRange(input)),
       changeRead: api.companions.changeRead.handler(({ input }) => items.changeRead(input)),
       part: api.companions.part.handler(({ input }) => items.part(input)),
       save: api.companions.save.handler(async ({ input }) => {
@@ -435,6 +442,9 @@ export const createRouter = (options: {
         }
       }),
       attach: api.companions.attach.handler(({ input }) => items.attach(input)),
+      folders: api.companions.folders.handler(({ input }) => items.folders(input)),
+      wroteTo: api.companions.wroteTo.handler(({ input }) => items.wroteTo(input)),
+      repoint: api.companions.repoint.handler(({ input }) => items.repoint(input)),
       openInProject: api.companions.openInProject.handler(({ input }) =>
         items.openInProject(input),
       ),

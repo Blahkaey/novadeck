@@ -189,6 +189,7 @@ export const scriptedRunner = ({
       release: api.terminals.release.handler(unplayed("terminals.release")),
       move: api.terminals.move.handler(unplayed("terminals.move")),
       active: api.terminals.active.handler(() => {}),
+      seen: api.terminals.seen.handler(() => {}),
       watch: api.terminals.watch.handler(async function* ({ signal }) {
         const changes = channel<TerminalChange>()
         watchers.add(changes)
@@ -318,9 +319,13 @@ export const scriptedRunner = ({
       watch: api.companions.watch.handler(idle),
       content: api.companions.content.handler(unplayed("companions.content")),
       changeFile: api.companions.changeFile.handler(unplayed("companions.changeFile")),
+      changeRange: api.companions.changeRange.handler(unplayed("companions.changeRange")),
       changeRead: api.companions.changeRead.handler(unplayed("companions.changeRead")),
       save: api.companions.save.handler(unplayed("companions.save")),
       attach: api.companions.attach.handler(unplayed("companions.attach")),
+      folders: api.companions.folders.handler(unplayed("companions.folders")),
+      wroteTo: api.companions.wroteTo.handler(unplayed("companions.wroteTo")),
+      repoint: api.companions.repoint.handler(unplayed("companions.repoint")),
       openInProject: api.companions.openInProject.handler(unplayed("companions.openInProject")),
       pageTrouble: api.companions.pageTrouble.handler(unplayed("companions.pageTrouble")),
       part: api.companions.part.handler(unplayed("companions.part")),
@@ -386,6 +391,8 @@ export const scriptedRunner = ({
         inboxSnoozed: [],
         inboxHistory: [],
         hibernateAfterMinutes: 60,
+        agentModes: false,
+        agentMode: "herd",
         worktrees: false,
       })),
       set: api.settings.set.handler(() => {}),

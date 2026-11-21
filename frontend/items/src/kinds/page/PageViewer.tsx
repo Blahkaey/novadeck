@@ -1,8 +1,15 @@
 import { pageTroublesPerCall, type PageContent } from "@novadeck/core/items"
 import { pageSights } from "@novadeck/core/items/page-sights"
 import { pagesPartition } from "@novadeck/core/items/pages"
+import { ContextMenu } from "@novadeck/toolkit/ContextMenu"
 import { useShown } from "@novadeck/toolkit/shown"
-import { mountBrowser, type Load, type Place, type Trouble } from "@novadeck/viewers/browser"
+import {
+  mountBrowser,
+  type Load,
+  type PageMenu,
+  type Place,
+  type Trouble,
+} from "@novadeck/viewers/browser"
 import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, Smartphone } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -10,6 +17,8 @@ import type { ArtifactBodyProps } from "../../ArtifactViewer"
 import { useAwake } from "../../awake"
 import { PaneTools, usePaneNote, type PaneTool } from "../../pane-row"
 import { useViewerSlot } from "../../ViewerSlot"
+import { AddressField } from "./AddressField"
+import { pageMenuItems } from "./page-menu"
 
 /** Whether two addresses share an origin: scheme, host and port. */
 const sameOrigin = (a: string, b: string): boolean => {
@@ -18,6 +27,26 @@ const sameOrigin = (a: string, b: string): boolean => {
   } catch {
     return false
   }
+}
+
+// The one-time line that says a phone can be zoomed: seen once, kept across launches in
+// local storage, which may be unavailable (a private window), where it shows each launch.
+const zoomHintKey = "novadeck.page-zoom-hint"
+const zoomHint = {
+  seen: (): boolean => {
+    try {
+      return localStorage.getItem(zoomHintKey) === "1"
+    } catch {
+      return false
+    }
+  },
+  see: (): void => {
+    try {
+      localStorage.setItem(zoomHintKey, "1")
+    } catch {
+      /* It shows again next launch. */
+    }
+  },
 }
 
 // How long troubles are gathered before they are told, so a page that logs a burst of them
@@ -66,6 +95,16 @@ const useTroubles = (tell: Tell): ((trouble: Trouble, shown: number) => void) =>
   return batch.collect
 }
 
+// Opens an address in the person's browser, never in the pane.
+const openOut = (url: string): void => {
+  window.open(url, "_blank", "noreferrer")
+}
+
+// Puts text on the clipboard, as a menu's Copy does; one the app can't write goes nowhere.
+const copyText = (text: string): void => {
+  void navigator.clipboard?.writeText(text).catch(() => undefined)
+}
+
 // Opens the page in the person's browser, never in the pane.
 const openTool = (url: string): PaneTool => ({
   key: "open",
@@ -83,6 +122,7 @@ const ShownPage = ({
   trouble,
   picture,
   phone,
+  zoom,
 }: {
   id: string
   content: PageContent
@@ -91,10 +131,24 @@ const ShownPage = ({
     | ((page: number, width?: number, forLook?: boolean) => Promise<string | undefined>)
     | undefined
   phone: ((page: number, phone: boolean) => Promise<boolean>) | undefined
+  zoom: ((page: number, factor: number) => Promise<boolean>) | undefined
 }): React.JSX.Element => {
   const collect = useTroubles(trouble)
   const [place, setPlace] = useState<Place>({ url: page.url, back: false, forward: false })
   const [load, setLoad] = useState<Load>("loading")
+  // A phone-size page with no mobile viewport tag, which a phone would lay out wider.
+  const [unmobile, setUnmobile] = useState(false)
+  // The menu the person asked for on the page, until it closes. It goes as the person goes
+  // back to the page, which the app's page hears only as its window losing focus to the
+  // page's view, as it does to another app, where a menu goes too.
+  const [menu, setMenu] = useState<PageMenu | undefined>(undefined)
+  const menuOpen = menu !== undefined
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (): void => setMenu(undefined)
+    window.addEventListener("blur", close)
+    return () => window.removeEventListener("blur", close)
+  }, [menuOpen])
   // The tab says where the page is now, which isn't always where it was shown.
   usePaneNote([], false, place.url)
   const [size, setSize] = useState(() => pageSights.layout(id))
@@ -118,9 +172,17 @@ const ShownPage = ({
     // Only where it can rest: a picture nothing rests as costs for nothing.
     ...(picture && sleeps ? { picture } : {}),
     ...(phone ? { phone } : {}),
+    ...(zoom ? { zoom } : {}),
+    zoomHint,
     awake,
     size,
-    on: { navigate: setPlace, load: setLoad, ...(page.live ? { trouble: collect } : {}) },
+    on: {
+      navigate: setPlace,
+      unmobile: setUnmobile,
+      load: setLoad,
+      menu: setMenu,
+      ...(page.live ? { trouble: collect } : {}),
+    },
   })
   // Kept out of sight, the page goes quiet: it stops drawing on its own, but not playing.
   const shown = useShown()
@@ -170,8 +232,27 @@ const ShownPage = ({
       className="artifact-browser"
       data-live={page.live || undefined}
       aria-busy={load === "loading"}
+      // Escape brings a zoomed phone back to fit before it's the pane's, which hides.
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || !viewer?.unzoom()) return
+        event.preventDefault()
+        event.stopPropagation()
+      }}
     >
       <PaneTools
+        chip={
+          <AddressField
+            where={place.url}
+            live={page.live}
+            onGo={(url) => {
+              if (!page.live) return openOut(url)
+              viewer?.visit(url)
+              // Resting, it goes there as it wakes.
+              wake()
+            }}
+            onReturn={() => viewer?.focus()}
+          />
+        }
         tools={[
           ...(page.live
             ? [
@@ -202,8 +283,44 @@ const ShownPage = ({
           openTool(place.url),
         ]}
       />
+      {unmobile && (
+        <div className="pane-notice" data-tone="warning" role="status">
+          <p>
+            This page has no mobile viewport tag: a phone would lay it out 980 wide and shrink it.
+          </p>
+        </div>
+      )}
       <div className="artifact-page-frame">
         <div ref={ref} className="artifact-page-view" />
+        {/* The menu's keys are its own: its Escape closes it, not the pane around it. */}
+        <span
+          className="contents"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") event.stopPropagation()
+          }}
+        >
+          <ContextMenu
+            label="Page actions"
+            at={menu && { x: menu.x, y: menu.y }}
+            items={
+              menu
+                ? pageMenuItems({
+                    menu,
+                    live: page.live,
+                    place,
+                    actions: {
+                      edit: (edit) => viewer?.edit(edit),
+                      copy: copyText,
+                      open: openOut,
+                    },
+                  })
+                : []
+            }
+            onOpenChange={(open) => {
+              if (!open) setMenu(undefined)
+            }}
+          />
+        </span>
         {load === "failed" && (
           <div className="artifact-page-failed" role="alert">
             <p>This page didn't load.</p>
@@ -235,10 +352,14 @@ export const PageViewer = ({
       trouble={trouble}
       picture={itemStore.picture}
       phone={itemStore.phone}
+      zoom={itemStore.zoom}
     />
   ) : (
     <div className="artifact-browser">
-      <PaneTools tools={[openTool(page.url)]} />
+      <PaneTools
+        chip={<AddressField where={page.url} live={false} onGo={openOut} onReturn={() => {}} />}
+        tools={[openTool(page.url)]}
+      />
       <div className="artifact-status">This page opens in your browser.</div>
     </div>
   )

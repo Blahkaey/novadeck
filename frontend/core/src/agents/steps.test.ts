@@ -285,11 +285,17 @@ describe("the words an agent was given", () => {
     const items = [
       user("draft the 0.9 release notes", 1),
       user(
-        'Stop hook feedback:\n<novadeck-messages note="from your lead"><message from="crow">build the context lane, then report</message></novadeck-messages>',
+        'Stop hook feedback:\n<novadeck-messages><message from="crow">build the context lane, then report</message></novadeck-messages>',
         2,
       ),
     ]
     expect(agentContext("claude", items).said?.text).toBe("draft the 0.9 release notes")
+  })
+
+  it("keep the person's words that quote a delivery of agents' messages", () => {
+    const asked =
+      'What does this mean?\n<novadeck-messages><message from="crow">hi</message></novadeck-messages>'
+    expect(agentContext("claude", [user(asked, 1)]).said?.text).toBe(asked)
   })
 
   it("are the person's Inbox answer when it came later, and the steps are those after it", () => {

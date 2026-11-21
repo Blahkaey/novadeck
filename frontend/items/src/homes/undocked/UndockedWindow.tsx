@@ -26,6 +26,7 @@ export const UndockedWindow = ({
   return (
     <div
       className="artifact-window"
+      tabIndex={-1}
       onBlur={(event) => {
         if (item?.kind === "plan" && !event.currentTarget.contains(event.relatedTarget))
           itemStore.plan(target, item.id).flush()

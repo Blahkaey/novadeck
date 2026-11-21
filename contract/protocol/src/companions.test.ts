@@ -3,9 +3,12 @@ import type { z } from "zod"
 
 import {
   changeFileDiff,
+  changeRange,
   companionItem,
   companionLimits,
   isDataPath,
+  isHtmlPath,
+  isPageFile,
   itemContent,
   maxChangeSideBytes,
   pageLook,
@@ -146,6 +149,14 @@ describe("a change as layers", () => {
       false,
     )
   })
+
+  it("carries a range's own files, and no more than a layer's", () => {
+    const listed = { files: [file], truncated: false }
+    expect(changeRange.parse(listed)).toEqual(listed)
+    expect(
+      changeRange.safeParse({ ...listed, files: Array.from({ length: 301 }, () => file) }).success,
+    ).toBe(false)
+  })
 })
 
 describe("a file followed to be edited", () => {
@@ -232,9 +243,36 @@ describe("a text file's content", () => {
   })
 })
 
+describe("isHtmlPath", () => {
+  it("knows a web page by its extension, in any case", () => {
+    for (const path of ["a.html", "b.HTM", "dir/c.Html"]) expect(isHtmlPath(path)).toBe(true)
+    for (const path of ["a.htmlx", "html", "a.html.txt", "notes.md"])
+      expect(isHtmlPath(path)).toBe(false)
+  })
+})
+
+describe("isPageFile", () => {
+  it("knows what a page draws with, by extension: styles, pictures and fonts", () => {
+    for (const name of ["a.css", "img/b.PNG", "c.jpeg", "d.svg", "fonts/e.woff2", "f.otf"])
+      expect(isPageFile(name)).toBe(true)
+    for (const name of ["a.js", "b.html", "c.txt", ".env", "d.json", "png"])
+      expect(isPageFile(name)).toBe(false)
+  })
+})
+
 describe("isDataPath", () => {
   it("knows the files a preview reads whole, by extension, in any case", () => {
-    for (const path of ["a.json", "b.JSONL", "c.ndjson", "d.yaml", "e.yml", "f.csv", "g.tsv"])
+    for (const path of [
+      "a.json",
+      "b.JSONL",
+      "c.ndjson",
+      "d.yaml",
+      "e.yml",
+      "f.csv",
+      "g.tsv",
+      "h.html",
+      "i.HTM",
+    ])
       expect(isDataPath(path)).toBe(true)
     for (const path of ["a.ts", "notes.md", "json", "data.json/README"])
       expect(isDataPath(path)).toBe(false)

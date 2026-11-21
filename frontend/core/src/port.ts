@@ -70,8 +70,9 @@ export type TerminalMountProps = {
   // created off screen takes none until it is on screen. Absent means on screen.
   readonly onScreen?: boolean
   // Whether the person is looking at it: really in sight and legible, in the view that shows
-  // it. A backend whose terminals can sleep wakes one it is told is seen for a moment; any
-  // other ignores it. Absent means not seen.
+  // it, for every terminal. A backend whose terminals can sleep wakes a sleeper it is told is
+  // seen for a moment, and one with a runner tells it which are seen, so it moves nothing
+  // there; any other ignores it. Absent means not seen.
   readonly seen?: boolean
   // Whether it is the selected terminal. Absent means selected.
   readonly selected?: boolean
@@ -114,8 +115,9 @@ export type ViewState = {
   // did, or that a copy reached the clipboard, for a moment.
   readonly notice: string | null
 }
-// The terminal font from Preferences, in CSS pixels.
-export type TerminalFont = { readonly size: number }
+// The terminal font from Preferences: the size in CSS pixels, and the family the person chose,
+// which goes in front of the theme's own chain; none is the theme's font.
+export type TerminalFont = { readonly size: number; readonly family?: string }
 
 // The page's theme, as a backend reads it for what it paints outside CSS, such as a
 // terminal's colours: the tokens' values where `element` draws, and each time a theme is
@@ -129,7 +131,7 @@ export type ThemeSource = {
 export type TerminalPort = {
   // Created once per backend instance so its identity is stable across renders.
   readonly mountTerminal: MountTerminal
-  // The font size from Preferences, called once before the first mount and again when it
+  // The font from Preferences, called once before the first mount and again when it
   // changes. Synchronous bookkeeping with no I/O.
   readonly setFont: (font: TerminalFont) => void
 }
@@ -173,12 +175,17 @@ export type TerminalRequest = {
 // agent, with a brief, so it then directs that agent and may close it; or running a command
 // in a new terminal, `command` exactly as the shell would be given it, in `cwd`. A run's
 // `terminalId` is the asking terminal's own; or taking the git worktree at `path`, on
-// `branch`, from the terminal that owns it (`terminalId`).
+// `branch`, from the terminal that owns it (`terminalId`); or joining the team of the terminal
+// `terminalId`, with an introduction if it has one; leaving the team of the lead `terminalId`;
+// or handing its own team to the terminal `terminalId`, which it leads.
 export type ApprovalAction =
   | { readonly type: "close" }
   | { readonly type: "run"; readonly command: string; readonly cwd: string }
   | { readonly type: "lead"; readonly brief: string }
   | { readonly type: "take"; readonly path: string; readonly branch: string }
+  | { readonly type: "join"; readonly message?: string | undefined }
+  | { readonly type: "leave" }
+  | { readonly type: "hand" }
 
 // An agent in terminal `from` asked for `action` on `terminalId`, so the app asks the person
 // first. It waits, with no time limit, until the person answers or the backend takes it
@@ -342,6 +349,19 @@ export type BackendFields = {
     readonly after: Store<number | null>
     readonly set: (minutes: number | null) => void
   }
+  // Optional. Whether Solo and Swarm may be picked, an Experimental switch the runner keeps:
+  // while off, agents work as a Herd whatever the pick. Absent where the backend has none.
+  readonly agentModes?: {
+    readonly enabled: Store<boolean>
+    readonly set: (enabled: boolean) => void
+  }
+  // Optional. How agents work with each other, which decides the version of Novadeck's tool
+  // texts they get: Herd settles things between agents whose work meets, Solo keeps each to its
+  // own work. Absent where the backend has no such setting.
+  readonly agentMode?: {
+    readonly mode: Store<AgentMode>
+    readonly set: (mode: AgentMode) => void
+  }
   // Optional. Whether agents may open git worktrees through Novadeck's tools, an Experimental
   // feature kept by the runner. Absent where the backend has none.
   readonly worktrees?: {
@@ -478,6 +498,9 @@ export type BackendFields = {
   // Optional. Tells the window around the page how the page looks, so its native parts
   // match; absent where nothing surrounds the page, as in a browser.
   readonly showAppearance?: (appearance: WindowAppearance) => void
+  // Optional. Scales the app's windows, by a fraction of their normal size; absent where
+  // nothing surrounds the page, as in a browser, whose own zoom does it.
+  readonly showScale?: (scale: number) => void
   // Optional. Desktop notifications about terminals, as when an agent finishes while the
   // person looks elsewhere: `show` shows one, a newer one for the same terminal replacing
   // it, and `onClick` hears the terminal id of each the person clicks, once the window
@@ -505,6 +528,23 @@ export type BackendFields = {
   // own document, it stays focused while focus is inside a frame of the page, as a page
   // in the companion pane. Absent where nothing surrounds the page, as in a browser.
   readonly windowFocus?: (listener: (focused: boolean) => void) => () => void
+  // Optional. The window's own controls where they sit over the page's top, its header standing
+  // in for a title bar, at its `side`: macOS's close, minimise and zoom buttons at the start,
+  // Windows' caption buttons at the end, which run from the page's top and can't hide: `place`
+  // centres them on a line `middle` CSS pixels below the page's top, or hides them (null);
+  // `onInset`'s listener hears the room they take from the page's edge on `side`, in CSS pixels,
+  // in answer to each `place` and again on each change, 0 while they don't show (full screen,
+  // or hidden); it returns the stop. Absent where the window has a title bar of its own
+  // above the page, or nothing surrounds the page, as in a browser.
+  readonly windowControls?: {
+    readonly side: "start" | "end"
+    readonly place: (middle: number | null) => void
+    readonly onInset: (listener: (inset: number) => void) => () => void
+  }
+  // Optional. `listener` hears whether a screen reader or other assistive technology runs,
+  // as the system tells the app: at once with the current state, and again on each change;
+  // returns the stop. Absent where nothing can tell, as in a browser.
+  readonly screenReader?: (listener: (running: boolean) => void) => () => void
   // Optional. A picture of a part of the page as it's drawn now, `rect` in CSS pixels of
   // its viewport, as a JPEG `data:` address one pixel to each CSS pixel, or undefined where
   // the window draws nothing: a companion pane, whose picture stands in where it builds
@@ -610,6 +650,9 @@ export type PaneRect = {
 export type WindowAppearance = {
   readonly scheme: "system" | "light" | "dark"
   readonly ground: string
+  // The header's ink, as `#rrggbb`, which the window's own controls draw in where they sit
+  // over the page (Windows' caption buttons).
+  readonly ink?: string
 }
 
 // A desktop notification about a terminal, by its id: a title and a body, one line each.
@@ -624,6 +667,9 @@ export type Notice = {
   // Absent plays the default.
   readonly sound?: NoticeSound
 }
+
+// How agents work with each other (the runner's `agentMode` setting, kept in step with it).
+export type AgentMode = "herd" | "solo" | "swarm"
 
 // An agent the backend can connect, as the Preferences switches show it.
 export type AgentConnection = {

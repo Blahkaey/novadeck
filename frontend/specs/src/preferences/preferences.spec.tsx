@@ -1,7 +1,9 @@
 import { afterEach, onTestFinished, vi } from "vitest"
+import { cleanup } from "vitest-browser-react"
 import { page, userEvent, type Locator } from "vitest/browser"
 
 import { pageScheme, saveFromAnotherWindow, systemScheme } from "../support/appearance"
+import { scalesShown, setScreenReaderRunning } from "../support/backend"
 import {
   closePreferences,
   escapeFrom,
@@ -9,7 +11,9 @@ import {
   openPreferencesOn,
   preferencesDialog,
 } from "../support/keyboard"
+import { expectStaysTrue } from "../support/layouts"
 import {
+  clickInto,
   expectStaysAbsent,
   openWorkspace,
   outputTextElement,
@@ -197,6 +201,71 @@ describe("Preferences", () => {
       await expect.poll(() => outputStyle("fontVariantLigatures")).toBe("normal")
       await reloadWorkspace()
       await expect.poll(() => outputStyle("fontVariantLigatures")).toBe("normal")
+    })
+  })
+
+  context("when choosing screen reader support", () => {
+    const support = () =>
+      preferencesDialog().getByRole("combobox", { name: "Screen reader support" })
+    // The text xterm keeps for a screen reader: its tree of rows and its live region.
+    const liveRegion = () =>
+      terminal("Checkout implementation").element().querySelector(".xterm-accessibility")
+
+    it("keeps a reader's text in the terminal in focus until turned off, and keeps that after reopening", async () => {
+      await openWorkspace()
+      await outputDrawn()
+      await openAppearance()
+      // A browser can't tell whether a reader runs, so it offers no Automatic, and keeps the text.
+      await expect.element(support()).toHaveTextContent("On")
+      await support().click()
+      await expect
+        .element(preferencesDialog().getByRole("option", { name: /^Automatic/ }))
+        .not.toBeInTheDocument()
+      await preferencesDialog().getByRole("option", { name: /^Off/ }).click()
+      await expect.element(support()).toHaveTextContent("Off")
+      await closePreferences()
+
+      await clickInto("Checkout implementation")
+      await expectStaysTrue(() => liveRegion() === null, "the terminal keeps no reader's text")
+
+      await reloadWorkspace()
+      await openAppearance()
+      await expect.element(support()).toHaveTextContent("Off")
+      await support().click()
+      await preferencesDialog().getByRole("option", { name: /^On/ }).click()
+      await closePreferences()
+      await clickInto("Checkout implementation")
+      await expect.poll(liveRegion).not.toBeNull()
+    })
+  })
+
+  context("when the app can tell whether a screen reader runs", () => {
+    const liveRegion = () =>
+      terminal("Checkout implementation").element().querySelector(".xterm-accessibility")
+
+    it("keeps no reader's text on Automatic, the default, while none runs", async () => {
+      await openWorkspace("/?screenReader=none")
+      await outputDrawn()
+      await openAppearance()
+      await expect
+        .element(preferencesDialog().getByRole("combobox", { name: "Screen reader support" }))
+        .toHaveTextContent("Automatic")
+      await closePreferences()
+      await clickInto("Checkout implementation")
+      await expectStaysTrue(() => liveRegion() === null, "the terminal keeps no reader's text")
+    })
+
+    it("keeps a reader's text on Automatic once one starts, and drops it once it stops", async () => {
+      await openWorkspace("/?screenReader=none")
+      await outputDrawn()
+      await clickInto("Checkout implementation")
+      await expectStaysTrue(() => liveRegion() === null, "the terminal keeps no reader's text")
+
+      setScreenReaderRunning(true)
+      await expect.poll(liveRegion).not.toBeNull()
+
+      setScreenReaderRunning(false)
+      await expect.poll(liveRegion).toBeNull()
     })
   })
 
@@ -655,11 +724,10 @@ describe("Terminal text size preference", () => {
       const initial = outputTextSize()
       await openAppearance()
 
-      await preferencesDialog().getByRole("combobox", { name: "Text size" }).click()
-      await preferencesDialog().getByRole("option", { name: "15px" }).click()
-      await expect
-        .element(preferencesDialog().getByRole("combobox", { name: "Text size" }))
-        .toHaveTextContent("15px")
+      const slider = preferencesDialog().getByRole("slider", { name: "Text size" })
+      await slider.fill("24")
+      await expect.element(slider).toHaveValue("24")
+      await expect.element(slider).toHaveAttribute("aria-valuetext", "24px")
       await closePreferences()
 
       await expect.poll(outputTextSize).toBeGreaterThan(initial)
@@ -668,8 +736,8 @@ describe("Terminal text size preference", () => {
       await expect.poll(outputTextSize).toBeGreaterThan(initial)
       await openAppearance()
       await expect
-        .element(preferencesDialog().getByRole("combobox", { name: "Text size" }))
-        .toHaveTextContent("15px")
+        .element(preferencesDialog().getByRole("slider", { name: "Text size" }))
+        .toHaveValue("24")
     })
   })
 })
@@ -848,16 +916,14 @@ describe("Appearance preference", () => {
       await expect.element(viewModeChoice("Focus")).toBeChecked()
       await expect.element(viewModeChoice("Grid")).toBeChecked()
       await expect.element(viewModeChoice("Canvas")).toBeChecked()
-      await expect
-        .element(appearance.getByRole("combobox", { name: "Text size" }))
-        .toHaveTextContent("13px")
+      await expect.element(appearance.getByRole("slider", { name: "Text size" })).toHaveValue("13")
       await expect.element(appearance.getByRole("switch", { name: "Ligatures" })).toBeVisible()
       await tab("General").click()
       await expect
         .element(preferencesDialog().getByRole("combobox", { name: "Theme" }))
         .not.toBeInTheDocument()
       await expect
-        .element(preferencesDialog().getByRole("combobox", { name: "Text size" }))
+        .element(preferencesDialog().getByRole("slider", { name: "Text size" }))
         .not.toBeInTheDocument()
     })
   })
@@ -1001,6 +1067,45 @@ describe("Preferences' tabs in a narrow window", () => {
       expect(tabBox.top - ring).toBeGreaterThanOrEqual(box.top)
       expect(tabBox.bottom + ring).toBeLessThanOrEqual(box.bottom)
       expect(tabBox.right + ring).toBeLessThanOrEqual(box.right)
+    })
+  })
+})
+
+describe("Scale preference", () => {
+  const scaleSelect = () => preferencesDialog().getByRole("combobox", { name: "Scale" })
+
+  it("is offered only where the app can scale its windows", async () => {
+    await openWorkspace()
+    await openAppearance()
+    await expect
+      .element(preferencesDialog().getByRole("slider", { name: "Text size" }))
+      .toBeVisible()
+    expect(scaleSelect().query()).toBeNull()
+  })
+
+  context("in the desktop app", () => {
+    it("tells the window each scale chosen, and keeps it after reopening", async () => {
+      await openWorkspace("/?scale=desktop")
+      expect(scalesShown.at(-1)).toBe(1)
+      await openAppearance()
+      await expect.element(scaleSelect()).toHaveTextContent("100%")
+
+      await scaleSelect().click()
+      await Promise.all(
+        ["80%", "90%", "100%", "110%", "125%", "150%", "175%", "200%"].map((name) =>
+          expect.element(preferencesDialog().getByRole("option", { name })).toBeVisible(),
+        ),
+      )
+      await preferencesDialog().getByRole("option", { name: "200%" }).click()
+      await expect.element(scaleSelect()).toHaveTextContent("200%")
+      expect(scalesShown.at(-1)).toBe(2)
+      expect(JSON.parse(localStorage.getItem("novadeck.preferences")!).appScale).toBe(200)
+
+      await cleanup()
+      await openWorkspace("/?scale=desktop")
+      await openAppearance()
+      await expect.element(scaleSelect()).toHaveTextContent("200%")
+      await expect.poll(() => scalesShown.at(-1)).toBe(2)
     })
   })
 })

@@ -9,8 +9,18 @@ import type { CompanionWindowMeta, WorkspaceTarget } from "./types"
 
 // The kinds an agent shows (with `show`) or the person attaches: each points at a file, a
 // page or a change. A video or a recording (`audio`) is a file played rather than read, and a
-// PDF one drawn page by page. A plan is the one kind an agent writes rather than shows.
-export type ShownKind = "image" | "video" | "audio" | "pdf" | "file" | "page" | "changes"
+// PDF one drawn page by page, and a 3D model (`model`) one drawn in the round. A folder is
+// listed, read-only, as a grid or a list. A plan is the one kind an agent writes rather than shows.
+export type ShownKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "model"
+  | "file"
+  | "folder"
+  | "page"
+  | "changes"
 
 // What an agent showed or the person attached, as the backend keeps it: a pointer to a
 // file or page, never a copy, held by exactly one terminal's bar or one undocked window.
@@ -92,7 +102,10 @@ export const kindRules: Record<ItemKind, KindRule> = {
   video: { pointer: "file", follow: "shown", close: "remove" },
   audio: { pointer: "file", follow: "shown", close: "remove" },
   pdf: { pointer: "file", follow: "shown", close: "remove" },
+  model: { pointer: "file", follow: "shown", close: "remove" },
   file: { pointer: "file", follow: "shown", close: "remove" },
+  // Followed whether shown or not: files landing in a folder behind another tab make it new.
+  folder: { pointer: "file", follow: "always", close: "remove" },
   page: { pointer: "page", follow: "shown", close: "remove" },
   changes: { pointer: "changes", follow: "shown", close: "remove" },
   plan: { pointer: "none", follow: "always", close: "hide" },
@@ -168,6 +181,65 @@ export type AudioContent = Omit<VideoContent, "kind"> & { readonly kind: "audio"
 // A PDF, drawn from its bytes, which `Companions.part` reads in parts while the file is as
 // `stamp` (its content's) names it, as a video's: its size in bytes.
 export type PdfContent = { readonly kind: "pdf"; readonly size: number }
+
+// The formats of 3D model the pane draws, by the file's extension.
+export type ModelFormat = "glb" | "gltf" | "stl" | "obj" | "ply" | "3mf"
+
+// Why a file a model names isn't read with it: an address of its own (`external`), a path out
+// of the model's folder (`outside`), or as a part's.
+export type ModelRefusal =
+  | "external"
+  | "outside"
+  | "missing"
+  | "not-a-file"
+  | "secret"
+  | "too-large"
+  | "unreadable"
+
+// A 3D model, drawn from its bytes, read in parts as a PDF's are, with the files beside it it
+// names (a glTF's buffers and textures, an OBJ's materials): each it reads, by its name as the
+// model writes it, which `Companions.part` reads as its own stamp names it, and each it doesn't
+// with why.
+export type ModelContent = {
+  readonly kind: "model"
+  readonly format: ModelFormat
+  readonly size: number
+  readonly files: readonly {
+    readonly name: string
+    readonly size: number
+    readonly stamp: string
+  }[]
+  readonly refused: readonly { readonly name: string; readonly reason: ModelRefusal }[]
+}
+
+// One entry of a folder's listing, as the runner lists it (see the protocol's `folderEntry`):
+// `children` counts what a folder holds, `secret` entries are named and never opened, a `link`
+// leaves the folder and is never entered, and `stamp` names a file as `Companions.part` reads it.
+export type FolderEntry = {
+  readonly name: string
+  readonly kind: "folder" | "image" | "video" | "audio" | "pdf" | "model" | "text" | "other"
+  readonly size: number
+  readonly modifiedAt: number
+  readonly children: number | null
+  readonly secret: boolean
+  readonly link: boolean
+  // A link that stays inside the top (listed as its target), or what is no regular file: neither
+  // is a file of its own to step to.
+  readonly linked?: true | undefined
+  readonly plain?: false | undefined
+  readonly stamp: string
+}
+
+// A folder's listing: the folder `within` its top (the one the item points at; "" is the top,
+// "/" between names), at most what the runner lists of its `total` entries (`truncated` otherwise).
+export type FolderContent = {
+  readonly kind: "folder"
+  readonly path: string
+  readonly within: string
+  readonly entries: readonly FolderEntry[]
+  readonly total: number
+  readonly truncated: boolean
+}
 
 // A part of an item's file, from the offset asked for (fewer bytes at its end, none past it);
 // `changed` when the file is no longer as the stamp named it, so it's read again from its new
@@ -276,6 +348,10 @@ export type ChangeFileRun = {
 }
 export type ChangeFileDiff = { readonly run: ChangeFileRun | null }
 
+// The files a selection of layers changed as one range, as git lists them from its start to its
+// end: its own counts, not its layers' added up.
+export type ChangeRange = { readonly files: readonly ChangedFile[]; readonly truncated: boolean }
+
 // An agent's whole change: a checkout measured against its main branch (`base` names it, or
 // is HEAD where there is none), as layers, newest first: the work not committed yet, then each
 // commit since the merge base. Each layer lists the files it changed, not their diffs, which
@@ -307,6 +383,8 @@ export type ShownContent =
   | VideoContent
   | AudioContent
   | PdfContent
+  | ModelContent
+  | FolderContent
   | FileContent
   | PageContent
   | ChangesContent
@@ -468,16 +546,44 @@ export const pageTroublesPerCall = 20
 
 // Where the items' content comes from. The items themselves reach the workspace store
 // as the backend's seed and actions, like terminals.
+// A folder a typed path may be: written as the person typed its parent, so it completes the text;
+// its absolute path through links (`real`), as a folder item showing it holds it; how many entries
+// it holds (`count`, and `more` when it holds more than were counted); whether a folder item shows
+// it.
+export type FolderMatch = {
+  readonly path: string
+  readonly real: string
+  readonly count: number
+  readonly more: boolean
+  readonly open: boolean
+}
+
+// A folder outside the project that an agent wrote a file in, as it is told in a path field's
+// suggestions: absolute, or led by `~`, with its absolute path through links (`real`, as
+// `FolderMatch`'s), the terminal's handle, the harness's name and when.
+export type WroteFolder = {
+  readonly path: string
+  readonly real: string
+  readonly handle: string
+  readonly harness: string
+  readonly at: number
+}
+
 export type Companions = {
   // Reports what the item holds now, then again whenever that changes, until stopped.
   // One that may hold secrets reports `secret` unless `reveal` is the path the item points at:
   // the person's yes is to a file, not to whatever the item is pointed at when it's heard.
   // With `edit`, a text file is its whole text (`TextContent`), or, where it can't be edited
   // whole, its lines saying why; a backend that edits no files reports it as without.
+  // A folder lists the subfolder named by `within`, or its top when omitted.
   readonly follow: (
     target: WorkspaceTarget,
     itemId: ItemId,
-    options: { readonly reveal: string | undefined; readonly edit?: boolean },
+    options: {
+      readonly reveal: string | undefined
+      readonly edit?: boolean
+      readonly within?: string | undefined
+    },
     on: (content: ItemContent) => void,
   ) => () => void
   // One file of a changes item as a selection of its layers (ids) changed it, read when asked
@@ -489,6 +595,14 @@ export type Companions = {
     path: string,
     layers: readonly string[],
   ) => Promise<ChangeFileDiff>
+  // The files a selection of a changes item's layers changed as one range, with its own counts:
+  // what the pane lists for a range of two or more layers. Absent where the backend can't, with
+  // `changeFile`.
+  readonly changeRange?: (
+    target: WorkspaceTarget,
+    itemId: ItemId,
+    layers: readonly string[],
+  ) => Promise<ChangeRange>
   // The person read a file of a changes item: its content names it in `read` until the file
   // changes again. Absent where the backend can't keep it: the pane then grays it for as
   // long as the content stays as it was.
@@ -496,13 +610,45 @@ export type Companions = {
   // An item's file from `offset`, for a kind read in parts (a video, a recording), while it
   // is as `stamp` names it (see `FilePart`). One
   // that may hold secrets is `secret` unless `reveal` is the path the item points at, as in
-  // `follow`. Rejects where the item is gone or of a kind not read in parts. Absent where the
-  // backend can't: a video, a recording or a PDF then says it can't be shown here.
+  // `follow`. With `file`, a model's, it is that file beside it, one its content lists, as its
+  // own stamp names it, never shown when it may hold secrets; for an HTML file's (a web page's) item
+  // it is a file beside the page by its name from the page's folder (a style, picture or font),
+  // read as it is now. Rejects where the item is gone or
+  // of a kind not read in parts. Absent where the backend can't: a video, a recording, a PDF or
+  // a model then says it can't be shown here.
   readonly part?: (
     target: WorkspaceTarget,
     itemId: ItemId,
-    part: { readonly stamp: string; readonly offset: number; readonly reveal: string | undefined },
+    part: {
+      readonly stamp: string
+      readonly offset: number
+      readonly reveal: string | undefined
+      readonly file?: string | undefined
+      // A folder item's file, by its path from the folder's top, with the stamp its listing gave.
+      readonly path?: string | undefined
+    },
   ) => Promise<FilePart>
+  // Attaches a file or a folder the person picked to a terminal's bar, by an absolute path, as
+  // an agent's show of it would: it opens there, in its kind's group. Resolves with the item;
+  // rejects when the path can't be shown. Absent where the backend can't.
+  readonly attach?: (target: WorkspaceTarget, terminalId: string, path: string) => Promise<Item>
+  // The folders a path being typed may be, by name, for a terminal (`path` is led by `~`, absolute,
+  // or from the terminal's directory): see `FolderMatch`. Absent where the backend can't.
+  readonly folders?: (
+    target: WorkspaceTarget,
+    terminalId: string,
+    path: string,
+  ) => Promise<readonly FolderMatch[]>
+  // The folders outside the project that a terminal's session's agents wrote a file in, the latest
+  // first: see `WroteFolder`. Absent where the backend can't.
+  readonly wroteTo?: (
+    target: WorkspaceTarget,
+    terminalId: string,
+  ) => Promise<readonly WroteFolder[]>
+  // Points a file's item at another file of its own kind, by an absolute path, as stepping
+  // through a folder's files does: the same item, holder and id, shown again. Resolves with
+  // the item; rejects when the path is no file of that kind. Absent where the backend can't.
+  readonly repoint?: (target: WorkspaceTarget, itemId: ItemId, path: string) => Promise<Item>
   // Writes the person's edit to the plan, or to the file the project window holds, unless it
   // changed since `basedOn`. `path` is the path the edit was made on (a text file's `path`):
   // an item pointed at another file since is refused as `moved`. A plan's save may leave it
@@ -550,6 +696,9 @@ export type Companions = {
   // touched, with a phone's screen and browser; false when it can't. Absent where pages
   // don't load live, or the app can't: a page at a phone's size is then only as narrow.
   readonly phone?: (page: number, phone: boolean) => Promise<boolean>
+  // Zooms a live page's view, by its web contents id, by a factor of the app's own zoom, as
+  // its viewer zooms it out to fit; false when it can't. Absent where pages don't load live.
+  readonly zoom?: (page: number, factor: number) => Promise<boolean>
 }
 
 // Items with nothing to show, for a backend whose terminals have only their messages

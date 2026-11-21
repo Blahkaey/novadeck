@@ -9,6 +9,7 @@ import { fieldsOf } from "@novadeck/harness-core/fields"
 import type { RequestAnswer } from "@novadeck/protocol"
 
 import {
+  CtrlEnd,
   digit,
   Down,
   editorHintWithin,
@@ -20,6 +21,7 @@ import {
   nonBlank,
   Right,
   rule,
+  belowView,
   settled,
   timeoutMs,
   typeable,
@@ -304,6 +306,14 @@ export const questions = (rows: readonly string[], facts: RequestFacts): DialogR
     return refuse("question.questions.3")
   }
 
+  const place = { asked: asked.length, final: asked.length === 1 }
+  if (belowView(rows)) {
+    // What the screen would refuse once shown, the facts refuse here: digits reach only one
+    // digit's rows, so a longer list than the shown read takes is no card to offer.
+    if (asked.some(({ preview, options }) => !preview && options.length + 2 > 9))
+      return refuse("question.questions.11")
+    return hidden(asked)
+  }
   const shown = questionScreen(rows)
   if (!shown) return refuse("question.questions.4")
   // A lone multi-select question has a tab bar too, for its Submit; a lone single-select
@@ -319,40 +329,58 @@ export const questions = (rows: readonly string[], facts: RequestFacts): DialogR
     return refuse("question.questions.9")
   }
 
-  const place = { asked: asked.length, final: asked.length === 1 }
   const entries = optionsOf(rows, shown, ask, place)
   if (!entries) return refuse("question.questions.10")
 
   const marker = entries.findIndex((each) => each.marker)
-  const dialog: AnswerableDialog = {
-    type: "questions",
-    // The "Chat about this" row, read in full above: it rejects the questions, tells the
-    // model the person wants to clarify them, and the person's words go as the next prompt.
-    chat: "prompt",
-    questions: asked.map((each, index) => ({
-      id: `q${index + 1}`,
-      header: each.header,
-      question: each.question,
-      options: each.options.map(({ label, description }, at) => ({
-        id: String(at + 1),
-        label,
-        description: description === "" ? null : description,
-      })),
-      multiSelect: each.multiSelect,
-      text: !each.preview,
-    })),
-  }
-
   return {
-    dialog,
+    dialog: dialogOf(asked),
     keys: (answer) =>
       answer.type === "chat"
         ? chatKeys(ask.options.length, ask.preview, marker)
         : keysFor(asked, marker, answer),
-    answered: (later) =>
-      idle(later) && !reviewing(later) && !(footerAt(later) >= 0 && showing(later, ask, place)),
+    answered: answeredOf(ask, place),
   }
 }
+
+/** The questions as the person answers them: all the hook said they ask, none of the screen. */
+const dialogOf = (asked: readonly Ask[]): AnswerableDialog => ({
+  type: "questions",
+  // The "Chat about this" row, read in full above: it rejects the questions, tells the
+  // model the person wants to clarify them, and the person's words go as the next prompt.
+  chat: "prompt",
+  questions: asked.map((each, index) => ({
+    id: `q${index + 1}`,
+    header: each.header,
+    question: each.question,
+    options: each.options.map(({ label, description }, at) => ({
+      id: String(at + 1),
+      label,
+      description: description === "" ? null : description,
+    })),
+    multiSelect: each.multiSelect,
+    text: !each.preview,
+  })),
+})
+
+const answeredOf =
+  (ask: Ask, place: Place) =>
+  (later: readonly string[]): boolean =>
+    idle(later) && !reviewing(later) && !(footerAt(later) >= 0 && showing(later, ask, place))
+
+/**
+ * The questions held below a fullscreen view the person scrolled up (see `belowView`):
+ * the hook's own words are the whole dialog, as a read of the screen gives it, so the card
+ * shows what the dialog will. The read only says how to bring it into view: the driver
+ * presses `reveal`, reads the dialog shown, and answers with that read's keys; Escape sets
+ * it aside where it is, as on a dialog in view.
+ */
+const hidden = (asked: readonly Ask[]): DialogRead => ({
+  dialog: dialogOf(asked),
+  reveal: CtrlEnd,
+  keys: () => undefined,
+  answered: () => false,
+})
 
 /**
  * The keys that set the questions aside: the digit of the "Chat about this" row, the one

@@ -1,3 +1,5 @@
+import type { WindowControlsSide } from "@novadeck/protocol/bridge"
+
 export const apiUrlArgumentPrefix = "--novadeck-api-url="
 export const databaseArgumentPrefix = "--novadeck-database="
 /** The relay agents start for Novadeck's MCP server and hooks, as the app ships it. */
@@ -54,6 +56,12 @@ export const saveBeforeQuitChannel = "novadeck:save-before-quit"
 export const appearanceChannel = "novadeck:appearance"
 
 /**
+ * Renderer-to-main report of the scale the person chose for the app, a fraction of its normal
+ * size, which every window shows; see main/window/scale.ts.
+ */
+export const scaleChannel = "novadeck:scale"
+
+/**
  * Renderer-to-main request to show a desktop notification about a terminal,
  * `{ id, title, body }`; see main/notices/notices.ts.
  */
@@ -86,6 +94,45 @@ export const windowFocusChannel = "novadeck:window-focus"
 
 /** Renderer-to-main request to be told, on `windowFocusChannel`, of the window's focus. */
 export const windowFocusRequestChannel = "novadeck:window-focus-request"
+
+/**
+ * Main-to-renderer report of whether a screen reader or other assistive technology is
+ * running, a boolean, sent on each change; see main/window/screen-reader.ts. A page that
+ * starts listening asks for the current one on `screenReaderRequestChannel`.
+ */
+export const screenReaderChannel = "novadeck:screen-reader"
+
+/** Renderer-to-main request to be told, on `screenReaderChannel`, whether one is running. */
+export const screenReaderRequestChannel = "novadeck:screen-reader-request"
+
+/**
+ * Whether the app can tell when a screen reader runs: Electron reports assistive technology on
+ * macOS and Windows, and on Linux the app reads the desktop's accessibility bus. Elsewhere the
+ * page hears nothing and keeps a reader's text.
+ */
+export const tellsScreenReader = (platform: string): boolean =>
+  platform === "darwin" || platform === "win32" || platform === "linux"
+
+/**
+ * The edge of the page's top the app's window puts its own controls over, the page's header
+ * standing in for a title bar: the start on macOS, the end on Windows. Undefined where the
+ * window keeps the system's title bar, as on Linux.
+ */
+export const windowControlsSide = (platform: string): WindowControlsSide | undefined =>
+  platform === "darwin" ? "start" : platform === "win32" ? "end" : undefined
+
+/**
+ * Main-to-renderer report of the room the window's controls take from the page's edge on their
+ * side, in CSS pixels, 0 while they don't show; see main/window/controls.ts. Sent on each change
+ * and in answer to each `windowControlsPlaceChannel` request.
+ */
+export const windowControlsChannel = "novadeck:window-controls"
+
+/**
+ * Renderer-to-main request to centre the window's controls on a line that many CSS pixels
+ * below the page's top, or to hide them (null).
+ */
+export const windowControlsPlaceChannel = "novadeck:window-controls-place"
 
 /** Main-to-renderer report of the terminal id of a notification the person clicked. */
 export const noticeClickChannel = "novadeck:notice-click"
@@ -202,6 +249,12 @@ export const pageLookChannel = "novadeck:page-look"
  * again, by its web contents id; answers whether it did. See the viewers' `phonePage`.
  */
 export const pagePhoneChannel = "novadeck:page-phone"
+
+/**
+ * Renderer-to-main request to zoom a live page's view by a factor of the app's own zoom, by
+ * its web contents id; answers whether it did. See the viewers' `zoomPage`.
+ */
+export const pageZoomChannel = "novadeck:page-zoom"
 
 /**
  * Renderer-to-main report of an error the page didn't catch, `{ kind, name, message, stack }`,

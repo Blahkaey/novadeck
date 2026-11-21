@@ -32,10 +32,10 @@ const openFiles = async (
 describe("The project window", () => {
   for (const view of ["focus", "grid", "canvas"] as const) {
     context(`in the ${view} view`, () => {
-      it("opens on a double-click on a file in Files, and the sidebar lists it by the file's name", async () => {
+      it("opens on a click on a file in Files, and the sidebar lists it by the file's name", async () => {
         await openFiles(view)
 
-        await row("package.json").dblClick()
+        await row("package.json").click()
 
         await expect.element(terminal("package.json")).toBeVisible()
         await sidebarPanel("Terminals").click()
@@ -43,6 +43,16 @@ describe("The project window", () => {
       })
     })
   }
+
+  it("still opens on a double-click, as before a click opened it", async () => {
+    await openFiles()
+
+    await row("package.json").dblClick()
+
+    await expect.element(terminal("package.json")).toBeVisible()
+    await sidebarPanel("Terminals").click()
+    await expect.element(terminalTab("package.json")).toBeVisible()
+  })
 
   it("opens on Enter on a file too", async () => {
     await openFiles()
@@ -69,10 +79,10 @@ describe("The project window", () => {
 
   it("is re-pointed by the next file opened: still one window, with the new file in it", async () => {
     await openFiles()
-    await row("package.json").dblClick()
+    await row("package.json").click()
     await expect.element(terminal("package.json")).toBeVisible()
 
-    await row("index.html").dblClick()
+    await row("index.html").click()
 
     await expect.element(terminal("index.html")).toBeVisible()
     await expect.element(terminal("package.json")).not.toBeInTheDocument()
@@ -89,14 +99,14 @@ describe("The project window", () => {
         .closest("[data-terminal-tab-id]")!
         .querySelector(".terminal-tab-process")!.textContent
     await openFiles()
-    await row("CartItem.tsx").dblClick()
+    await row("CartItem.tsx").click()
     await expect.element(terminal("CartItem.tsx")).toBeVisible()
     await sidebarPanel("Terminals").click()
     await expect.element(terminalTab("CartItem.tsx")).toBeVisible()
     await expect.poll(() => line("CartItem.tsx")).toBe("src/cart")
 
     await sidebarPanel("Files").click()
-    await row("package.json").dblClick()
+    await row("package.json").click()
     await sidebarPanel("Terminals").click()
     await expect.element(terminalTab("package.json")).toBeVisible()
     await expect.poll(() => line("package.json")).toBe("")
@@ -105,7 +115,7 @@ describe("The project window", () => {
   it("reads a Markdown file as a document labelled by the file's name", async () => {
     await openFiles()
 
-    await row("README.md").dblClick()
+    await row("README.md").click()
 
     await expect.element(terminal("README.md")).toBeVisible()
     await expect
@@ -116,7 +126,7 @@ describe("The project window", () => {
   it("holds back a file that looks like a secret behind the gate", async () => {
     await openFiles()
 
-    await row(".env.local").dblClick()
+    await row(".env.local").click()
 
     const window = terminal(".env.local")
     await expect.element(window.getByRole("button", { name: "Show it" })).toBeVisible()
@@ -125,7 +135,7 @@ describe("The project window", () => {
 
   it("is made again by the next open once it has been closed", async () => {
     await openFiles()
-    await row("package.json").dblClick()
+    await row("package.json").click()
     await expect.element(terminal("package.json")).toBeVisible()
     await sidebarPanel("Terminals").click()
     const menu = await windowMenu("package.json")
@@ -133,14 +143,14 @@ describe("The project window", () => {
     await expect.element(terminal("package.json")).not.toBeInTheDocument()
 
     await sidebarPanel("Files").click()
-    await row("index.html").dblClick()
+    await row("index.html").click()
 
     await expect.element(terminal("index.html")).toBeVisible()
   })
 
   it("offers only Close in its menu: no rename, no dock back", async () => {
     await openFiles()
-    await row("package.json").dblClick()
+    await row("package.json").click()
     await sidebarPanel("Terminals").click()
 
     const menu = await windowMenu("package.json")
@@ -161,6 +171,13 @@ describe("Worktree diff in the project window", () => {
     await row("Checkout.tsx").dblClick()
     await expect.element(merge("moth")).toBeVisible()
   }
+
+  it("keeps an excluded agent out of the diff when the open file is clicked again", async () => {
+    await openCheckout()
+    await merge("moth").click()
+    await row("Checkout.tsx").click()
+    await expect.element(checkout().getByTitle("Merge @moth's work")).toBeVisible()
+  })
 
   it("switches views in the same window with the mouse and keyboard, keeping the editor's selection", async () => {
     await openCheckout()

@@ -1,7 +1,7 @@
 import { transcript as transcriptOf } from "@novadeck/emulator/headless"
 import type { Install, Model } from "@novadeck/harness-core/harness"
 import { hookShellSlackMs } from "@novadeck/harness-core/hook-command"
-import type { AskAnswer, InboxEntry } from "@novadeck/protocol"
+import { defaultAgentMode, type AskAnswer, type InboxEntry } from "@novadeck/protocol"
 import type {
   AgentDetail,
   SliceChange,
@@ -55,7 +55,7 @@ import { Companion, type Checkout } from "./companion.js"
 import { conversationDetail } from "./conversation.js"
 import { Murmur } from "./descriptions.js"
 import { agentWorking } from "./doorbell-host.js"
-import { agentProcess, shutdownTreeGraceMs, shutdownTreesMs, treeGraceMs } from "./ending.js"
+import { closing, shutdownTreeGraceMs, shutdownTreesMs, treeGraceMs } from "./ending.js"
 import { failed } from "./failures.js"
 import { Hibernation } from "./hibernation.js"
 import { historyHost } from "./history-host.js"
@@ -236,6 +236,7 @@ export class Terminals {
       | "murmurTimes"
       | "pty"
       | "hibernateAfterMinutes"
+      | "agentMode"
       | "hibernation"
     >
   > & {
@@ -338,7 +339,7 @@ export class Terminals {
       scrollback: 1000,
       kill: { graceMs: 1000, treeGraceMs, shutdownTreesMs, shutdownTreeGraceMs },
       trees: this.trees,
-      follows: (id) => agentProcess(this.records.get(id)),
+      ...closing(this.records),
       pty: this.pty,
       failed: failed.terminal,
     })
@@ -511,6 +512,7 @@ export class Terminals {
         if (record) this.typing.watchQueue(record)
       },
       held: (id, root, held) => this.reporting.held(id, root, held),
+      ...(options.agentMode && { mode: options.agentMode }),
       onWake: (id) => this.sleepers.ask(id),
     })
     this.inbox = new Inbox(
@@ -733,6 +735,7 @@ export class Terminals {
       agents: (call) => this.agents(call),
       team: (call) => this.peers.team(call),
       notes: () => options.notes,
+      agentMode: () => options.agentMode?.() ?? defaultAgentMode,
       ...worktreeHost(this.options.worktrees, (sessionId) => this.projectOf(sessionId)),
     })
     this.moves = new Moves({

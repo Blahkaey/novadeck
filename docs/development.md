@@ -121,8 +121,9 @@ the last thing opened, by you or by the agent when you asked for it, and for a s
 rest of that icon's things as tabs under its header, each with its ×, Delete closing the
 tab with focus. The arrow keys, Home and End move along the tabs, and Ctrl+PageDown and
 Ctrl+PageUp step through them from anywhere in the pane; neither opens something that may
-hold secrets until you pick it. Every other icon with something open waits behind it as a
-thin card edge above the pane, as in a file drawer: the edges stay compact on hover,
+hold secrets until you pick it. Every other icon with something open waits behind it, the
+nearest five as thin card edges above the pane, as in a file drawer (the rest only on the
+taskbar): the edges stay compact on hover,
 and a click brings its icon forward. The mark under
 an icon says whether it's new, showing, open behind, or seen: something new gets a dot,
 quietly, and nothing opens on its own unless you asked for it. Something the agent opens
@@ -292,7 +293,7 @@ Terminals:
   Canvas wire side by side (on neighbours, the teams chain through the middle one).
 - **New terminals:** "Every state at once" adds one terminal per state, named after it, so
   the tabs and the windows in Grid and Canvas show done, replied (unread), failed, working,
-  planning, subagents, asking, waiting, paused at its limit or at a model's own (weekly Fable), asleep (plain, done, asking),
+  planning, subagents, asking, waiting, paused at its limit (resetting soon, or in 8 days) or at a model's own (weekly Fable), waiting on a wake-up due in minutes or in 7 days, asleep (plain, done, asking),
   waking (plain, asking), ended and the rest side by side. Its agents are of the harness the group's switch chose (see Agent). "Asks (MCP)" and
   "Needs a sign-in" are agents with an `ask` open in the Inbox (a
   question, and an action ask), so their "?" and "!" show beside "Working, a side question",
@@ -386,7 +387,10 @@ Agents:
   selected one, and "Ask to lead selected" has it ask to lead the selected one, which raises the
   approval modal (two presses queue two; approving closes the terminal, or makes the asker its
   lead); "Ask to take selected's worktree" has it ask to take the selected terminal's worktree
-  (allowing changes nothing in the demo); "Withdraw approvals" takes them back.
+  (allowing changes nothing in the demo); "Ask to join selected's team", "Ask to leave
+  selected's team" and "Ask to hand its team to selected" raise the cards for `join`, `leave`
+  and `hand_lead` (confirming sets the asker's lead in the demo workspace); "Withdraw
+  approvals" takes them back.
 - **Doorbell** and **Messages:** only in the `messages` variant, on the selected terminal.
   Doorbell puts its idle agent where the doorbell can't ring it (working, a prompt queued,
   shell mode, text in its box, a dialog, asking you, failed, away), which its Messages pane
@@ -401,8 +405,7 @@ Agents:
   report or failed, so the Inbox lists every kind: its header counts the 10 that wait, and the
   2 done reports are Updates. It
   adds terminals to the current session if the workspace has too few, without selecting
-  them or leaving the Inbox, and leaves the selected terminal alone, since
-  a report is read once you have looked at its terminal for a moment. "Clear waiting agents" rests every agent,
+  them or leaving the Inbox. "Clear waiting agents" rests every agent,
   which answers every request and calls off the finishes still to come, reads every finish and
   the done reports its agents wrote, and withdraws and clears the MCP asks the panel opened
   (those of "Every state at once"), so nothing the agents or the panel made waits. The rows
@@ -493,6 +496,64 @@ Agents:
   shows the report under a new stamp, as if its file was rewritten, read in 512-byte parts 0.3 s
   apart: the old one stays on screen under a Loading chip for about 2 s, then the new one swaps
   in on the page you were on.
+- **Web page:** only in the `showcase` variant, on the selected terminal's bar. The pages are
+  files in code (`frontend/demo/src/showcase/html-samples.ts`), drawn by the pane's page viewer
+  with the files beside them read by name, as the runner reads them: "Show a web page" is
+  `strip.html`, a three-panel comic strip on a cream ground, styled by `strip.css` and drawn with
+  three SVGs beside it (two as `<img>`, one as a CSS background), with a Show source switch in the
+  pane's row; "Show a web page that loads slowly" reads its files 0.7 s apart, the pane blank and
+  busy till they are in; "Show a web page whose files are missing" draws plain, with no styles and
+  no pictures; "Show a web page with no styles" is a bare heading on white; "Show a web page too
+  long to draw" opens on its source under "This page is too long to draw, so its source is shown.";
+  "Rewrite the page's stylesheet" writes `strip.css` again with another ground (a new stamp each
+  time), and the pane draws the strip again on it; "Stop the page viewer" sends the open page's
+  frame to another page, and the pane says "The page viewer stopped.".
+- **3D model:** only in the `showcase` variant, on the selected terminal's bar. The models are
+  bytes made in code (`frontend/demo/src/showcase/model.ts`), drawn by the pane's 3D viewer:
+  "Show an STL bracket" is an L-bracket as a CAD loop writes it, 60 × 40 × 40 mm; "Show an
+  animated glTF" is an arm read with its `arm.bin` beside it, whose Play swings its boom; "Show an
+  OBJ with materials" is a crate coloured by its `crate.mtl`; "Show a PLY scan of points" is a
+  dome of coloured points; "Show a model that loads slowly" reads one in 1 KB parts 0.3 s apart;
+  "Show a model too large to preview" is the pane's "Novadeck previews 3D models up to 256 MB";
+  "Show a model that may hold secrets" joins the stack unopened until you pick its tab; "Show a
+  model whose read fails" is the pane's "couldn't be loaded"; "Show a glTF naming a texture
+  elsewhere" is drawn without it, under "Not read: https://cdn.example.com/arm-skin.png (an address
+  of its own)"; "Show a 3MF spacer" is a tube read from its zip in the millimetres it names; "Show a glTF whose files
+  were refused" lists one refused file for each reason; "Show a glTF whose buffer can't be read" is a
+  buffer whose read fails; "Show a glTF claiming 4 GB" is refused before three.js allocates it; "Show an
+  STL with nothing in it" says there's nothing to draw; "Show a model past what a peek draws" keeps
+  its peek a badge; "Show a Draco-compressed glTF" says Novadeck can't read that compression yet
+  (the one state the panel can't reach is no WebGL at all);
+  "Show a file that isn't a model" says "This isn't a model Novadeck can read."; "Stop the 3D
+  viewer" sends the open model's frame to another page, and the pane says "The 3D viewer
+  stopped."; "Rewrite the bracket" writes it again 10 mm longer, read in small parts: the old one
+  stays in view under a Loading chip, then the new one is drawn from where you were looking.
+- **Folder:** only in the `showcase` variant, on the selected terminal's bar. The dev server's
+  terminal (`@fox`) already holds `render`, a folder an agent wrote into (`frontend/demo/src/showcase/folders.ts`:
+  SVG stills, a clip, a PDF, a log, a Markdown note (`notes.md`) and a JSON file (`results.json`), a
+  folder inside it, a secret file and folder and a link out), listed as thumbnails, newest first;
+  double-clicking a file opens it in its kind's group, Alt+double-click (or "Open as text" in the
+  entry's right-click menu) opens `notes.md` or `results.json` on its source with "Show source"
+  pressed, Space is a quick look (a still larger, the clip's first frame and length, an icon card
+  for the PDF, the log and the secret; ← → step, Enter opens, Space or Escape closes), "Copy path"
+  copies an entry's absolute path, and opening a folder from the Files panel (`agents` demo) lists a stand-in. A file opened from
+  it, while the folder is on the bar, has ‹ and › through the folder's files of its kind (a
+  still: ← and → too; ‹ is off on the first still and › on the last, and the log, the only
+  text file, has both off) and Show in render, which goes back to the folder with the file selected
+  (a still of `old-runs` has "Show in old-runs", which opens that folder inside render). The Folder group:
+  "Show a folder" shows it again; "Open a file of the folder" opens the newest still of it as a
+  double-click would; "A file lands in the folder" puts a new picture on top (held
+  in a pill while the pointer is in the grid); "A file is being written" grows one for about 3 s
+  (write cursor and pulse); "Show a folder with nothing in it", "...too large to list whole" and
+  "...that may hold secrets" are the pane's other states; "The folder goes away" strikes its tab
+  through and says it is gone, with a Close action; "Bring the folder back" undoes it. Every state
+  of the path field needs no action: with the `render` pane in focus, Ctrl+L (Cmd+L) turns the
+  crumbs into the field with the groups "Shown by agents" (`render` itself), "Agents wrote to,
+  outside the project" (three folders, one by an agent of each harness) and, once something has
+  been opened, "You opened"; typing `~/re` adds the matches with `render` marked open
+  (`frontend/demo/src/showcase/path-field.ts` holds the folders it knows); Enter on `~/Downloads`
+  opens a stand-in, and on a name with an extension nothing is there for (`missing.txt`) the
+  field shows the reason under itself.
 - **Changes:** only in the `showcase` variant, no action needed: the dev server's terminal
   (`@fox`, the third) holds its items on the bar beside those that can't show, thirteen of them
   changes, one in each shape the changes pane draws: an ordinary change in layers (a refactor of
@@ -556,7 +617,7 @@ Agents:
   into `public`, then cut `README.md` and paste it on `public`'s `favicon.svg`) puts the red-edged
   line above the tree. What was cut or copied follows a rename of it or of a folder it is in, and
   goes with a delete of either. The naming field's red line shows by typing a name already beside
-  it, such as `src` at the top. A file the project window shows (double-click `package.json`), and
+  it, such as `src` at the top. A file the project window shows (click `package.json`), and
   edits (see File editing below), opens there at its new name, with its edits, when renamed, and says
   "package.json isn't there any more." once deleted (the demo's window follows the person's deletes
   and moves, as the runner's watch does); a file New File… makes opens empty, and a copy holds the
@@ -621,7 +682,7 @@ Agents:
   made on an earlier version answers the text as it now stands, to merge into. Typing, a pause,
   `Ctrl+S` (`Cmd+S` on macOS) or a click away saves; the file opened again shows what was saved.
   The group acts on the file the project window of the session on screen shows, and asks for one
-  first (double-click a file in Files). "Too large to edit" and "Not UTF-8 text" show it as
+  first (click a file in Files). "Too large to edit" and "Not UTF-8 text" show it as
   read-only lines, the header saying why; "Binary file" says it isn't text; "An agent's copy",
   "Folder can't be written" and "Can't be edited here" turn the editor read-only, a line in the
   header saying why; "File deleted" says it isn't there any more, as when something other than
@@ -658,7 +719,7 @@ Agents:
   `too-large`, `not-text`, `binary`, `outside`, `folder`, `not-a-plan`, `gone`, `unreadable`,
   `failing`, `refuse-folder`, `refuse-too-large`, `refuse-not-text` or `refuse-moved`, which puts
   the first file the project window opens in it.
-- **File preview:** in the `agents`, `messages` and `inbox` variants, double-click
+- **File preview:** in the `agents`, `messages` and `inbox` variants, click
   `src/checkout/Checkout.tsx` in the Files panel (or click it under a selected row of the Worktrees
   panel) to open the project window as the file would be once the agents' work merges onto main:
   Moth's and Crow's changes carried onto main's copy (`frontend/demo/src/preview.ts`), each under a
@@ -761,7 +822,9 @@ App:
   Review page sends them. "Plan with a change field" adds Claude Code 2.1.287's plan, whose only
   way back is "Tell Claude what to change": that row is a field that must say what. "Form from
   an MCP server" adds the form an MCP server asks Claude Code to fill in, answered in the card as
-  the chat's is (a text, a choice, a number and a yes/no; Submit or Decline). A request's sheet
+  the chat's is (a text, a choice, a number and a yes/no; Submit or Decline); "Form from an MCP
+  server, in Codex" adds the one Codex draws, which only its screen tells, shown as its text to
+  answer in the terminal. A request's sheet
   is the chat's own card, and its draft (the words in its options, its picks and page, a form's
   entries) stays with its row. Answering any
   row moves the sheet on to the next that needs you (updates skipped) with a one-line receipt,
@@ -823,7 +886,10 @@ App:
 - **Startup:** "Hold the splash" keeps it until you press Escape; "Slow attach" counts
   terminals attaching over about 3 s; "Welcome dialog" opens the first-run dialog for
   connecting agents again (no reboot); "App error" makes a view throw as it draws, for the
-  crash screen that stands in for the app, whose Reload boots the demo again.
+  crash screen that stands in for the app, whose Reload boots the demo again; "Views fail to
+  load" fails every pane view whose code loads lazily (Markdown, plan, data, web page, folder, 3D model,
+  PDF), as a chunk that couldn't be fetched: each one open, or opened next, says "Couldn't load
+  this view" in its pane, with a Retry that loads it, and the rest of the app carries on.
 - **Agent Chat offer:** where the backend reads conversations (the showcase and agents demos). "Offer Agent Chat" turns Agent Chat off in the saved preferences, clears
   `novadeck.agent-chat-offer-answered` and boots the demo again, as for someone who updated past
   the welcome dialog: a card, Agent Chat, with Turn on and No thanks, rises over the footer's right
@@ -896,6 +962,19 @@ App:
 - **Sandbox:** boot as a desktop app running without Electron's sandbox, for the footer's No
   sandbox chip and its fix command; "No sandbox, no fix" as one with no command to offer;
   and "Sandboxed" back to normal.
+- **Screen reader:** boot as a desktop app that says a screen reader runs, or that none does, for
+  Preferences > Appearance's Screen reader support on Automatic: the terminal in focus keeps a
+  reader's text only while one runs. "As in a browser" boots back to a page nothing tells, which
+  offers On and Off alone.
+- **Window controls:** boot as the macOS desktop app, whose window sets its close, minimise and
+  zoom buttons into the header (drawn in the page as stand-ins): the header is 52px, its mark gives
+  way to them and its start keeps clear of them, and in Zen they hide and come back while the
+  pointer is in the top-left corner, the Focus window's header moving aside for them, and in Grid
+  and Canvas a plate in the dock's look holding them. "macOS, full screen" boots with them gone to
+  the menu bar, the header starting at its edge. "Windows, in the header" boots as the Windows app,
+  its caption buttons at the 48px header's end, as tall as it; in Zen they stay, on the Focus
+  window's header past a rule, or on a plate in the top-right corner. "Own title bar" boots back to
+  a window with its own, as on Linux and in a browser.
 - **Agent worktrees:** the page's update channel starts stable, which turns the
   setting off, so the rail has no Worktrees toggle, as in a stable build. "On, with Worktrees" boots on
   the experimental channel with the setting on, for the Worktrees panel and the Worktrees group's
@@ -1489,6 +1568,17 @@ beside it that reads theme tokens; see [docs/theming.md](theming.md), which
 `theme/contract.test.ts` enforces. See [CODING.md](../CODING.md) for broader
 conventions.
 
+### App scale
+
+Preferences > Appearance > Scale (80% to 200%, `appScale` in the preferences) sets how large
+the whole desktop app is. The page tells its window (`showScale` on the bridge, as
+`showAppearance` does); the main process (`apps/desktop/src/main/window/scale.ts`) clamps it,
+keeps it in `scale.json` in the data folder, and sets every app window's zoom factor, those
+opened later at their `zoomFactor` and again at `dom-ready`. Electron gives every `<webview>` a page hosts the page's zoom whenever it changes, so `rezoomPages` (viewers' `browser/host.ts`) puts each view back at the factor its viewer last asked (`zoomPage`) right after; a Canvas node's box keeps its CSS size, so its viewer would never ask again. Terminals refit through their container's resize, as for
+any window resize; the browser pane's views keep their own zoom. Nothing else zooms the page: the View menu carries no zoom role (so no Ctrl+- or
+Ctrl+0 is taken from a terminal on Linux or Windows), and Electron applies no pinch or Ctrl+wheel zoom. A browser has no `showScale`, so the row is hidden there and the
+browser's own zoom does it; the previews demo scales by CSS `zoom` instead.
+
 ### UI behaviour specs
 
 `frontend/specs/src/` describes the UI the way a person uses it and guards the UX while
@@ -1629,7 +1719,10 @@ every pull request, in three parts. Windows and macOS run only when the change a
 package that declares `"novadeck": { "platform": "system" }`, or a file outside every package
 (`scripts/quality/plan`): Windows runs every test, and macOS, once every Linux job has passed,
 the system packages' tests, one package at a time (`npm run test:system`). The nightly
-Quality run runs every test on all three. The UI tests run in Chromium alongside backend API,
+Quality run runs every test on all three, and so does a whole-suite run of Quality (a change
+to CI or a root file): on macOS in three jobs, every test but the UI specs' (`test:macos1`) and the specs in two
+halves (`test:macos2`, `test:macos3`), each on one worker, as two workers starved each other on
+its 3-vCPU runners. The UI tests run in Chromium alongside backend API,
 real PTY, and built-CLI tests. The required `Test` check passes only when every job the plan
 chose has. A draft PR runs no macOS job, in Quality or E2E, and its `Test` and `E2E` checks
 fail ("draft: macOS not run") while its change needs macOS: open a PR as a draft while you
@@ -1778,16 +1871,24 @@ Release notes are written by a model through OpenRouter
 commits become short lines grouped by area, led by up to two highlights of new features, each
 a short title and line for the what's-new card with an icon the model picks from a fixed set,
 its change kept in full under its area; when a prerelease is promoted, its notes are rewritten
-with up to four highlights picked from everything since the last stable release. The app
+with up to four highlights picked from everything since the last stable release: the changes
+that make the biggest difference to people who already use the app, by how many meet them,
+how often and how much, whether new features, speedups, fixes or reworks. The model names
+the app's parts as [GLOSSARY.md](../GLOSSARY.md) does, which the prompt includes. The app
 shows a release's highlights after updating to it until the person dismisses them. The
 `OPENROUTER_API_KEY` repository secret enables it, and the `RELEASE_NOTES_PRERELEASE_MODEL`
 and `RELEASE_NOTES_PROMOTE_MODEL` repository variables pick the models (by default
 `anthropic/claude-haiku-5.5`, and `anthropic/claude-opus-5.5` at high effort; a different model a
 variable names thinks at its own default). Without the key, when the key is
-out of credit, or when a run fails, a release keeps the notes it has, the run page shows a
-warning, and neither step holds a release or a promotion. A promotion costs about $0.10 to
-$0.30, and a prerelease about a tenth of a cent. OpenRouter holds a promotion's whole output
-limit up front, about $0.70 on Opus, so the key's limit needs that much free when one runs. With `OPENROUTER_API_KEY` and a `gh` login,
+out of credit, or when a run fails, a prerelease keeps the notes it has and the run page shows a
+warning, but a promotion fails and the release stays a prerelease: a stable release without
+notes shows the app no card, so run Promote to Stable again once the cause is fixed. A promotion
+costs about $0.10 to $0.30, and a prerelease about a tenth of a cent. OpenRouter holds a
+promotion's whole output limit up front, about $0.70 on Opus plus its input, so the key's daily
+limit needs that much free after the day's prereleases ($3 since 2026-11-20; $1 refused v1.8.2's
+and v1.9.53's notes with 402). The latest stable release can get its notes written again by
+rerunning its promotion's Write Release Notes job: they start from the stable release before
+it, and Promote, which reruns with it, refuses to mark an older tag latest. With `OPENROUTER_API_KEY` and a `gh` login,
 `node scripts/release-notes/main.ts promote v1.2.3 --dry-run` prints what a promotion would
 write without changing any release; it asks the model, so it spends credit.
 

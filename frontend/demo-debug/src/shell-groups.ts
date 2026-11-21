@@ -70,6 +70,11 @@ export const shellGroups = ({
           hint: "A view throws: the crash screen, with Reload",
           run: (context) => context.crash(),
         },
+        {
+          label: "Views fail to load",
+          hint: "Each Markdown, plan, data, folder, 3D model and PDF pane, open or opened next, says Couldn't load this view, with Retry, which loads it",
+          run: (context) => context.failViewLoads(),
+        },
       ],
     },
     {
@@ -127,6 +132,60 @@ export const shellGroups = ({
           hint: "No chip",
           reboots: true,
           run: () => launch.setSandbox({ sandboxed: true }),
+        },
+      ],
+    },
+    {
+      section: "App",
+      title: "Screen reader",
+      actions: [
+        {
+          label: "Desktop, reader running",
+          hint: "Preferences > Appearance offers Automatic; on it, the terminal in focus keeps a reader's text",
+          reboots: true,
+          run: () => launch.setScreenReader(true),
+        },
+        {
+          label: "Desktop, no reader",
+          hint: "Preferences > Appearance offers Automatic; on it, terminals keep no reader's text",
+          reboots: true,
+          run: () => launch.setScreenReader(false),
+        },
+        {
+          label: "As in a browser",
+          hint: "Nothing tells: Preferences offers On and Off alone, and shows On for Automatic",
+          reboots: true,
+          run: () => launch.setScreenReader(undefined),
+        },
+      ],
+    },
+    {
+      section: "App",
+      title: "Window controls",
+      actions: [
+        {
+          label: "macOS, in the header",
+          hint: "The window's close, minimise and zoom buttons sit at the header's start, where the mark gives way to them; in Zen they hide, and come back while the pointer is in the top-left corner",
+          reboots: true,
+          run: () => launch.setWindowControls("inset"),
+        },
+        {
+          label: "macOS, full screen",
+          hint: "No buttons over the page, as macOS keeps them in the menu bar that slides down: the header starts at its edge",
+          reboots: true,
+          run: () => launch.setWindowControls("fullScreen"),
+        },
+        {
+          label: "Windows, in the header",
+          hint: "The window's caption buttons hold the header's end, as tall as it is, and the header keeps clear of them; in Zen they stay, on the Focus window's header or on a plate in the corner",
+          reboots: true,
+          run: () => launch.setWindowControls("caption"),
+        },
+        {
+          label: "Own title bar",
+          hint: "As on Linux and in a browser: nothing over the header",
+          reboots: true,
+          run: () => launch.setWindowControls(undefined),
         },
       ],
     },

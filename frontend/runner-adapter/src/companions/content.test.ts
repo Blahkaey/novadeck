@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -10,6 +10,7 @@ import {
 } from "@novadeck/core/items"
 import {
   companionLimits,
+  folderMatchLimits,
   maxPageTroubles,
   pageTrouble,
   type ChangeFileDiff,
@@ -31,7 +32,14 @@ const hero = itemIdOf("hero")
 // Items over a runner whose content streams the test feeds.
 const following = ({ livePages = false } = {}) => {
   const streams = new Map<string, ReturnType<typeof channel<RunnerContent>>>()
-  const asked: { readonly itemId: string; readonly reveal?: string; readonly edit?: boolean }[] = []
+  const asked: {
+    readonly itemId: string
+    readonly reveal?: string
+    readonly edit?: boolean
+    readonly within?: string | undefined
+  }[] = []
+  const attached: { terminalId: string; path: string }[] = []
+  const repointed: { itemId: string; path: string }[] = []
   const opened: unknown[] = []
   const projectOpened = {
     item: {
@@ -62,11 +70,19 @@ const following = ({ livePages = false } = {}) => {
     },
   }
   const saves: { itemId: string; text: string; basedOn: string; path?: string }[] = []
+  const rangeAsked: { itemId: string; layers: readonly string[] }[] = []
   const readAsked: { itemId: string; path: string }[] = []
   const changeAsked: { itemId: string; path: string; layers: readonly string[] }[] = []
   let changed: ChangeFileDiff = { run: null }
   let saving: PlanSaveResult = { saved: true, stamp: "b2" }
-  const videoAsked: { itemId: string; stamp: string; offset: number; reveal?: string }[] = []
+  const videoAsked: {
+    itemId: string
+    stamp: string
+    offset: number
+    reveal?: string
+    path?: string
+  }[] = []
+  const foldersAsked: { terminalId: string; path: string }[] = []
   let videoReturns: FilePart = { state: "changed" }
   let failure: unknown
   const companions = createRunnerCompanions(
@@ -80,6 +96,10 @@ const following = ({ livePages = false } = {}) => {
       changeFile: async (input) => {
         changeAsked.push(input)
         return changed
+      },
+      changeRange: async (input) => {
+        rangeAsked.push(input)
+        return { files: [], truncated: false }
       },
       changeRead: async (input) => {
         readAsked.push(input)
@@ -98,18 +118,46 @@ const following = ({ livePages = false } = {}) => {
         videoAsked.push(input)
         return videoReturns
       },
+      attach: async (input) => {
+        attached.push(input)
+        return { ...projectOpened.item, id: "attached", holder: { terminalId: input.terminalId } }
+      },
+      folders: async (input) => {
+        foldersAsked.push(input)
+        return [
+          { path: "~/render", real: "/home/u/render", count: 7, open: true },
+          { path: "~/rest", real: "/home/u/rest", count: folderMatchLimits.counted, open: false },
+        ]
+      },
+      wroteTo: async () => [
+        { path: "/tmp/notes", real: "/tmp/notes", handle: "raven", agent: "codex", at: 5 },
+        {
+          path: "~/.cache/probe",
+          real: "/home/u/.cache/probe",
+          handle: "kite",
+          agent: "agy",
+          at: 4,
+        },
+        { path: "/tmp/copy", real: "/tmp/copy", handle: "moth", agent: "claude", at: 3 },
+      ],
+      repoint: async (input) => {
+        repointed.push(input)
+        return { ...projectOpened.item, id: input.itemId, path: input.path, version: 2 }
+      },
     },
     { livePages },
   )
   const seen: ItemContent[] = []
-  const follow = (reveal?: string, edit?: boolean) =>
-    companions.follow(target, hero, { reveal, ...(edit !== undefined && { edit }) }, (content) =>
-      seen.push(content),
-    )
+  const follow = (reveal?: string, options: { edit?: boolean; within?: string } = {}) =>
+    companions.follow(target, hero, { reveal, ...options }, (content) => seen.push(content))
   return {
     companions,
     asked,
+    attached,
+    foldersAsked,
+    repointed,
     changeAsked,
+    rangeAsked,
     readAsked,
     videoAsked,
     videoReturns: (part: FilePart) => {
@@ -134,6 +182,93 @@ const following = ({ livePages = false } = {}) => {
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+describe("a folder's listing", () => {
+  it("is followed for the folder inside it that is asked for, and the top when none is", async () => {
+    const app = following()
+    app.follow(undefined, { within: "old-runs/notes" })
+    app.follow()
+    app.follow(undefined, { within: "" })
+    expect(app.asked).toEqual([
+      { itemId: "hero", reveal: undefined, within: "old-runs/notes" },
+      { itemId: "hero", reveal: undefined, within: undefined },
+      { itemId: "hero", reveal: undefined, within: undefined },
+    ])
+  })
+
+  it("is held as the runner lists it", async () => {
+    const app = following()
+    app.follow()
+    const content = {
+      kind: "folder" as const,
+      path: "/tmp/render",
+      within: "",
+      entries: [
+        {
+          name: "a.png",
+          kind: "image" as const,
+          size: 3,
+          modifiedAt: 1,
+          children: null,
+          secret: false,
+          link: false,
+          stamp: "3:1:2",
+        },
+      ],
+      total: 1,
+      truncated: false,
+    }
+    app.push({ state: "ready", stamp: "s", content })
+    await settle()
+    expect(app.seen).toEqual([{ state: "ready", stamp: "s", content }])
+  })
+})
+
+describe("a file pointed at another file", () => {
+  it("is asked of the runner by its item and the absolute path, and comes back as the same item", async () => {
+    const app = following()
+    const item = await app.companions.repoint?.(target, hero, "/tmp/render/b.svg")
+    expect(app.repointed).toEqual([{ itemId: hero, path: "/tmp/render/b.svg" }])
+    expect(item).toMatchObject({ id: hero, path: "/tmp/render/b.svg", version: 2 })
+  })
+})
+
+describe("a file or folder attached to a terminal", () => {
+  it("is asked of the runner by the terminal and its absolute path, and comes back as an item", async () => {
+    const app = following()
+    const item = await app.companions.attach?.(target, "t1", "/tmp/render")
+    expect(app.attached).toEqual([{ terminalId: "t1", path: "/tmp/render" }])
+    expect(item).toMatchObject({ id: "attached", holder: { terminalId: "t1" } })
+  })
+})
+
+describe("a folder's path field", () => {
+  it("asks the runner which folders a typed path may be, and says when a folder holds more than was counted", async () => {
+    const app = following()
+    const found = await app.companions.folders?.(target, "t1", "~/re")
+    expect(app.foldersAsked).toEqual([{ terminalId: "t1", path: "~/re" }])
+    expect(found).toEqual([
+      { path: "~/render", real: "/home/u/render", count: 7, more: false, open: true },
+      {
+        path: "~/rest",
+        real: "/home/u/rest",
+        count: folderMatchLimits.counted,
+        more: true,
+        open: false,
+      },
+    ])
+  })
+
+  it("names the harness of each agent that wrote outside the project by the name people know it by", async () => {
+    const app = following()
+    const found = await app.companions.wroteTo?.(target, "t1")
+    expect(found?.map(({ handle, harness }) => [handle, harness])).toEqual([
+      ["raven", "Codex"],
+      ["kite", "Antigravity"],
+      ["moth", "Claude Code"],
+    ])
+  })
+})
 
 describe("a picture of a live page", () => {
   // Never asked here: only the picture is.
@@ -270,6 +405,17 @@ describe("the runner's companion content", () => {
       { itemId: hero, path: "a.ts", layers: ["uncommitted", "abc"] },
     ])
     expect(diff).toEqual({ run })
+  })
+
+  it("asks the runner for the files of a range of layers", async () => {
+    const app = following()
+
+    await expect(app.companions.changeRange!(target, hero, ["a", "b"])).resolves.toEqual({
+      files: [],
+      truncated: false,
+    })
+
+    expect(app.rangeAsked).toEqual([{ itemId: hero, layers: ["a", "b"] }])
   })
 
   it("tells the runner a file of a change was read", async () => {
@@ -428,8 +574,8 @@ describe("the runner's companion content", () => {
 
   it("follows a file to be edited: its whole text, saying whether it can be saved", async () => {
     const app = following()
-    app.follow(undefined, true)
-    app.follow("/p/.env", true)
+    app.follow(undefined, { edit: true })
+    app.follow("/p/.env", { edit: true })
     const writable = {
       kind: "text" as const,
       path: "/p/a.ts",
@@ -455,14 +601,14 @@ describe("the runner's companion content", () => {
       { state: "ready", stamp: "2", content: outside },
     ])
     // Not asked to edit, it asks for no more than before.
-    app.follow(undefined, false)
+    app.follow(undefined, { edit: false })
     app.follow()
     expect(app.asked.slice(2)).toStrictEqual([{ itemId: "hero" }, { itemId: "hero" }])
   })
 
   it("passes on why a file followed to be edited can't be edited whole", async () => {
     const app = following()
-    app.follow(undefined, true)
+    app.follow(undefined, { edit: true })
     const listing = {
       kind: "file" as const,
       path: "/p/big.log",
@@ -565,6 +711,20 @@ describe("the runner's companion content", () => {
           reveal: undefined,
         }),
       ).toEqual({ state: "unavailable", reason: "secret" })
+    })
+
+    it("name a file of a folder item by its path from the folder's top", async () => {
+      const app = following()
+      app.videoReturns({ state: "part", data: "AAEC" })
+      await app.companions.part?.(target, hero, {
+        stamp: "s",
+        offset: 0,
+        reveal: undefined,
+        path: "old-runs/a.svg",
+      })
+      expect(app.videoAsked).toEqual([
+        { itemId: "hero", stamp: "s", offset: 0, path: "old-runs/a.svg" },
+      ])
     })
 
     it("hold a video's content as the runner has it", async () => {
@@ -687,6 +847,41 @@ describe("the runner's companion content", () => {
     })
   })
 
+  context("a path field on a real runner", () => {
+    it("names the folders a typed path may be, and none any agent wrote in yet", async () => {
+      const runner = await startTestRunner()
+      const directory = await mkdtemp(join(tmpdir(), "novadeck-field-"))
+      try {
+        const terminal = await runner.client.terminals.create({
+          id: crypto.randomUUID(),
+          sessionId: runner.listing[0]!.sessions[0]!.session.id,
+          cols: 80,
+          rows: 24,
+        })
+        await mkdir(join(directory, "render", "frames"), { recursive: true })
+        const companions = createRunnerCompanions(runner.client.companions)
+        await expect(
+          companions.folders?.(target, terminal.id, join(directory, "re")),
+        ).resolves.toEqual([
+          {
+            path: join(directory, "render"),
+            real: await realpath(join(directory, "render")),
+            count: 1,
+            more: false,
+            open: false,
+          },
+        ])
+        await expect(companions.wroteTo?.(target, terminal.id)).resolves.toEqual([])
+        await expect(
+          companions.folders?.(target, crypto.randomUUID(), join(directory, "re")),
+        ).rejects.toMatchObject({ code: "TERMINAL_NOT_FOUND" })
+      } finally {
+        await runner.close()
+        await rm(directory, { recursive: true, force: true })
+      }
+    })
+  })
+
   it("reports nothing once stopped", async () => {
     const app = following()
     const stop = app.follow()
@@ -774,10 +969,15 @@ describe("what a page shows wrong", () => {
     const companions = createRunnerCompanions({
       content: () => channel<RunnerContent>().iterator,
       changeFile: () => Promise.reject(new Error("unused")),
+      changeRange: () => Promise.reject(new Error("unused")),
       changeRead: () => Promise.reject(new Error("unused")),
       save: () => Promise.reject(new Error("unused")),
       openInProject: () => Promise.reject(new Error("unused")),
+      repoint: () => Promise.reject(new Error("unused")),
       part: () => Promise.reject(new Error("unused")),
+      attach: () => Promise.reject(new Error("unused")),
+      folders: () => Promise.reject(new Error("unused")),
+      wroteTo: () => Promise.reject(new Error("unused")),
       pageTrouble: async (input) => {
         calls.push(input)
         if (failure) throw failure

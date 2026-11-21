@@ -10,6 +10,7 @@ import {
   lockPagesSession,
   maxForwardedRequests,
   maxRequestOrigins,
+  ownZoom,
   pagesSession,
   countSignIns,
   emulatePhone,
@@ -27,6 +28,9 @@ import {
   signInWindow,
   watchPageRequests,
   webAddress,
+  maxPageZoom,
+  rezoomPages,
+  zoomPage,
 } from "./host.js"
 import { chromeMajorOf, phoneUserAgent } from "./phone.js"
 
@@ -301,6 +305,121 @@ describe("a page view", () => {
         }),
       ).toEqual({ action: "deny" })
     })
+  })
+})
+
+describe("a page view's zoom", () => {
+  const pages = {} as Session
+  const zoomOf = (type: string, session: Session): string[] => {
+    const modes: string[] = []
+    ownZoom(
+      {
+        getType: () => type,
+        session,
+        setZoomMode: (mode: string) => modes.push(mode),
+      } as unknown as WebContents,
+      pages,
+    )
+    return modes
+  }
+
+  it("is its own, not its site's", () => {
+    expect(zoomOf("webview", pages)).toEqual(["isolated"])
+  })
+
+  it("leaves the app's own page and windows, and a page's sign-in windows, as they are", () => {
+    // The app's page and its windows, on its own session.
+    expect(zoomOf("window", {} as Session)).toEqual([])
+    // A page's sign-in window, on the pages' session but no page view.
+    expect(zoomOf("window", pages)).toEqual([])
+    // A <webview> on another session isn't a page view.
+    expect(zoomOf("webview", {} as Session)).toEqual([])
+  })
+})
+
+describe("a page view zoomed out to fit", () => {
+  const app = { getZoomFactor: () => 0.9 } as unknown as WebContents
+  const view = (owner: WebContents = app) => {
+    const zooms: number[] = []
+    const contents = {
+      getType: () => "webview",
+      isDestroyed: () => false,
+      hostWebContents: owner,
+      setZoomFactor: (factor: number) => zooms.push(factor),
+    } as unknown as WebContents
+    return { contents, zooms }
+  }
+  const byId =
+    (contents: WebContents) =>
+    (id: number): WebContents | undefined =>
+      id === 7 ? contents : undefined
+
+  it("is zoomed by its factor of the app's own zoom", () => {
+    const { contents, zooms } = view()
+    expect(zoomPage(app, 7, 0.5, byId(contents))).toBe(true)
+    expect(zooms).toEqual([0.45])
+  })
+
+  it("is zoomed in too, as a phone's is, up to as far as Chromium zooms a page", () => {
+    const { contents, zooms } = view()
+    expect(zoomPage(app, 7, 1.5, byId(contents))).toBe(true)
+    expect(zoomPage(app, 7, maxPageZoom, byId(contents))).toBe(true)
+    expect(zooms).toEqual([1.35, 4.5])
+  })
+
+  it("is nothing for another window's page, an id that's no view's, or a factor no zoom is", () => {
+    const other = view({ getZoomFactor: () => 1 } as unknown as WebContents)
+    expect(zoomPage(app, 7, 0.5, byId(other.contents))).toBe(false)
+    const { contents, zooms } = view()
+    for (const id of [8, "7", 7.5]) expect(zoomPage(app, id, 0.5, byId(contents))).toBe(false)
+    for (const factor of [0, -1, 5.5, Number.POSITIVE_INFINITY, Number.NaN, "0.5", undefined])
+      expect(zoomPage(app, 7, factor, byId(contents))).toBe(false)
+    expect(zooms).toEqual([])
+  })
+})
+
+describe("a page view after the app's zoom changes", () => {
+  // An app page whose zoom the test moves, and views it hosts that record their zoom.
+  const hosted = () => {
+    const app = { zoom: 1, getZoomFactor: () => app.zoom } as unknown as WebContents & {
+      zoom: number
+    }
+    const view = (owner: WebContents = app) => {
+      const zooms: number[] = []
+      const contents = {
+        getType: () => "webview",
+        isDestroyed: () => false,
+        hostWebContents: owner,
+        setZoomFactor: (factor: number) => zooms.push(factor),
+      } as unknown as WebContents
+      return { contents, zooms }
+    }
+    return { app, view }
+  }
+  const byId =
+    (contents: WebContents) =>
+    (id: number): WebContents | undefined =>
+      id === 7 ? contents : undefined
+
+  it("is zoomed again by the factor its viewer last asked, of the app's zoom now", () => {
+    const { app, view } = hosted()
+    const { contents, zooms } = view()
+    zoomPage(app, 7, 0.5, byId(contents))
+    app.zoom = 2
+    rezoomPages(app, [contents])
+    expect(zooms).toEqual([0.5, 1])
+  })
+
+  it("is left alone when its viewer never asked, or it is another window's", () => {
+    const { app, view } = hosted()
+    const never = view()
+    const other = hosted()
+    const elsewhere = other.view()
+    zoomPage(other.app, 7, 0.5, byId(elsewhere.contents))
+    app.zoom = 2
+    rezoomPages(app, [never.contents, elsewhere.contents])
+    expect(never.zooms).toEqual([])
+    expect(elsewhere.zooms).toEqual([0.5])
   })
 })
 
@@ -623,6 +742,23 @@ describe("the requests of a page view that fail", () => {
     expect(told).toEqual([[3, { url: "http://localhost/a", status: 0, what: "script" }]])
   })
 
+  it("leave out a part of the page that missed the cache, as a font Chromium then fetches", () => {
+    const { told, errored } = watched()
+    for (const resourceType of ["font", "xhr", "image", "script"])
+      errored("net::ERR_CACHE_MISS", { resourceType })
+    expect(told).toEqual([])
+  })
+
+  it("include a document that missed the cache, the page's own or a frame's", () => {
+    const { told, errored } = watched()
+    errored("net::ERR_CACHE_MISS", { url: "http://localhost/posted", resourceType: "subFrame" })
+    errored("net::ERR_CACHE_MISS", { url: "http://localhost/form", resourceType: "mainFrame" })
+    expect(told).toEqual([
+      [3, { url: "http://localhost/posted", status: 0, what: "frame" }],
+      [3, { url: "http://localhost/form", status: 0, what: "page" }],
+    ])
+  })
+
   it("are named as a viewer names them", () => {
     const { told, completed } = watched()
     const kinds = ["mainFrame", "subFrame", "xhr", "script", "image", "stylesheet", "font", "media"]
@@ -778,6 +914,7 @@ describe("a page view as a phone's", () => {
       "attach",
       "agent phone",
       "Emulation.setDeviceMetricsOverride",
+      "Emulation.setScrollbarsHidden",
       "Emulation.setTouchEmulationEnabled",
       "Emulation.setUserAgentOverride",
     ])

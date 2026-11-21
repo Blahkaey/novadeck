@@ -30,8 +30,20 @@ export const panelNamed = (name: string): SidebarPanel | undefined =>
   sidebarPanels.find((panel) => panel === name) ??
   (Object.hasOwn(formerPanels, name) ? formerPanels[name] : undefined)
 export type WindowedView = Exclude<ViewMode, "focus">
+// The scales of the whole app the person may choose, as a percent of its normal size.
+export const appScales = [80, 90, 100, 110, 125, 150, 175, 200] as const
+export type AppScale = (typeof appScales)[number]
+
+// When terminals keep their text for a screen reader; see `PreferencesValue.screenReader`.
+export const screenReaderPreferences = ["auto", "on", "off"] as const
+export type ScreenReaderPreference = (typeof screenReaderPreferences)[number]
+
 export type PreferencesValue = {
   fontSize: number
+  // The terminal's font family, in front of the theme's monospace chain; "" (or unset) is the
+  // bundled one. Any family name the person's computer lists, installed or not: one that is
+  // gone draws as the rest of the chain does.
+  fontFamily?: string
   enabledViews: ViewMode[]
   // The theme and the scheme chosen for it; the theme is a plain id the app may not know.
   // See docs/theming.md.
@@ -51,6 +63,10 @@ export type PreferencesValue = {
   // Whether monospace text joins pairs such as => and != into one glyph. Off by default:
   // a terminal shows what a program printed.
   ligatures: boolean
+  // When a terminal in focus keeps its text for a screen reader: "auto" while the app says one
+  // runs (always where nothing can tell, as in a browser), "on" always, "off" never. Keeping
+  // it costs a layout of every row the terminal draws.
+  screenReader: ScreenReaderPreference
   // Whether a terminal an agent runs in shows its conversation rather than its screen, on
   // a backend that reads conversations.
   chatView: boolean
@@ -62,6 +78,9 @@ export type PreferencesValue = {
   onboardingTour: boolean
   // The patterns that hide files and folders from the Files panel in every project.
   filesExclude: FilesExclude
+  // How large the whole app is drawn, as a percent of its normal size: its text, terminals and
+  // dialogs together. The desktop app scales its windows by it; a browser has its own zoom.
+  appScale: AppScale
 }
 export type Project = { id: string; name: string; directory: string }
 
@@ -94,6 +113,10 @@ export type AgentStatus = {
   // The absolute path its running turn's edit tools wrote last, root or a subagent, as it is
   // written; absent once the turn ends and until it writes something.
   readonly wrote?: string
+  // When its running turn last had it write words (epoch milliseconds, as its transcript dates
+  // them): an assistant text, no thinking or tool call. Absent once the turn ends, and until it
+  // writes some.
+  readonly wordsAt?: number
   // How its latest turn ended, once none runs, with the start of its last reply where its
   // harness tells it (see `AgentTurnEnd`).
   readonly lastTurn?: AgentTurnEnd

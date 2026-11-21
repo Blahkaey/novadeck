@@ -12,6 +12,7 @@ import {
   feedbackSendChannel,
   webglContextsArgumentPrefix,
   appearanceChannel,
+  scaleChannel,
   installAppChannel,
   badgeChannel,
   noticeChannel,
@@ -26,6 +27,7 @@ import {
   pagePictureChannel,
   panePictureChannel,
   pagePhoneChannel,
+  pageZoomChannel,
   portableChannel,
   portableStateChannel,
   quitAppChannel,
@@ -42,6 +44,8 @@ import {
   updateOfferChannel,
   updateRequestChannel,
   versionChannel,
+  windowControlsChannel,
+  windowControlsPlaceChannel,
   windowFocusChannel,
   windowFocusRequestChannel,
 } from "../bridge.js"
@@ -241,14 +245,28 @@ describe("a request a page view failed", () => {
 })
 
 describe("the page's appearance", () => {
-  it("goes to the main process as its scheme and ground only", () => {
+  it("goes to the main process as its scheme, ground and ink only", () => {
     const appearance = {
       scheme: "dark",
       ground: "#0f1114",
+      ink: "#e6e8eb",
       extra: "dropped",
     } as const
     electron.exposed.showAppearance(appearance)
-    expect(electron.messages).toEqual([[appearanceChannel, { scheme: "dark", ground: "#0f1114" }]])
+    expect(electron.messages).toEqual([
+      [appearanceChannel, { scheme: "dark", ground: "#0f1114", ink: "#e6e8eb" }],
+    ])
+  })
+})
+
+describe("the app's scale", () => {
+  it("goes to the main process as a number, and nothing else does", () => {
+    electron.exposed.showScale?.(1.5)
+    electron.exposed.showScale?.("2" as unknown as number)
+    expect(electron.messages).toEqual([
+      [scaleChannel, 1.5],
+      [scaleChannel, undefined],
+    ])
   })
 })
 
@@ -372,6 +390,16 @@ describe("a live page made a phone's", () => {
       return electron.exposed.pagePhone?.(7, false)
     })
     expect(await Promise.all(phones)).toEqual(answers.map(() => false))
+  })
+})
+
+describe("a live page zoomed out to fit", () => {
+  it("is asked for by the page's view id, and did only when the main process says so", async () => {
+    electron.answer = true
+    expect(await electron.exposed.pageZoom?.(7, 0.5)).toBe(true)
+    expect(electron.messages).toEqual([[pageZoomChannel, 7, 0.5]])
+    electron.answer = "true"
+    expect(await electron.exposed.pageZoom?.(7, 0.5)).toBe(false)
   })
 })
 
@@ -926,5 +954,122 @@ describe("feedback", () => {
     electron.answer = about
     expect(await electron.exposed.feedbackAbout!()).toEqual(about)
     expect(electron.sent).toEqual([feedbackAboutChannel])
+  })
+})
+
+// Loads the preload again as it loads on `platform`.
+const loadOn = async (platform: NodeJS.Platform): Promise<void> => {
+  const actual = Object.getOwnPropertyDescriptor(process, "platform")!
+  Object.defineProperty(process, "platform", { value: platform })
+  try {
+    vi.resetModules()
+    electron.renderer.removeAllListeners()
+    await import("./index")
+  } finally {
+    Object.defineProperty(process, "platform", actual)
+  }
+}
+
+describe("the window's own controls", () => {
+  it("are none of the page's on Linux, whose window keeps the system's title bar", async () => {
+    await loadOn("linux")
+    expect(electron.exposed.windowControlsSide).toBeUndefined()
+    expect(electron.exposed.onWindowControls).toBeUndefined()
+    expect(electron.exposed.placeWindowControls).toBeUndefined()
+  })
+
+  context("on Windows", () => {
+    it("sit at the end of the page's top", async () => {
+      await loadOn("win32")
+      expect(electron.exposed.windowControlsSide).toBe("end")
+    })
+
+    // The page's window as the preload measures it: 1000 wide, its overlay's title bar area
+    // ending `room` short of its right edge, or no overlay.
+    const stubPage = (overlay: boolean, room = 160): void => {
+      const geometry = Object.assign(new EventTarget(), {
+        visible: true,
+        getTitlebarAreaRect: () => ({ x: 0, width: 1000 - room }),
+      })
+      vi.stubGlobal("window", {
+        innerWidth: 1000,
+        navigator: overlay ? { windowControlsOverlay: geometry } : {},
+      })
+    }
+
+    it("pass the app's room on, measured by the page where it can", async () => {
+      await loadOn("win32")
+      stubPage(true)
+      try {
+        const insets: number[] = []
+        const stop = electron.exposed.onWindowControls!((inset) => insets.push(inset))
+        electron.renderer.emit(windowControlsChannel, {}, 138)
+        electron.renderer.emit(windowControlsChannel, {}, 0)
+        stop()
+        electron.renderer.emit(windowControlsChannel, {}, 138)
+        expect(insets).toEqual([160, 0])
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it("keep the app's own room where the page measures less, so the header never runs under them", async () => {
+      await loadOn("win32")
+      stubPage(true, 110)
+      try {
+        const insets: number[] = []
+        const stop = electron.exposed.onWindowControls!((inset) => insets.push(inset))
+        electron.renderer.emit(windowControlsChannel, {}, 138)
+        stop()
+        expect(insets).toEqual([138])
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it("pass the app's own room on where the page can't measure", async () => {
+      await loadOn("win32")
+      stubPage(false)
+      try {
+        const insets: number[] = []
+        const stop = electron.exposed.onWindowControls!((inset) => insets.push(inset))
+        electron.renderer.emit(windowControlsChannel, {}, 138)
+        stop()
+        expect(insets).toEqual([138])
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+  })
+
+  context("on macOS", () => {
+    it("sit at the start of the page's top", async () => {
+      await loadOn("darwin")
+      expect(electron.exposed.windowControlsSide).toBe("start")
+    })
+
+    it("pass the page's placing on, a number or none and nothing else", async () => {
+      await loadOn("darwin")
+      electron.exposed.placeWindowControls?.(32)
+      electron.exposed.placeWindowControls?.(null)
+      electron.exposed.placeWindowControls?.(Number.NaN)
+      electron.exposed.placeWindowControls?.("32" as never)
+      expect(electron.messages).toEqual([
+        [windowControlsPlaceChannel, 32],
+        [windowControlsPlaceChannel, null],
+      ])
+    })
+
+    it("pass the app's room on to the page, a finite number only, until it stops", async () => {
+      await loadOn("darwin")
+      const insets: number[] = []
+      const stop = electron.exposed.onWindowControls!((inset) => insets.push(inset))
+      electron.renderer.emit(windowControlsChannel, {}, 74)
+      electron.renderer.emit(windowControlsChannel, {}, "74")
+      electron.renderer.emit(windowControlsChannel, {}, Number.POSITIVE_INFINITY)
+      stop()
+      electron.renderer.emit(windowControlsChannel, {}, 0)
+      expect(insets).toEqual([74])
+    })
   })
 })

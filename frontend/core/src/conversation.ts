@@ -1,5 +1,5 @@
 import type { Refused } from "./conversation/prompt-refusal"
-import type { AgentMessage, MessageWaits } from "./messages"
+import type { AgentMessage, DeliveredNotice, MessageWaits } from "./messages"
 import type { Store } from "./store"
 import type { TerminalKey } from "./types"
 
@@ -101,6 +101,7 @@ export type ChatItem = {
     | { readonly type: "plan-approved" }
     | { readonly type: "compaction" }
     | { readonly type: "gap" }
+    | { readonly type: "notice" }
     | undefined
   // On a user item, the images the prompt carried, in the order of their `[Image #N]`
   // placeholders in its words; absent where it had none or its record doesn't hold them.
@@ -347,6 +348,8 @@ export type Conversation = {
 export type ChatDoorbell = {
   readonly waiting: readonly AgentMessage[]
   readonly delivered: readonly AgentMessage[]
+  // The notices Novadeck delivered with them, oldest first: not conversation, so apart from `delivered`.
+  readonly notices: readonly DeliveredNotice[]
   readonly waits: MessageWaits | null
   readonly waitsSince: number | null
   readonly ringing: boolean
@@ -355,6 +358,7 @@ export type ChatDoorbell = {
 export const noDoorbell: ChatDoorbell = {
   waiting: [],
   delivered: [],
+  notices: [],
   waits: null,
   waitsSince: null,
   ringing: false,
@@ -542,6 +546,17 @@ export const boxNotCleared = (): SettleInTerminal =>
   new SettleInTerminal(
     "That didn't clear the agent's input box. Look at it above, or clear it in the terminal.",
   )
+
+// What `Conversations.send` and `interrupt` reject with when the link to the backend dropped
+// while the call was on its way, once it is back: the call may have taken there, as the backend
+// goes on with it, or not, and its answer can't say which. A prompt sent with a `ref` is then
+// told by what the conversation shows next: its receipt (`Conversation.prompts`), or none.
+export class InDoubt extends Error {
+  constructor(message = "The link to the runner dropped as it went.") {
+    super(message)
+    this.name = "InDoubt"
+  }
+}
 
 // A failure with the words the message took out of the agent's box before it failed, which the
 // chat's box takes all the same: they are in the agent's no longer.

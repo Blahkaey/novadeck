@@ -1,3 +1,4 @@
+import { bytesText } from "@novadeck/core/command-text"
 import {
   pathOf,
   type ShownKind,
@@ -38,14 +39,6 @@ export const artifactLook = (
   item: Pick<Item, "name">,
 ): { readonly name: string; readonly label: string } => ({ name: item.name, label: item.name })
 
-// A size in bytes as a person reads it.
-export const sizeText = (bytes: number): string =>
-  bytes < 1024
-    ? `${bytes} bytes`
-    : bytes < 1024 * 1024
-      ? `${Math.round(bytes / 1024)} KB`
-      : `${(bytes / 1024 / 1024).toFixed(1)} MB`
-
 // Why it can't show, in a few words, as a peek says it.
 const shortReasons: Record<UnavailableReason, string> = {
   missing: "Not there any more",
@@ -57,9 +50,11 @@ const shortReasons: Record<UnavailableReason, string> = {
   gone: "Gone",
 }
 
-// The largest file a kind previews, where the pane says it: the runner's `pdfLimits`.
+// The largest file a kind previews, where the pane says it: the runner's `pdfLimits` and
+// `modelLimits`.
 const largest: Partial<Record<Item["kind"], string>> = {
   pdf: "Novadeck previews PDFs up to 128 MB.",
+  model: "Novadeck previews 3D models up to 256 MB, with the files beside them they name.",
 }
 
 // Why it can't show, as the pane says it.
@@ -77,7 +72,7 @@ const reasonText = (
       return `${name} is no longer a file.`
     case "too-large":
       return [
-        `${name} is too large to preview${size === null ? "" : ` (${sizeText(size)})`}.`,
+        `${name} is too large to preview${size === null ? "" : ` (${bytesText(size)})`}.`,
         ...(largest[kind] ? [largest[kind]] : []),
       ].join(" ")
     case "binary":
@@ -184,9 +179,14 @@ export const artifactView = <K extends ShownKind>(
   return View
 }
 
+// A peek's body: what the item is, and, for one that reads its bytes for a still, where from
+// and as which stamp.
 type ThumbBody<K extends ShownKind> = ComponentType<{
   readonly content: Extract<ShownContent, { readonly kind: K }>
   readonly item: Item
+  readonly itemStore: ItemStore
+  readonly target: WorkspaceTarget
+  readonly stamp: string
 }>
 
 const LoadedThumb = <K extends ShownKind>({
@@ -202,7 +202,13 @@ const LoadedThumb = <K extends ShownKind>({
     return <span className="peek-held">{shortReasons[load.reason]}</span>
   const { content } = load
   return content.kind === kind ? (
-    <Body content={content as Extract<ShownContent, { readonly kind: K }>} item={item} />
+    <Body
+      content={content as Extract<ShownContent, { readonly kind: K }>}
+      item={item}
+      itemStore={itemStore}
+      target={target}
+      stamp={load.stamp}
+    />
   ) : null
 }
 

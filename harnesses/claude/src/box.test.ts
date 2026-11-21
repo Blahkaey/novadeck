@@ -1,4 +1,4 @@
-import type { ScreenText } from "@novadeck/emulator/headless"
+import { createScreen, readScreen, type ScreenText } from "@novadeck/emulator/headless"
 import { readSlice } from "@novadeck/harness-core/slices"
 import { loadProbe } from "@novadeck/harness-core/testing/probes"
 import { checkPaste, hidesText, newTurn, tailOf, takesQueue } from "@novadeck/tui-input/box"
@@ -167,6 +167,87 @@ describe("Claude Code's clear hint", () => {
 
   it("ignores a footer which quotes the hint as other text", () => {
     expect(clearPending([rule, "❯ restored", rule, "Earlier: Esc again to clear"])).toBe(false)
+  })
+})
+
+describe("the words of a queued message, from 2.1.328 on, which Up brings back as a placeholder", () => {
+  // The screen of 2.1.328 at 120 columns (probed 2026-11-19, e2e/interrupt.e2e.ts, a five-line
+  // message queued behind a held turn), its rows as they stood above the box.
+  const frame = (above: readonly string[]): ScreenText => {
+    const wide = "─".repeat(120)
+    const all = [
+      ...above,
+      "· Flibbertigibbeting… (1s · ↓ 1 tokens)",
+      wide,
+      "❯ Press up to edit queued messages",
+      wide,
+    ]
+    return {
+      rows: all,
+      bright: all,
+      columns: 120,
+      cursor: { row: all.length - 2, column: 2 },
+      bracketedPaste: true,
+      alternate: false,
+    }
+  }
+  const hint = "  ⎿  Queued · ctrl+x ctrl+s to send now"
+  const shown = (above: readonly string[]) => box.takeQueued!.shown!(frame(above))
+
+  it("reads the lines of the one message queued", () => {
+    expect(
+      shown([
+        "❯ Hold on",
+        "",
+        "❯ Queued beta",
+        "  second line",
+        "  third line",
+        "  fourth line",
+        "  fifth line",
+        hint,
+      ]),
+    ).toEqual(["Queued beta", "second line", "third line", "fourth line", "fifth line"])
+  })
+
+  it("keeps a blank line, and the indent a line itself has", () => {
+    expect(shown(["❯ Hold on", "", "❯ one", "", "      indented", hint])).toEqual([
+      "one",
+      "",
+      "    indented",
+    ])
+  })
+
+  it("reads none where two messages are queued", () => {
+    expect(shown(["❯ Hold on", "", "❯ a", "  b", hint, "", "❯ c", "  d", hint])).toBeUndefined()
+  })
+
+  it("reads none where another message stands under the hint, with none of its own", () => {
+    expect(shown(["❯ Hold on", "", "❯ a", "  b", hint, "❯ c", "  d"])).toBeUndefined()
+    expect(shown(["❯ Hold on", "", "❯ a", "  b", hint, "", "❯ c"])).toBeUndefined()
+  })
+
+  it("tells whether a queued message's hint still shows above the box", () => {
+    const { waiting } = box.takeQueued!
+    expect(waiting!(frame(["❯ Hold on", "", "❯ a", "  b", hint]))).toBe(true)
+    expect(waiting!(frame(["❯ Hold on", "", "❯ a", "  b"]))).toBe(false)
+  })
+
+  it("reads none where nothing is queued or no message leads the row", () => {
+    expect(shown(["❯ Hold on", "", "● Held reply."])).toBeUndefined()
+    expect(shown(["● Held reply.", hint])).toBeUndefined()
+  })
+
+  it("reads none where a row between does not continue the message", () => {
+    expect(shown(["❯ a", "● elsewhere", hint])).toBeUndefined()
+  })
+
+  it("names the lines a placeholder stands for, where it counts them", () => {
+    const { stands } = box.takeQueued!
+    expect(stands!("[Pasted text #1 +4 lines]")).toBe(4)
+    expect(stands!("[Pasted text #12 +29 lines]")).toBe(29)
+    expect(stands!("[Pasted text #1]")).toBeUndefined()
+    expect(stands!("[Pasted text #1 +4 lines] and more")).toBeUndefined()
+    expect(stands!("Queued beta")).toBeUndefined()
   })
 })
 
@@ -611,6 +692,21 @@ describe("Claude Code's box where it draws no colour or dim", () => {
     expect(box.read(typed('Try "edit foo" and then more', 2))?.text).toBe(
       'Try "edit foo" and then more',
     )
+  })
+
+  it("reads its placeholder as an empty box below a row the terminal wrapped", async () => {
+    // A row the next one continues keeps its trailing blank, as where a wide character
+    // didn't fit its last column, and its bright twin doesn't: nothing on it is dim.
+    const terminal = createScreen({ cols: 20, rows: 4, scrollback: 0 })
+    await new Promise<void>((done) => terminal.write(`${"a".repeat(19)}漢字 tail\r\n`, done))
+    const read = readScreen(terminal)
+    expect([read.rows[0], read.bright[0]]).toEqual([`${"a".repeat(19)} `, "a".repeat(19)])
+    const wrapped = {
+      ...fresh,
+      rows: fresh.rows.map((row, at) => (at === 0 ? read.rows[0]! : row)),
+      bright: fresh.bright.map((row, at) => (at === 0 ? read.bright[0]! : row)),
+    }
+    expect(box.read(wrapped)).toMatchObject({ text: "", mode: "prompt" })
   })
 
   it("reads the suggestion's shape as the person's own where colour is on", () => {

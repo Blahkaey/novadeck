@@ -1,4 +1,5 @@
 import type {
+  ChangedFile,
   ChangeFileDiff,
   Item,
   FileContent,
@@ -8,7 +9,15 @@ import type {
 } from "@novadeck/core/items"
 
 import { clip, clipMime, clipSize } from "./clip"
-import { lockedPdf, lockedPdfSize, notAPdf, quarterlyReport } from "./pdf"
+import type { DemoFolder } from "./folders"
+import {
+  lockedPdf,
+  lockedPdfSize,
+  notAPdf,
+  notAPdfSize,
+  quarterlyReport,
+  quarterlyReportSize,
+} from "./pdf"
 import { recording, recordingMime, recordingSize } from "./recording"
 
 // Something a sample agent shows: the item it points at, by an id that stays the same, and
@@ -22,6 +31,10 @@ export type SampleArtifact = {
   // A change's files read one at a time, as the runner reads them: the file's diff for the
   // layers selected.
   readonly changeFile?: (path: string, layers: readonly string[]) => ChangeFileDiff
+  // The files the layers selected changed as one range.
+  readonly changeRange?: (layers: readonly string[]) => readonly ChangedFile[]
+  // A folder's files, which its listings, its files' parts and what they open as come from.
+  readonly folder?: DemoFolder
   // A video's, a recording's or a PDF's bytes, which its parts are cut from: `read` makes them when first
   // asked, `part` is how many go in a part (the runner's 2 MiB unless given), and `delay` how
   // long each part takes, in milliseconds, so one can be seen loading.
@@ -33,6 +46,9 @@ export type SampleArtifact = {
     readonly reason?: Extract<FilePart, { state: "unavailable" }>["reason"]
     // Its read fails, as when the link to the runner drops: the first part asked for rejects.
     readonly fails?: true
+    // A part of a file beside a model, by the name its content lists it by, read as the runner
+    // reads it.
+    readonly beside?: (name: string, offset: number) => Promise<FilePart>
   }
 }
 
@@ -50,7 +66,7 @@ export const ready = (
   content,
 })
 
-const studio = "~/projects/studio"
+export const studio = "~/projects/studio"
 
 // A file's lines as the pane loads them: all of a short file, pointing at `from`–`to`.
 export const fileLines = (
@@ -341,7 +357,7 @@ const unavailable = (
   content,
 })
 
-const cannot = (reason: UnavailableReason, size: number | null = null): ItemContent => ({
+export const cannot = (reason: UnavailableReason, size: number | null = null): ItemContent => ({
   state: "unavailable",
   reason,
   size,
@@ -480,8 +496,8 @@ export const pdfContent = (size: number, stamp = "1"): ItemContent => ({
 
 const quarterly: SampleArtifact = {
   item: pdfItem("studio-report", "quarterly-report.pdf", "5 pages, Letter"),
-  content: pdfContent(quarterlyReport.length),
-  file: { read: async () => quarterlyReport },
+  content: pdfContent(quarterlyReportSize),
+  file: { read: quarterlyReport },
 }
 
 // The PDF again, as it is after the agent rewrote the file: a new stamp.
@@ -492,7 +508,7 @@ export const pdfAgain = (sample: SampleArtifact, stamp: string): SampleArtifact 
   content: pdfContent(
     sample.content.state === "ready" && sample.content.content.kind === "pdf"
       ? sample.content.content.size
-      : quarterlyReport.length,
+      : quarterlyReportSize,
     stamp,
   ),
 })
@@ -502,8 +518,8 @@ export const pdfSamples = {
   // Several parts of 512 bytes, 600 ms each: its progress shows.
   slow: {
     item: pdfItem("studio-report-slow", "slow-report.pdf", "5 pages, Letter"),
-    content: pdfContent(quarterlyReport.length),
-    file: { read: async () => quarterlyReport, part: 512, delay: 600 },
+    content: pdfContent(quarterlyReportSize),
+    file: { read: quarterlyReport, part: 512, delay: 600 },
   },
   large: {
     item: pdfItem("studio-report-large", "annual-review.pdf", "412 pages"),
@@ -511,8 +527,8 @@ export const pdfSamples = {
   },
   secret: {
     item: pdfItem("studio-report-private", "salaries.pdf", "2 pages, Letter", true),
-    content: pdfContent(quarterlyReport.length),
-    file: { read: async () => quarterlyReport },
+    content: pdfContent(quarterlyReportSize),
+    file: { read: quarterlyReport },
   },
   locked: {
     item: pdfItem("studio-report-locked", "locked.pdf", "1 page, locked"),
@@ -522,13 +538,13 @@ export const pdfSamples = {
   // Its read fails, as when the link to the runner drops.
   failing: {
     item: pdfItem("studio-report-failing", "unreachable-report.pdf", "5 pages, Letter"),
-    content: pdfContent(quarterlyReport.length),
-    file: { read: async () => quarterlyReport, fails: true },
+    content: pdfContent(quarterlyReportSize),
+    file: { read: quarterlyReport, fails: true },
   },
   broken: {
     item: pdfItem("studio-report-broken", "broken.pdf", "Not a PDF"),
-    content: pdfContent(notAPdf.length),
-    file: { read: async () => notAPdf },
+    content: pdfContent(notAPdfSize),
+    file: { read: notAPdf },
   },
 } satisfies Record<string, SampleArtifact>
 

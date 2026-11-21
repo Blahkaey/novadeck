@@ -8,6 +8,7 @@ import type { BootRehearsals } from "./boot-rehearsal"
 import { createDebugDemo, type DemoLaunch } from "./debug-demo"
 import type { DemoPortable } from "./desktop/portable"
 import type { DemoUninstall } from "./desktop/uninstall"
+import type { DemoWindowControls } from "./desktop/window-controls"
 import { restoreIconGuides } from "./icon-guides"
 
 export { debugPanelOf } from "./debug-demo"
@@ -28,6 +29,8 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
   restoreIconGuides()
   let slowAttach = false
   let sandbox: SandboxState | undefined
+  let screenReader: boolean | undefined
+  let windowControls: DemoWindowControls | undefined
   let portable: DemoPortable | undefined
   let uninstall: DemoUninstall | undefined
   let worktrees = true
@@ -63,6 +66,16 @@ export const connectDemo = (rehearsals: BootRehearsals, theme: ThemeSource): Con
       sandbox,
       setSandbox: (next) => {
         sandbox = next
+        rehearsals.rehearse({ reboot: true })
+      },
+      screenReader,
+      setScreenReader: (next) => {
+        screenReader = next
+        rehearsals.rehearse({ reboot: true })
+      },
+      windowControls,
+      setWindowControls: (next) => {
+        windowControls = next
         rehearsals.rehearse({ reboot: true })
       },
       portable,

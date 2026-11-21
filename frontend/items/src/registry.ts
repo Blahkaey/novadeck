@@ -4,7 +4,9 @@ import type { LucideIcon } from "lucide-react"
 import { audio } from "./kinds/audio"
 import { changes } from "./kinds/changes"
 import { file } from "./kinds/file"
+import { folder } from "./kinds/folder"
 import { image } from "./kinds/image"
+import { model } from "./kinds/model"
 import { page } from "./kinds/page"
 import { pdf } from "./kinds/pdf"
 import { plan } from "./kinds/plan"
@@ -20,7 +22,9 @@ export const registry = {
   video,
   audio,
   pdf,
+  model,
   file,
+  folder,
   page,
   changes,
   plan,

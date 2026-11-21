@@ -2,7 +2,7 @@
   "name": "@novadeck/viewers",
   "version": "0.0.0",
   "private": true,
-  "description": "Content viewers behind one contract: code, image, markdown, PDF, data trees, web pages and a text editor, each mounted into an element, keeping its scroll and place across remounts through state its app stores.",
+  "description": "Content viewers behind one contract: code, image, markdown, PDF, 3D models, data trees, web pages and a text editor, each mounted into an element, keeping its scroll and place across remounts through state its app stores.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "sideEffects": [
@@ -36,6 +36,17 @@
       "default": "./dist/image.js"
     },
     "./image.css": "./src/image.css",
+    "./html": {
+      "development": "./src/html.ts",
+      "types": "./dist/html.d.ts",
+      "default": "./dist/html.js"
+    },
+    "./html.css": "./src/html.css",
+    "./html-frame": {
+      "development": "./src/html/frame-entry.ts",
+      "types": "./dist/html/frame-entry.d.ts",
+      "default": "./dist/html/frame-entry.js"
+    },
     "./markdown": {
       "development": "./src/markdown.ts",
       "types": "./dist/markdown.d.ts",
@@ -46,6 +57,17 @@
       "development": "./src/markdown-blocks.ts",
       "types": "./dist/markdown-blocks.d.ts",
       "default": "./dist/markdown-blocks.js"
+    },
+    "./model": {
+      "development": "./src/model.ts",
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./model.css": "./src/model.css",
+    "./model-frame": {
+      "development": "./src/model/frame-entry.ts",
+      "types": "./dist/model/frame-entry.d.ts",
+      "default": "./dist/model/frame-entry.js"
     },
     "./pdf": {
       "development": "./src/pdf.ts",
@@ -126,6 +148,7 @@
     "@lezer/xml": "^1.0.6",
     "@lezer/yaml": "^1.0.4",
     "pdfjs-dist": "^6.5.438",
+    "three": "^0.187.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
@@ -134,6 +157,7 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
     "@vitest/browser-playwright": "5.1.0",
     "electron": "catalog:",
     "playwright": "^1.65.0",
@@ -157,6 +181,9 @@
     }
   },
   "novadeck": {
-    "platform": "system"
+    "platform": "system",
+    "reads": [
+      "tools/build-kit"
+    ]
   }
 }

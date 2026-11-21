@@ -3,8 +3,9 @@ import type { Item } from "@novadeck/core/items"
 import type { WorkspaceTarget } from "@novadeck/core/types"
 import type { ReactNode } from "react"
 
+import { ItemBody } from "../item-body"
 import { PaneChrome, PaneTitle, tabTip } from "../pane-row"
-import { itemLook, registrationOf } from "../registry"
+import { itemLook } from "../registry"
 import type { ItemStore } from "../store/item-store"
 import { useContent, usePlans } from "../store/use-item-store"
 
@@ -16,14 +17,16 @@ export const WindowItem = ({
   itemStore,
   target,
   body,
+  steps = true,
 }: {
   item: Item
   itemStore: ItemStore
   target: WorkspaceTarget
   body?: ReactNode
+  // Whether a file can be pointed at another of its folder, which the project window's can't.
+  steps?: boolean
 }): React.JSX.Element => {
   const plans = usePlans(itemStore, item.kind === "plan" ? [item.id] : [])
-  const { View } = registrationOf(item)
   // A shells item with a shell that failed tints its title, as a pane's tab.
   const load = useContent(itemStore, target, item)
   const failed =
@@ -35,7 +38,7 @@ export const WindowItem = ({
     <PaneChrome
       renderRow={(note) => (
         <PaneTitle
-          icon={icon}
+          icon={note.icon ?? icon}
           name={name}
           look={{
             tip: tabTip(item, note.facts, { where: note.where }),
@@ -46,7 +49,7 @@ export const WindowItem = ({
         />
       )}
     >
-      {body ?? <View item={item} itemStore={itemStore} target={target} />}
+      {body ?? <ItemBody item={item} itemStore={itemStore} target={target} steps={steps} />}
     </PaneChrome>
   )
 }

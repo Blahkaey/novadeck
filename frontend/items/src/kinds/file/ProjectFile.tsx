@@ -1,10 +1,11 @@
 import type { FileContent, Item, ItemContent } from "@novadeck/core/items"
 import type { Lines } from "@novadeck/viewers/editor"
 import type { ClassedRange } from "@novadeck/viewers/markdown"
-import { lazy, Suspense, useMemo, type ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 
 import { Unavailable } from "../../ArtifactViewer"
 import { blockedText, SaveNotice, stalledText, unreadableText } from "../../document/SaveNotice"
+import { lazyView } from "../../lazy-view"
 import type { ViewProps } from "../../registration"
 import { linesOf } from "../../store/file-rewrite"
 import type { FileActions } from "../../store/item-store"
@@ -19,8 +20,9 @@ import { readOnlyText } from "./uneditable"
 
 // The editor loads when a file is first edited, CodeMirror with it, so the workspace never
 // pays for it.
-const CodeEditor = lazy(() =>
-  import("./editor/CodeEditor").then((module) => ({ default: module.CodeEditor })),
+const CodeEditor = lazyView(
+  () => import("./editor/CodeEditor").then((module) => module.CodeEditor),
+  <div className="artifact-code" />,
 )
 
 // The class on a Markdown file's lines another writer changed (see prose.css).
@@ -69,10 +71,14 @@ const listingOf = (path: string, text: string): FileContent => {
 const TextFile = ({
   item,
   doc,
+  target,
+  itemStore,
   content,
   file,
 }: {
   item: Item
+  target: ViewProps["target"]
+  itemStore: ViewProps["itemStore"]
   doc: FileDoc
   // What the item holds now: this file whole, or, while the person's edits can't reach it,
   // what it holds instead.
@@ -115,19 +121,17 @@ const TextFile = ({
     </div>
   ) : undefined
   const sourceEditor = (at?: number): React.JSX.Element => (
-    <Suspense fallback={<div className="artifact-code" />}>
-      <CodeEditor
-        id={item.id}
-        path={doc.path}
-        text={doc.text}
-        readOnly={readOnly}
-        marks={doc.marks}
-        label={item.name}
-        onEdit={file.edit}
-        onSave={file.flush}
-        at={at}
-      />
-    </Suspense>
+    <CodeEditor
+      id={item.id}
+      path={doc.path}
+      text={doc.text}
+      readOnly={readOnly}
+      marks={doc.marks}
+      label={item.name}
+      onEdit={file.edit}
+      onSave={file.flush}
+      at={at}
+    />
   )
   return (
     <>
@@ -156,7 +160,13 @@ const TextFile = ({
         <SaveNotice text={stalledText} edits={edits} retry={file.retry} retryLabel="Retry" />
       )}
       {listing ? (
-        <FileViewer item={item} content={listing} editors={{ sourceEditor, documentEditor }} />
+        <FileViewer
+          itemStore={itemStore}
+          target={target}
+          item={item}
+          content={listing}
+          editors={{ sourceEditor, documentEditor }}
+        />
       ) : (
         (documentEditor ?? sourceEditor())
       )}
@@ -213,7 +223,14 @@ export const ProjectFile = ({
       )}
       {worktreeCopy && <p className="pane-notice">Read-only copy from an agent worktree.</p>}
       {editing ? (
-        <TextFile item={item} doc={doc} content={load} file={file} />
+        <TextFile
+          itemStore={itemStore}
+          target={target}
+          item={item}
+          doc={doc}
+          content={load}
+          file={file}
+        />
       ) : load?.state === "unavailable" ? (
         <Unavailable
           item={item}
@@ -222,7 +239,7 @@ export const ProjectFile = ({
           onReveal={() => itemStore.reveal(item.id, item.path)}
         />
       ) : listing ? (
-        <FileViewer item={item} content={listing} />
+        <FileViewer itemStore={itemStore} target={target} item={item} content={listing} />
       ) : (
         <div className="artifact-status" />
       )}

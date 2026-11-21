@@ -27,6 +27,7 @@ import {
 } from "./agents.js"
 import {
   changeFileDiff,
+  changeRange,
   companionChange,
   companionLimits,
   companionItem,
@@ -40,6 +41,10 @@ import {
   planSaveResult,
   planUnwritable,
   filePart,
+  folderMatch,
+  folderMatchLimits,
+  maxWroteFolders,
+  wroteFolder,
 } from "./companions.js"
 import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
@@ -399,6 +404,12 @@ export const contract = {
     // most to the system, however fast they are told. A terminal not there is not an error: the
     // call stands for whenever it starts.
     active: procedure.input(z.strictObject({ terminalId: id.nullable() })).output(z.void()),
+    // The terminals this client's person has in sight now, as a whole list that replaces its
+    // last: really on screen and legible, which is what lets a sleeper wake. Each client has
+    // its own, which lapses with its connection. A terminal no client lists is unseen, and
+    // the runner may then do what would move the person's view of it, as scrolling a dialog
+    // the agent's TUI holds out of view into view. Terminals not there are not an error.
+    seen: procedure.input(z.strictObject({ terminalIds: z.array(id).max(256) })).output(z.void()),
     close: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
     // Renames a terminal: the runner keeps the title with the terminal, running or saved
     // to restore, and announces it on `watch`. One it keeps nothing of is
@@ -788,12 +799,16 @@ export const contract = {
     // if pointed back. With `edit`, a file is its whole text, saying whether `save` writes it,
     // where it can be edited whole, or its listing saying why not (see `itemContent`).
     // An unknown item is NOT_FOUND.
+    // A folder item lists the folder `within` names, a path from the one it points at (the top;
+    // "" is the top itself), never one outside it nor a secret one: that is unavailable as
+    // `missing` or `secret`; the listing is read again as the folder changes.
     content: procedure
       .input(
         z.strictObject({
           itemId: id,
           reveal: z.string().max(4096).optional(),
           edit: z.boolean().optional(),
+          within: z.string().max(4096).optional(),
         }),
       )
       .output(eventIterator(itemContent)),
@@ -801,7 +816,18 @@ export const contract = {
     // parts (a video, a recording), read only while the file is as `stamp` (its content's)
     // names it: else `changed`. One that may hold secrets is `secret` unless `reveal` is the
     // path the item points at, as in `content`. An unknown item, or one of a kind not read in
-    // parts, is NOT_FOUND.
+    // parts, is NOT_FOUND. With `file`, a model's, it is that file beside it, one its content
+    // lists, by its name there and as its own stamp names it; never shown when it may hold
+    // secrets, whatever `reveal`; a `file` its model doesn't name is NOT_FOUND. A folder item's
+    // `path` is a file of the folder, from its top, which is read as the file's own kind is (an
+    // image up to `folderLimits.thumbnail` bytes, for a thumbnail; a video, a recording, a PDF or
+    // a 3D model as an item of its kind is), with the stamp its listing gave: never one outside
+    // the folder, through a link too, nor a secret one (`secret`), nor one in a secret folder.
+    // With `file`, an HTML file's (a web page's), it is a file beside the page, by its name from the
+    // page's folder (`/` between names, decoded): a style, picture or font of the page's folder or
+    // under it, never one outside it (`..`, a link out), nor one that may hold secrets, which
+    // is `missing`; read with the stamp it has now, so no part of it is `changed`, and the `stamp`
+    // given is not read.
     part: procedure
       .input(
         z.strictObject({
@@ -809,6 +835,8 @@ export const contract = {
           stamp: z.string().max(128),
           offset: z.int().nonnegative(),
           reveal: z.string().max(4096).optional(),
+          file: z.string().max(4096).optional(),
+          path: z.string().min(1).max(4096).optional(),
         }),
       )
       .output(filePart),
@@ -825,6 +853,18 @@ export const contract = {
         }),
       )
       .output(changeFileDiff),
+    // The files a selection of a changes item's layers changed as one range (see
+    // `changeRange`), with the range's own counts: what the pane lists for a range of two or more
+    // layers (a Shift+click), instead of its layers' files added up. An unknown item, or one that
+    // is no change, is NOT_FOUND.
+    changeRange: procedure
+      .input(
+        z.strictObject({
+          itemId: id,
+          layers: z.array(z.string().min(1).max(128)).min(1).max(maxChangeLayers),
+        }),
+      )
+      .output(changeRange),
     // The person read a file of a changes item, by the name its content lists it under: the
     // item's content names it in `read` until the file changes again. Kept across restarts
     // with the Worktrees panel's memory. A file the change as a whole does not list is not
@@ -854,8 +894,8 @@ export const contract = {
       )
       .output(planSaveResult),
     // Attaches a file the person picked to a terminal's bar, by a path absolute or from
-    // the terminal's directory. A terminal the runner keeps nothing of is
-    // TERMINAL_NOT_FOUND; a path that is no file is INVALID_FILE, saying why.
+    // the terminal's directory, or led by `~` for the person's home. A terminal the runner keeps
+    // nothing of is TERMINAL_NOT_FOUND; a path that is no file or folder is INVALID_FILE, saying why.
     attach: procedure
       .input(
         z.strictObject({
@@ -868,6 +908,37 @@ export const contract = {
           title: z.string().min(1).max(256).optional(),
         }),
       )
+      .output(companionItem),
+    // The folders a path being typed may be, for a terminal's folder tab: those under the
+    // path's parent whose names start as its last part does (all of them for a path ending in
+    // `/`), by name, at most `folderMatchLimits.matches`, each with how many entries it holds and
+    // whether a folder item shows it. The path is led by `~` for the person's home, or is read
+    // from the terminal's directory. Only folders are named, never a hidden one unless the last
+    // part starts with a dot, and never one that may hold secrets, nor anything under one; a
+    // parent that isn't a folder, or can't be read, names none. A terminal the runner keeps
+    // nothing of is TERMINAL_NOT_FOUND.
+    folders: procedure
+      .input(z.strictObject({ terminalId: id, path: z.string().max(companionLimits.path) }))
+      .output(z.array(folderMatch).max(folderMatchLimits.matches)),
+    // The folders outside the project that the agents of a terminal's session wrote a file in,
+    // as their harnesses' tool calls told (a command's output is told by none): the latest
+    // first, once each, at most `maxWroteFolders`. Never a folder inside the session's project
+    // or under the terminal that wrote it, one a harness keeps for itself (its plans, memory, conversations
+    // and logs, not the rest of its home), one that may hold secrets, or one that is gone.
+    // Kept with the terminals, so it outlives a restart. A terminal the runner keeps nothing of
+    // is TERMINAL_NOT_FOUND.
+    wroteTo: procedure
+      .input(z.strictObject({ terminalId: id }))
+      .output(z.array(wroteFolder).max(maxWroteFolders)),
+    // Points a file's item at another file of its own kind, by a path absolute or from the
+    // folder of the file it points at now: the same item, holder and id, with a later
+    // version, as the person stepping through a folder's files does. A file that may hold
+    // secrets opens onto its gate. What the item's bar held under the new pointer is
+    // replaced. An unknown item is NOT_FOUND, a project window's item a CONFLICT, and an
+    // item that is no file, a path that is no file, or a file of another kind INVALID_FILE,
+    // saying why.
+    repoint: procedure
+      .input(z.strictObject({ itemId: id, path: z.string().min(1).max(4096) }))
       .output(companionItem),
     // Opens a file in the session's project window, by a path absolute or from the
     // session's project folder: the item the window holds is pointed at it, with a later

@@ -8,7 +8,7 @@ import {
   resumeFlags,
   type KeptFlags,
 } from "@novadeck/harness-core/kept-flags"
-import { beside } from "@novadeck/harness-core/paths"
+import { beside, flavourOf, homeAbove } from "@novadeck/harness-core/paths"
 
 import { box, slice } from "./box.js"
 import { conversation, conversations } from "./conversation.js"
@@ -31,7 +31,7 @@ import {
 } from "./plugin.js"
 import { statusLineLimit, statusLineSettings } from "./settings.js"
 import { conversational, shapes } from "./shapes.js"
-import { followShells } from "./shells.js"
+import { followShells, followWords } from "./shells.js"
 import { commands, makeCmdShim, posixShim, valued } from "./shim.js"
 import { heldScreen, hooksTrusted } from "./startup.js"
 import { shown, startupScreen } from "./status-line.js"
@@ -152,6 +152,13 @@ export const agy = {
   // The folders of its conversations, where it writes the plans it asks to be reviewed.
   planFolders: (install) => [join(antigravityHome(install), "brain")],
   planFoldersOf: (transcript) => beside(transcript, "brain", "brain"),
+  // The folders of its conversations, where it keeps their artifacts.
+  bookkeeping: (install) => [join(antigravityHome(install), "brain")],
+  // A conversation's files are `<home>/brain/<conversation>/…`, a few folders deep.
+  bookkeepingOf: (transcript) => {
+    const home = homeAbove(transcript, "brain", 1, 4)
+    return home === undefined ? [] : [flavourOf(home).join(home, "brain")]
+  },
   connected,
   installed,
   connect,
@@ -198,9 +205,13 @@ export const agy = {
     context: "partial",
   },
   decode: (report) => withLaunch(decode(report), report, launch.kept),
-  // The holds that run out, and the background shells its transcript tells of.
+  // The holds that run out, and the background shells and the words its transcript tells of.
   watch: async (run, signal, emit) => {
-    await Promise.all([followHolds(run, signal, emit), followShells(run, signal, emit)])
+    await Promise.all([
+      followHolds(run, signal, emit),
+      followShells(run, signal, emit),
+      followWords(run, signal, emit),
+    ])
   },
   dialogs,
   commandFields: ["CommandLine"],

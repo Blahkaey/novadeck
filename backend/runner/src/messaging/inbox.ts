@@ -34,6 +34,7 @@ import {
   undelivered,
   type Message,
 } from "./messages.js"
+import { noticeText } from "./notice-format.js"
 import type { Happening, Reports } from "./peers.js"
 import {
   clampedTurn,
@@ -309,15 +310,18 @@ const noticedSubjects = 5
 export const withdrawnNotice = (subjects: readonly string[]): string => {
   const named = subjects.map((each) => JSON.stringify(shorten(each, 80)))
   const one = subjects.length === 1
-  return (
-    "Novadeck: automatic notice, not from the user: the user wrote to you, " +
-    `so Novadeck took your open ${one ? "ask" : "asks"} out of their Inbox: ` +
-    `${firstFew(named, noticedSubjects)}. ` +
-    `${one ? "It is" : "They are"} closed and can no longer be answered in the Inbox. ` +
-    `Read their message as their reply to ${one ? "it" : "them"}; whatever it leaves open, ` +
-    "ask again with the ask tool before ending the turn, rather than saying it waits in the " +
-    "Inbox. This notice needs no reply."
-  )
+  return noticeText("Inbox", {
+    facts:
+      "The user wrote to you, " +
+      `so Novadeck took your open ${one ? "ask" : "asks"} out of their Inbox: ` +
+      `${firstFew(named, noticedSubjects)}. ` +
+      `${one ? "It is" : "They are"} closed and can no longer be answered in the Inbox.`,
+    actions: [
+      `What ${one ? "it" : "they"} asked that their message leaves open and your turn ends ` +
+        "waiting on, ask again as before: in your reply, with an ask as its copy, never " +
+        "mentioning the Inbox.",
+    ],
+  })
 }
 
 /**
@@ -332,23 +336,22 @@ export const dismissedNotice = (
     noticedSubjects,
   )
   const one = asks.length === 1
-  const head = "Novadeck: automatic notice, not from the user: the user dismissed "
-  const tail = " This notice needs no reply."
+  const head = "The user dismissed "
   const acts = asks.filter((each) => each.action === "action").length
   if (acts === asks.length)
-    return (
-      `${head}your ${one ? "ask" : "asks"} ${list} from their Inbox. ` +
-      `They won't do ${one ? "it" : "them"} for now: go on without ${one ? "it" : "them"}, ` +
-      `or stop at that step and say so.${tail}`
-    )
+    return noticeText("Inbox", {
+      facts:
+        `${head}your ${one ? "ask" : "asks"} ${list} from their Inbox without doing ` +
+        `${one ? "it" : "them"}.`,
+    })
   const options = asks.some((each) => each.action === "options")
-  return (
-    `${head}your ${one ? "ask" : "asks"} ${list} from their Inbox without answering ` +
-    `${one ? "it" : "them"}. Don't read that as an answer` +
-    (options ? `: they chose none of ${one ? "its" : "their"} options` : "") +
-    `. Take it that they don't need ${one ? "it" : "them"} now, and don't ask ` +
-    `${one ? "it" : "them"} again unless ${one ? "it matters" : "they matter"} again.${tail}`
-  )
+  return noticeText("Inbox", {
+    facts:
+      `${head}your ${one ? "ask" : "asks"} ${list} from their Inbox without answering ` +
+      `${one ? "it" : "them"}. That is no answer` +
+      (options ? `: they chose none of ${one ? "its" : "their"} options` : "") +
+      ".",
+  })
 }
 
 export class Inbox {
@@ -382,6 +385,8 @@ export class Inbox {
   >()
   private readonly resumeGraceMs: number
   private readonly logSweepMs: number
+  /** Made, so read: until then a change has no one to tell, and the host may not be whole. */
+  private made = false
   private closed = false
   constructor(
     private readonly host: Host,
@@ -424,7 +429,10 @@ export class Inbox {
       else if (entry?.id) stale.push(entry.id)
     }
     if (stale.length > 0) this.save(() => records.removeEntries(stale))
-    this.prune()
+    // What the first prune lets go it tells no one, and a failure of it waits for the sweep:
+    // the runner is still starting, and must start.
+    this.maintain()
+    this.made = true
     if (sweepMs > 0) {
       this.sweeper = setInterval(() => {
         try {
@@ -1397,6 +1405,7 @@ export class Inbox {
     }
   }
   private changed(terminalId: string): void {
+    if (!this.made) return
     this.host.changed(terminalId)
     this.publish()
   }

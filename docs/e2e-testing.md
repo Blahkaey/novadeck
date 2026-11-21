@@ -162,9 +162,9 @@ again without it. These tests skip anywhere else. Its traces upload as
 
 | Harness     | Published as                                                                               | Version |
 | ----------- | ------------------------------------------------------------------------------------------ | ------- |
-| Claude Code | npm, `@anthropic-ai/claude-code`                                                           | 2.1.326 |
-| Codex       | npm, `@openai/codex`                                                                       | 0.169.0 |
-| Antigravity | an archive, by its address and SHA-512 (Linux, macOS, Windows; x86-64, and arm64 on macOS) | 1.5.9   |
+| Claude Code | npm, `@anthropic-ai/claude-code`                                                           | 2.1.329 |
+| Codex       | npm, `@openai/codex`                                                                       | 0.171.0 |
+| Antigravity | an archive, by its address and SHA-512 (Linux, macOS, Windows; x86-64, and arm64 on macOS) | 1.5.13  |
 
 `install.ts` installs each harness into `<cache>/<harness>-<version>`, staging it first
 in a folder with a random name so an interrupted install never counts as done, and
@@ -378,7 +378,12 @@ network:
   It looks again, up to five times, until it finds no process it hasn't seen, its waits
   ending within 15 seconds, inside the fixture's 20 for a cleanup; one it hasn't seen
   still running then is ended forcibly, unwaited, and named so. Should the test end
-  early, its teardown does the same, and fails the test for any process it had to end. On Windows, which has no `/proc`, a small lister (`reap/lister.cs`) finds
+  early, its teardown does the same, and fails the test for any process it had to end.
+  Before it, the sandbox's Claude Code background service (which its agents view starts,
+  and a terminal's close leaves running by design) is ended as the sandbox's logout would
+  end it, and named so in the log, not as a leak (`claude-service.ts`): only the process
+  its lock names, by pid and start, and of what runs under it only its background sessions
+  (`claude bg-pty-host`, `claude bg-spare`), so anything else still fails the test. On Windows, which has no `/proc`, a small lister (`reap/lister.cs`) finds
   them: compiled once by its source into the system's temporary folder with the .NET
   Framework's `csc.exe`, and named by its own hash too, checked before it runs, so a
   program there that isn't what its name says is compiled again. It lists the processes
@@ -853,8 +858,10 @@ for (const setup of setups) {
   - _`/side`_: with a side conversation open, t2's message waits, t1 Drafting from the
     person's keys, never Ringing nor Unbound, and no call holds the doorbell's line past
     the settle window. The side conversation's first prompt carries nothing; t1's
-    session and agent stay, the message queued. Back at the root (Ctrl-C closes the side
-    view), the person's next prompt carries the message, in the root's own conversation,
+    session and agent stay, the message queued. Back at the root (Ctrl-/ switches to it,
+    the side conversation kept, as both 0.170.0 and 0.171.0 do; from 0.171.0 Ctrl-C asks to
+    archive it, and on 120 columns it is a pane beside the root's), the person's next prompt
+    carries the message, in the root's own conversation,
     which never held the side question, and t1 settles, still bound to the root.
   - _A spawned agent's dialog dismissed with Esc_: t1's root spawns an agent
     (`spawn_agent`, `multi_agent_v1`) and its turn ends; the agent's escalated
@@ -863,8 +870,9 @@ for (const setup of setups) {
     `activity.attention`) from a subagent it lists as running. t2's message waits queued
     past the settle window, t1 never rung and no call holding the doorbell's line. The
     person presses Esc on the dialog (`escape()`, never Enter), which fires no hook:
-    Novadeck's request goes to none by following the agent's own rollout, the subagent
-    still listed as running, and t1 is then rung and its hook delivers. Codex's own
+    Novadeck's request goes to none by following the agent's own rollout, whose abort
+    ends the subagent's turn as its stop would (no longer listed), and t1 is then rung
+    and its hook delivers. Codex's own
     evidence that it aborted: the dialog's thread line leaves the screen, the agent's
     rollout (`rollout-<time>-<agent id>.jsonl` under `CODEX_HOME/sessions`) holds
     `turn_aborted`, and no call of its conversation ever looks at the command's result.
@@ -931,10 +939,11 @@ versions it names). That's where they pay:
   (`PROBE_OUT` and its siblings). The job keeps those as its `probes-<harness>-<slice>` artifact,
   with a `fixtures.diff` of the fixtures the probes rewrote in the tree, and its summary
   says which changed: against the latest release, that is the harness's drift, before a
-  pin moves. Two assert what the code relies on, so a release that changes it fails the night
+  pin moves. Three assert what the code relies on, so a release that changes it fails the night
   (and `nightly.yml` opens its issue): `launch-flags` (a bare resume forgets exactly the
-  flags `forgets` lists) and `cron-id` (CronCreate's `tool_response.id` is CronDelete's
-  `tool_input.id`). Another exception is `agy-stop-boundary`, which asserts that each prompt reached
+  flags `forgets` lists), `cron-id` (CronCreate's `tool_response.id` is CronDelete's
+  `tool_input.id`) and `agy-schedule` (an Antigravity schedule's PostToolUse comes at its kill,
+  with its PreToolUse's `stepIdx`, and none at a cron's firing). Another exception is `agy-stop-boundary`, which asserts that each prompt reached
   the model exactly once; it runs only with `AGY_CAPTURE`, and the Flaky capture workflow
   runs it when it, its config or that workflow changes.
 - Every case starts a real harness, and the ask probes run dozens of cases each (Antigravity's
@@ -1216,9 +1225,14 @@ transcript says.
     `CODEX_THREAD_ID`, so its decoder takes nothing of them.
   - _`/side`_: typed and submitted, it shows a side conversation, its footer saying "Side
     from main thread · ctrl+/ to switch · ctrl+c to close" (0.161.0 spells the keys `^/`
-    and `^c`); ctrl+c goes back to the root.
-    Its thread is ephemeral: its first prompt fires a `SessionStart` saying `fork`, and
-    every hook of it gives `transcript_path` as null.
+    and `^c`); ctrl+c goes back to the root. From 0.171.0, on 100 columns or more, it is a
+    pane of the sidebar beside the root's, its tab "Side chat", and ctrl+c asks to archive
+    it ("^c to archive" where it takes the whole screen; `e2e/probes/codex-side.e2e.ts`).
+    Up to 0.170.0 its thread is ephemeral by default: its first prompt fires a
+    `SessionStart` saying `fork`, and every hook of it gives `transcript_path` as null.
+    From 0.171.0 Codex keeps it, its hooks naming its rollout. An approval the root asks
+    while the side has the focus is held out of view until Ctrl-/ moves the focus to the
+    root (`e2e/probes/codex-side-dialog.e2e.ts`).
   - _Fork_: `codex fork` shows its "Fork a previous session" picker, latest first, each
     session by its first prompt, the first selected (`›`), with no title until one is
     picked ("enter fork"); picked, the fork shows "Thread forked from <id>", its title
@@ -1299,10 +1313,6 @@ reason to leave a harness out. These stand today:
 - **Codex on Windows drops a line break typed as a key of its own** (`losesLineBreakKeys`). It
   reads the console's keys, and adds no line to its box (0.167.0, 2026-11-07), so a test builds
   a draft of several lines there with a paste, as a burst of typing keeps its line breaks.
-- **Claude Code on Windows leaves a process behind once its agents view opens**
-  (`agentsViewOutlivesDeck`). A `claude.exe` under `WmiPrvSE` outlived the deck (2.1.316,
-  2026-11-07), so inbox.e2e.ts's view test runs on the other platforms, as what it reads is the
-  same there.
 
 `known-gaps.ts` names each one as a `Gap`, with the harnesses it affects (and the
 platforms, where only some have it), documented

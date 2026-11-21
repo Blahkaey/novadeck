@@ -445,6 +445,8 @@ where that is an agent. Windows doesn't tell a terminal's foreground program, so
 is the agent whose session last bound the terminal, until the shell has shown its prompt
 for a second (`processPollMs`), as a sample would tell elsewhere.
 
+`terminals.seen({ terminalIds })` tells the runner which terminals this client has in sight, as a whole list that replaces the client's last: every terminal, running or asleep, the person can really see (in Focus the one displayed; in Grid and Canvas a tile a quarter of which is in view and legible; never one under its chat, minimized or off screen). Each client has its own list, which lapses with its connection (a closed window leaves nothing seen), and a client tells it again after it reconnects. A terminal no client lists is unseen, and only then does the runner do what would move the person's view of it: a harness's dialog held out of view (Claude Code's fullscreen renderer, scrolled up, draws a dialog below the view and says only `Waiting for your answer (ctrl+End) ↓`, on macOS `· fn+↓ to scroll`) that no adapter reads from the request's facts is brought into view by the keys of the adapter's `reveal` (Ctrl+End for Claude Code; `q` for Codex, whose `/diff` pager hides a dialog asked under it and says nothing, and Ctrl-/ where its `/side` conversation has the focus, which holds the root's dialog out of view; Antigravity draws its dialogs over its views and needs none), once for each screen it is held on, once the screen is still (on one that keeps moving, as Codex's turn timer beside its sidebar, once the request has waited unread 6 s, and only once for it; keys an adapter says toggle, as Codex's Ctrl-/, only once for each request), once the terminal has been unseen for 5 s (counted from the runner's start, from the last time a client had it in sight, and from a connection's release, so a window that reloads is not caught between lists) and nothing else holds its input box. It never does this for a terminal in sight. Answering a held dialog from a card does scroll it into view, as the person asked for it. Terminals the runner doesn't have are not an error.
+
 `reported` is the agent's `done` report that still stands, `{ subject, at }`, or null: the
 latest `done` of the session bound in the terminal, read or not (from the report log, so
 not ended by the Inbox's day), unless the person's
@@ -493,10 +495,10 @@ next part within a minute. A file past `maxUploadBytes` (32 MiB) is
 terminal `TERMINAL_NOT_FOUND`.
 
 The MCP `ask`, `tell` and `done` tools add questions and updates to the Inbox. In a Novadeck
-terminal the server's `instructions` say when each serves: `ask` doesn't stop the work, as
-most decisions aren't blocking; everything put in the Inbox is an extra copy, so the
-reply still says it in full and never mentions the Inbox; `tell` is for
-milestones; `done` is the agent's own short report when the task it was given is finished,
+terminal the server's `instructions` say when each serves: `ask` is a copy of every
+question the agent's turn ends waiting on; everything put in the Inbox is an extra copy,
+so the reply still says it in full and never mentions the Inbox; `tell` is for news such
+as a milestone; `done` is the agent's own short report when the task it was given is finished,
 not when it answers a question or finishes a step. With a lead, the agent uses them all the
 same and also sends its lead the same. Claude Code reads the instructions up
 front, before it loads a tool's description; the prompt-time notice every harness gets says the
@@ -809,7 +811,11 @@ not command completion.
 - Closing sends a hangup to the owned shell, escalating if the shell ignores it.
   Where the terminal's bound agent holds the foreground, what the agent started is
   read first and waited for, 3 s for a close and 2 s for a shutdown, then gets
-  SIGTERM, and SIGKILL half a second on. Otherwise it is not a process-tree kill
+  SIGTERM, and SIGKILL half a second on. What the agent's harness runs apart from the
+  terminal (`Harness.apart`) is left running with all under it, though the agent started it:
+  Claude Code's background service, which ← at its prompt starts and the person's other
+  sessions share, keeps the conversation going in the background, which Claude Code ends
+  itself (`harnesses/claude/src/daemon.ts`). Otherwise it is not a process-tree kill
   guarantee: daemonized jobs and descendants that ignore hangup may continue, as with
   an ordinary terminal emulator, and so may a daemon an agent left in a group of its
   own. Use an OS service/cgroup or a future supervisor if all descendant cleanup is
@@ -980,8 +986,8 @@ worktree as the person asks, through the worktrees service: it answers `{ closed
 and with the worktree holding uncommitted files or commits main lacks (squash- and rebase-merged
 work does not count, also once main has changed its files again), `{ closed: false, holds }` for the person to confirm before `force`. It
 refuses with `CONFLICT` and the reason while its owner's agent is working in it (checked afresh in
-the service's queue), when git status can't be read or the worktree has submodules (even with
-`force`), and answers `NOT_FOUND` for a root that is no work. A work that is `safe` (below) closes unforced
+the service's queue), when git status can't be read, the worktree has submodules, or it holds an
+untracked git repository of its own with work no remote has (even with `force`), and answers `NOT_FOUND` for a root that is no work. A work that is `safe` (below) closes unforced
 without that question, as it was read afresh just before the removal (an uncommitted file made since
 still asks); the agent-facing `close_worktree` is unchanged. These work with the Experimental switch off.
 
@@ -1671,10 +1677,13 @@ one from an earlier runner.
   not the one on screen (another's, as with parallel calls) stays null until it is. The
   raw text is the screen's rows without trailing blanks, from the bottom up while they fit
   in 4 KiB, a run of blank rows made one. A request the screen alone tells (Codex's
-  "Implement this plan?" and Antigravity's plan for review, which fire no hook) is a
-  request like any other: the adapter's `screenRequest` raises it while its screen shows,
-  and it goes once the screen has been still for 500 ms without it, or the turn moves on,
-  or it was answered.
+  "Implement this plan?" and an MCP server's form, and Antigravity's plan for review, which
+  fire no hook) is a request like any other: the adapter's `screenRequest` raises it while
+  its screen shows, and it goes once the screen has been still for 500 ms without it, or it
+  was answered; the root's turns ending or starting under it leave it be. While a view of
+  the harness's own holds a dialog out of sight (the adapter's `reveal` says so, as for
+  Codex's `/diff` pager), one the screen no longer shows is hidden, not gone: it keeps its
+  ref, and the same request shows again as the view closes.
 - A `choices` or `questions` dialog carries an `id`, a fingerprint (a hash) of what the adapter
   read, and a `choices` dialog a `detail`: what the dialog shows of what it asks about (the
   command, the tool's arguments, the permission, the file), as the terminal draws it. An
@@ -1943,11 +1952,11 @@ one from an earlier runner.
     keeps both sides and resolves them as the rest arrives, never dropping one for it.
     The client's `companions.watch()` yields `reset` before each fresh sequence, as
     `terminals.watch()` does.
-  - `companions.content({ itemId, reveal?, edit? })`, `reveal` being a path, streams what an item points at, read from
+  - `companions.content({ itemId, reveal?, edit?, within? })`, `reveal` being a path, streams what an item points at, read from
     disk now and again each time it changes, until the item is deleted; an unknown item
     is `NOT_FOUND`. It is `ready`, with a `stamp` that changes with it, or `unavailable`
     with a reason and the file's size where known: `missing`, `unreadable`, `not-a-file`,
-    `too-large` (an image over 8 MiB, a video over 512 MiB, a PDF over 128 MiB), `binary` (a NUL byte in its first 8 KiB), `secret`
+    `too-large` (an image over 8 MiB, a video over 512 MiB, a PDF over 128 MiB, a 3D model over 256 MiB), `binary` (a NUL byte in its first 8 KiB), `secret`
     (a file that may hold secrets, unless `reveal` is the path the item points at: the
     person's yes is to a file, so an item re-pointed to another reads `secret` again and, pointed
     back, revealed again), or `gone` (a plan no longer there).
@@ -1955,10 +1964,40 @@ one from an earlier runner.
     `shown`, its item's version, which each show raises and which loads it afresh, and the
     `scroll` that show gave, a CSS selector to bring into view once it has loaded. A video is
     its `mime` and `size`, with `shown` and the `at` its latest show gave; a PDF its `size`.
-    Neither carries its bytes, which `companions.part({ itemId, stamp, offset, reveal? })`
+    A 3D model (`model`: a `.glb`, `.gltf`, `.stl`, `.obj`, `.ply` or `.3mf` file; an `.obj` with
+    a NUL byte in its first 8 KiB is a compiled object file, and a file as before) is its
+    `format`, its `size` and the files beside it that it names: `files`, each `name` as the model
+    writes it, with its `size` and `stamp`, and `refused`, each `name` with why it isn't read:
+    `external` (a scheme, a drive or a leading `/` or `\`), `outside` (a path out of the
+    model's folder, by `..` or a symlink), `missing`, `not-a-file`, `secret`, `too-large` or
+    `unreadable`. A glTF names its `buffers` and `images` (their `uri`s, percent-decoded to
+    read), a GLB the same from its JSON chunk only, an OBJ its `mtllib` files and, from each,
+    the textures three.js's MTLLoader would ask for (named from the library's folder as
+    `folder/name`); an STL, PLY or 3MF names none. A `data:` name is embedded and not listed.
+    Names are paths from the model's real folder, subfolders included, listed once each, at
+    most 64 (`modelLimits.files`), and together with the model at most 256 MiB
+    (`modelLimits.bytes`), the first to pass it `too-large`. A file beside a model is never
+    revealed: one that may hold secrets is `secret` whatever `reveal` says.
+    None of them carries its bytes, which `companions.part({ itemId, stamp, offset, reveal?, file? })`
     reads, 2 MiB (`partBytes`) as base64 from `offset`, while the file is as the content's
     `stamp` names it (else `changed`, or `unavailable` with `missing`, `unreadable`,
-    `not-a-file`, `too-large` or `secret` as above); an item of another kind is `NOT_FOUND`. A text
+    `not-a-file`, `too-large` or `secret` as above); an item of another kind is `NOT_FOUND`.
+    With `file`, a model's, it reads that file beside the model, by its name in the content's
+    `files`, as its own `stamp` names it; an item that is no model, or a `file` its content
+    doesn't list for the model as it is now, is `NOT_FOUND`.
+    A folder
+    is the listing of the folder `within` names (`companions.content({ itemId, within? })`: a
+    path from the item's top, "" for the top; one that leaves the top, through a link too, is
+    `unavailable` as `missing`, and one that may hold secrets as `secret`; a top that is gone is
+    `gone`): `path`, `within`, `entries`, `total` and `truncated`, the first 2000 entries by name,
+    each with its `name`, `kind` (`folder`, `image`, `video`, `audio`, `pdf`, `model`, `text`, `other`;
+    an `.obj` that is a compiled object file, as show tells it, is `other`),
+    `size`, `modifiedAt`, `children` (what a folder holds), `secret`, `link` (a link out of the
+    top: never entered or read) and `stamp`. It is read again, a few changes together, as the
+    folder changes. `companions.part` takes a `path` for such an item, a file of the folder from its
+    top, read as its kind is (an image only to 2 MiB; a 3D model whole, as its grid draws a still
+    of it alone) against the stamp its entry gave. A
+    text
     file is the lines around those pointed at, read to the last of them and up to 4 MiB
     more to count the rest: `total` once it reached the file's end, else `truncated`;
     lines past the end are pulled back to it and marked `clamped`. With `edit`, a text file is
@@ -2025,6 +2064,11 @@ one from an earlier runner.
     main's work merged in (in memory), so what main brought in is no part of either. A snapshot's objects
     are written to a folder of the runner's own, never to the person's object store, and a file
     that may hold secrets is never hashed.
+  - `companions.changeRange({ itemId, layers })` lists the files the layers selected changed as
+    one range, over the same span as `changeFile` (a file added and dropped inside it is not
+    there, a renamed one is one row, counts are the range's own, at most 300): `{ files,
+    truncated }`. The changes pane asks it for a range of two or more layers. An unknown item, or
+    one that is no change, is `NOT_FOUND`.
   - `companions.changeRead({ itemId, path })` marks a file of a changes item read, by the path
     its content lists it under: the item's content names it in `read` until the file changes
     again, across restarts (the runner keeps it beside the Worktrees panel's memory). A file the
@@ -2068,10 +2112,52 @@ one from an earlier runner.
     still `EBUSY`) is an ordinary error that may pass; an unknown item is
     `NOT_FOUND`.
     Saves of one item are handled one at a time.
-  - `companions.attach({ terminalId, path, lines?, title? })` puts a file the person
-    picked on a terminal's bar, by a path absolute or from the terminal's directory:
-    `TERMINAL_NOT_FOUND`, or `INVALID_FILE` saying why for a missing path, a folder, a
-    pipe or a device. Binary files are accepted.
+  - `companions.attach({ terminalId, path, lines?, title? })` puts a file or a folder the
+    person picked on a terminal's bar, by a path absolute, from the terminal's directory, or led
+    by `~` for the person's home folder (the folder view's path field types one):
+    `TERMINAL_NOT_FOUND`, or `INVALID_FILE` saying why for a missing path, a folder that may
+    hold secrets, a pipe or a device. Binary files are accepted. A folder is a `folder` item.
+  - `companions.folders({ terminalId, path })` names the folders a path being typed in a folder
+    view's path field may be, as `{ path, count, open }[]`: those in the path's parent (all of
+    them for a path that ends in a separator) whose names start as its last part does, in any
+    case, by name, at most 20. `path` is written as the person typed the parent (a leading `~`, or
+    relative to the terminal's directory) and ends in the folder's name, so it completes the
+    text; `count` is how many entries the folder holds, up to 1000 (a folder holding more says
+    1000, which the client writes `1000+`); `open` says a folder item of the session already shows
+    it. Only folders are named (a link to one counts), never a dot folder unless the last part
+    starts with a dot, never one that may hold secrets (`folderSecrets`, as `show` refuses
+    one) nor anything in one, and a parent that is no folder, can't be read, or may hold secrets
+    names none. The parent is read as far as its first 5000 entries. `TERMINAL_NOT_FOUND` for a
+    terminal not kept.
+  - `companions.wroteTo({ terminalId })` names the folders outside the project that the agents
+    of the terminal's session wrote a file in, as `{ path, handle, agent, at }[]`: the latest first,
+    once each, at most 8, the terminal's `handle` and its agent's harness id. They are told by each
+    harness's file-tool writes (Claude Code's file-writing tool hooks, as Write and Edit; Codex's
+    `apply_patch` hook and its rollout's `FileChange`; Antigravity's file-writing tool hook),
+    which name absolute paths, as the `file-touched` events the terminal's `work.wrote` keeps (the
+    latest 20 folders written in outside the folder the terminal works in, each with when; kept
+    with the terminal, so it outlives a restart, and shaped as the rest of `work`, so no schema
+    change). A command's output is told by no harness, so a folder only a shell command wrote in
+    is not named. Each time is the fact's own (the hook's start, or the rollout line's stamp), so a
+    backlog told again after a restart is no newer. Never named: a folder in the session's
+    project or in the folder its terminal works in (as written and as they resolve through
+    links, also left out when kept), one a harness keeps for itself (each harness's `bookkeeping`: Claude Code's `plans`,
+    `projects` with its transcripts and memory, `todos` and the like under its config folder;
+    Codex's `sessions`, `memories` and `log`; Antigravity's `brain`), under the home the runner's
+    environment names and under the home the writing session's own transcript names, as a second
+    account's, each compared as written and through links. The rest of a home (a skill, a
+    `CLAUDE.md`, a setting) is work the person asked for and is named. The session's own home is told by its transcript's place (`<home>/projects/<project>/<id>.jsonl` for Claude Code, `<home>/sessions/<y>/<m>/<d>/rollout-*.jsonl` for Codex, `<home>/brain/<conversation>/…` for Antigravity; a path laid out otherwise names none), and its bookkeeping folders are left out as a write is recorded, so a moved home's plans are never stored, one that may hold secrets, one that is gone. `path` leads with `~` for a folder in
+    the person's home. `TERMINAL_NOT_FOUND` for a terminal not kept.
+  - `companions.repoint({ itemId, path })` points a file's item (an image, video, audio,
+    PDF or file, held by a terminal's bar or an undocked window) at another file of the same
+    kind, by a path absolute or from the folder of the file it points at now, as the person
+    stepping through a folder's files does. It answers the same item (the same `id` and holder)
+    with a later `version`, `by` `person`, `openAsked` set and `shownAt` now; the pointer is
+    built as `attach` builds it, so a file that may hold secrets opens onto its gate. An item the
+    bar held under the new pointer is replaced. `NOT_FOUND` for an unknown item, `CONFLICT` for the
+    item of a project window (which `openInProject` points), or `INVALID_FILE` saying why for an item
+    that is no file's, a path that is no file, a folder, or a file of another kind. Nothing in it
+    depends on an agent or its harness.
   - `companions.openInProject({ sessionId, path, windowId })` opens a file the person
     picked in the session's project window, by a path absolute or from the project's
     folder, and answers the `item` and `window`. A session has one such window (`home` is
@@ -2079,7 +2165,7 @@ one from an earlier runner.
     same item at it, with a later `version` and the window named by it again. With no
     window yet, one is made under `windowId` with an item whose `from` is null.
     `NOT_FOUND` for an unknown session, `CONFLICT` for a taken `windowId`, or
-    `INVALID_FILE` saying why. No agent's show lands in it, and closing it deletes it.
+    `INVALID_FILE` saying why (a folder opens through `attach`, not here). No agent's show lands in it, and closing it deletes it.
   - `companions.move({ itemId, terminalId })` moves an item onto a bar of its session,
     from a bar or a window, which goes with it; an item that bar held under the same
     pointer is replaced. `NOT_FOUND`, `TERMINAL_NOT_FOUND`, or `CONFLICT` for another
@@ -2124,7 +2210,7 @@ one from an earlier runner.
   the plans its bar mirrored of the earlier one go; moved ones stay.
 
 - `settings.get()` and
-  `settings.set({ transcripts?, welcomed?, inboxOrder?, inboxSnoozed?, inboxHistory?, hibernateAfterMinutes?, worktrees? })`
+  `settings.set({ transcripts?, welcomed?, inboxOrder?, inboxSnoozed?, inboxHistory?, hibernateAfterMinutes?, worktrees?, agentModes?, agentMode? })`
   read and change whether transcripts are kept (unless turned off; turning them off forgets
   every saved transcript), whether the person has seen the first-run choice of agents, the
   Inbox rows that ask in the order the person dragged them into, and the rows they snoozed
@@ -2137,7 +2223,10 @@ one from an earlier runner.
   many idle minutes an agent is stopped to rest as a sleeper (30 by default, at most a week,
   `null` for never; see "Idle agents rest" in agent-messaging.md), and whether agents may
   open git worktrees through Novadeck's tools (off until the person turns it on, in
-  Preferences' Experimental tab). `get` also
+  Preferences' Experimental tab), whether Solo and Swarm may be picked (`agentModes`, off until
+  the person turns it on in the same tab; while off, agents work as a Herd whatever `agentMode`
+  holds, and the saved pick returns with the switch), and how agents work with each other,
+  `"herd"` until the person picks `"solo"` or `"swarm"` (see "Herd, Solo and Swarm" in agent-messaging.md). `get` also
   reports `transcriptsAvailable`: false once it is known there is no key to seal
   transcripts with, true when there is one and while it is still awaited (it waits about a
   second for it).
@@ -2170,7 +2259,7 @@ one from an earlier runner.
   refused (`Tour.openPolicy`, through the Terminals option `openPolicy`), so a teammate that
   follows the script anyway can't nest a team. `removed` names the projects it removed. A
   folder there that is no folder, or that holds files without the marker, is the person's and
-  is never emptied: `CONFLICT`, as are an agent Novadeck isn't connected to and a second run
+  is never emptied: `CONFLICT`, refused before any project is removed, as are an agent Novadeck isn't connected to and a second run
   while one is being readied. An agent whose cheapest model can't be told is `MODELS_UNLISTED`:
   Codex lists its models (its `models_cache.json`) only once it has started signed in. Neither
   changes anything. The client then opens the folder as a project and starts `command` in a

@@ -1,17 +1,23 @@
 import { createHash } from "node:crypto"
 import { constants, type Stats } from "node:fs"
 import { open, realpath, stat, type FileHandle } from "node:fs/promises"
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 
 import type { PlanSource } from "@novadeck/harness-core/events"
 import {
   companionLimits,
   isDataPath,
+  isHtmlPath,
+  isPageFile,
+  pageLimits,
   type AgentName,
   type ItemContent,
   type PlanSaveResult,
   type FilePart,
+  modelFormats,
+  modelLimits,
+  modelRefusal,
   partBytes,
   pdfLimits,
   videoLimits,
@@ -22,7 +28,7 @@ import { cut, tail } from "../text.js"
 import type { ItemRecord } from "./records.js"
 import { replaceFile, unwritable, type ReplaceWords } from "./replace.js"
 import { failure, type RequestFailure } from "./request.js"
-import { secret } from "./secrets.js"
+import { folderSecrets, linkHops, secret, secrets } from "./secrets.js"
 import { isMissing, stampOf } from "./stamps.js"
 
 // What is shown as an image, by extension: what Chromium decodes itself, as the desktop app
@@ -92,19 +98,21 @@ export const unavailable = (
 })
 
 /** Whether a file is shown as an image, by its extension. */
-const isImage = (path: string): boolean => images[extname(path).toLowerCase()] !== undefined
+export const isImage = (path: string): boolean => images[extname(path).toLowerCase()] !== undefined
 
 /** Whether a file is played as a video, by its extension. */
-const isVideo = (path: string): boolean => videos[extname(path).toLowerCase()] !== undefined
+export const isVideo = (path: string): boolean => videos[extname(path).toLowerCase()] !== undefined
 
 /** Whether a file is played as a recording, by its extension. */
-const isAudio = (path: string): boolean => recordings[extname(path).toLowerCase()] !== undefined
+export const isAudio = (path: string): boolean =>
+  recordings[extname(path).toLowerCase()] !== undefined
 
 /** Whether a file is previewed as a PDF, by its extension. */
-const isPdf = (path: string): boolean => extname(path).toLowerCase() === ".pdf"
+export const isPdf = (path: string): boolean => extname(path).toLowerCase() === ".pdf"
 
 // The formats a person names otherwise than by their extension: JPEG's other extensions are
-// JPEG, and JPEG XL is spelt out.
+// JPEG, JPEG XL is spelt out, and a glTF model is glTF in its text form or its binary one, as
+// its pane names it.
 const formatNames: { readonly [extension: string]: string } = {
   ".jpg": "JPEG",
   ".jpe": "JPEG",
@@ -112,6 +120,8 @@ const formatNames: { readonly [extension: string]: string } = {
   ".pjpeg": "JPEG",
   ".pjp": "JPEG",
   ".jxl": "JPEG XL",
+  ".gltf": "glTF",
+  ".glb": "glTF",
 }
 
 /** A file's format as a person names it, by its extension: "JPEG" for a.jfif, "PNG" for a.png. */
@@ -120,9 +130,18 @@ export const formatOf = (path: string): string => {
   return formatNames[extension] ?? extension.slice(1).toUpperCase()
 }
 
+/** A 3D model's format, by its file's extension; undefined for any other file. */
+const modelFormatOf = (path: string): (typeof modelFormats)[number] | undefined => {
+  const extension = extname(path).toLowerCase().slice(1)
+  return modelFormats.find((format) => format === extension)
+}
+
+/** Whether a file is a 3D model the pane draws, by its extension. */
+export const isModel = (path: string): boolean => modelFormatOf(path) !== undefined
+
 /**
  * How a file is shown, by its extension: as an image, played as a video or a recording,
- * drawn as a PDF, or read.
+ * drawn as a PDF or as a 3D model, or read.
  */
 const kindOf = (path: string): Pointed["kind"] =>
   isImage(path)
@@ -133,7 +152,37 @@ const kindOf = (path: string): Pointed["kind"] =>
         ? "audio"
         : isPdf(path)
           ? "pdf"
-          : "file"
+          : modelFormatOf(path)
+            ? "model"
+            : "file"
+
+/**
+ * Whether the start of a file holds a NUL byte, as a binary file does; undefined where it can't
+ * be read (gone, locked, no plain file).
+ */
+const startsBinary = async (path: string): Promise<boolean | undefined> => {
+  try {
+    const opened = await openPlain(path)
+    if ("state" in opened) return undefined
+    try {
+      const head = Buffer.alloc(sniffBytes)
+      const { bytesRead } = await opened.handle.read(head, 0, sniffBytes, 0)
+      return head.subarray(0, bytesRead).includes(0)
+    } finally {
+      await opened.handle.close().catch(() => {})
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether a file named as a Wavefront model (.obj) is a compiled object file instead, as MSVC's
+ * compiler writes: one starts with its machine's type, in binary, where a model is text. Only its
+ * start is read; undefined where it can't be, which tells nothing yet.
+ */
+export const isCompiledObject = async (path: string): Promise<boolean | undefined> =>
+  extname(path).toLowerCase() === ".obj" ? await startsBinary(path) : false
 
 /**
  * The lines of a file of `total` lines shown, from `first` to `last`, and the ones
@@ -160,14 +209,15 @@ export type Pointed = {
   readonly ok: true
   /** Its path, symlinks resolved. */
   readonly path: string
-  readonly kind: "image" | "video" | "audio" | "pdf" | "file"
+  readonly kind: "image" | "video" | "audio" | "pdf" | "model" | "file" | "folder"
   readonly size: number
   readonly secret: boolean
 }
 
 /**
- * A file a request points at, from the terminal's directory: anything but a missing
- * path, a folder, or a pipe or device. What it holds is read only as it loads. `env` is
+ * A file or a folder a request points at, from the terminal's directory: anything but a
+ * missing path, or a pipe or device. A folder that may hold secrets is refused: it is never
+ * listed. What it holds is read only as it loads. `env` is
  * the person's environment, which says where tools keep their logins (see `secret`).
  */
 export const pointAt = async (
@@ -175,18 +225,31 @@ export const pointAt = async (
   cwd: string,
   env?: NodeJS.ProcessEnv,
 ): Promise<Pointed | RequestFailure> => {
-  const path = await realpath(resolve(cwd, given)).catch(() => undefined)
+  // Judged by the name it was asked by, each name its links lead through, and where it leads: a
+  // `.env` that links to `config/dev.vars` is still a secret, as the folder listing holds it,
+  // and so is a `notes.txt` that links to that `.env`.
+  const asked = resolve(cwd, given)
+  const path = await realpath(asked).catch(() => undefined)
   if (!path) return failure("That file doesn't exist.")
   const stats = await stat(path).catch(() => undefined)
   if (!stats) return failure("That file doesn't exist.")
-  if (stats.isDirectory()) return failure("That's a folder; only files can be shown.")
-  if (!stats.isFile()) return failure("Only files can be shown, not a pipe or a device.")
+  const hops = await linkHops(asked)
+  if (stats.isDirectory()) {
+    const held = folderSecrets(env)
+    if (held(path) || hops.some(held))
+      return failure("That folder may hold secrets, so Novadeck won't list what is in it.")
+    return { ok: true, path, kind: "folder", size: 0, secret: false }
+  }
+  if (!stats.isFile())
+    return failure("Only files and folders can be shown, not a pipe or a device.")
+  const kind = kindOf(path)
   return {
     ok: true,
     path,
-    kind: kindOf(path),
+    // A compiled object file is an .obj too, which no model is.
+    kind: kind === "model" && (await isCompiledObject(path)) === true ? "file" : kind,
     size: stats.size,
-    secret: secret(path, env),
+    secret: [path, ...hops].some(secrets(env)),
   }
 }
 
@@ -613,6 +676,413 @@ export const loadPdf = async (
   }
 }
 
+// The most of a GLB's JSON chunk, or of a material library, that is read to find the files it
+// names; one larger names none.
+const maxNamingBytes = 16 * 1024 * 1024
+
+/** A file a model names, as it is read: its path, symlinks resolved, and its stamp. */
+export type ModelFile = { readonly path: string; readonly stamp: string }
+
+/** A 3D model as it loads, and the files it names, each by the name the model writes it as. */
+export type ModelLoad = {
+  readonly content: ItemContent
+  readonly files: ReadonlyMap<string, ModelFile>
+}
+
+/** The stamps of the files a model's read listed, as they are now, in order: none for one gone. */
+export const filesStamps = (files: ModelLoad["files"]): Promise<string[]> =>
+  Promise.all([...files.values()].map((file) => stat(file.path).then(stampOf, () => "")))
+
+/** The stamp a model's file is as now, or undefined when it can't be read. */
+export const modelStamp = async (item: Pick<ItemRecord, "path">): Promise<string | undefined> => {
+  if (item.path === null) return undefined
+  try {
+    const stats = await stat(await realpath(item.path))
+    return stats.isFile() ? stampOf(stats) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A 3D model, as it is now, symlinks resolved: its format and size, never its bytes, which
+ * `readPart` reads for the client to draw; and the files it names (see `discoverModel`). Its
+ * stamp is the model file's own. One that may hold secrets is `secret` unless `reveal`, and
+ * one past what the pane takes is `too-large`.
+ */
+export const loadModel = async (
+  item: Pick<ItemRecord, "path" | "secret">,
+  reveal: boolean,
+  env?: NodeJS.ProcessEnv,
+): Promise<ItemContent> => (await discoverModel(item, reveal, env)).content
+
+/**
+ * A part of a file beside a web page, by its name from the page's folder (`/` between names,
+ * as the page's own addresses give it, already decoded): the files a page draws with
+ * (`isPageFile`), from the page's folder or under it, `..` and symlinks out of it refused,
+ * never one that may hold secrets (whatever the person revealed). `path` is the file's real
+ * path once it is found, which the page's live stamp follows. Read against the stamp it has
+ * now, as the client has none to give: a page's assets are read whole and again when any
+ * changes, so no part of one is told changed.
+ */
+export const readPageFile = async (
+  page: Pick<ItemRecord, "path">,
+  name: string,
+  offset: number,
+  env?: NodeJS.ProcessEnv,
+): Promise<{ readonly part: FilePart; readonly path?: string }> => {
+  const gone = { part: { state: "unavailable", reason: "missing" } } as const
+  if (page.path === null || !isHtmlPath(page.path) || !isPageFile(name)) return gone
+  let folder: string
+  try {
+    folder = dirname(await realpath(page.path))
+  } catch {
+    return gone
+  }
+  const found = await beside(folder, "", name, false, env)
+  if ("refusal" in found) {
+    const { refusal } = found
+    return refusal === "secret" || refusal === "not-a-file" || refusal === "unreadable"
+      ? { part: { state: "unavailable", reason: refusal } }
+      : gone
+  }
+  const part = await readPart(
+    { path: found.path, secret: false },
+    { stamp: stampOf(found.stats), offset },
+    false,
+    pageLimits.file,
+    env,
+  )
+  return { part, path: found.path }
+}
+
+/** The stamps of the files a page drew with, as they are now, in order: none for one gone. */
+export const pageStamps = (paths: Iterable<string>): Promise<string[]> =>
+  Promise.all([...paths].map((path) => stat(path).then(stampOf, () => "")))
+
+/**
+ * A model and the files it names, each checked as the client will ask for it, by the name
+ * the model writes, which is its key. A `data:` name is embedded and left out. One with an
+ * address of its own is `external`; one that leaves the model's folder, by its path or by a
+ * symlink, is `outside`; then it is `missing`, `not-a-file` or `secret`, or `too-large` once
+ * the model and the files read so far pass `modelLimits.bytes`. A file beside a model is never
+ * revealed, whatever `reveal`. Past `modelLimits.files` names, the rest are left out. An
+ * OBJ's material libraries are read for the textures they name, from their own folder.
+ */
+export const discoverModel = async (
+  item: Pick<ItemRecord, "path" | "secret">,
+  reveal: boolean,
+  env?: NodeJS.ProcessEnv,
+): Promise<ModelLoad> => {
+  const model = await partsFile(item, reveal, modelLimits.bytes, env)
+  if ("state" in model) return { content: model, files: new Map() }
+  const { path, stats } = model
+  const format = modelFormatOf(path)
+  if (!format) return { content: unavailable("unreadable", stats.size), files: new Map() }
+  const folder = dirname(path)
+  const listed = new Map<string, ModelFile & { readonly size: number }>()
+  const refused = new Map<string, (typeof modelRefusal.options)[number]>()
+  const seen = new Set<string>()
+  let total = stats.size
+
+  // One name, as written, read from `from` under the model's folder; the file's real path
+  // once it is listed.
+  const take = async (name: string, from: string): Promise<string | undefined> => {
+    const key = from === "" || isExternal(name) ? name : `${from}/${name}`
+    if (/^data:/i.test(name) || seen.has(key) || seen.size >= modelLimits.files) return undefined
+    seen.add(key)
+    // A name past any path is none: told, cut short, as what the protocol takes.
+    if (key.length > companionLimits.path) {
+      refused.set(`${key.slice(0, companionLimits.path - 1)}…`, "unreadable")
+      return undefined
+    }
+    const found = await beside(folder, from, name, format === "gltf" || format === "glb", env)
+    if ("refusal" in found) {
+      refused.set(key, found.refusal)
+      return undefined
+    }
+    if (total + found.stats.size > modelLimits.bytes) {
+      refused.set(key, "too-large")
+      return undefined
+    }
+    total += found.stats.size
+    listed.set(key, { path: found.path, stamp: stampOf(found.stats), size: found.stats.size })
+    return found.path
+  }
+
+  try {
+    if (format === "gltf" || format === "glb") {
+      // eslint-disable-next-line no-await-in-loop -- Each file counts against what the last left.
+      for (const uri of await gltfUris(path, format)) await take(uri, "")
+    } else if (format === "obj") {
+      for (const library of await objLibraries(path)) {
+        // eslint-disable-next-line no-await-in-loop -- Each library's textures count against what the last left.
+        const real = await take(library, "")
+        if (real === undefined) continue
+        const from = dirname(library.replaceAll("\\", "/"))
+        // eslint-disable-next-line no-await-in-loop -- As above.
+        for (const texture of await mtlTextures(real)) await take(texture, from === "." ? "" : from)
+      }
+    }
+  } catch {
+    // What can't be read names nothing more.
+  }
+  return {
+    content: {
+      state: "ready",
+      stamp: stampOf(stats),
+      content: {
+        kind: "model",
+        format,
+        size: stats.size,
+        files: [...listed].map(([name, file]) => ({ name, size: file.size, stamp: file.stamp })),
+        refused: [...refused].map(([name, reason]) => ({ name, reason })),
+      },
+    },
+    files: new Map(
+      [...listed].map(([name, file]) => [name, { path: file.path, stamp: file.stamp }]),
+    ),
+  }
+}
+
+/** Whether a name has an address of its own: a scheme, a drive, or a root. */
+const isExternal = (name: string): boolean =>
+  /^[\\/]/.test(name) || /^[a-z][a-z0-9+.-]*:/i.test(name)
+
+/** Whether a path is inside a folder, or is it. */
+const within = (folder: string, path: string): boolean => {
+  const from = relative(folder, path)
+  return from !== ".." && !from.startsWith(`..${sep}`) && !isAbsolute(from)
+}
+
+/**
+ * The file a model names beside it: `name` from `from`, a folder under the model's `folder`,
+ * its path and stats, or why not (see `discoverModel`). A glTF's names are percent-encoded;
+ * an OBJ's and its materials' are as written.
+ */
+const beside = async (
+  folder: string,
+  from: string,
+  name: string,
+  encoded: boolean,
+  env: NodeJS.ProcessEnv | undefined,
+): Promise<
+  | { readonly path: string; readonly stats: Stats }
+  | { readonly refusal: (typeof modelRefusal.options)[number] }
+> => {
+  if (isExternal(name)) return { refusal: "external" }
+  let relativeName = name
+  if (encoded) {
+    try {
+      relativeName = decodeURIComponent(name)
+    } catch {
+      return { refusal: "missing" }
+    }
+  }
+  // Either slash leaves a folder on Windows, and a name is the same one on every system.
+  if (relativeName.includes("\0")) return { refusal: "missing" }
+  const target = resolve(folder, from, ...relativeName.split(/[\\/]/))
+  if (!within(folder, target)) return { refusal: "outside" }
+  let path: string
+  let stats: Stats
+  try {
+    path = await realpath(target)
+    if (!within(folder, path)) return { refusal: "outside" }
+    stats = await stat(path)
+  } catch (error) {
+    const reason = reasonOf(error)
+    return { refusal: reason === "missing" ? "missing" : "unreadable" }
+  }
+  if (!stats.isFile()) return { refusal: "not-a-file" }
+  if (secret(path, env) || secret(target, env)) return { refusal: "secret" }
+  return { path, stats }
+}
+
+/** The addresses a glTF's buffers and images name, in the order the file gives them. */
+// The `"uri"` strings of a glTF's text, found without parsing it: each value, but one that
+// holds its data itself (`data:`), which is passed over, or one past any path.
+const scanUris = (text: Buffer): string[] => {
+  const uris: string[] = []
+  let at = text.indexOf('"uri"')
+  while (at >= 0) {
+    const start = text.indexOf('"', text.indexOf(":", at + 5) + 1)
+    if (start < 0) break
+    const close = text.indexOf('"', start + 1)
+    if (close < 0) break
+    if (!text.subarray(start + 1, start + 6).equals(Buffer.from("data:")) && close - start <= 4096)
+      uris.push(JSON.parse(text.toString("utf8", start, close + 1)) as string)
+    at = text.indexOf('"uri"', close + 1)
+  }
+  return uris
+}
+
+const gltfUris = async (path: string, format: "gltf" | "glb"): Promise<string[]> => {
+  const opened = await openPlain(path)
+  if ("state" in opened) return []
+  const { handle, stats } = opened
+  try {
+    let json: Buffer
+    if (format === "gltf") {
+      json = Buffer.alloc(stats.size)
+      await readFully(handle, json, 0)
+      // One too large to parse at once, as a glTF holding its data in itself: its addresses
+      // found in its bytes, the data it holds skipped over.
+      if (stats.size > maxNamingBytes) return scanUris(json)
+    } else {
+      // A GLB's header, then its first chunk, which is the JSON. The length it gives is taken
+      // only as far as the file goes and a limit.
+      const head = Buffer.alloc(20)
+      if ((await readFully(handle, head, 0)) < 20) return []
+      if (head.readUInt32LE(0) !== 0x46546c67 || head.readUInt32LE(16) !== 0x4e4f534a) return []
+      json = Buffer.alloc(Math.min(head.readUInt32LE(12), stats.size - 20, maxNamingBytes))
+      json = json.subarray(0, await readFully(handle, json, 20))
+    }
+    const parsed: unknown = JSON.parse(json.toString("utf8"))
+    return ["buffers", "images"].flatMap((section) => {
+      const entries = (parsed as { [key: string]: unknown })[section]
+      return Array.isArray(entries)
+        ? entries.flatMap((entry: unknown) => {
+            const uri = (entry as { uri?: unknown } | null)?.uri
+            return typeof uri === "string" ? [uri] : []
+          })
+        : []
+    })
+  } catch {
+    return []
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+/** Reads from `position` until `buffer` is full or the file ends; how many bytes it got. */
+const readFully = async (handle: FileHandle, buffer: Buffer, position: number): Promise<number> => {
+  let read = 0
+  while (read < buffer.length) {
+    // eslint-disable-next-line no-await-in-loop -- One chunk after another.
+    const { bytesRead } = await handle.read(buffer, read, buffer.length - read, position + read)
+    if (bytesRead === 0) break
+    read += bytesRead
+  }
+  return read
+}
+
+/**
+ * The material libraries an OBJ names, as three.js's OBJLoader reads them: each `mtllib` line
+ * gives the rest of the line, trimmed, as one name. A line ends with `\` to go on in the next.
+ */
+const objLibraries = async (path: string): Promise<string[]> => {
+  const opened = await openPlain(path)
+  if ("state" in opened) return []
+  const { handle } = opened
+  const libraries: string[] = []
+  const decoder = new StringDecoder("utf8")
+  const chunk = Buffer.alloc(chunkBytes)
+  let line = ""
+  let position = 0
+  const finish = (): void => {
+    const text = line.trimStart()
+    if (text.startsWith("mtllib ")) libraries.push(text.slice(7).trim())
+    line = ""
+  }
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop -- One chunk after another.
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, position)
+      position += bytesRead
+      const text = bytesRead === 0 ? decoder.end() : decoder.write(chunk.subarray(0, bytesRead))
+      const lines = text.split("\n")
+      for (const [index, part] of lines.entries()) {
+        line += part
+        if (index === lines.length - 1) break
+        // Carriage returns end no line, as the loader reads them out first.
+        if (line.endsWith("\r")) line = line.slice(0, -1)
+        if (line.endsWith("\\")) line = line.slice(0, -1)
+        else finish()
+      }
+      if (bytesRead === 0) break
+    }
+    finish()
+  } finally {
+    await handle.close().catch(() => {})
+  }
+  return libraries
+}
+
+// The texture lines of a material library, by the kind of map each sets in three.js's
+// MTLLoader: a material takes the first of a kind in the order its lines first name them.
+const textureKinds: { readonly [line: string]: string } = {
+  map_kd: "map",
+  map_ks: "specularMap",
+  map_ke: "emissiveMap",
+  norm: "normalMap",
+  map_bump: "bumpMap",
+  bump: "bumpMap",
+  disp: "displacementMap",
+  map_d: "alphaMap",
+}
+
+/**
+ * The texture names a material library gives, as three.js 0.187's MTLLoader asks for them: a
+ * line's key is lower case and its value the rest of it, trimmed; a repeated key in a
+ * material keeps its last value; a material of the same name replaces the one before; and a
+ * texture's options (`-bm`, `-mm`, `-s`, `-o`, with the counts of values the loader takes)
+ * come out of its value, which is joined again as its name.
+ */
+const mtlTextures = async (path: string): Promise<string[]> => {
+  const opened = await openPlain(path)
+  if ("state" in opened) return []
+  const { handle, stats } = opened
+  try {
+    if (stats.size > maxNamingBytes) return []
+    const buffer = Buffer.alloc(stats.size)
+    const read = await readFully(handle, buffer, 0)
+    const materials = new Map<string, Map<string, string>>()
+    let info = new Map<string, string>()
+    for (const raw of buffer.subarray(0, read).toString("utf8").split("\n")) {
+      const line = raw.trim()
+      if (line.length === 0 || line.startsWith("#")) continue
+      const space = line.indexOf(" ")
+      const key = (space >= 0 ? line.slice(0, space) : line).toLowerCase()
+      const value = space >= 0 ? line.slice(space + 1).trim() : ""
+      if (key === "newmtl") {
+        info = new Map()
+        materials.set(value, info)
+      } else {
+        info.set(key, value)
+      }
+    }
+    const names: string[] = []
+    for (const material of materials.values()) {
+      const kinds = new Set<string>()
+      for (const [key, value] of material) {
+        const kind = textureKinds[key]
+        if (kind === undefined || value === "" || kinds.has(kind)) continue
+        kinds.add(kind)
+        const name = textureName(value)
+        if (name !== "") names.push(name)
+      }
+    }
+    return names
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+/** A texture line's name, as MTLLoader's `getTextureParams` leaves it. */
+const textureName = (value: string): string => {
+  const items = value.split(/\s+/)
+  for (const [option, count] of [
+    ["-bm", 2],
+    ["-mm", 3],
+    ["-s", 4],
+    ["-o", 4],
+  ] as const) {
+    const at = items.indexOf(option)
+    if (at >= 0) items.splice(at, count)
+  }
+  return items.join(" ").trim()
+}
+
 /**
  * The file of an item read in parts, symlinks resolved, with its stats; or why it can't be
  * read: not there, no plain file, held as `secret` unless `reveal`, or past `largest` bytes.
@@ -643,6 +1113,7 @@ export const partsOf: { readonly [kind in ItemRecord["kind"]]?: number } = {
   video: videoLimits.bytes,
   audio: videoLimits.bytes,
   pdf: pdfLimits.bytes,
+  model: modelLimits.bytes,
 }
 
 /**
@@ -657,6 +1128,8 @@ export const readPart = async (
   reveal: boolean,
   largest: number,
   env?: NodeJS.ProcessEnv,
+  // Whether the file opened is still the one asked for, where the caller must know.
+  same?: (opened: Stats) => Promise<boolean>,
 ): Promise<FilePart> => {
   if (item.path === null) return { state: "unavailable", reason: "missing" }
   let path: string
@@ -673,6 +1146,7 @@ export const readPart = async (
   try {
     if ((item.secret || secret(path, env)) && !reveal)
       return { state: "unavailable", reason: "secret" }
+    if (same && !(await same(stats))) return { state: "unavailable", reason: "missing" }
     if (stats.size > largest) return { state: "unavailable", reason: "too-large" }
     if (stampOf(stats) !== part.stamp) return { state: "changed" }
     const length = Math.max(0, Math.min(partBytes, stats.size - part.offset))

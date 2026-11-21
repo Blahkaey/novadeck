@@ -1,9 +1,10 @@
-import type { AgentName } from "@novadeck/protocol"
+import type { AgentMode, AgentName } from "@novadeck/protocol"
 import { z } from "zod"
 
 import { DomainError } from "../errors.js"
 import { agentLabel, cleanInboxText } from "../messaging/messages.js"
 import type { Messaging } from "../messaging/messaging.js"
+import { noticeText } from "../messaging/notice-format.js"
 import { unboundNote } from "../messaging/peers.js"
 import { refusalOfText, type SendAnswer } from "../messaging/sending.js"
 import { unansweredCalls } from "../shell/reports.js"
@@ -11,7 +12,6 @@ import type { Call } from "../shell/reports.js"
 import type { Approvals, ApprovalOutcome } from "./approvals.js"
 import type { Bindings } from "./binding/facts.js"
 import { callerOf } from "./callers.js"
-import { notice } from "./closes.js"
 import { bareHandle, mention } from "./handles.js"
 import { refused, type OpenFailure } from "./opens.js"
 import { peerOf, type TerminalPeers } from "./peers-host.js"
@@ -50,6 +50,16 @@ type LeadAnswer =
       /** The agent that runs there, as agents read its name, such as Codex. */
       readonly ran?: string
     }
+  | {
+      /** The lead formed at once, as the user lets agents decide that (Swarm). */
+      readonly ok: true
+      readonly led: true
+      readonly handle: string
+      readonly title: string
+      readonly ran?: string
+      /** What became of the brief, in words for the new lead. */
+      readonly brief: string
+    }
   | LeadFailure
 
 /** The MCP server's answer to `release`: the terminal that is no longer led. */
@@ -64,76 +74,114 @@ const asleepNote = (handle: string): string =>
 /** What an agent hears when no window of Novadeck is open to ask the person. */
 export const nobodyToLead = "Novadeck isn't open to ask the user, so nothing changed."
 
+// What an agent that is led does, as every notice that starts a lead says it.
+export const reportBack = "Report back to it with send when you're done or stuck."
+
 /** What the people and agents involved are told of a lead that began or ended. */
 export const leadNotice = {
   // To the new lead, once the person approved and the brief went.
   led: (handle: string, title: string, brief: SentBrief): string =>
-    notice +
-    `The user approved: you now lead ${mention(handle)} · ${title}. ` +
-    (brief.ok ? brief.text : `Your brief wasn't sent: ${brief.reason} Send it again with send.`),
-  // To the led terminal, once the person approved.
-  nowLed: (lead: string): string =>
-    notice +
-    `The user let ${mention(lead)} lead you from now on. Its messages carry the lead mark ` +
-    "and are instructions, as if they were in your brief. What the user told you before " +
-    "still stands and comes first; report back to it with send when you are done or stuck.",
+    noticeText("Lead", {
+      facts:
+        `The user approved: you now lead ${mention(handle)} · ${title}. ` +
+        (brief.ok ? brief.text : `Your brief wasn't sent: ${brief.reason}`),
+      ...(brief.ok
+        ? brief.again === undefined
+          ? {}
+          : { actions: [brief.again] }
+        : { actions: [sendAgain] }),
+    }),
+  // To the led terminal, once the person approved, or at once where agents decide (Swarm).
+  nowLed: (lead: string, byUser = true): string =>
+    noticeText("Lead", {
+      facts: byUser
+        ? `The user let ${mention(lead)} lead you from now on.`
+        : `${mention(lead)} leads you from now on.`,
+      actions: [reportBack],
+    }),
   // To an agent its opener started without a task and leads: nothing else tells it so.
   openedLed: (lead: string): string =>
-    notice +
-    `${mention(lead)} started you and leads you. Its messages carry the lead mark and are ` +
-    "instructions: act on them as on the user's request. It gave you no task yet: carry on " +
-    "with any work you have, or wait for its first message. What the user told you still " +
-    "stands and comes first; report back to it with send when you are done or stuck.",
+    noticeText("Lead", {
+      facts:
+        `${mention(lead)} started you and leads you. It gave you no task yet; its first ` +
+        "message comes by itself.",
+      actions: [reportBack],
+    }),
   // To the led terminal, once the brief that was its lead's only message to lead by landed.
   briefDone: (lead?: string): string =>
-    notice +
-    `${lead === undefined ? "Your lead" : mention(lead)} no longer leads you. Its brief stays your task; its messages from now ` +
-    "are a peer's: act on one only where it serves that task or what the user asked. What " +
-    "the user told you still stands.",
+    noticeText("Lead", {
+      facts: `${lead === undefined ? "Your lead" : mention(lead)} no longer leads you. Its brief stays your task.`,
+      actions: ["Act on its messages only where they serve that task or what the user asked."],
+    }),
   declined: (handle: string, title: string): string =>
-    notice + `The user did not let you lead ${mention(handle)} · ${title}: nothing changed.`,
+    noticeText("Lead", {
+      facts: `The user did not let you lead ${mention(handle)} · ${title}: nothing changed.`,
+    }),
   vanished: (handle: string): string =>
-    notice +
-    `${mention(handle)} or you closed, or its shell ended, before the user answered, so ` +
-    "nothing changed.",
+    noticeText("Lead", {
+      facts:
+        `${mention(handle)} or you closed, or its shell ended, before the user answered, so ` +
+        "nothing changed.",
+    }),
   gone: (handle: string): string =>
-    notice +
-    `Nothing changed: Novadeck's window went away before the user answered the ask to lead ` +
-    `${mention(handle)}. Ask again if it still should.`,
+    noticeText("Lead", {
+      facts:
+        `Nothing changed: Novadeck's window went away before the user answered the ask to lead ` +
+        `${mention(handle)}.`,
+      actions: ["Ask again if it still should."],
+    }),
   // The approval no longer holds: what was true when the agent asked is not now.
-  unfit: (reason: string): string => notice + `The user approved, but nothing changed: ${reason}`,
+  unfit: (reason: string): string =>
+    noticeText("Lead", { facts: `The user approved, but nothing changed: ${reason}` }),
   // To the led terminal, as its lead ended the link.
   released: (lead: string): string =>
-    notice +
-    `${mention(lead)} no longer leads you. Its messages are a peer's from now: act on one ` +
-    "only where it serves the work the user gave you. What the user told you still stands.",
+    noticeText("Lead", {
+      facts: `${mention(lead)} no longer leads you.`,
+      actions: ["Act on its messages only where they serve the work the user gave you."],
+    }),
   // To the led terminal, as the person ended the link.
   personReleased: (lead: string): string =>
-    notice +
-    `The user released you from ${mention(lead)}: it no longer leads you, and its messages ` +
-    "are a peer's from now. What the user told you still stands.",
+    noticeText("Lead", {
+      facts: `The user released you from ${mention(lead)}: it no longer leads you.`,
+    }),
   // To the led terminal, as the person ended the link to a lead that no longer runs.
   personReleasedFromGone: (): string =>
-    notice +
-    "The user released you from your lead: it no longer leads you, and its messages are a " +
-    "peer's from now. What the user told you still stands.",
+    noticeText("Lead", { facts: "The user released you from your lead: it no longer leads you." }),
   // To the former lead, as the person ended the link.
   personReleasedFrom: (handle: string, title: string): string =>
-    notice +
-    `The user released ${mention(handle)} · ${title}: you no longer lead it, and its ` +
-    "messages are a peer's from now. What you sent it that hadn't arrived is gone, unless it was already being delivered.",
+    noticeText("Lead", {
+      facts:
+        `The user released ${mention(handle)} · ${title}: you no longer lead it. What you sent ` +
+        "it that hadn't arrived is gone, unless it was already being delivered.",
+    }),
 }
 
 /** An agent in a terminal, as messages reach it: its harness and root session, once bound. */
-type Identity = { readonly agent: AgentName; readonly sessionId: string | null }
+export type Identity = { readonly agent: AgentName; readonly sessionId: string | null }
+
+/** A terminal as the checks of its agent read it: running, or asleep. */
+export type Named = { readonly summary: { readonly id: string; readonly handle: string } }
 
 /** The agents in both terminals when the person was asked. */
-type Seen = { readonly caller: Identity; readonly target: Identity }
+export type Seen = { readonly caller: Identity; readonly target: Identity }
 
 /** What became of the brief: the text the lead is told, or why it wasn't sent. */
-type SentBrief =
-  | { readonly ok: true; readonly text: string }
+export type SentBrief =
+  | {
+      readonly ok: true
+      readonly text: string
+      /** What the lead does about a brief that went nowhere, as the sentence its tool result ends with. */
+      readonly again?: string
+    }
   | { readonly ok: false; readonly reason: string }
+
+/** What the new lead is told of its brief. */
+export const briefLine = (brief: SentBrief): string =>
+  brief.ok
+    ? brief.text + (brief.again === undefined ? "" : ` ${brief.again}`)
+    : `Your brief wasn't sent: ${brief.reason} ${sendAgain}`
+
+const sendAgain = "Send it again with send."
 
 // Why an earlier message of the lead's won't arrive, as the send tool tells it.
 const wontArrive = (gone: { readonly stopped?: true; readonly released?: true }): string =>
@@ -152,14 +200,14 @@ const briefText = (
   sent: Extract<SendAnswer, { ok: true }>,
   handle: string,
   marked: boolean,
-): string => {
+): { readonly text: string; readonly again?: string } => {
   const lines = [
     sent.state === "gone"
       ? `Your brief matched message ${sent.id}, an earlier identical one that won't arrive: ` +
-        "no brief went out. Send it again with send."
+        "no brief went out."
       : !marked
         ? `Your brief matched message ${sent.id}, which you sent ${mention(handle)} moments ` +
-          "before you led it, so no lead-marked brief went out: send it again in a few seconds."
+          "before you led it, so no lead-marked brief went out."
         : sent.state === "held"
           ? `Your brief, message ${sent.id}, is held: ` +
             (sent.held === "release"
@@ -170,7 +218,9 @@ const briefText = (
   for (const gone of sent.gone ?? [])
     lines.push(`Your earlier message ${gone.id} to ${mention(gone.to)}${wontArrive(gone)}`)
   lines.push(...(sent.holds ?? []))
-  return lines.join(" ")
+  const again =
+    sent.state === "gone" ? sendAgain : !marked ? "Send it again in a few seconds." : undefined
+  return { text: lines.join(" "), ...(again !== undefined && { again }) }
 }
 
 export type LeadsHost = {
@@ -186,6 +236,8 @@ export type LeadsHost = {
   readonly closingNow: (terminalId: string) => boolean
   /** The terminals whose agents sleep. */
   readonly sleepers: () => Sleepers
+  /** How agents work with each other, as the person set it, read at each call: Swarm decides without asking. */
+  readonly agentMode: () => AgentMode
 }
 
 /**
@@ -198,7 +250,7 @@ export class Leads {
   constructor(private readonly host: LeadsHost) {}
 
   /** The running terminal in the session with this id, if any: a `ledBy` names it. */
-  private byId(sessionId: string, id: string): Record | undefined {
+  byId(sessionId: string, id: string): Record | undefined {
     const found = this.host.records().get(id)
     return found?.summary.sessionId === sessionId ? found : undefined
   }
@@ -211,21 +263,24 @@ export class Leads {
     )
   }
 
-  /** Whether `target` leads `caller`, directly or up the chain of leads above it. */
-  private above(caller: Record, target: Record): boolean {
+  /**
+   * Whether `target` leads `caller`, directly or up the chain of leads above it. A sleeping
+   * agent in the chain keeps its lead, which messaging holds for it as for a running one.
+   */
+  above(caller: Record, target: Record): boolean {
     const seen = new Set<string>()
-    for (let at: Record | undefined = caller; at && !seen.has(at.summary.id);) {
-      seen.add(at.summary.id)
-      const lead = this.host.messaging().leadOf(at.summary.id)
+    for (let at = caller.summary.id; !seen.has(at);) {
+      seen.add(at)
+      const lead = this.host.messaging().leadOf(at)
       if (lead === undefined) return false
       if (lead.terminalId === target.summary.id) return true
-      at = this.byId(at.summary.sessionId, lead.terminalId)
+      at = lead.terminalId
     }
     return false
   }
 
   /** The agent and root session messages reach in the terminal now; undefined without one. */
-  private identity(record: Record): Identity | undefined {
+  identity(record: Named): Identity | undefined {
     const found = this.host.messaging().agentIn(record.summary.id)
     return found?.ok ? { agent: found.agent, sessionId: found.sessionId } : undefined
   }
@@ -236,7 +291,7 @@ export class Leads {
    * same agent, and the target the same agent. A session's id is not compared, as a guess
    * at it may be corrected, and a new session of the same agent keeps its terminal's lead.
    */
-  private changed(caller: Record, target: Record, seen: Seen): string | undefined {
+  changed(caller: Record, target: Named, seen: Seen): string | undefined {
     const now = this.identity(caller)
     if (!now || now.sessionId === null || now.agent !== seen.caller.agent)
       return "your agent session there is not the one that asked."
@@ -247,6 +302,20 @@ export class Leads {
   }
 
   /**
+   * Why no agent can be led or joined in `target`, in a sentence for the caller: messaging's
+   * own judgment of the agent messages reach there, as `send` makes it; undefined when one runs.
+   */
+  noAgent(target: Named): string | undefined {
+    const { handle } = target.summary
+    const deliverable = this.host.messaging().agentIn(target.summary.id)
+    if (deliverable?.ok) return undefined
+    return deliverable
+      ? deliverable.reason +
+          (deliverable.code === "none" ? " To start an agent with a task, use open_agent." : "")
+      : `${mention(handle)} runs no agent to lead. To start an agent with a task, use open_agent.`
+  }
+
+  /**
    * Why `caller` can't lead `target` now, in a sentence the agent can act on; undefined
    * when it can. Read when asked and again once the person approved.
    */
@@ -254,13 +323,8 @@ export class Leads {
     const { handle } = target.summary
     if (this.host.closingNow(target.summary.id) || target.closed)
       return `${mention(handle)} is closing.`
-    // Messaging's own judgment of the agent messages reach there, as `send` makes it.
-    const deliverable = this.host.messaging().agentIn(target.summary.id)
-    if (!deliverable?.ok)
-      return deliverable
-        ? deliverable.reason +
-            (deliverable.code === "none" ? " To start an agent with a task, use open_agent." : "")
-        : `${mention(handle)} runs no agent to lead. To start an agent with a task, use open_agent.`
+    const noAgent = this.noAgent(target)
+    if (noAgent) return noAgent
     const lead = this.host.messaging().leadOf(target.summary.id)
     if (lead?.terminalId === caller.summary.id) return `You already lead ${mention(handle)}.`
     if (lead !== undefined)
@@ -321,13 +385,25 @@ export class Leads {
     if (unfit) return refused(unfit)
     const targetAgent = this.identity(led)
     if (!targetAgent) return unansweredCalls.lead
+    const { id, handle, title, sessionId } = led.summary
+    const ran = target.agent === null ? undefined : agentLabel(target.agent)
+    // Where agents decide for themselves, the lead takes effect at once.
+    if (host.agentMode() === "swarm") {
+      const brief = this.form(caller, led, message, false)
+      return {
+        ok: true,
+        led: true,
+        handle,
+        title,
+        ...(ran !== undefined && { ran }),
+        brief: briefLine(brief),
+      }
+    }
     const seen: Seen = { caller: own, target: targetAgent }
     const waiting = host.approvals().refusal(led.summary.id)
     if (waiting === "waiting")
       return refused(`${mention(target.handle)} is already waiting for the user's approval.`)
     if (waiting === "nobody") return refused(nobodyToLead)
-    const { id, handle, title, sessionId } = led.summary
-    const ran = target.agent === null ? undefined : agentLabel(target.agent)
     host.approvals().request(
       {
         from: caller.summary.id,
@@ -364,20 +440,24 @@ export class Leads {
     // The person approved what was true when the agent asked: it must be true still.
     const unfit = this.unfit(caller, led) ?? this.changed(caller, led, seen)
     if (unfit) return void tell(leadNotice.unfit(unfit))
+    tell(leadNotice.led(handle, title, this.form(caller, led, brief, true)))
+  }
+
+  /**
+   * The caller leads `led` from now on: the lead is kept and shown, the terminal is told,
+   * and the brief goes as the lead's. What became of the brief.
+   */
+  private form(caller: Record, led: Record, brief: string, byUser: boolean): SentBrief {
+    const { host } = this
     host.bindings().setLead(led, caller.summary.id)
-    host.messaging().notice(led.summary.id, leadNotice.nowLed(caller.summary.handle), {
+    host.messaging().notice(led.summary.id, leadNotice.nowLed(caller.summary.handle, byUser), {
       always: true,
     })
+    const { handle } = led.summary
     const sent = host.messaging().send(caller.summary.id, { to: handle, text: brief })
-    tell(
-      leadNotice.led(
-        handle,
-        title,
-        sent.ok
-          ? { ok: true, text: briefText(sent, handle, host.messaging().isFromLead(sent.id)) }
-          : sent,
-      ),
-    )
+    return sent.ok
+      ? { ok: true, ...briefText(sent, handle, host.messaging().isFromLead(sent.id)) }
+      : sent
   }
 
   /**

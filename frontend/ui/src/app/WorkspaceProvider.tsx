@@ -40,6 +40,7 @@ import {
   notesShown,
   reportsWorks,
 } from "./routing"
+import { watchScale } from "./scale"
 import { currentContext } from "./selectors"
 import {
   createUiStore,
@@ -60,6 +61,7 @@ import {
   type UiLocation,
 } from "./ui-store"
 import { watchUnreadTurns } from "./unread-turns"
+import { watchWindowControls } from "./window-controls"
 
 const now = (): number => Date.now()
 
@@ -89,7 +91,10 @@ const createServices = (
   // The store only reports later commits; give the backend the starting terminals now.
   backend.commit(initial, [])
   // Terminals mount in layout effects, before any effect of the app's could tell the font.
-  backend.setFont({ size: preferences.fontSize })
+  backend.setFont({
+    size: preferences.fontSize,
+    ...(preferences.fontFamily && { family: preferences.fontFamily }),
+  })
   const ui = createUiStore(
     initialUi({
       location: { route, dialogDepth: dialogDepthOf(location.state), navigationType },
@@ -172,6 +177,7 @@ export const WorkspaceProvider = ({
   }, [services])
   useEffect(() => persistUi(services.ui, services.workspace), [services])
   useEffect(() => watchAppearance(services.ui, window, services.backend.showAppearance), [services])
+  useEffect(() => watchScale(services.ui, services.backend.showScale), [services])
   useEffect(
     () => followSavedPreferences(services.ui, window, services.commands.updatePreferences),
     [services],
@@ -207,6 +213,10 @@ export const WorkspaceProvider = ({
   }, [services])
   useEffect(() => watchChat(services.chat, services.workspace), [services])
   useEffect(() => watchPageFocus(services.ui, window, services.backend.windowFocus), [services])
+  useEffect(
+    () => watchWindowControls(services.ui, window, services.backend.windowControls),
+    [services],
+  )
   useEffect(
     () => watchActiveTerminal(services.workspace, services.ui, services.backend.activeTerminal),
     [services],

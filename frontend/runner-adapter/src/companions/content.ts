@@ -11,6 +11,7 @@ import type { CompanionWindowMeta, WorkspaceTarget } from "@novadeck/core/types"
 import {
   companionLimits,
   fitsRunner,
+  folderMatchLimits,
   harnesses,
   lookLimits,
   planUnwritable,
@@ -128,17 +129,30 @@ export const troubleOf = (trouble: PageTrouble): RunnerTrouble => {
 export const createRunnerCompanions = (
   runner: Pick<
     Runner["companions"],
-    "content" | "changeFile" | "changeRead" | "openInProject" | "save" | "pageTrouble" | "part"
+    | "content"
+    | "changeFile"
+    | "changeRange"
+    | "changeRead"
+    | "openInProject"
+    | "save"
+    | "pageTrouble"
+    | "part"
+    | "attach"
+    | "folders"
+    | "wroteTo"
+    | "repoint"
   >,
   {
     livePages = false,
     picture,
     phone,
+    zoom,
     inOrder = (_target, operation) => operation(),
   }: {
     readonly livePages?: boolean
     readonly picture?: Companions["picture"]
     readonly phone?: Companions["phone"]
+    readonly zoom?: Companions["zoom"]
     // Runs a call behind the person's earlier changes to the session's items; direct by
     // default.
     readonly inOrder?: <T>(target: WorkspaceTarget, operation: () => Promise<T>) => Promise<T>
@@ -146,13 +160,15 @@ export const createRunnerCompanions = (
 ): Companions => ({
   ...(livePages && picture ? { picture } : {}),
   ...(livePages && phone ? { phone } : {}),
-  follow: (_target, itemId, { reveal, edit }, on) => {
+  ...(livePages && zoom ? { zoom } : {}),
+  follow: (_target, itemId, { reveal, edit, within }, on) => {
     let stream: ReturnType<typeof runner.content> | undefined
     let stopped = false
     try {
       stream = runner.content(itemId, {
         ...(reveal !== undefined && { reveal }),
         ...(edit && { edit }),
+        ...(within !== undefined && within !== "" && { within }),
       })
     } catch {
       return () => {}
@@ -174,9 +190,17 @@ export const createRunnerCompanions = (
     }
   },
   changeFile: (_target, itemId, path, layers) => runner.changeFile({ itemId, path, layers }),
+  changeRange: (_target, itemId, layers) => runner.changeRange({ itemId, layers }),
   changeRead: (_target, itemId, path) => runner.changeRead({ itemId, path }),
-  part: async (_target, itemId, { stamp, offset, reveal }) => {
-    const part = await runner.part({ itemId, stamp, offset, ...(reveal && { reveal }) })
+  part: async (_target, itemId, { stamp, offset, reveal, file, path }) => {
+    const part = await runner.part({
+      itemId,
+      stamp,
+      offset,
+      ...(reveal && { reveal }),
+      ...(file !== undefined && { file }),
+      ...(path !== undefined && { path }),
+    })
     return part.state === "part" ? { state: "part", bytes: decode(part.data) } : part
   },
   save: async (_target, itemId, text, basedOn, path) => {
@@ -210,6 +234,19 @@ export const createRunnerCompanions = (
       )
       .catch(() => {})
   },
+  attach: async (_target, terminalId, path) => itemOf(await runner.attach({ terminalId, path })),
+  folders: async (_target, terminalId, path) =>
+    (await runner.folders({ terminalId, path })).map((match) => ({
+      ...match,
+      more: match.count >= folderMatchLimits.counted,
+    })),
+  wroteTo: async (_target, terminalId) =>
+    (await runner.wroteTo({ terminalId })).map(({ agent, ...folder }) => ({
+      ...folder,
+      harness: displayNames[agent],
+    })),
+  repoint: async (target, itemId, path) =>
+    itemOf(await inOrder(target, () => runner.repoint({ itemId, path }))),
   openInProject: async (target, path, windowId) => {
     const { item, window } = await inOrder(target, () =>
       runner.openInProject({ sessionId: target.workspaceSessionId, path, windowId }),

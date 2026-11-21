@@ -9,6 +9,16 @@ import type { NoticeSound } from "./sounds.js"
  */
 export const runnerPortMessage = "novadeck:runner-port"
 
+/**
+ * The edge of the page's top a window's own controls sit over, where the page's header stands
+ * in for its title bar: `start` (left), as macOS's buttons, or `end` (right), as Windows' are.
+ */
+export type WindowControlsSide = "start" | "end"
+
+/** Whether `value` is a `WindowControlsSide`. */
+export const isWindowControlsSide = (value: unknown): value is WindowControlsSide =>
+  value === "start" || value === "end"
+
 export type DesktopBridge = {
   requestRunner(id: string): void
   /** Asks the person to choose a folder; resolves its absolute path, or null when cancelled. */
@@ -22,14 +32,23 @@ export type DesktopBridge = {
   beforeQuit(save: () => Promise<void>): () => void
   /**
    * Tells the window how the page looks: the scheme for native menus, title bars and the
-   * page's `prefers-color-scheme` (`system` while the page follows the system), and the
-   * ground as `#rrggbb`, which the window shows before the page paints. The app
-   * ignores anything else.
+   * page's `prefers-color-scheme` (`system` while the page follows the system), the
+   * ground as `#rrggbb`, which the window shows before the page paints, and the header's
+   * ink as `#rrggbb`, which the window's own controls draw in where they sit over the page
+   * (Windows' caption buttons). The app ignores anything else, and an ink that isn't one.
    */
   showAppearance(appearance: {
     readonly scheme: "system" | "light" | "dark"
     readonly ground: string
+    readonly ink?: string
   }): void
+  /**
+   * Scales every window of the app, as a fraction of its normal size, 0.8 to 2: its page, its
+   * terminals and its dialogs, so the person's own choice of how large the app is. The app
+   * clamps what it is given, and keeps it for the next launch. Absent from apps that came
+   * before it.
+   */
+  showScale?(scale: number): void
   /**
    * The path on this machine of a file the person pasted, such as one copied
    * in a file manager, or "" for one that is no file there, as a copied image's bytes.
@@ -77,6 +96,34 @@ export type DesktopBridge = {
    * stops listening. Absent from apps that came before it.
    */
   onWindowFocus?(listener: (focused: boolean) => void): () => void
+  /**
+   * Calls `listener` with whether a screen reader or other assistive technology is running,
+   * as the system tells Chromium: at once with the current state, and again on each change.
+   * Returns a function that stops listening. Absent from apps that came before it.
+   */
+  onScreenReader?(listener: (running: boolean) => void): () => void
+  /**
+   * The edge of the page's top the window's own controls sit over, where the page's header
+   * stands in for the window's title bar: `start` for macOS's close, minimise and zoom buttons
+   * at the top left, `end` for Windows' caption buttons at the top right, which run from the
+   * window's top and can't hide. Present exactly where `onWindowControls` is.
+   */
+  windowControlsSide?: WindowControlsSide
+  /**
+   * Calls `listener` with the room the window's own controls take over the page's top, as CSS
+   * pixels from its edge on `windowControlsSide`: at once, and again on each change. 0 while
+   * they don't show there, as in full screen or hidden by `placeWindowControls`. Returns a
+   * function that stops listening. Absent where the window draws its own title bar above the
+   * page, as on Linux, and from apps that came before it.
+   */
+  onWindowControls?(listener: (inset: number) => void): () => void
+  /**
+   * Centres the window's own controls on a line `middle` CSS pixels below the page's top, as
+   * the middle of its header, or hides them (null; at the `end`, which can't hide, they go to
+   * the header's middle). At the `end` they run from the page's top, twice `middle` high. The
+   * app drops anything else. Present exactly where `onWindowControls` is.
+   */
+  placeWindowControls?(middle: number | null): void
   /**
    * Calls `listener` with the terminal id of each notice the person clicks, once the app
    * has brought its window to the front. Returns a function that stops listening. Absent
@@ -273,6 +320,12 @@ export type DesktopBridge = {
    * page view of the asking page, and when it can't. Absent from apps that came before it.
    */
   pagePhone?(page: number, phone: boolean): Promise<boolean>
+  /**
+   * Zooms a live page's view, by its view's `getWebContentsId()`, by `factor` (0 to 1) of the
+   * app's own zoom, as its viewer zooms it out to fit. False for anything but a page view of
+   * the asking page. Absent from apps that came before it.
+   */
+  pageZoom?(page: number, factor: number): Promise<boolean>
 }
 
 /** What `DesktopBridge.lookAtPage` answers: a look at a page, or why there is none. */

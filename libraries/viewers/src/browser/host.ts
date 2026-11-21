@@ -426,6 +426,65 @@ export const guardPage = (
   })
 }
 
+/**
+ * Keeps a page view's zoom its own, through every navigation: its viewer zooms its page out
+ * to fit (see `framingOf`), and Chromium would otherwise give that zoom to every view and
+ * window on the same host, as two panes of two ports of `localhost`, and take it back as the
+ * view goes to another host. Only a page view, a <webview> on the pages' session `pages`:
+ * the app's own page and windows, and a page's sign-in windows, zoom as they always have.
+ * From `web-contents-created`, before its viewer can zoom it.
+ */
+export const ownZoom = (contents: WebContents, pages: Session): void => {
+  if (contents.getType() === "webview" && contents.session === pages)
+    contents.setZoomMode("isolated")
+}
+
+/**
+ * Zooms the page view `id` of `app`, the app's page that asks, by `factor` of the app's
+ * own zoom, as its viewer has it zoomed out to fit, or in on a phone (see `framingOf`): a
+ * view's zoom is its own (`ownZoom`), so the app's, as the person zooms it, reaches it only
+ * so. False for anything but a page view of `app`, or a factor no zoom is: Chromium zooms a
+ * page no further than `maxPageZoom` times.
+ */
+export const maxPageZoom = 5
+
+export const zoomPage = (
+  app: WebContents,
+  id: unknown,
+  factor: unknown,
+  fromId: (id: number) => WebContents | undefined,
+): boolean => {
+  const page = pageViewOf(app, id, fromId)
+  if (!page || typeof factor !== "number" || !(factor > 0 && factor <= maxPageZoom)) return false
+  page.setZoomFactor(factor * app.getZoomFactor())
+  zoomed.set(page, factor)
+  return true
+}
+
+// The factor each page view was last zoomed by (see `zoomPage`), of the app's own zoom.
+const zoomed = new WeakMap<WebContents, number>()
+
+/**
+ * Zooms again the page views of `app` among `all` (Electron's `webContents.getAllWebContents()`)
+ * by the factor their viewers last asked, of the app's zoom as it is now. Electron copies the
+ * app's zoom into every view it hosts whenever it changes, whatever the view's own zoom, so a
+ * change of the app's, as Preferences' scale, takes each view's from it until its viewer asks
+ * again, which a view whose box keeps its CSS size, as a Canvas node, never does. One view's
+ * zoom set right after the app's holds.
+ */
+export const rezoomPages = (app: WebContents, all: readonly WebContents[]): void => {
+  for (const page of all) {
+    const factor = zoomed.get(page)
+    if (
+      factor !== undefined &&
+      !page.isDestroyed() &&
+      page.getType() === "webview" &&
+      page.hostWebContents === app
+    )
+      page.setZoomFactor(factor * app.getZoomFactor())
+  }
+}
+
 // How a picture of a page is encoded: JPEG, which a page's text survives at this quality.
 export const pictureQuality = 85
 // How long a picture may take: one of a view out of sight never comes, as Chromium draws it
@@ -590,10 +649,18 @@ export const maxForwardedRequests = 100
 /** How many origins of one page view have a count of their own per navigation; those past it share one. */
 export const maxRequestOrigins = 32
 
+/** The kinds of request that load a document, the page's own or a frame's. */
+const documents: ReadonlySet<string> = new Set(["mainFrame", "subFrame"])
+
 /**
  * Tells of each request of the pages' session that fails, with the page view it is for: an
  * HTTP error answer (4xx, 5xx), or none at all (status 0), but not one cancelled, as by a
- * page that aborts its own fetch or goes elsewhere (`net::ERR_ABORTED`). The page's own
+ * page that aborts its own fetch or goes elsewhere (`net::ERR_ABORTED`), nor a part of a
+ * page that misses Chromium's cache (`net::ERR_CACHE_MISS`): Chromium looks for a web font
+ * there first and, on a miss, fetches it again from the server, so the miss is no failure,
+ * and a page that asks only its cache meant to go without. A document that misses it, the
+ * page's own or a frame's, as one gone back to after a form, didn't load, and is told:
+ * nothing else tells of a frame's failed load. The page's own
  * performance entries can't say as much: their buffer fills, and an abort reads as no
  * answer. Electron keeps one listener per request event for a session, so nothing else
  * may use these two on it. A page view that fails requests without end, as one polling a
@@ -650,7 +717,9 @@ export const watchPageRequests = (
   })
   pages.webRequest.onErrorOccurred((details) => {
     navigating(details)
-    if (details.error !== "net::ERR_ABORTED") tell(details, 0)
+    if (details.error === "net::ERR_ABORTED") return
+    if (details.error === "net::ERR_CACHE_MISS" && !documents.has(details.resourceType)) return
+    tell(details, 0)
   })
   // A page view gone, as each rest of a page drops one: its counts go with it.
   return { forget: (contentsId) => void told.delete(contentsId) }

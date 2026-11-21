@@ -65,6 +65,31 @@ describe("A change's pane", () => {
       .toHaveAttribute("title", "Click to see only this commit")
   })
 
+  it("takes a range of rows with Shift+click, from the row clicked last, selecting no text", async () => {
+    const pane = await openChange()
+
+    await layer(pane, /^Uncommitted/).click()
+    await expect
+      .element(layer(pane, /Test verifySession/))
+      .toHaveAttribute("title", "Click to see only this commit, Shift+click to see the range to it")
+    await userEvent.keyboard("{Shift>}")
+    await layer(pane, /Test verifySession/).click()
+    await userEvent.keyboard("{/Shift}")
+
+    await expect.element(layer(pane, /^Uncommitted/)).toHaveAttribute("aria-selected", "true")
+    await expect.element(layer(pane, /Test verifySession/)).toHaveAttribute("aria-selected", "true")
+    await expect
+      .element(layer(pane, /Check session expiry/))
+      .toHaveAttribute("aria-selected", "false")
+    await expect.element(pane.getByText(/· 2 of 3$/)).toBeVisible()
+    expect(window.getSelection()?.toString() ?? "").toBe("")
+
+    // A plain click inside the range keeps that row alone.
+    await layer(pane, /Test verifySession/).click()
+    await expect.element(layer(pane, /^Uncommitted/)).toHaveAttribute("aria-selected", "false")
+    await expect.element(pane.getByText(/· 7d02b4a$/)).toBeVisible()
+  })
+
   it("unfolds what a file changed, one file at a time, then opens it, steps and goes back", async () => {
     const pane = await openChange()
 
@@ -131,5 +156,31 @@ describe("A change's pane", () => {
 
     await pane.getByRole("button", { name: "Back to the files" }).click()
     await expect.element(pane.getByRole("listbox", { name: "Layers" })).toBeVisible()
+  })
+
+  it("opens a file from under what it changed, and from the arrow at its row's end", async () => {
+    const pane = await openChange()
+
+    await file(pane, "cookies.ts").click()
+    await pane.getByRole("button", { name: "Open diff" }).click()
+    await expect.element(pane.getByText("1 of 6")).toBeVisible()
+    await pane.getByRole("button", { name: "Back to the files" }).click()
+
+    // The arrow is the pointer's: it shows where the pointer is.
+    const row = file(pane, "routes.ts")
+    await row.hover()
+    const arrow = row.element().closest(".diff-file")!.querySelector(".changes-file-open")!
+    await page.elementLocator(arrow).click()
+    await expect.element(pane.getByText("5 of 6")).toBeVisible()
+  })
+
+  it("moves the arrow keys on from an unfolded file's Open diff as from its row", async () => {
+    const pane = await openChange()
+    await file(pane, "cookies.ts").click()
+
+    pane.getByRole("button", { name: "Open diff" }).element().focus()
+    await userEvent.keyboard("{ArrowDown}")
+
+    await expect.element(file(pane, "session.test.ts")).toHaveFocus()
   })
 })

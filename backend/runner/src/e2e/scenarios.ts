@@ -79,10 +79,15 @@ export const prompted = async (
 
 /**
  * Opens a terminal running the harness and waits until Novadeck sees it Ready and its
- * prompt shows (`prompted`), so a prompt can be submitted at once.
+ * prompt shows (`prompted`), so a prompt can be submitted at once; `options` as `deck.open`
+ * takes them.
  */
-export const start = async ({ deck }: E2E, setup: AgentSetup): Promise<DeckTerminal> => {
-  const terminal = await deck.open(setup.agent)
+export const start = async (
+  { deck }: E2E,
+  setup: AgentSetup,
+  options?: Parameters<E2E["deck"]["open"]>[1],
+): Promise<DeckTerminal> => {
+  const terminal = await deck.open(setup.agent, options)
   await terminal.reached("ready", { timeoutMs: 60_000 })
   await prompted(terminal, setup)
   return terminal
@@ -400,11 +405,11 @@ const deliveriesIn = (text: string): Delivery[] => {
 export const received = (call: Call): Delivery[] =>
   call.turns.flatMap((each) => (each.role === "assistant" ? [] : deliveriesIn(each.text)))
 
-/** One delivery wrapper as the model read it: its rules note, and its messages' ids. */
-export type Wrapper = { readonly note: string; readonly ids: readonly string[] }
+/** One delivery wrapper as the model read it: its rules, and its messages' ids. */
+export type Wrapper = { readonly rules: string; readonly ids: readonly string[] }
 
 const wrapperOf = (wrapped: string): Wrapper => ({
-  note: unescape(/^<novadeck-messages note="([^"]*)"/.exec(wrapped)?.[1] ?? ""),
+  rules: unescape(/^<novadeck-messages>\s*<rules>([\s\S]*?)<\/rules>/.exec(wrapped)?.[1] ?? ""),
   ids: [...wrapped.matchAll(message)].map(
     ([, attributes = ""]) => /\bid="([^"]*)"/.exec(attributes)?.[1] ?? "",
   ),
@@ -424,9 +429,9 @@ export const wrappers = (call: Call): Wrapper[] =>
     return [...plain, ...escaped].map(wrapperOf)
   })
 
-/** Whether a wrapper's note only points to the full one the session was given before. */
+/** Whether a wrapper's rules only point to the full ones the session was given before. */
 export const pointsBack = (wrapper: Wrapper): boolean =>
-  wrapper.note.includes("the full note given earlier in this session has the rules")
+  wrapper.rules.includes("Rules as given earlier.")
 
 /** Whether the call's latest user turn delivered a message from `from`. */
 export const delivered = (call: Call, from: string): boolean =>

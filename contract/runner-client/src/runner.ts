@@ -27,8 +27,11 @@ import {
   type InboxEntry,
   type InterruptResult,
   type ChangeFileDiff,
+  type ChangeRange,
   type ItemContent,
   type FilePart,
+  type FolderMatch,
+  type WroteFolder,
   type MurmurSettings,
   type MurmurState,
   type Note,
@@ -390,6 +393,11 @@ export type Runner = {
      */
     /** The terminal this client's person uses now, or none; see the contract's `terminals.active`. */
     active(terminalId: string | null): Promise<void>
+    /**
+     * Tells the runner which terminals this client has in sight, replacing its last list
+     * (`terminals.seen`); the runner takes any other as unseen.
+     */
+    seen(terminalIds: readonly string[]): Promise<void>
     busy(options?: {
       readonly fresh?: true
     }): Promise<{ readonly busy: string[]; readonly unknown: string[] }>
@@ -682,12 +690,12 @@ export type Runner = {
      * reconnections. A file that may hold secrets is `held` unless `reveal` is the
      * path the item points at, the file the person chose to show. With `edit`, a file is
      * its whole text, saying whether `save` writes it, where it can be edited whole, or its
-     * lines saying why not. Iteration ends once the item is deleted, the runner closes, or on
+     * lines saying why not. A folder lists the folder `within` names from its top. Iteration ends once the item is deleted, the runner closes, or on
      * `return()`.
      */
     content(
       itemId: string,
-      options?: { readonly reveal?: string; readonly edit?: boolean },
+      options?: { readonly reveal?: string; readonly edit?: boolean; readonly within?: string },
     ): AsyncIterableIterator<ItemContent, undefined>
     /**
      * One file of a changes item as a selection of its layers changed it: one run, from the
@@ -699,6 +707,14 @@ export type Runner = {
       readonly path: string
       readonly layers: readonly string[]
     }): Promise<ChangeFileDiff>
+    /**
+     * The files a selection of a changes item's layers changed as one range. Rejects with
+     * `NOT_FOUND` for an unknown item or one that is no change.
+     */
+    changeRange(input: {
+      readonly itemId: string
+      readonly layers: readonly string[]
+    }): Promise<ChangeRange>
     /**
      * The person read a file of a changes item: its content names the file in `read` until it
      * changes again. Rejects with `NOT_FOUND` for an unknown item or one that is no change.
@@ -731,6 +747,23 @@ export type Runner = {
       readonly lines?: { readonly from: number; readonly to: number }
       readonly title?: string
     }): Promise<CompanionItem>
+    /**
+     * The folders a path being typed may be (see the contract): those under its parent whose
+     * names start as its last part does. Rejects with `TERMINAL_NOT_FOUND`.
+     */
+    folders(input: { readonly terminalId: string; readonly path: string }): Promise<FolderMatch[]>
+    /**
+     * The folders outside the project a terminal's session's agents wrote a file in, the latest
+     * first. Rejects with `TERMINAL_NOT_FOUND`.
+     */
+    wroteTo(input: { readonly terminalId: string }): Promise<WroteFolder[]>
+    /**
+     * Points a file's item at another file of its own kind, by a path absolute or from the
+     * folder of the file it points at now: the same item and holder, with a later version.
+     * Rejects with `NOT_FOUND`, `CONFLICT` for a project window's item, or `INVALID_FILE`
+     * saying why (no file, an item that is no file, another kind).
+     */
+    repoint(input: { readonly itemId: string; readonly path: string }): Promise<CompanionItem>
     /**
      * Opens a file in the session's project window, by a path absolute or from the
      * session's project folder: the window's item is pointed at it, or, with none yet, the
@@ -766,13 +799,17 @@ export type Runner = {
      * An item's file from `offset`, up to `partBytes` bytes, for a kind read in parts (a
      * video, a recording), while it is as
      * `stamp` names it; `changed` when it is not. Rejects with `NOT_FOUND` for an unknown
-     * item or one of a kind not read in parts.
+     * item or one of a kind not read in parts. With `file`, a model's file beside it, one its
+     * content lists, as its own stamp names it. A folder item's `path` names one of its files,
+     * from its top.
      */
     part(input: {
       readonly itemId: string
       readonly stamp: string
       readonly offset: number
       readonly reveal?: string
+      readonly file?: string
+      readonly path?: string
     }): Promise<FilePart>
     /** What went wrong on a page item during its show `shown`, as the pane saw it. */
     pageTrouble(input: {
@@ -1003,6 +1040,8 @@ export const connectRunner = async (
         call((client) => client.terminals.rename({ terminalId, title })),
       resetTitle: (terminalId) => call((client) => client.terminals.resetTitle({ terminalId })),
       active: (terminalId) => call((client) => client.terminals.active({ terminalId })),
+      seen: (terminalIds) =>
+        call((client) => client.terminals.seen({ terminalIds: [...terminalIds] })),
       busy: (only) => call((client) => client.terminals.busy(only)),
       async upload(terminalId, { name, data }) {
         if (data.length > maxUploadBytes) throw new WireError<RunnerErrorCode>("UPLOAD_TOO_LARGE")
@@ -1114,22 +1153,28 @@ export const connectRunner = async (
       list: (input) => call((client) => client.companions.list(input)),
       watch: () =>
         followAll(connection, (client, signal) => client.companions.watch(undefined, { signal })),
-      content: (itemId, { reveal, edit } = {}) =>
+      content: (itemId, { reveal, edit, within } = {}) =>
         followRestarting(connection, (client, signal) =>
           client.companions.content(
             {
               itemId,
               ...(reveal !== undefined && { reveal }),
               ...(edit !== undefined && { edit }),
+              ...(within !== undefined && { within }),
             },
             { signal },
           ),
         ),
       changeFile: (input) =>
         call((client) => client.companions.changeFile({ ...input, layers: [...input.layers] })),
+      changeRange: (input) =>
+        call((client) => client.companions.changeRange({ ...input, layers: [...input.layers] })),
       changeRead: (input) => call((client) => client.companions.changeRead(input)),
       save: (input) => call((client) => client.companions.save(input)),
       attach: (input) => call((client) => client.companions.attach(input)),
+      folders: (input) => call((client) => client.companions.folders(input)),
+      wroteTo: (input) => call((client) => client.companions.wroteTo(input)),
+      repoint: (input) => call((client) => client.companions.repoint(input)),
       openInProject: (input) => call((client) => client.companions.openInProject(input)),
       move: (itemId, terminalId) =>
         call((client) => client.companions.move({ itemId, terminalId })),

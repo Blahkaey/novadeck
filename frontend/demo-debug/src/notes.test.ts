@@ -22,6 +22,7 @@ const context = (activeProjectId?: string): DemoActionContext => ({
   workspace: () => (activeProjectId ? ({ activeProjectId } as Workspace) : undefined),
   note: () => undefined,
   crash: () => undefined,
+  failViewLoads: () => undefined,
 })
 
 // A workspace on `projectId`, whose session on screen has these terminals.

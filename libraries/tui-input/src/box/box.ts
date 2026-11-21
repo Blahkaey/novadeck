@@ -121,6 +121,11 @@ export type BoxProfile = {
   /** How far a word may reach on a row of the box's text, on a screen `columns` wide. */
   readonly textWidth: (columns: number) => number
   /**
+   * How many columns the box's rows have on `screen`: fewer than the screen's where the program
+   * draws a pane beside the one holding its box, and the screen's where omitted.
+   */
+  readonly columns?: (screen: ScreenText) => number
+  /**
    * How the box takes a shell command (`!` typed in an empty box, then the command pasted):
    * `expands` where Enter runs a command it shows as a placeholder as the text the
    * placeholder stands for, false where it would run the placeholder's own text.
@@ -189,6 +194,17 @@ export type BoxProfile = {
     readonly recalled: (screen: ScreenText) => boolean
     readonly leave: string
     readonly blocked: (screen: ScreenText) => boolean
+    /**
+     * For a program whose keys bring a queued message back as a placeholder, not its text: the
+     * lines of the one message the screen shows queued, in full, as they stand there (the screen
+     * before the keys); undefined where there is not exactly one, or its rows can't be told from
+     * the lines it was sent in (it may wrap them).
+     */
+    readonly shown?: (screen: ScreenText) => readonly string[] | undefined
+    /** Whether the screen still shows a message queued: after the keys, the queue didn't come whole into the box. */
+    readonly waiting?: (screen: ScreenText) => boolean
+    /** How many lines a placeholder in the box stands for, as it says; undefined where it names no count. */
+    readonly stands?: (text: string) => number | undefined
   }
   /**
    * When the screen says an interrupt's first Escape would go wrong yet, and how long, in

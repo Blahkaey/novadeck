@@ -19,6 +19,7 @@ import { afterAll, afterEach, beforeAll, onTestFinished } from "vitest"
 import { readCloseShownRequest, readShowRequest } from "../companions/request.js"
 import { unboundNote } from "../messaging/peers.js"
 import { describe, expect, it } from "../test.js"
+import { hostless, ownHome } from "../testing/host.js"
 import { installShellFiles } from "./install.js"
 import { mcpAnswer, mcpVersions } from "./mcp.js"
 import { listenForReports, unheard, type Call, type Reports } from "./reports.js"
@@ -57,6 +58,12 @@ const relay: Start = { command: relayPath, args: ["mcp", manifest.version, ...mc
 // collects its answers until it has answered every one with an id, and every batch. With
 // `close`, it closes the server's input at once and collects what it answers before it
 // exits.
+// Where an answer's request stands among those sent: those of no request's id go last.
+const rank = (ids: readonly unknown[], answer: Answer): number => {
+  const index = ids.indexOf((answer as { id?: unknown }).id)
+  return index < 0 ? ids.length : index
+}
+
 const session = (
   env: NodeJS.ProcessEnv,
   messages: readonly object[],
@@ -72,6 +79,14 @@ const session = (
       child.kill()
     })
     const expected = messages.filter((message) => Array.isArray(message) || "id" in message).length
+    // Requests are answered as each is done, so a handshake that asks the runner may answer
+    // after a refusal sent behind it, as a harness matches answers by id; the answers are
+    // taken in the order of their requests, those of no request's id last.
+    // A batch is answered with no id, as null.
+    const ids = messages.flatMap((message) =>
+      Array.isArray(message) ? [null] : "id" in message ? [(message as { id: unknown }).id] : [],
+    )
+    const inOrder = (all: Answer[]) => all.toSorted((a, b) => rank(ids, a) - rank(ids, b))
     const answers: Answer[] = []
     let buffer = ""
     child.stdout.setEncoding("utf8")
@@ -84,7 +99,7 @@ const session = (
       }
       if (!close && answers.length >= expected) {
         child.stdin.end()
-        resolve(answers)
+        resolve(inOrder(answers))
       }
     })
     child.on("error", reject)
@@ -96,19 +111,24 @@ const session = (
     if (close) child.stdin.end()
   })
 
-// This environment without the variables of a Novadeck terminal the tests run in.
-const outside = (): NodeJS.ProcessEnv => {
-  const env = { ...process.env }
-  delete env.NOVADECK_MCP
-  delete env.NOVADECK_TERMINAL_ID
-  delete env.NOVADECK_REPORT
-  delete env.NOVADECK_REPORT_TOKEN
-  return env
-}
+// This environment without the variables of a Novadeck terminal or agent session the tests
+// run in.
+const outside = (): NodeJS.ProcessEnv => hostless()
 
 const initialize = { id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }
 const initialized = { method: "notifications/initialized" }
 const list = { id: 2, method: "tools/list" }
+
+const steering = [
+  "rarely watch",
+  "aren't blocking",
+  "keep going",
+  "keep working",
+  "Stop only",
+  "without stopping your work",
+  "go ahead with it",
+  "pull request",
+]
 
 describe("Novadeck's MCP server outside a Novadeck terminal", () => {
   it("answers the handshake and offers no tools", async () => {
@@ -137,6 +157,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       ask: () => Promise.resolve(unheard),
       ack: () => {},
       call: async (call) => {
+        // How agents work together is asked with the handshake and the listing; the calls
+        // checked are the tools' own.
+        if (call.type === "mode") return answersBy.mode ?? { ok: true, mode: "herd" }
         calls.push(call)
         await new Promise((resolve) => setTimeout(resolve, delay))
         return call.type in answersBy ? answersBy[call.type] : answer
@@ -171,6 +194,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       "close_terminal",
       "lead",
       "release",
+      "join",
+      "leave",
+      "hand_lead",
       "send",
       "agents",
       "team",
@@ -234,7 +260,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       content: [
         {
           text: expect.stringMatching(
-            /^Asked the user to approve running make in a new terminal in \/work\. Nothing opened yet/,
+            /^Asked the user to approve running make in a new terminal in \/work\. Nothing opened yet.*comes as a notice once your turn ends\. They already have the request, so don't call it again\.$/,
           ),
         },
       ],
@@ -613,9 +639,45 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       expect(text(close)).toContain("Its branch b stays")
       expect(text(give)).toContain("@fox")
     })
+
+    it("tells where a branch only origin had came from, and whether origin could say", async () => {
+      const said = async (origin: "current" | "unchecked" | "gone", tracking?: boolean) => {
+        answersBy.openWorktree = {
+          ok: true,
+          path: "/w",
+          branch: "feat",
+          existing: false,
+          origin,
+          ...(tracking !== undefined && { tracking }),
+          instructions: [],
+        }
+        const [, open] = await session(terminal(), [
+          initialize,
+          {
+            id: 3,
+            method: "tools/call",
+            params: { name: "open_worktree", arguments: { branch: "feat" } },
+          },
+        ])
+        const content = (open?.result as { content?: { text: string }[] } | undefined)?.content
+        return content?.[0]?.text ?? ""
+      }
+      expect(await said("current", true)).toContain(
+        "on the new branch feat from origin/feat, tracking it. You own it.",
+      )
+      expect(await said("unchecked", true)).toContain(
+        "on the new branch feat from origin/feat as last fetched, tracking it (origin couldn't be asked whether it still has it).",
+      )
+      expect(await said("current", false)).toContain(
+        "on the new branch feat from origin/feat, not tracking it (git couldn't set its upstream). You own it.",
+      )
+      expect(await said("gone")).toContain(
+        "on the new branch feat (origin no longer has a branch of that name; origin/feat was left by an earlier fetch, so it wasn't used).",
+      )
+    })
   })
 
-  it("says an ask is an extra copy, which the reply never mentions", async () => {
+  it("says an ask is an extra copy that may not show, which the reply and words before it ask in full", async () => {
     answer = { ok: true, id: "a1" }
     const [, asked] = await session(terminal(), [
       initialize,
@@ -626,10 +688,11 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       },
     ])
     const text = (asked!.result as { content: { text: string }[] }).content[0]!.text
-    expect(text).toContain("Ask a1 is in the user's Inbox, as an extra copy")
+    expect(text).toContain("Ask a1 is in the user's Inbox, as an extra copy that may not show here")
     expect(text).toContain(
-      "your reply still asks the question in full, and doesn't mention the Inbox. Their answer arrives later as a message",
+      "your reply, and whatever you write to them about it before then, asks the question in full, with all they need to answer or act on it, such as an action's command, and doesn't mention the Inbox or the ask. Their answer arrives later as a message",
     )
+    for (const words of [...steering, "end your turn"]) expect(text).not.toContain(words)
   })
 
   it("closes another terminal by its handle, and says what that ended", async () => {
@@ -733,8 +796,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     })
     expect(asked.content[0]?.text).toBe(
       "Asked the user to confirm closing @fox · api-server, which runs Codex. It closes only " +
-        "if they confirm, and Novadeck tells you either way, as a message. End your turn " +
-        "rather than wait.",
+        "if they confirm, and Novadeck tells you either way, as a message once your turn ends.",
     )
     expect(asked.isError).toBe(false)
     await expect(said({ ok: false, reason: "moth is your own terminal." })).resolves.toEqual({
@@ -757,41 +819,36 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       expect(described.find((tool) => tool.name === name)!.description).toContain("such as @fox")
   })
 
-  it("says up front that ask doesn't stop the work and tell is for milestones", async () => {
+  it("says up front what ask, tell and done are for, never how to work", async () => {
     const [handshake] = await session(terminal(), [initialize])
     const instructions = handshake?.result?.instructions as string
     // Claude Code reads the instructions up front, before any tool's description: they open
     // with how agents share the machine and its work.
     expect(instructions.startsWith("You aren't working alone")).toBe(true)
     expect(instructions).toContain("what you settle between you needs no one's approval")
-    expect(instructions).toContain("puts a question in the user's Inbox, where they see it")
-    expect(instructions).toContain("so a question only in your reply goes unseen")
     expect(instructions).toContain(
-      "When your harness has its own question tool and you'd stop to ask with it, do, as you normally would",
+      "Novadeck's ask puts a copy of a question you ask the user in their Inbox, where they see it when they're away from this terminal",
     )
     expect(instructions).toContain(
-      "Novadeck shows that question in the Inbox as it is, so it needs no ask",
+      "Always make one, whether or not they're here, for every question your turn ends waiting on, such as which option to take, unless it is already an open ask",
     )
-    expect(instructions).toContain(
-      "Always ask there every other question you end your turn waiting on",
-    )
-    expect(instructions).toContain("unless it is already an open ask")
     expect(instructions).toContain("a closing offer such as 'anything else?' isn't one")
     expect(instructions).toContain("nor is an action your harness is already prompting them")
+    expect(instructions).toContain(
+      "nor a question you ask with your harness's own question tool, as you normally would",
+    )
     expect(instructions).toContain(
       "When they write to you here, Novadeck takes your open asks out of the Inbox and tells you",
     )
     expect(instructions).toContain(
       "If they answer one here and no such notice came, withdraw it yourself",
     )
-    expect(instructions).toContain("Mid-work, ask without stopping your work")
-    expect(instructions).toContain("for a decision the user should make, ask there and keep going")
-    expect(instructions).toContain("Its tell puts a milestone there")
+    expect(instructions).toContain("Its tell puts news there for when they're elsewhere")
     expect(instructions).toContain(
       "Whatever you put in the Inbox is an extra copy for when they're elsewhere: your reply says it all as fully as it would without Novadeck, and never mentions the Inbox or what you put there.",
     )
     expect(instructions).not.toContain("lands in the Inbox quietly")
-    expect(instructions).toContain("an ask with the action shape, not just words in your reply")
+    expect(instructions).toContain("is an ask with the action shape")
     expect(instructions).toContain("never ask for a secret value")
     expect(instructions).toContain(
       "Its done is your own short report when the task you were given is finished",
@@ -800,37 +857,38 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(instructions).toContain(
       "With a lead, use ask, tell and done all the same, and send your lead your report and your questions too; approvals of actions are still only the user's.",
     )
+    // What Novadeck's Inbox is for, never when to stop, what to decide alone or what to ship.
+    for (const words of steering) expect(instructions).not.toContain(words)
     for (const native of ["AskUserQuestion", "request_user_input", "ask_question"])
       expect(instructions).not.toContain(native)
   })
 
-  it("nudges ask toward not blocking, and tell toward milestones, never each step", async () => {
+  it("makes ask an always-made extra copy, and tell news, never each step", async () => {
     const [, tools] = await session(terminal(), [initialize, list])
     const described = tools?.result?.tools as { name: string; description: string }[]
     const ask = described.find((tool) => tool.name === "ask")!
     expect(ask.description).toContain(
-      "Put a question in the user's Inbox without stopping your work.",
+      "Put a copy of a question you ask the user in Novadeck's Inbox, where they see it when they're away from this terminal.",
     )
+    expect(ask.description).toContain(
+      "Always make one, whether or not they're here, for every question your turn ends waiting on, such as which option to take, unless it is already an open ask",
+    )
+    expect(ask.description).toContain(
+      "The ask is an extra copy, never the question itself, and what you give it may not show here: your reply, and whatever you write to them about the question before then, asks it as fully as it would without Novadeck, with all they need to answer or act on it, such as an action's command, and never mentions the Inbox or the ask.",
+    )
+    expect(ask.description).toContain(
+      "nor a question you ask with your harness's own question tool, as you normally would",
+    )
+    expect(ask.description).toContain("isn't one, nor is an action your harness is already")
     expect(ask.description).toContain("With a lead, ask all the same, and send it the question too")
     expect(ask.description).toContain(
-      "if your lead answers it first, act on that as its instruction and withdraw the ask, unless the question asks approval of an action, such as opening a pull request: only the user gives that",
+      "if your lead answers it first, act on that as its instruction and withdraw the ask, unless the question asks approval of an action: only the user gives that",
     )
-    expect(ask.description).toContain("needs no approval of theirs")
-    expect(ask.description).toContain("A pick that is hard to undo waits for their answer")
-    expect(ask.description).toContain("once nothing else is left, end your")
-    expect(ask.description).toContain(
-      "When your harness has its own question tool and you'd stop to ask with it, do",
-    )
-    expect(ask.description).toContain(
-      "Always ask every other question you end your turn waiting on",
-    )
-    expect(ask.description).toContain("unless it is already an open ask")
-    expect(ask.description).toContain("isn't one, nor is an action your harness is already")
     expect(ask.description).toContain("withdraw it too once the user answers it another way")
     expect(ask.description).toContain("when the user writes to you in this terminal")
     expect(ask.description).toContain("The user can also dismiss an ask in their Inbox")
     const tell = described.find((tool) => tool.name === "tell")!
-    expect(tell.description).toContain("a pull request opened")
+    expect(tell.description).toContain("such as a milestone reached")
     expect(tell.description).toContain("not each step")
     expect(tell.description).toContain("With a lead, tell all the same, and send it that too")
     const done = described.find((tool) => tool.name === "done")!
@@ -839,14 +897,14 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(done.description).toContain(
       "With a lead, call done all the same, and send it your report too",
     )
-    expect(ask.description).toContain(
-      "The ask is an extra copy for when they're elsewhere: your reply asks the question as fully as it would without Novadeck, and never says it's in the Inbox",
-    )
     for (const tool of ["tell", "done"])
       expect(described.find((each) => each.name === tool)!.description).toContain(
         "It adds to your reply, never replaces it",
       )
-    expect(ask.description).toContain("an ask with the action shape")
+    expect(ask.description).toContain("an action shape for what only the user can do")
+    for (const tool of ["ask", "tell", "done"])
+      for (const words of steering)
+        expect(described.find((each) => each.name === tool)!.description).not.toContain(words)
     for (const each of described)
       for (const native of ["AskUserQuestion", "request_user_input", "ask_question"])
         expect(each.description).not.toContain(native)
@@ -857,8 +915,13 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     const described = tools?.result?.tools as { name: string; description: string }[]
     const show = described.find((tool) => tool.name === "show")!
     expect(show.description).toContain(
-      "Show a deliverable when it is done, not each file you touch",
+      "Show a deliverable, a file or page the task itself calls for that your reply can't carry, when it is done, not each file you touch",
     )
+    // A deliverable is what the task calls for, not a kind of document: listing "a report"
+    // drew agents to write their answer to a file only to show it.
+    expect(show.description).not.toContain("report")
+    for (const kind of ["an image or screenshot", "a mockup or diagram", "a rendered document"])
+      expect(show.description).toContain(kind)
     expect(show.description).toContain("the files a change touches on the way aren't")
     expect(show.description).toContain("show the changes themselves with changes")
     for (const name of ["show", "close"]) {
@@ -890,6 +953,34 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(showing.description).toContain("Check it before showing after a while")
   })
 
+  it("says when answers arrive as a fact, and shows what is asked to see only as what already exists", async () => {
+    const [, tools] = await session(terminal(), [initialize, list])
+    const described = tools?.result?.tools as { name: string; description: string }[]
+    const named = (name: string) => described.find((tool) => tool.name === name)!.description
+    // What the agent does with its turn is its harness's and the user's; Novadeck says only
+    // that answers come once the turn ends.
+    for (const each of described)
+      for (const words of ["end your turn", "carry on with"])
+        expect(each.description.toLowerCase()).not.toContain(words)
+    // The tools whose outcome the user decides later (take_worktree only with worktrees on).
+    for (const each of described.filter((tool) =>
+      ["close_terminal", "lead", "take_worktree"].includes(tool.name),
+    ))
+      expect(each.description).toContain("once your turn ends")
+    expect(described.some((tool) => tool.name === "close_terminal")).toBe(true)
+    expect(named("open_agent")).toContain(
+      "Each agent works in its own terminal, alongside you, on the harness and model you pick.",
+    )
+    // "Whatever they ask to see" turned "show me the plan" into edits made only to have a diff
+    // to show; a diff after every piece of work was a rule rather than a change to show.
+    expect(named("show")).toContain(
+      "or an existing file or page, or the working tree's changes, that they ask to see",
+    )
+    expect(named("show")).toContain("to show a change, show the changes themselves with changes")
+    for (const words of ["whatever they ask to see", "once a piece of work is done"])
+      expect(named("show")).not.toContain(words)
+  })
+
   it("names every kind of image show takes, JPEG XL among them", async () => {
     const [, tools] = await session(terminal(), [initialize, list])
     const show = (tools?.result?.tools ?? []).find((tool) => tool.name === "show") as unknown as {
@@ -917,7 +1008,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(close.description).toContain(
       "Another agent's terminal closes only once the user confirms",
     )
-    expect(close.description).toContain("you hear the outcome as a message from Novadeck")
+    expect(close.description).toContain(
+      "the outcome comes as a message from Novadeck once your turn ends",
+    )
     expect(close.description).toContain("A terminal with no agent there")
     expect(close.inputSchema).toMatchObject({ required: ["to"], additionalProperties: false })
   })
@@ -944,9 +1037,203 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     const text = (reply: typeof led) =>
       (reply as { result: { content: { text: string }[] } }).result.content[0]!.text
     expect(text(led)).toMatch(/^Asked the user to let you lead @fox · Build, which runs Codex\./)
-    expect(text(led)).toContain("End your turn rather than wait")
+    expect(text(led)).toContain("Novadeck tells you either way, as a message once your turn ends")
     expect(none?.result).toMatchObject({ isError: true })
     expect(text(released)).toMatch(/^Released @fox/)
+  })
+
+  describe("the tools that change who decides", () => {
+    const described = async () => {
+      const [, tools] = await session(terminal(), [initialize, list])
+      const all = tools?.result?.tools as {
+        name: string
+        description: string
+      }[]
+      return (name: string) => all.find((tool) => tool.name === name)!.description
+    }
+    const asks =
+      "The user must approve: Novadeck asks them and this answers at once; the outcome comes as a message from Novadeck once your turn ends."
+    const modeWords = async (mode: "herd" | "solo" | "swarm") => {
+      answersBy.mode = { ok: true, mode }
+      try {
+        return await described()
+      } finally {
+        delete answersBy.mode
+      }
+    }
+
+    it("words close_terminal, lead, open_terminal and take_worktree by mode, Herd and Solo as they were", async () => {
+      answersBy.worktrees = { ok: true, on: true }
+      try {
+        for (const mode of ["herd", "solo"] as const) {
+          // eslint-disable-next-line no-await-in-loop -- In turn.
+          const tool = await modeWords(mode)
+          expect(tool("close_terminal")).toContain(
+            "A teammate you lead closes at once. Another agent's terminal closes only once the user confirms: Novadeck asks them and this answers at once; the outcome comes as a message from Novadeck once your turn ends.",
+          )
+          expect(tool("lead")).toContain(
+            // In Solo leading is only when the user asks.
+            (mode === "solo"
+              ? "Use it only when the user asked you to direct that agent"
+              : "Use it only when the user asked you to direct that agent, or the work needs you to direct an agent already running") +
+              "; to start a new agent with a task, use open_agent. " +
+              asks +
+              " If they approve, you lead that terminal",
+          )
+          expect(tool("lead")).toMatch(/^Ask the user to let you lead/)
+          expect(tool("open_terminal")).toContain("A command is run only if the user approves it")
+          expect(tool("take_worktree")).toContain("yours only if the user agrees")
+        }
+        const swarm = await modeWords("swarm")
+        expect(swarm("close_terminal")).toContain(
+          "A teammate you lead closes at once. Another agent's terminal closes at once if an agent opened it; one the user opened closes only once the user confirms: Novadeck asks them and this answers at once; the outcome comes as a message from Novadeck once your turn ends.",
+        )
+        expect(swarm("lead")).toContain(
+          "Use it when the work needs you to direct an agent already running; to start a new agent with a task, use open_agent. It takes effect at once: you lead that terminal",
+        )
+        expect(swarm("lead")).not.toContain("The user must approve")
+        expect(swarm("lead")).not.toContain("Use it only when the user asked")
+        // A command is the user's to approve in every mode.
+        expect(swarm("open_terminal")).toContain("A command is run only if the user approves it")
+        expect(swarm("open_terminal")).not.toContain("run at once")
+        expect(swarm("take_worktree")).toContain("yours at once, and its owner is told.")
+        expect(swarm("take_worktree")).not.toContain("only if the user agrees")
+      } finally {
+        delete answersBy.worktrees
+      }
+    })
+
+    it("lists join, leave and hand_lead in every mode, gated as the user set it", async () => {
+      for (const mode of ["herd", "solo", "swarm"] as const) {
+        // eslint-disable-next-line no-await-in-loop -- In turn.
+        const tool = await modeWords(mode)
+        const gate = mode === "swarm" ? "It takes effect at once." : asks
+        expect(tool("join")).toContain(
+          "Join the team of the agent in another Novadeck terminal of this project and session, by the terminal's exact handle as agents lists it (such as @fox): it becomes your lead, directs your work as a lead does, and you report back to it with send. message, if given, goes to it as your introduction: what you work on and why you join. " +
+            gate +
+            " It is refused while you have a lead (leave first), where that terminal runs no agent, or where it is you or an agent you lead, directly or through others.",
+        )
+        expect(tool("join")).toContain("A handle goes to a new terminal an hour after")
+        expect(tool("leave")).toBe(
+          "Leave your lead's team: it no longer leads you, and its messages and yours are a peer's from then on; a brief it opened you with stays your task. " +
+            gate +
+            " It is refused when you have no lead.",
+        )
+        expect(tool("hand_lead")).toContain(
+          "Hand the lead of your team to one of the agents you lead, by its terminal's exact handle as agents lists it (such as @fox): it then leads every other agent you led, and you, and takes your place under your own lead if you have one. Each of them is told. " +
+            gate +
+            " It is refused for a terminal you don't lead.",
+        )
+        expect(tool("hand_lead")).toContain("A handle goes to a new terminal an hour after")
+      }
+    })
+
+    it("sends only what each takes, and says what happened: asked, or done at once", async () => {
+      calls.length = 0
+      const call = async (name: string, args: object, reply: object) => {
+        answer = reply
+        const replies = await session(terminal(), [
+          initialize,
+          { id: 3, method: "tools/call", params: { name, arguments: args } },
+        ])
+        return (
+          replies.find((each) => each?.id === 3) as {
+            result: { content: { text: string }[]; isError?: boolean }
+          }
+        ).result
+      }
+      const named = { handle: "fox", title: "Build", ran: "Codex" }
+      const asked = await call(
+        "join",
+        { to: "fox", message: "Hi.", extra: 1 },
+        { ok: true, asked: true, ...named },
+      )
+      expect(asked.content[0]!.text).toMatch(
+        /^Asked the user to let you join the team of @fox · Build, which runs Codex\./,
+      )
+      const joined = await call(
+        "join",
+        { to: "fox" },
+        {
+          ok: true,
+          joined: true,
+          ...named,
+          introduction: "Your introduction, message m1, is sent.",
+        },
+      )
+      expect(joined.content[0]!.text).toMatch(
+        /^You joined the team of @fox · Build, which runs Codex: it leads you now/,
+      )
+      expect(joined.content[0]!.text).toContain("Your introduction, message m1, is sent.")
+      const left = await call("leave", { to: "fox" }, { ok: true, left: true, ...named })
+      expect(left.content[0]!.text).toMatch(/^You left the team of @fox/)
+      const leaveAsked = await call("leave", {}, { ok: true, asked: true, ...named })
+      expect(leaveAsked.content[0]!.text).toMatch(/^Asked the user to let you leave/)
+      const handed = await call(
+        "hand_lead",
+        { to: "fox" },
+        { ok: true, handed: true, ...named, members: ["owl", "bee"] },
+      )
+      expect(handed.content[0]!.text).toMatch(
+        /^@fox · Build, which runs Codex leads @owl, @bee and you now/,
+      )
+      const handAsked = await call("hand_lead", { to: "fox" }, { ok: true, asked: true, ...named })
+      expect(handAsked.content[0]!.text).toMatch(
+        /^Asked the user to let you hand your team to @fox/,
+      )
+      const refused = await call("hand_lead", {}, {})
+      expect(refused.isError).toBe(true)
+      expect(calls.map(({ type, request }) => ({ type, request }))).toEqual([
+        { type: "join", request: { to: "fox", message: "Hi." } },
+        { type: "join", request: { to: "fox" } },
+        { type: "leave", request: {} },
+        { type: "leave", request: {} },
+        { type: "handLead", request: { to: "fox" } },
+        { type: "handLead", request: { to: "fox" } },
+      ])
+    })
+
+    it("tells a lead taken at once, a worktree taken at once, and a terminal closed at once", async () => {
+      answersBy.worktrees = { ok: true, on: true }
+      try {
+        answer = {
+          ok: true,
+          led: true,
+          handle: "fox",
+          title: "Build",
+          ran: "Codex",
+          brief: "Your brief, message m1, is sent; its replies arrive by themselves.",
+        }
+        const [, led] = await session(terminal(), [
+          initialize,
+          {
+            id: 3,
+            method: "tools/call",
+            params: { name: "lead", arguments: { to: "fox", message: "Go." } },
+          },
+        ])
+        const text = (led!.result as { content: { text: string }[] }).content[0]!.text
+        expect(text).toMatch(
+          /^You now lead @fox · Build, which runs Codex: it treats your messages as instructions/,
+        )
+        expect(text).toContain("Your brief, message m1, is sent")
+        expect(text).not.toContain("Asked the user")
+        answer = { ok: true, path: "/w", branch: "b", from: "moth" }
+        const [, took] = await session(terminal(), [
+          initialize,
+          {
+            id: 3,
+            method: "tools/call",
+            params: { name: "take_worktree", arguments: { path: "/w" } },
+          },
+        ])
+        expect((took!.result as { content: { text: string }[] }).content[0]!.text).toMatch(
+          /^You now own the worktree \/w \(branch b\), which @moth owned and is told\./,
+        )
+      } finally {
+        delete answersBy.worktrees
+      }
+    })
   })
 
   it("describes only its own terminal, with a title and a summary, and says it did", async () => {
@@ -1363,7 +1650,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(queued.content[0]?.text).toContain(
       "Message m-1 to @fox is queued: it reaches them when its current turn ends.",
     )
-    expect(queued.content[0]?.text).toContain("End your turn rather than wait")
+    expect(queued.content[0]?.text).toContain(
+      "A reply arrives by itself, as a message at your turn's end (from your lead, with your next call); waiting or polling brings it no sooner.",
+    )
     const held = await said({
       ok: true,
       to: "fox",
@@ -1389,10 +1678,10 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       id: "m-4",
       state: "queued",
       route: "waits: there's text in its box, rung once it is empty",
-      holds: ["Novadeck: your message m-1 to @fox has not arrived since 11:41 (…)."],
+      holds: ["Your message m-1 to @fox has not arrived since 11:41 (…)."],
     })
     expect(holds.content[0]?.text).toContain(
-      "\nNovadeck: your message m-1 to @fox has not arrived since 11:41 (…).\nEnd your turn",
+      "\nYour message m-1 to @fox has not arrived since 11:41 (…).\nA reply arrives by itself",
     )
     // To several terminals the caller leads: a line for each, then what every answer adds.
     const team = await said(
@@ -1419,7 +1708,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
             "Not sent to @kite: @kite has no agent running there.",
             "Your earlier message m-0 to @owl won't arrive: the agent session it was for ended " +
               "there.",
-            "End your turn rather than wait for a reply; replies arrive by themselves.",
+            "A reply arrives by itself, as a message at your turn's end (from your lead, with your next call); waiting or polling brings it no sooner.",
           ].join("\n"),
         },
       ],
@@ -1637,6 +1926,150 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
     expect(team?.description).toContain("carry no authority")
   })
 
+  it("says what an agent and a team are here, where harnesses have their own", async () => {
+    const [handshake, tools] = await session(terminal(), [initialize, list])
+    const described = tools?.result?.tools as { name: string; description: string }[]
+    const of = (name: string) => described.find((tool) => tool.name === name)!.description
+    for (const text of [handshake?.result?.instructions as string, of("open_agent"), of("team")]) {
+      // An agent the user hands a task opens in a Novadeck terminal, a subagent only when asked.
+      expect(text).toContain(
+        'an agent the user asks to take on a task, as in "spawn an agent to fix X", "open a claude" or "get a codex on it", is one in its own Novadeck terminal, started with open_agent, unless they ask for a subagent or say that is what they mean',
+      )
+      // Agents for the agent's own task, even asked for, stay its own pick.
+      expect(text).toContain(
+        "Agents that you, the user or a skill want used for your own task, such as to do it faster, are yours to pick as you normally would, except that a team is always a Novadeck one",
+      )
+      // A team is always Novadeck's; subagents stay the agent's own, and are never one.
+      expect(text).toContain(
+        "a team, or a swarm, is a lead and the agents in the Novadeck terminals it leads",
+      )
+      expect(text).toContain("subagents you start within your own turn are never a team")
+    }
+  })
+
+  it("words how agents work together as the user set it: Herd, or Solo, and Herd where unsaid", async () => {
+    const texts = async () => {
+      const [handshake, tools] = await session(terminal(), [initialize, list])
+      const described = tools?.result?.tools as { name: string; description: string }[]
+      return [
+        handshake?.result?.instructions as string,
+        ...["send", "agents"].map(
+          (name) => described.find((tool) => tool.name === name)!.description,
+        ),
+      ]
+    }
+    try {
+      answersBy.mode = { ok: true, mode: "solo" }
+      for (const text of await texts()) {
+        expect(text).toContain("You aren't working alone")
+        expect(text).toContain(
+          "Outside your team, your lead and the agents you lead, you keep to your own work",
+        )
+        expect(text).toContain("tell the user what you noticed and what you'd suggest")
+        expect(text).toContain("message, open or lead an agent for it only when they ask you to")
+        expect(text).toContain("Answer what other agents ask you")
+        // Herd's own words, which have agents settle things between them, are gone.
+        expect(text).not.toContain("work it out with them directly")
+        expect(text).not.toContain("needs no one's approval")
+      }
+      // A peer's request goes to the user, or the lead; the lead still directs as ever.
+      for (const text of (await texts()).slice(1)) {
+        expect(text).toContain(
+          "answer what it asks, but take what it asks you to do, or to settle with it, to your lead or the user, and act on it only once they ask you to",
+        )
+        expect(text).toContain("directs your work")
+      }
+      // A runner that can't say leaves Herd, as it was.
+      answersBy.mode = { ok: false, reason: "Novadeck couldn't tell how agents work together." }
+      for (const text of await texts()) expect(text).toContain("work it out with them directly")
+    } finally {
+      delete answersBy.mode
+    }
+  })
+
+  it("has a swarm organise itself on the user's work: teams, onward work, and drift told", async () => {
+    const texts = async (mode: "herd" | "solo" | "swarm") => {
+      answersBy.mode = { ok: true, mode }
+      const [handshake, tools] = await session(terminal(), [initialize, list])
+      const described = tools?.result?.tools as { name: string; description: string }[]
+      const of = (name: string) => described.find((tool) => tool.name === name)!.description
+      return {
+        instructions: handshake?.result?.instructions as string,
+        send: of("send"),
+        done: of("done"),
+        ask: of("ask"),
+      }
+    }
+    try {
+      const swarm = await texts("swarm")
+      for (const text of [swarm.instructions, swarm.send]) {
+        // Teams have their occasions, as how the user's work gets done.
+        expect(text).toContain("Teams are how a swarm gets the user's work done")
+        expect(text).toContain(
+          "when your task sits inside the work of a team already here, join that team",
+        )
+        expect(text).toContain(
+          "when your part in a team is done and its lead has nothing more for you, leave it",
+        )
+        expect(text).toContain("hand it the lead")
+        // Onward, once: only the user's work under way, never work of its own.
+        expect(text).toContain(
+          "look once at agents for work the user started that is still under way",
+        )
+        expect(text).toContain("If none fits, stop there. Never start work nobody asked for.")
+        // Anchored on the user's work, drift told.
+        expect(text).toContain("Helping other agents never outranks what the user asked")
+        expect(text).toContain("keep to what they asked and tell them with tell")
+        expect(text).toContain("Decide yourself what the user left open")
+      }
+      expect(swarm.done).toContain("look once at agents for work the user started")
+      expect(swarm.ask).toContain("Decide yourself what the user left open")
+      // None of it reaches Herd or Solo; each listing in turn, as they share the runner's mode.
+      const herd = await texts("herd")
+      const solo = await texts("solo")
+      for (const other of [herd, solo]) {
+        for (const text of Object.values(other)) {
+          expect(text).not.toContain("as a swarm")
+          expect(text).not.toContain("look once at agents")
+          expect(text).not.toContain("Decide yourself what the user left open")
+        }
+      }
+    } finally {
+      delete answersBy.mode
+    }
+  })
+
+  it("has work meet over shared things too: told to agents in Herd and Swarm, to the user in Solo", async () => {
+    const texts = async (mode: "herd" | "solo" | "swarm") => {
+      answersBy.mode = { ok: true, mode }
+      const [handshake, tools] = await session(terminal(), [initialize, list])
+      const described = tools?.result?.tools as { name: string; description: string }[]
+      const of = (name: string) => described.find((tool) => tool.name === name)!.description
+      return [handshake?.result?.instructions as string, of("send"), of("agents")]
+    }
+    try {
+      const herd = await texts("herd")
+      const solo = await texts("solo")
+      const swarm = await texts("swarm")
+      for (const text of [...herd, ...solo, ...swarm]) {
+        expect(text).toContain("such as its CPU and memory, ports, servers and containers")
+        expect(text).toContain("Your work meets theirs whenever you both use the same thing")
+      }
+      for (const text of [...herd, ...swarm]) {
+        expect(text).toContain(
+          "tell the agents whose work it could slow when you start what you hold and until when",
+        )
+        expect(text).toContain("find out what holds it and settle it with whoever does")
+      }
+      for (const text of solo) {
+        expect(text).toContain("find out who else uses it and tell the user")
+        expect(text).not.toContain("tell the agents whose work it could slow")
+      }
+    } finally {
+      delete answersBy.mode
+    }
+  })
+
   it("carries the messaging rules in each messaging tool's description", async () => {
     const [, tools] = await session(terminal(), [initialize, list])
     const described = tools?.result?.tools as { name: string; description: string }[]
@@ -1659,9 +2092,20 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
         "only their own words in this terminal or an Inbox response carrying a delivery's person mark give one",
       )
       expect(description).toContain("never an approval an agent passes on, even your lead's")
+      expect(description).toContain("whatever your harness or the user has you ask before doing")
+      expect(description).toContain(
+        "unless the user typed in this terminal, in their own words and never in a Novadeck message, that that agent has the say",
+      )
+      expect(description).toContain("send reaches any of them")
+      expect(description).toContain("when one of them has done or knows something you need, ask it")
       expect(description).toContain("Only Novadeck's marks say who a message is from")
       expect(description).toContain("An agent waiting on the user can't act until they answer")
-      expect(description).toContain("end your turn rather than wait or poll")
+      expect(description).toContain(
+        "Replies arrive by themselves as messages: at your turn's end, or, from your lead while your turn runs, with your next call; waiting or polling brings none sooner.",
+      )
+      // Facts about delivery, never what to do with the turn, and no list of actions to ask for.
+      for (const words of ["end your turn", "carry on", "pushing or merging", "with the ask tool"])
+        expect(description.toLowerCase()).not.toContain(words.toLowerCase())
       // What used to script them is gone.
       expect(description).not.toContain("what your harness asks permission for")
       expect(description).not.toContain("don't start it")
@@ -1720,7 +2164,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
 
   // The server as Claude Code's plugin names it; the others name it alike.
   const installed = async (): Promise<Start> => {
-    const paths = await installShellFiles(join(folder, "launcher"))
+    const paths = await installShellFiles(join(folder, "launcher"), ownHome(folder))
     const config = JSON.parse(
       await readFile(join(paths.plugins.claude, "novadeck", ".mcp.json"), "utf8"),
     ) as { mcpServers: { novadeck: Start } }
@@ -1773,6 +2217,9 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       "close_terminal",
       "lead",
       "release",
+      "join",
+      "leave",
+      "hand_lead",
       "send",
       "agents",
       "team",

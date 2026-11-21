@@ -23,6 +23,7 @@ import { createRunner } from "../index.js"
 import { cmdPrints, installShellFiles } from "../shell/install.js"
 import type { ShellPaths } from "../shell/scripts.js"
 import { describe, expect, it as base } from "../test.js"
+import { hostless, ownHome } from "../testing/host.js"
 import type { Resources } from "../testing/resources.js"
 import { WorkspaceStore } from "../workspaces/store.js"
 import { harnesses } from "./registry.js"
@@ -114,25 +115,26 @@ const it = base.extend<{ fixture: Fixture }>({
         )
     const log = join(root, "calls.log")
     const paths = await installShellFiles(join(root, "shell"), {
+      ...ownHome(root),
       worktrees: join(root, "worktrees"),
     })
-    const environment = (env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
-      ...process.env,
-      HOME: home,
-      USERPROFILE: home,
-      SHELL: "/bin/sh",
-      // Only the stand-ins and system tools: a real agent on this machine never runs.
-      PATH: windows
-        ? [bin, process.env.SystemRoot ? join(process.env.SystemRoot, "System32") : ""].join(
-            delimiter,
-          )
-        : [bin, "/usr/bin", "/bin"].join(delimiter),
-      // Agents' homes inside the fixture; an empty one would mean the working directory.
-      CLAUDE_CONFIG_DIR: join(home, ".claude"),
-      CODEX_HOME: join(home, ".codex"),
-      FAKE_LOG: log,
-      ...env,
-    })
+    const environment = (env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv =>
+      hostless({
+        HOME: home,
+        USERPROFILE: home,
+        SHELL: "/bin/sh",
+        // Only the stand-ins and system tools: a real agent on this machine never runs.
+        PATH: windows
+          ? [bin, process.env.SystemRoot ? join(process.env.SystemRoot, "System32") : ""].join(
+              delimiter,
+            )
+          : [bin, "/usr/bin", "/bin"].join(delimiter),
+        // Agents' homes inside the fixture; an empty one would mean the working directory.
+        CLAUDE_CONFIG_DIR: join(home, ".claude"),
+        CODEX_HOME: join(home, ".codex"),
+        FAKE_LOG: log,
+        ...env,
+      })
     const agents = (env: NodeJS.ProcessEnv = {}) =>
       createHarnesses(() => Promise.resolve(paths), { home, env: environment(env) })
     const calls = () => {
@@ -397,6 +399,23 @@ describe("agents Novadeck can connect", () => {
       expect(hookEvents(copy)).not.toContain("PreToolUse")
     },
   )
+
+  it("tell the folders every harness keeps for itself, as the environment moves them", async ({
+    fixture,
+  }) => {
+    const bookkeeping = await fixture.agents().bookkeeping()
+    expect(bookkeeping).toContain(join(fixture.home, ".claude", "plans"))
+    expect(bookkeeping).toContain(join(fixture.home, ".codex", "memories"))
+    expect(bookkeeping).toContain(join(fixture.home, ".gemini", "antigravity-cli", "brain"))
+    // Not the homes whole: a skill or a setting there is the person's work.
+    expect(bookkeeping).not.toContain(join(fixture.home, ".claude"))
+    const moved = join(fixture.root, "moved")
+    const elsewhere = await fixture
+      .agents({ CLAUDE_CONFIG_DIR: moved, CODEX_HOME: join(moved, "codex") })
+      .bookkeeping()
+    expect(elsewhere).toContain(join(moved, "plans"))
+    expect(elsewhere).toContain(join(moved, "codex", "sessions"))
+  })
 
   it("never undo a disconnect asked for before the refresh looked", async ({ fixture }) => {
     installed(fixture.home, "agy")

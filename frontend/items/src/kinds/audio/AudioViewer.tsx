@@ -1,8 +1,9 @@
+import { bytesText } from "@novadeck/core/command-text"
 import type { AudioContent } from "@novadeck/core/items"
 import { AudioLines } from "lucide-react"
 
 import type { ArtifactBodyProps } from "../../ArtifactViewer"
-import { bytesText, formatName } from "../video/format"
+import { formatName } from "../video/format"
 import { Playback } from "../video/Playback"
 import { AudioPlayer } from "./AudioPlayer"
 
@@ -12,7 +13,7 @@ export const AudioViewer = (props: ArtifactBodyProps<"audio">): React.JSX.Elemen
   <Playback {...props} element="audio">
     {(url, stamp, onBroken) => (
       <AudioPlayer
-        id={props.item.id}
+        id={`${props.item.id}\n${props.item.path}`}
         src={url}
         stamp={stamp}
         name={props.item.name}

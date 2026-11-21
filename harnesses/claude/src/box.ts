@@ -151,7 +151,8 @@ const still = (rows: readonly string[]): readonly string[] =>
  * (fixtures/monochrome-prompt.probe.json).
  */
 const suggestion = (box: InputBox, screen: ScreenText): boolean =>
-  screen.rows.every((row, at) => row === screen.bright[at]) &&
+  // A row the next continues keeps its trailing blanks, which its bright twin never does.
+  screen.rows.every((row, at) => row.trimEnd() === screen.bright[at]) &&
   box.mode === "prompt" &&
   box.first === box.last &&
   screen.cursor.row === box.first &&
@@ -172,6 +173,46 @@ const queued = (screen: ScreenText): boolean => {
     first !== undefined &&
     screen.rows.slice(first).some((row) => row.includes("Press up to edit queued messages"))
   )
+}
+
+/**
+ * The lines of the one message the screen shows queued above its box (probed 2.1.328, 2026-11-19):
+ * `❯ first line`, the rest indented two columns, then `  ⎿  Queued · ctrl+x ctrl+s to send now`.
+ * Undefined where no row says "Queued" or two do, or no `❯` row leads the message. The rows
+ * are the screen's, so a line longer than the screen wraps into more of them: whoever uses
+ * this checks them against the words as they were sent.
+ */
+const queuedHints = (
+  screen: ScreenText,
+): { above: readonly string[]; hints: number[] } | undefined => {
+  const first = read(screen)?.first
+  if (first === undefined) return undefined
+  const above = screen.rows.slice(0, first)
+  return { above, hints: above.flatMap((row, at) => (/^\s*⎿\s+Queued\b/.test(row) ? [at] : [])) }
+}
+
+/** Whether the screen shows a queued message's hint above its box. */
+const queuedShown = (screen: ScreenText): boolean => (queuedHints(screen)?.hints.length ?? 0) > 0
+
+const queuedMessage = (screen: ScreenText): readonly string[] | undefined => {
+  const found = queuedHints(screen)
+  if (!found || found.hints.length !== 1) return undefined
+  const { above } = found
+  const end = found.hints[0]!
+  // A message still in its prompt hook may stand under the hint with none of its own.
+  if (above.slice(end + 1).some((row) => row.startsWith("❯ "))) return undefined
+  const start = above.slice(0, end).findLastIndex((row) => row.startsWith("❯ "))
+  if (start < 0) return undefined
+  const rows = above.slice(start, end)
+  const lines: string[] = []
+  for (const [at, row] of rows.entries()) {
+    if (at === 0) lines.push(row.slice(2).trimEnd())
+    else if (row.trim() === "") lines.push("")
+    else if (row.startsWith("  ")) lines.push(row.slice(2).trimEnd())
+    else return undefined
+  }
+  while (lines.at(-1) === "") lines.pop()
+  return lines
 }
 
 /**
@@ -264,6 +305,14 @@ export const box: BoxProfile = {
       screen.rows
         .slice(screen.rows.findLastIndex(rule) + 1)
         .some((row) => row.includes("/ for commands")),
+    // From 2.1.328 Up brings a message of more than three lines back as `[Pasted text #1 +4
+    // lines]`, which the box can't say the words of: the screen did, above the box, before it.
+    shown: queuedMessage,
+    waiting: queuedShown,
+    stands: (text) => {
+      const count = /^\[Pasted text #\d+ \+(\d+) lines?\]$/.exec(text.trim())?.[1]
+      return count === undefined ? undefined : Number(count)
+    },
   },
   // Enter runs a command shown as a placeholder as the text it stands for. It binds its session
   // before any command, so none starts one (`starts`).

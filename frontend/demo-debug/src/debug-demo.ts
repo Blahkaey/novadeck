@@ -33,20 +33,30 @@ import { restoreClipboard } from "./clipboard"
 import { createDebugPanel, type DebugPanel } from "./DebugPanel"
 import { createDemoPortable, type DemoPortable } from "./desktop/portable"
 import { createDemoSandbox } from "./desktop/sandbox"
+import { demoShowScale } from "./desktop/scale"
+import { createDemoScreenReader } from "./desktop/screen-reader"
 import { createDemoUninstall, type DemoUninstall } from "./desktop/uninstall"
 import { updatesGroup, type DemoUpdates } from "./desktop/updates"
+import {
+  clearDemoWindowControls,
+  createDemoWindowControls,
+  type DemoWindowControls,
+} from "./desktop/window-controls"
 import { doorbellGroups } from "./doorbell"
 import { feedbackGroups } from "./feedback"
 import { fileEditingGroups } from "./file-editing"
 import { filesGroups } from "./files"
+import { folderViewGroups } from "./folder-view"
 import { forgesGroups } from "./forges"
 import { historyGroups } from "./history"
 import { inboxGroups } from "./inbox"
 import { installGroups } from "./installs"
 import { launchGroups } from "./launch"
 import { messageGroups } from "./messages"
+import { modelGroups } from "./models"
 import { murmurGroups } from "./murmur"
 import { notesGroups } from "./notes"
+import { pageGroups } from "./pages"
 import { pdfGroups } from "./pdfs"
 import { planGroups } from "./plans"
 import { createDemoStates } from "./states"
@@ -74,6 +84,16 @@ export type DemoLaunch = {
   readonly sandbox: SandboxState | undefined
   // Boots again with the desktop app saying this of its sandbox (or nothing).
   readonly setSandbox: (sandbox: SandboxState | undefined) => void
+  // Whether the desktop app says a screen reader runs; undefined where nothing can tell, as in
+  // a browser, which offers no Automatic in Preferences.
+  readonly screenReader: boolean | undefined
+  // Boots again with the desktop app saying this of a screen reader (or nothing).
+  readonly setScreenReader: (running: boolean | undefined) => void
+  // How the desktop app's window holds its own controls; undefined for one with its own title
+  // bar, as on Linux, or a browser.
+  readonly windowControls: DemoWindowControls | undefined
+  // Boots again with the window holding its controls so (or with its own title bar).
+  readonly setWindowControls: (controls: DemoWindowControls | undefined) => void
   // The portable copy the desktop app plays; undefined for an installed one.
   readonly portable: DemoPortable | undefined
   // Boots again as this portable copy (or an installed one).
@@ -140,6 +160,16 @@ const panels = new WeakMap<Backend, DebugPanel>()
 
 /** The debug panel for a backend `createDebugDemo` made. */
 export const debugPanelOf = (backend: Backend): DebugPanel | undefined => panels.get(backend)
+
+// The window's controls the launch plays, drawn in the page; a launch with none takes away
+// those an earlier boot drew.
+const windowControlsOf = (
+  controls: DemoWindowControls | undefined,
+): Pick<Backend, "windowControls"> => {
+  if (controls) return { windowControls: createDemoWindowControls(controls) }
+  clearDemoWindowControls()
+  return {}
+}
 
 // Wraps a demo variant in the shell the runner's backend has around it: a connection
 // that can drop, a crash loop that can trip, a boot that takes its time, and the states
@@ -293,8 +323,13 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
       ),
     whatsNew: states.whatsNew,
     ...(launch.sandbox ? { sandbox: createDemoSandbox(launch.sandbox) } : {}),
+    ...(launch.screenReader === undefined
+      ? {}
+      : { screenReader: createDemoScreenReader(launch.screenReader).screenReader }),
     ...(launch.portable ? { portable: createDemoPortable(launch.portable).portable } : {}),
     ...(launch.uninstall ? { uninstall: createDemoUninstall(launch.uninstall).uninstall } : {}),
+    ...windowControlsOf(launch.windowControls),
+    showScale: demoShowScale,
     pickDirectory: states.pickDirectory,
     ...(inner.moveTerminal ? { moveTerminal: states.moveTerminal(inner.moveTerminal) } : {}),
     ...(inner.conversations ? { conversations: states.chat(inner.conversations) } : {}),
@@ -318,6 +353,9 @@ export const createDebugDemo = (launch: DemoLaunch): Backend => {
           ...planGroups(inner.companions),
           ...videoGroups(inner.companions),
           ...pdfGroups(inner.companions),
+          ...pageGroups(inner.companions),
+          ...modelGroups(inner.companions),
+          ...folderViewGroups(inner.companions),
           ...babciaGroups(babciaCuesOf(inner)),
           ...launchGroups(launchCuesOf(inner)),
           ...doorbellGroups(inner.messages),

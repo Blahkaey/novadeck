@@ -214,6 +214,7 @@ const panel = (
     workspace: () => workspace.getSnapshot(),
     note: (text) => void notes.push(text),
     crash: () => {},
+    failViewLoads: () => {},
   }
   const read = vi.fn<NonNullable<Inbox["readFinishes"]>>()
   const states = createDemoStates(
@@ -387,7 +388,7 @@ describe("demo states", () => {
       [
         ...Array<string>(3).fill("ask"),
         ...Array<string>(1).fill("ask"),
-        ...Array<string>(13).fill("finish"),
+        ...Array<string>(15).fill("finish"),
         ...Array<string>(4).fill("work"),
       ].toSorted(),
     )
@@ -720,6 +721,7 @@ describe("demo states", () => {
         workspace: () => only,
         note: (text) => void notes.push(text),
         crash: () => {},
+        failViewLoads: () => {},
         target: "project",
         harness: "claude",
       })
@@ -895,6 +897,7 @@ const openOver = (variant: "plain" | "agents" | "inbox", harness: AgentName = "c
     workspace: () => workspace.getSnapshot(),
     note: () => {},
     crash: () => {},
+    failViewLoads: () => {},
   }
   const states = createDemoStates(turns, () => inbox)
   const run = (label: string): void =>

@@ -193,6 +193,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       rename: (id, title) => note(`rename ${id}`, () => runner.terminals.rename(id, title)),
       resetTitle: (id) => note(`reset title ${id}`, () => runner.terminals.resetTitle(id)),
       active: (id) => note(`active ${id}`, () => runner.terminals.active(id)),
+      seen: (ids) => runner.terminals.seen(ids),
       busy: () => runner.terminals.busy(),
       upload: (id, file) => note(`upload ${id}`, () => runner.terminals.upload(id, file)),
       restart: (id, size) => note(`restart ${id}`, () => runner.terminals.restart(id, size)),
@@ -265,10 +266,15 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       content: (itemId, options) => runner.companions.content(itemId, options),
       changeFile: (input) =>
         note(`change file ${input.path}`, () => runner.companions.changeFile(input)),
+      changeRange: (input) => note("change range", () => runner.companions.changeRange(input)),
       changeRead: (input) =>
         note(`change read ${input.path}`, () => runner.companions.changeRead(input)),
       save: (input) => note(`save plan ${input.itemId}`, () => runner.companions.save(input)),
       attach: (input) => note(`attach ${input.path}`, () => runner.companions.attach(input)),
+      folders: (input) => note(`folders ${input.path}`, () => runner.companions.folders(input)),
+      wroteTo: (input) => note("wrote to", () => runner.companions.wroteTo(input)),
+      repoint: (input) =>
+        note(`repoint ${input.itemId} ${input.path}`, () => runner.companions.repoint(input)),
       openInProject: (input) =>
         note(`open ${input.path} in project`, () => runner.companions.openInProject(input)),
       move: (itemId, terminalId) =>

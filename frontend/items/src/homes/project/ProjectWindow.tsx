@@ -96,7 +96,13 @@ export const ProjectWindow = ({
       }}
     >
       {item && (
-        <WindowItem item={item} itemStore={itemStore} target={target} body={body || undefined} />
+        <WindowItem
+          item={item}
+          itemStore={itemStore}
+          target={target}
+          body={body || undefined}
+          steps={false}
+        />
       )}
     </div>
   )

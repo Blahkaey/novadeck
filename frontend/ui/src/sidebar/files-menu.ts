@@ -1,6 +1,7 @@
 import { absolutePath, relativePath } from "@novadeck/core/files"
 import { Chord } from "@novadeck/toolkit/Chord"
 import type { ContextMenuAction } from "@novadeck/toolkit/ContextMenu"
+import { PanelRight } from "lucide-react"
 import { createElement } from "react"
 
 import { filesShortcutBindings, type Platform, type Shortcut } from "../interaction/shortcuts"
@@ -34,6 +35,7 @@ export const filesMenu = ({
   platform,
   onCopy,
   onRefresh,
+  onOpenFolder,
   onHide,
   onNew,
   clipboard,
@@ -48,6 +50,7 @@ export const filesMenu = ({
   platform: Platform
   onCopy: (text: string) => void
   onRefresh: () => void
+  onOpenFolder?: ((row: FilesRow) => void) | undefined
   // Hides the row in the project; absent where the backend keeps no patterns of the project's.
   onHide?: ((row: FilesRow) => void) | undefined
   // Starts naming a new file, or a folder, where the menu was asked; absent where the backend
@@ -100,6 +103,16 @@ export const filesMenu = ({
       ],
     ])
   return grouped([
+    row.node.folder && onOpenFolder
+      ? [
+          {
+            value: "open-in-pane",
+            label: "Open in the pane",
+            icon: createElement(PanelRight, { size: 14, strokeWidth: 1.75, "aria-hidden": true }),
+            onSelect: () => onOpenFolder(row),
+          },
+        ]
+      : [],
     making,
     [
       ...(clipboard && ours

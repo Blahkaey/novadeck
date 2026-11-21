@@ -1,9 +1,10 @@
 import { MURMUR_NAME } from "@novadeck/core/addons/murmur"
 import type { ForgeName } from "@novadeck/core/forges"
 import type { AgentName } from "@novadeck/core/harnesses"
+import type { AgentMode } from "@novadeck/core/port"
 import type { NoticeSound } from "@novadeck/core/sounds"
 import { viewModes } from "@novadeck/core/state"
-import type { PreferencesValue } from "@novadeck/core/types"
+import { appScales, screenReaderPreferences, type PreferencesValue } from "@novadeck/core/types"
 import { Checkbox } from "@novadeck/toolkit/Checkbox"
 import { Dialog } from "@novadeck/toolkit/Dialog"
 import { SegmentGroup } from "@novadeck/toolkit/SegmentGroup"
@@ -20,19 +21,24 @@ import { soundChoiceOf, soundInEffect, soundName, sounds } from "../sounds"
 import { themes, type ThemeEntry, type ThemeId } from "../theme/themes"
 import { AddonRow } from "./addon-parts"
 import { agentsExplanation, type AgentSwitch } from "./agent-switches"
+import { AgentModePicker } from "./AgentModePicker"
 import { AgentSwitches } from "./AgentSwitches"
+import { builtInFont, fontChoices, isBundled } from "./font-choices"
 import { forgesExplanation, type ForgeSwitch } from "./forge-switches"
 import { ForgeSwitches } from "./ForgeSwitches"
 import { murmurDescription } from "./murmur-addon"
 import { MurmurAddon, type MurmurAddonValue } from "./MurmurAddon"
 import {
+  fontSizeRange,
   preferencesTabs,
   settingRowClasses,
   settingsCardClasses,
   versionText,
   type PreferencesTab,
 } from "./settings"
+import { useThemeMonoFamily } from "./theme-font"
 import { UninstallApp, type UninstallValue } from "./UninstallApp"
+import { useInstalledFonts } from "./useInstalledFonts"
 import { VoiceInput, type VoiceAddon } from "./VoiceInput"
 
 const themeItems = themes.map(({ id, name }) => ({ label: name, value: id }))
@@ -56,7 +62,19 @@ const agentPresentations = [
   { chatView: false, label: "Terminal", icon: SquareTerminal },
 ] as const
 
-const fontSizes = [12, 13, 15].map((size) => ({ label: `${size}px`, value: String(size) }))
+const scaleItems = appScales.map((scale) => ({ label: `${scale}%`, value: String(scale) }))
+
+// Screen reader support's choices: Automatic only where the app can tell when one runs. Plain
+// words, as the menu is as wide as its button; the row's description says what they do.
+const screenReaderChoices = (known: boolean) => [
+  ...(known ? [{ label: "Automatic", value: "auto" }] : []),
+  { label: "On", value: "on" },
+  { label: "Off", value: "off" },
+]
+
+const screenReaderExplanation = (known: boolean): string =>
+  "Lets a screen reader read the terminal you're in, at some cost to speed." +
+  (known ? " Automatic turns it on while the system reports one." : "")
 
 // Section titles match the sidebar's panel titles.
 const sectionTitleClasses = "section-label m-0 text-label font-medium"
@@ -192,6 +210,8 @@ export const Preferences = ({
   renderFilesExclude,
   transcripts,
   hibernation,
+  agentModes,
+  agentMode,
   tour = false,
   worktrees,
   forges,
@@ -203,6 +223,8 @@ export const Preferences = ({
   logs,
   uninstall,
   notices = false,
+  screenReaderKnown = false,
+  scalable = false,
   systemSounds = false,
   hearSound,
   chat = false,
@@ -241,6 +263,17 @@ export const Preferences = ({
     readonly minutes: number | null
     readonly onChange: (minutes: number | null) => void
   }
+  // Whether Solo and Swarm may be picked, an Experimental feature the backend keeps; absent
+  // where it has none. The picker below shows only while it is on.
+  agentModes?: {
+    readonly enabled: boolean
+    readonly onChange: (enabled: boolean) => void
+  }
+  // How agents work with each other; absent where the backend has no such setting.
+  agentMode?: {
+    readonly mode: AgentMode
+    readonly onChange: (mode: AgentMode) => void
+  }
   // Whether the backend has a tour, which the Onboarding tour switch offers from the footer.
   tour?: boolean
   // Whether agents get git worktrees, an Experimental feature the backend keeps; absent
@@ -265,6 +298,11 @@ export const Preferences = ({
   }
   // Whether the page can show desktop notifications, as the desktop app can.
   notices?: boolean
+  // Whether the app can tell when a screen reader runs, as the desktop app can: it offers
+  // Automatic, which follows it, where a browser offers On and Off alone.
+  screenReaderKnown?: boolean
+  // Whether the app can scale its windows, as the desktop app can; a browser has its own zoom.
+  scalable?: boolean
   // Whether the system's notifications play the sound themselves, at the system's alert
   // volume, as on macOS.
   systemSounds?: boolean
@@ -345,7 +383,10 @@ export const Preferences = ({
   const hasExperimental = experimental?.on === true
   // Agents holds the agents and when to stop the idle ones; a backend with neither, as the
   // website's demo, has no tab for them.
-  const hasAgentsTab = hasAgents || hibernation !== undefined
+  // The mode picker is an Experimental feature: it shows only with its switch on, and only where
+  // the Experimental tab is there to turn it off.
+  const showAgentMode = agentMode !== undefined && agentModes?.enabled === true && hasExperimental
+  const hasAgentsTab = hasAgents || hibernation !== undefined || showAgentMode
   const hidden = (id: PreferencesTab): boolean =>
     (id === "agents" && !hasAgentsTab) ||
     (id === "addons" && !hasAddons) ||
@@ -353,6 +394,14 @@ export const Preferences = ({
     (id === "experimental" && !hasExperimental)
   // Where no tab is named, Agents opens where there is one, else General.
   const shown = tab === null ? (hasAgentsTab ? "agents" : "general") : hidden(tab) ? "general" : tab
+  const { fonts: installed } = useInstalledFonts(open && shown === "appearance")
+  const themeFamily = useThemeMonoFamily()
+  const terminalFonts = fontChoices(installed, value.fontFamily ?? "", themeFamily)
+  // Terminals join ligatures only in the bundled font, which they draw where it is the default
+  // (the standard themes) or the choice.
+  const terminalLigatures = isBundled(
+    terminalFonts.value === builtInFont ? themeFamily || "JetBrains Mono" : terminalFonts.value,
+  )
   // The Experimental tab's switches, one row each.
   const experimentalToggles = [
     {
@@ -383,6 +432,16 @@ export const Preferences = ({
       checked: worktrees?.enabled ?? false,
       onToggle: (enabled: boolean) => worktrees?.onChange(enabled),
       disabled: !worktrees,
+    },
+    {
+      id: "agent-modes",
+      label: "Agent modes",
+      description: agentModes
+        ? "Pick how agents work together, in the Agents tab: Solo for one or two agents you steer yourself, Herd for several side by side, Swarm for a big goal split across agents. While this is off, agents work as Herd."
+        : "Not available here.",
+      checked: agentModes?.enabled ?? false,
+      onToggle: (enabled: boolean) => agentModes?.onChange(enabled),
+      disabled: !agentModes,
     },
   ]
   const lastView = value.enabledViews.length === 1
@@ -456,7 +515,7 @@ export const Preferences = ({
         </div>
         <div ref={panels} className="preferences-panels grid min-h-0 flex-1 overflow-y-auto">
           <TabPanel value="agents" className={panelClasses}>
-            {(agents || hibernation) && (
+            {(agents || hibernation || showAgentMode) && (
               <Section title="Agents" {...(agents ? { description: agentsExplanation } : {})}>
                 {agents && (
                   <AgentSwitches
@@ -483,6 +542,9 @@ export const Preferences = ({
                       portalContainer={dialog}
                     />
                   </div>
+                )}
+                {showAgentMode && (
+                  <AgentModePicker mode={agentMode.mode} onChange={agentMode.onChange} />
                 )}
               </Section>
             )}
@@ -542,17 +604,36 @@ export const Preferences = ({
                 </fieldset>
               </div>
             </Section>
+            {scalable && (
+              <Section title="Scale">
+                <div className={settingsCardClasses}>
+                  <Select
+                    className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-36`}
+                    label="Scale"
+                    items={scaleItems}
+                    value={String(value.appScale)}
+                    onValueChange={(next) => {
+                      const appScale = appScales.find((scale) => String(scale) === next)
+                      if (appScale) onChange({ ...value, appScale })
+                    }}
+                    open={open && shown === "appearance" && openSelect === "scale"}
+                    onOpenChange={(expanded) => setOpenSelect(expanded ? "scale" : null)}
+                    portalContainer={dialog}
+                  />
+                </div>
+              </Section>
+            )}
             <Section title="Layout">
               <fieldset
-                className="view-preferences settings-fieldset m-0 min-w-0 p-0"
+                className="view-preferences settings-fieldset m-0 flex min-w-0 flex-col p-0"
                 aria-describedby="view-modes-description"
               >
-                <legend className="float-left mb-1.5 w-full p-0 px-0.5">
+                <legend className="w-full p-0 px-0.5">
                   <span className={`block ${groupTitleClasses}`}>View modes</span>
                 </legend>
                 <p
                   id="view-modes-description"
-                  className={`clear-both px-0.5 ${sectionDescriptionClasses}`}
+                  className={`mt-1.5 px-0.5 ${sectionDescriptionClasses}`}
                 >
                   Layouts shown in the header. At least one stays on; with one, the header has no
                   switch.
@@ -592,15 +673,15 @@ export const Preferences = ({
               {/* Only where the backend reads agents' conversations. */}
               {chat && (
                 <fieldset
-                  className="agent-chat-preferences settings-fieldset m-0 mt-2.5 min-w-0 p-0"
+                  className="agent-chat-preferences settings-fieldset m-0 mt-2.5 flex min-w-0 flex-col p-0"
                   aria-describedby="agent-chat-description"
                 >
-                  <legend className="float-left mb-1.5 w-full p-0 px-0.5">
+                  <legend className="w-full p-0 px-0.5">
                     <span className={`block ${groupTitleClasses}`}>Show agents as</span>
                   </legend>
                   <p
                     id="agent-chat-description"
-                    className={`clear-both px-0.5 ${sectionDescriptionClasses}`}
+                    className={`mt-1.5 px-0.5 ${sectionDescriptionClasses}`}
                   >
                     Agent Chat: read and reply to agents in a chat instead of their terminal. When
                     the chat can't handle something, answer in the terminal.
@@ -644,21 +725,48 @@ export const Preferences = ({
             </Section>
             <Section title="Text">
               <div className={settingsCardClasses}>
+                <div className={`preference-row ${settingRowClasses}`}>
+                  <span id="font-size-label">Text size</span>
+                  <span className="flex shrink-0 items-center gap-3">
+                    <input
+                      type="range"
+                      min={fontSizeRange.min}
+                      max={fontSizeRange.max}
+                      step={1}
+                      value={value.fontSize}
+                      onChange={(event) =>
+                        onChange({ ...value, fontSize: Number(event.target.value) })
+                      }
+                      aria-labelledby="font-size-label"
+                      aria-valuetext={`${value.fontSize}px`}
+                      className="settings-range w-40 cursor-pointer"
+                    />
+                    <span aria-hidden="true" className="w-10 text-right tabular-nums">
+                      {value.fontSize}px
+                    </span>
+                  </span>
+                </div>
                 <Select
-                  className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-36`}
-                  label="Text size"
-                  items={fontSizes}
-                  value={String(value.fontSize)}
-                  onValueChange={(size) => onChange({ ...value, fontSize: Number(size) })}
-                  open={open && shown === "appearance" && openSelect === "font-size"}
-                  onOpenChange={(expanded) => setOpenSelect(expanded ? "font-size" : null)}
+                  className={`preference-row ${settingRowClasses} [&_[data-part=trigger]]:w-52`}
+                  label="Terminal font"
+                  items={terminalFonts.items}
+                  value={terminalFonts.value}
+                  onValueChange={(choice) =>
+                    onChange({ ...value, fontFamily: choice === builtInFont ? "" : choice })
+                  }
+                  open={open && shown === "appearance" && openSelect === "terminal-font"}
+                  onOpenChange={(expanded) => setOpenSelect(expanded ? "terminal-font" : null)}
                   portalContainer={dialog}
                 />
                 <div className={`preference-row ${settingRowClasses}`}>
                   <SettingText
                     id="ligatures-label"
                     label="Ligatures"
-                    description="Join pairs such as => and != into one symbol in terminals and code."
+                    description={
+                      terminalLigatures
+                        ? "Join pairs such as => and != into one symbol in terminals and code."
+                        : "Join pairs such as => and != into one symbol in code. Terminals draw them only in the built-in JetBrains Mono."
+                    }
                     descriptionId="ligatures-description"
                   />
                   <Switch
@@ -666,6 +774,36 @@ export const Preferences = ({
                     onChange={(ligatures) => onChange({ ...value, ligatures })}
                     labelledBy="ligatures-label"
                     describedBy="ligatures-description"
+                  />
+                </div>
+                <div className={`preference-row ${settingRowClasses}`}>
+                  <SettingText
+                    id="screen-reader-label"
+                    label="Screen reader support"
+                    description={screenReaderExplanation(screenReaderKnown)}
+                    descriptionId="screen-reader-description"
+                  />
+                  <Select
+                    className="shrink-0 [&_[data-part=label]]:sr-only [&_[data-part=trigger]]:w-36"
+                    label="Screen reader support"
+                    items={screenReaderChoices(screenReaderKnown)}
+                    // Where nothing can tell, Automatic keeps the text, as On does.
+                    value={
+                      value.screenReader === "auto" && !screenReaderKnown
+                        ? "on"
+                        : value.screenReader
+                    }
+                    onValueChange={(choice) =>
+                      onChange({
+                        ...value,
+                        screenReader:
+                          screenReaderPreferences.find((each) => each === choice) ??
+                          value.screenReader,
+                      })
+                    }
+                    open={open && shown === "appearance" && openSelect === "screen-reader"}
+                    onOpenChange={(expanded) => setOpenSelect(expanded ? "screen-reader" : null)}
+                    portalContainer={dialog}
                   />
                 </div>
               </div>

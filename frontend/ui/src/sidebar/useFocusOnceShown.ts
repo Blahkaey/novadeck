@@ -20,15 +20,17 @@ export const focusMovable = (tree: HTMLElement | null): boolean => {
 export const useFocusOnceShown = (
   rows: readonly FilesRow[],
   tree: HTMLElement | null,
+  focusRow: (row: FilesRow) => void,
 ): ((path: string | null) => void) => {
   const focusing = useRef<string | null>(null)
   useLayoutEffect(() => {
     const path = focusing.current
-    if (path === null || !rows.some((row) => row.node.path === path)) return
+    const row = path !== null && rows.find((each) => each.node.path === path)
+    if (!row) return
     focusing.current = null
     if (!focusMovable(tree)) return
-    tree?.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)?.focus()
-  }, [rows, tree])
+    focusRow(row)
+  }, [rows, tree, focusRow])
   return useCallback((path: string | null) => {
     focusing.current = path
   }, [])

@@ -147,7 +147,7 @@ const vendors: Record<string, readonly string[]> = {
   "react-router": ["app/", "shell/"],
   // The Files panel's patterns for hiding files, matched as globs.
   picomatch: ["sidebar/files-exclude.ts"],
-  "react-dom": ["layouts/transition.ts", "entries/start.tsx"],
+  "react-dom": ["layouts/transition.ts", "entries/start.tsx", "sidebar/useTreeScroll.ts"],
 }
 
 // The packages that hold what used to be folders of src, named as the layers above know them.

@@ -1,14 +1,19 @@
+import { join } from "node:path"
+
+import type { ScreenText } from "@novadeck/emulator/headless"
 import type { DialogAdapter, RequestFacts } from "@novadeck/harness-core/dialogs"
 import { fakeAdapter, FakeTui } from "@novadeck/harness-core/testing/dialogs"
+import { loadProbe } from "@novadeck/harness-core/testing/probes"
 import { screen } from "@novadeck/harness-core/testing/screens"
 import { requestAnswer } from "@novadeck/protocol"
 import { InputQueue } from "@novadeck/tui-input"
 import { afterEach, vi } from "vitest"
 
 import { DomainError } from "../errors.js"
+import { harnesses } from "../harnesses/registry.js"
 import { describe, expect, it } from "../test.js"
 import { Answers, type AnswersHost } from "./answers.js"
-import { identified } from "./dialogs.js"
+import { identified, identifiedRead } from "./dialogs.js"
 
 // The answer driver's sleeps go through the global setTimeout, so a case that times them runs
 // them on a fake clock (see `timed`); every other case gets the real timer, as before.
@@ -94,6 +99,13 @@ const terminal = (
     turnStartedAt?: () => number | undefined
     /** How long a turn is left to run before the first key, in milliseconds; 10 by default. */
     settleMs?: number
+    /**
+     * Its dialog is held out of view while the screen shows "FAKE ELSEWHERE": it reads from the
+     * facts, with the keys "R" to bring it into view (which do, unless `stuck`).
+     */
+    held?: boolean | "stuck"
+    /** A real adapter reads the screen, and the screen is these rows: no fake TUI. */
+    real?: { adapter: DialogAdapter; rows: readonly string[] }
     /** Runs after each write, as the TUI redraws. */
     after?: (tui: FakeTui) => void
     /**
@@ -122,6 +134,18 @@ const terminal = (
   let settled = 0
   let asked = 0
   const adapter = (): DialogAdapter => {
+    if (options.real) return options.real.adapter
+    const inner = shownAdapter()
+    if (!options.held) return inner
+    return {
+      read: (rows, each) => {
+        if (!rows.includes("FAKE ELSEWHERE")) return inner.read(rows, each)
+        const read = inner.read(new FakeTui().rows(), each)
+        return read && { ...read, reveal: "R", keys: () => undefined }
+      },
+    }
+  }
+  const shownAdapter = (): DialogAdapter => {
     const plain = fakeAdapter()
     if (options.turnEndsAfter !== undefined)
       return { read: (rows, each) => (each.turnEnded ? undefined : plain.read(rows, each)) }
@@ -283,9 +307,11 @@ const terminal = (
             }
           : undefined,
     ringing: () => undefined,
-    screen: () => Promise.resolve(tui.screen()),
+    screen: () =>
+      Promise.resolve(options.real ? screen({ rows: [...options.real.rows] }) : tui.screen()),
     press: (_terminal, data) => {
       tui.write(data)
+      if (data === "R" && options.held === true) tui.state = "ask"
       options.after?.(tui)
       return true
     },
@@ -1355,5 +1381,115 @@ describe("setting a question aside, as the chat's Send or Stop does over it", ()
     expect(await made.setAside()).toBe("dismissed")
     expect(made.tui.written).toEqual(["\x1b"])
     expect(made.locks).toEqual(["failed"])
+  })
+})
+
+describe("answering a dialog held out of view", () => {
+  const held = (options: Parameters<typeof terminal>[0] = {}) => {
+    const made = terminal({ held: true, ...options })
+    made.tui.state = "other"
+    return made
+  }
+
+  it("brings it into view first, then answers by the read of the dialog in view", async () => {
+    const { tui, answers, read, calls } = held()
+    const id = identifiedRead(read()!)!.id
+    // Not the id of the same dialog in view: a card answered once it shows has another.
+    expect(id).not.toBe(shown(new FakeTui()))
+    await answers.answer("t", "r1", { dialog: id, type: "choice", option: "1" })
+    expect(tui.written).toEqual(["R", "1"])
+    expect(calls).toContain("done")
+  })
+
+  it("is DIALOG_CHANGED, pressing nothing, for the id of the dialog in view", async () => {
+    const { tui, answers } = held()
+    expect(
+      await fails(
+        answers.answer("t", "r1", { dialog: shown(new FakeTui()), type: "choice", option: "1" }),
+      ),
+    ).toBe("DIALOG_CHANGED")
+    expect(tui.written).toEqual([])
+  })
+
+  it("fails with only the scroll pressed, locking nothing, where the dialog never comes into view", async () => {
+    const { tui, answers, read, locks, calls } = held({ held: "stuck" })
+    const id = identifiedRead(read()!)!.id
+    expect(
+      await fails(answers.answer("t", "r1", { dialog: id, type: "choice", option: "1" })),
+    ).toBe("CONFLICT")
+    expect(tui.written).toEqual(["R"])
+    expect(locks).toEqual([])
+    // What the person typed meanwhile was meant for a dialog not in view: dropped, not flushed.
+    expect(calls).toContain("discard")
+  })
+
+  it("is no read where another request waits too, pressing nothing", async () => {
+    const { tui, answers, read } = held({ others: [{ ref: "r2", facts }] })
+    expect(read()).toBeDefined()
+    expect(
+      await fails(
+        answers.answer("t", "r1", {
+          dialog: identifiedRead(read()!)!.id,
+          type: "choice",
+          option: "1",
+        }),
+      ),
+    ).toBe("CONFLICT")
+    expect(tui.written).toEqual([])
+  })
+
+  it("sets a question aside with Escape alone, which is no scroll key: the view stays where it is", async () => {
+    let waiting = true
+    const made = held({
+      chat: "prompt",
+      escape: "interrupts",
+      waiting: () => waiting,
+      asking: () => (waiting ? [{ ref: "r1", kind: "question" }] : []),
+      after: (tui) => {
+        if (tui.written.at(-1) !== "\x1b") return
+        tui.state = "gone"
+        waiting = false
+      },
+    })
+    const result = await made.queue.run("t", (entry) =>
+      made.answers.setAside(entry, "t", ["r1"], "talk"),
+    )
+    expect(result).toBe("dismissed")
+    expect(made.tui.written).toEqual(["\x1b"])
+  })
+})
+
+describe("answering over Codex's /diff pager, which hides the dialog under it", () => {
+  // Escape there answers the hidden dialog (probed on 0.170.0): nothing must ever press it.
+  const { states } = loadProbe<{ states: Record<string, ScreenText> }>(
+    join(import.meta.dirname, "../../../../harnesses/codex/src"),
+    "hidden-dialog.probe.json",
+  )
+  const pager = () =>
+    terminal({
+      real: { adapter: harnesses.codex.dialogs!, rows: states.permissionHeld!.rows },
+      escape: "skips",
+      asking: () => [{ ref: "r1", kind: "question" }],
+      // The tracker shows it raw, as nothing reads there.
+      shown: false,
+    })
+
+  it("refuses an answer, pressing nothing and locking nothing: the dialog reads raw", async () => {
+    const { answers, tui, locks, read } = pager()
+    expect(read()).toBeUndefined()
+    expect(
+      await fails(answers.answer("t", "r1", { dialog: "none", type: "choice", option: "1" })),
+    ).toBe("CONFLICT")
+    expect(tui.written).toEqual([])
+    expect(locks).toEqual([])
+  })
+
+  it("refuses to set a question aside, as a Stop or a Send would, pressing no Escape", async () => {
+    const { answers, queue, tui, locks } = pager()
+    expect(await fails(queue.run("t", (entry) => answers.setAside(entry, "t", ["r1"], "hi")))).toBe(
+      "CONFLICT",
+    )
+    expect(tui.written).toEqual([])
+    expect(locks).toEqual([])
   })
 })

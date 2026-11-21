@@ -1154,7 +1154,7 @@ describe("runner client companion items", () => {
       version: 1,
     })
     await expect(
-      client.companions.attach({ terminalId: first.id, path: "." }),
+      client.companions.attach({ terminalId: first.id, path: "missing.md" }),
     ).rejects.toMatchObject({ code: "INVALID_FILE" })
     await expect(
       client.companions.attach({ terminalId: crypto.randomUUID(), path: "notes.md" }),
@@ -1291,6 +1291,48 @@ describe("runner client project window", () => {
   })
 })
 
+describe("runner client repoint", () => {
+  it("points a bar's file at another of its kind through the wire, and refuses the rest with their codes", async ({
+    resources,
+  }) => {
+    const app = await deployed(resources)
+    const client = await app.connect()
+    const { id: sessionId } = await session(client, app.directory)
+    const terminal = await client.terminals.create(shell(sessionId))
+    const directory = await realpath(app.directory)
+    await writeFile(join(directory, "one.md"), "# One\n")
+    await writeFile(join(directory, "two.md"), "# Two\n")
+    await writeFile(join(directory, "pic.png"), "pixels")
+    const item = await client.companions.attach({
+      terminalId: terminal.id,
+      path: join(directory, "one.md"),
+    })
+
+    await expect(
+      client.companions.repoint({ itemId: item.id, path: join(directory, "two.md") }),
+    ).resolves.toMatchObject({
+      id: item.id,
+      holder: { terminalId: terminal.id },
+      name: "two.md",
+      version: 2,
+    })
+    await expect(
+      client.companions.repoint({ itemId: item.id, path: join(directory, "pic.png") }),
+    ).rejects.toMatchObject({ code: "INVALID_FILE" })
+    await expect(
+      client.companions.repoint({ itemId: crypto.randomUUID(), path: join(directory, "one.md") }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" })
+    const opened = await client.companions.openInProject({
+      sessionId,
+      path: "one.md",
+      windowId: crypto.randomUUID(),
+    })
+    await expect(
+      client.companions.repoint({ itemId: opened.item.id, path: join(directory, "two.md") }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+  })
+})
+
 describe("runner client messages", () => {
   it("lists and watches Inbox entries, rejects a stale answer, and reads tells through the authenticated API", async ({
     resources,
@@ -1320,6 +1362,7 @@ describe("runner client messages", () => {
       waits: null,
       waitsSince: null,
       paused: false,
+      notices: [],
       threads: [],
     })
     await client.messages.pause(true)
@@ -1360,6 +1403,7 @@ describe("runner client message watch", () => {
         waits: null,
         waitsSince: null,
         paused: false,
+        notices: [],
         threads: [],
       },
     })
@@ -1841,9 +1885,10 @@ describe("runner client works", () => {
     const found = new Map<string, unknown>()
     for (;;) {
       // eslint-disable-next-line no-await-in-loop -- Events arrive in order.
-      const { value } = await watch.next()
-      if (value?.type === "changed") found.set(value.work.root, value.work)
-      if (value?.type === "synced") break
+      const { done, value } = await watch.next()
+      if (done) throw new Error("The works watch ended before it synced.")
+      if (value.type === "changed") found.set(value.work.root, value.work)
+      if (value.type === "synced") break
     }
     expect(found.get(worktree)).toMatchObject({
       root: worktree,
@@ -1874,8 +1919,9 @@ describe("runner client works", () => {
     expect(existsSync(worktree)).toBe(false)
     for (;;) {
       // eslint-disable-next-line no-await-in-loop -- Events arrive in order.
-      const { value } = await watch.next()
-      if (value?.type === "removed") {
+      const { done, value } = await watch.next()
+      if (done) throw new Error("The works watch ended before the worktree was removed.")
+      if (value.type === "removed") {
         expect(value).toMatchObject({ root: worktree, projectId })
         break
       }

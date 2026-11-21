@@ -1,5 +1,6 @@
 import type { FileChange } from "@novadeck/core/files"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
+import { Tooltip } from "@novadeck/toolkit/Tooltip"
 import {
   ChevronRight,
   File,
@@ -11,6 +12,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  PanelRight,
   type LucideIcon,
 } from "lucide-react"
 import { useCallback } from "react"
@@ -30,6 +32,7 @@ import {
   type FilesNote,
   type FilesRow,
 } from "./files-tree"
+import type { Place } from "./files-window"
 
 const plainIcons: Readonly<Record<FileIcon, LucideIcon>> = {
   code: FileCode,
@@ -54,7 +57,7 @@ const noteTexts: Readonly<Record<FilesNote["note"], string>> = {
 }
 
 // A quiet line at the end of an open folder that couldn't be read in full.
-export const NoteRow = ({ line }: { line: FilesNote }): React.JSX.Element => (
+export const NoteRow = ({ line, place }: { line: FilesNote; place: Place }): React.JSX.Element => (
   <div role="none" className="files-note-row">
     {Array.from({ length: line.depth }, (_, level) => (
       <span
@@ -67,6 +70,8 @@ export const NoteRow = ({ line }: { line: FilesNote }): React.JSX.Element => (
     <div
       role="treeitem"
       aria-level={line.depth + 1}
+      aria-setsize={place.size}
+      aria-posinset={place.position}
       aria-disabled="true"
       className="files-note text-caption"
       data-note={line.note}
@@ -177,6 +182,7 @@ const rowLabel = (row: FilesRow, everyone: readonly string[], cut: boolean): str
 // copying or moving now is busy: a spinner in its icon's place.
 export const TreeRow = ({
   row,
+  place,
   chips,
   lit,
   selected,
@@ -186,11 +192,14 @@ export const TreeRow = ({
   cut,
   busy,
   onActivate,
-  onOpenFile,
+  onOpenFolder,
   onFocus,
   onLight,
 }: {
   row: FilesRow
+  // Where the row stands among its siblings: the tree draws only some of its rows, and a screen
+  // reader learns the rest from this.
+  place: Place
   // The chips the row shows, or undefined for none (an open folder names nobody: its files do).
   chips: ChipSet | undefined
   lit: ReadonlySet<string>
@@ -203,8 +212,10 @@ export const TreeRow = ({
   cut: boolean
   // A paste copies or moves it now.
   busy: boolean
+  // A click: opens a file, folds a folder.
   onActivate: (row: FilesRow) => void
-  onOpenFile: (row: FilesRow) => void
+  // Opens a folder row in the pane; absent where the backend can't.
+  onOpenFolder: ((row: FilesRow) => void) | undefined
   onFocus: (path: string) => void
   onLight: (pointed: Pointed | undefined) => void
 }): React.JSX.Element => {
@@ -213,6 +224,7 @@ export const TreeRow = ({
   const Icon = node.folder ? (open ? FolderOpen : Folder) : fileIcon
   const everyone = chips?.everyone ?? []
   const branch = expandable(node)
+  const openable = node.folder && onOpenFolder !== undefined
   return (
     <div
       role="none"
@@ -224,6 +236,8 @@ export const TreeRow = ({
       data-pulse={pulse === undefined ? undefined : pulse % 2 === 1 ? "a" : "b"}
       data-selected={selected}
       data-cut={cut}
+      // Focus anywhere in the row, the pane button too, keeps the row drawn.
+      onFocus={() => onFocus(node.path)}
     >
       {Array.from({ length: depth }, (_, level) => (
         <span
@@ -239,15 +253,16 @@ export const TreeRow = ({
         className="files-row-select"
         style={{ paddingLeft: 6 + indent * depth }}
         aria-level={depth + 1}
+        aria-setsize={place.size}
+        aria-posinset={place.position}
         data-path={node.path}
         tabIndex={tabStop ? 0 : -1}
         aria-expanded={branch ? open : undefined}
         aria-selected={node.folder ? undefined : selected}
         aria-label={rowLabel(row, everyone, cut)}
         aria-busy={busy || undefined}
-        onClick={() => onActivate(row)}
-        onDoubleClick={() => onOpenFile(row)}
-        onFocus={() => onFocus(node.path)}
+        // A double click's second click doesn't open the file again.
+        onClick={(event) => (node.folder || event.detail <= 1) && onActivate(row)}
       >
         <span className="files-twisty" aria-hidden="true">
           {branch && <ChevronRight size={12} strokeWidth={1.5} data-open={open} />}
@@ -267,6 +282,20 @@ export const TreeRow = ({
             onLight(handle === undefined ? undefined : { path: node.path, handle })
           }
         />
+      )}
+      {openable && (
+        <Tooltip content="Open in the pane">
+          {/* A pointer's shortcut to the menu's entry, which keyboards reach by the row's own menu. */}
+          <button
+            type="button"
+            className="icon-button files-row-action"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={() => onOpenFolder(row)}
+          >
+            <PanelRight size={14} strokeWidth={1.75} />
+          </button>
+        </Tooltip>
       )}
     </div>
   )

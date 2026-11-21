@@ -1146,6 +1146,81 @@ describe("Inbox creation limits", () => {
 })
 
 describe("bounded Inbox history", () => {
+  it("lets a day-old entry go as it is made, and tells its host of changes only once it is", ({
+    resources,
+  }) => {
+    const clock = inboxClock()
+    const records = memoryInbox()
+    const run = setup(records, undefined, clock)
+    resources.defer(run.stop)
+    const tell = (subject: string) => {
+      const sent = run.inbox.call(identity.terminalId, "tell", { subject, body: "Body" })
+      if (!sent.ok) throw new Error(sent.reason)
+      run.inbox.read([sent.id])
+    }
+    tell("Halfway")
+    clock.advance(60_000)
+    tell("Nearly")
+    run.stop()
+    clock.advance(retentionMs - 60_000)
+    // The runner's own host is still being put together while its Inbox is made.
+    const told: string[] = []
+    const booted = new Inbox(
+      {
+        owner: () => undefined,
+        reply: () => {},
+        replyState: () => undefined,
+        forgetReplies: () => {},
+        changed: (id) => void told.push(id),
+        exists: () => true,
+      },
+      records,
+      clock.now,
+      { sweepMs: 0 },
+    )
+    resources.defer(() => booted.close())
+    expect(records.entries().map((each) => each.content)).toMatchObject([{ subject: "Nearly" }])
+    expect(told).toEqual([])
+    clock.advance(60_000)
+    booted.prune()
+    expect(records.entries()).toEqual([])
+    expect(told).toEqual([identity.terminalId])
+  })
+
+  it("is made though its first prune fails, and prunes at the next", ({ resources }) => {
+    const clock = inboxClock()
+    const records = memoryInbox()
+    const run = setup(records, undefined, clock)
+    resources.defer(run.stop)
+    const sent = run.inbox.call(identity.terminalId, "tell", { subject: "Halfway", body: "Body" })
+    if (!sent.ok) throw new Error(sent.reason)
+    run.inbox.read([sent.id])
+    run.stop()
+    clock.advance(retentionMs)
+    let whole = false
+    const booted = new Inbox(
+      {
+        owner: () => undefined,
+        reply: () => {},
+        replyState: () => {
+          if (!whole) throw new Error("The host is not whole yet")
+          return undefined
+        },
+        forgetReplies: () => {},
+        changed: () => {},
+        exists: () => true,
+      },
+      records,
+      clock.now,
+      { sweepMs: 0 },
+    )
+    resources.defer(() => booted.close())
+    whole = true
+    expect(records.entries()).toHaveLength(1)
+    booted.prune()
+    expect(records.entries()).toEqual([])
+  })
+
   it("retains only the latest hundred resolved records per terminal at runtime", ({
     resources,
   }) => {
@@ -2066,14 +2141,21 @@ describe("asks the person's own prompt withdraws", () => {
     expect(inbox.list().find((each) => each.id === id)?.settled?.how).not.toBe("replied")
   })
 
-  it("names a few subjects in one short paragraph, as the agent's quoted words", () => {
+  it("names a few subjects in one short notice, as the agent's quoted words", () => {
     const subjects = Array.from({ length: 7 }, (_, index) => `Question ${index + 1} "quoted"`)
     const notice = withdrawnNotice([...subjects, "x".repeat(400)])
-    expect(notice.startsWith("Novadeck: automatic notice, not from the user: ")).toBe(true)
+    expect(notice.startsWith("Novadeck · Inbox\n")).toBe(true)
     expect(notice).toContain('"Question 1 \\"quoted\\""')
     expect(notice).toContain("and 3 more")
-    expect(notice).not.toContain("\n")
+    // A header, the facts and one action line: no subject's own newline splits it further.
+    expect(notice.split("\n")).toHaveLength(3)
     expect(Buffer.byteLength(notice)).toBeLessThan(1_000)
+    // What they left open is asked again in the reply, with an ask as its copy, and the
+    // Inbox goes unmentioned; their message isn't taken for an answer it may not be.
+    expect(notice).toContain(
+      "ask again as before: in your reply, with an ask as its copy, never mentioning the Inbox",
+    )
+    expect(notice).not.toContain("Read their message as their reply")
   })
 })
 
@@ -2185,16 +2267,19 @@ describe("asks the person dismisses", () => {
   it("words the notice by the ask's shape", () => {
     const options = dismissedNotice([{ subject: "S", action: "options" }])
     expect(options).toBe(
-      'Novadeck: automatic notice, not from the user: the user dismissed your ask "S" from their Inbox without answering it. ' +
-        "Don't read that as an answer: they chose none of its options. Take it that they don't need it now, and don't ask it again unless it matters again. This notice needs no reply.",
+      'Novadeck · Inbox\nThe user dismissed your ask "S" from their Inbox without answering it. ' +
+        "That is no answer: they chose none of its options.",
     )
     expect(dismissedNotice([{ subject: "S", action: "text" }])).toContain(
-      "Don't read that as an answer. Take it",
+      "without answering it. That is no answer.",
     )
     expect(dismissedNotice([{ subject: "S", action: "action" }])).toBe(
-      'Novadeck: automatic notice, not from the user: the user dismissed your ask "S" from their Inbox. ' +
-        "They won't do it for now: go on without it, or stop at that step and say so. This notice needs no reply.",
+      'Novadeck · Inbox\nThe user dismissed your ask "S" from their Inbox without doing it.',
     )
+    // A dismissal is a fact, never a guess at what they want or a say on going on.
+    for (const action of ["options", "text", "action"])
+      for (const words of ["don't need", "go on", "stop", "again unless"])
+        expect(dismissedNotice([{ subject: "S", action }])).not.toContain(words)
   })
 
   it("lets the agent withdraw an ask already dismissed quietly, and refuses other closed asks", () => {

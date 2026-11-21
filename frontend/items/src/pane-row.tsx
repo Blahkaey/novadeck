@@ -27,9 +27,11 @@ export type TabNote = {
   readonly gone: boolean
   // Where it points now, where that isn't where it was shown: a page's live address.
   readonly where: string | undefined
+  // The icon its tab wears instead of its kind's, as a folder that may hold secrets wears a lock.
+  readonly icon: LucideIcon | undefined
 }
 
-const noNote: TabNote = { facts: [], gone: false, where: undefined }
+export const noNote: TabNote = { facts: [], gone: false, where: undefined, icon: undefined }
 
 // Where the viewer puts its tools: the row's own spot, null until drawn, and undefined where
 // no row is drawn, as when a viewer is drawn on its own.
@@ -66,14 +68,19 @@ export const PaneChrome = ({
 }
 
 // Tells the tab of what's shown what its viewer knows of it: `facts` for its tooltip, whether
-// it's `gone`, and `where` it points now. Let go as the viewer is.
-export const usePaneNote = (facts: readonly string[], gone = false, where?: string): void => {
+// it's `gone`, `where` it points now, and the `icon` it wears instead of its kind's. Let go as the viewer is.
+export const usePaneNote = (
+  facts: readonly string[],
+  gone = false,
+  where?: string,
+  icon?: LucideIcon,
+): void => {
   const set = useContext(NoteSetter)
   const joined = facts.join("\n")
   useEffect(() => {
-    set?.({ facts: joined === "" ? [] : joined.split("\n"), gone, where })
+    set?.({ facts: joined === "" ? [] : joined.split("\n"), gone, where, icon })
     return () => set?.(noNote)
-  }, [set, joined, gone, where])
+  }, [set, joined, gone, where, icon])
 }
 
 // What the row says of one tab beyond its name and icon.
@@ -106,13 +113,16 @@ export const TabFace = ({
 }): React.JSX.Element => (
   <>
     <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
-    <span className="pane-tab-name">{name}</span>
-    {look.origin !== undefined && (
-      <span className="pane-tab-origin" aria-hidden="true">
-        <SquareTerminal size={12} strokeWidth={1.5} />
-        {look.origin}
-      </span>
-    )}
+    {/* Its words, which a tab's mark sits under. */}
+    <span className="pane-tab-label">
+      <span className="pane-tab-name">{name}</span>
+      {look.origin !== undefined && (
+        <span className="pane-tab-origin" aria-hidden="true">
+          <SquareTerminal size={12} strokeWidth={1.5} />
+          {look.origin}
+        </span>
+      )}
+    </span>
   </>
 )
 
@@ -215,19 +225,29 @@ const ToolButton = ({ tool }: { tool: PaneTool }): React.JSX.Element => {
 
 // The viewer's tools, at the end of the row before the place's buttons, or where it's drawn
 // without a row, at its top. `chip` is a link that isn't a tool, as a change's pull request.
+//
+// `after` is for the tools the place adds to a viewer's own, as a file's steps through its folder:
+// they come after the viewer's whichever is drawn first, and stay whole (a menu of them beside the
+// viewer's own "More tools" would be two of a name).
 export const PaneTools = ({
   tools,
   chip,
+  after = false,
 }: {
   tools: readonly PaneTool[]
   chip?: ReactNode
+  after?: boolean
 }): React.JSX.Element | null => {
   const slot = useContext(ToolsSlot)
-  const folds = tools.length > mostBeforeFolding
+  const folds = !after && tools.length > mostBeforeFolding
   const body = (
     <>
       {chip}
-      <span className="pane-tools-inline" data-fold={folds || undefined}>
+      <span
+        className="pane-tools-inline"
+        data-fold={folds || undefined}
+        data-after={after || undefined}
+      >
         {tools.map((tool) => (
           <ToolButton key={tool.key} tool={tool} />
         ))}
@@ -297,7 +317,8 @@ export const tabTip = (
     ...((item.kind === "image" ||
       item.kind === "video" ||
       item.kind === "audio" ||
-      item.kind === "pdf") &&
+      item.kind === "pdf" ||
+      item.kind === "model") &&
     item.detail
       ? [item.detail]
       : []),

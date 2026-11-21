@@ -43,12 +43,69 @@ export const videoLimits = { bytes: 512 * 1024 * 1024 } as const
  */
 export const pdfLimits = { bytes: 128 * 1024 * 1024 } as const
 
-// The files whose preview reads them as a whole, as a tree or a table, by extension.
-const dataExtensions = new Set(["json", "jsonl", "ndjson", "yaml", "yml", "csv", "tsv"])
+// The files whose preview reads them as a whole, as a tree, a table or a page, by extension.
+const dataExtensions = new Set([
+  "json",
+  "jsonl",
+  "ndjson",
+  "yaml",
+  "yml",
+  "csv",
+  "tsv",
+  "html",
+  "htm",
+])
 
 /** Whether a file is read as data: whole, up to `companionLimits.data`, not by its lines. */
 export const isDataPath = (path: string): boolean =>
   dataExtensions.has(/\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase() ?? "")
+
+/** Whether a file is a web page the pane draws, by extension: `.html` or `.htm`. */
+export const isHtmlPath = (path: string): boolean => /\.html?$/i.test(path)
+
+/**
+ * The files beside a web page that the pane reads for it (`companions.part` with `file`): the
+ * most of one, how many, and all told, in bytes. Only what a page draws with
+ * (`isPageFile`), and only from the page's own folder or under it.
+ */
+export const pageLimits = { file: 16 * 1024 * 1024, files: 64, bytes: 32 * 1024 * 1024 } as const
+
+/** Whether a file beside a page is of a type the page draws with: styles, pictures or fonts. */
+export const isPageFile = (name: string): boolean =>
+  /\.(css|png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf)$/i.test(name)
+
+/**
+ * A 3D model the pane previews: the most it takes, its file and the files beside it it names
+ * (a glTF's buffers and textures, an OBJ's materials and theirs) all told, in bytes, which it
+ * holds whole as it draws them; and how many such files it reads.
+ */
+export const modelLimits = { bytes: 256 * 1024 * 1024, files: 64 } as const
+
+/** The formats of model the pane draws, by the file's extension. */
+export const modelFormats = ["glb", "gltf", "stl", "obj", "ply", "3mf"] as const
+
+/**
+ * Why a file a model names isn't read with it: `external`, an address of its own (`https:`,
+ * `file:`, an absolute path), never read; `outside`, a path out of the model's folder; and as
+ * a part's, `missing`, `not-a-file`, `secret` (never shown beside a model), `too-large` (past
+ * what's left of `modelLimits.bytes`) or `unreadable`.
+ */
+export const modelRefusal = z.enum([
+  "external",
+  "outside",
+  "missing",
+  "not-a-file",
+  "secret",
+  "too-large",
+  "unreadable",
+])
+
+/**
+ * A folder the pane lists: at most `entries` of what it holds are listed (`truncated` says
+ * when it holds more), each named in at most `name` UTF-16 code units; an image listed with a
+ * thumbnail is read through `companions.part`, so it is at most `thumbnail` bytes.
+ */
+export const folderLimits = { entries: 2000, name: 1024, thumbnail: partBytes } as const
 
 // What agents show and the person attaches beside a terminal: a pointer to a file, a
 // page or a plan, never a copy of it, which `companions.content` reads when it loads.
@@ -61,13 +118,25 @@ export const isDataPath = (path: string): boolean =>
 // the background shells the agent in its terminal left running, one per terminal, which the
 // runner makes as the first one starts; it points at nothing (`path` and `url` are null).
 // A video or an audio recording is a file too, played rather than read, which the runner
-// tells by its extension.
+// tells by its extension. A folder points at a folder, whose listing it holds, read-only.
 const itemHolder = z.union([z.strictObject({ terminalId: id }), z.strictObject({ windowId: id })])
 export const companionItem = z.strictObject({
   id,
   sessionId: id,
   holder: itemHolder,
-  kind: z.enum(["image", "video", "audio", "pdf", "file", "page", "plan", "changes", "shells"]),
+  kind: z.enum([
+    "image",
+    "video",
+    "audio",
+    "pdf",
+    "model",
+    "file",
+    "folder",
+    "page",
+    "plan",
+    "changes",
+    "shells",
+  ]),
   name: z.string().max(companionLimits.name),
   detail: z.string().max(companionLimits.detail),
   path: z.string().max(companionLimits.path).nullable(),
@@ -264,6 +333,14 @@ const diffHunk = z.strictObject({
   ),
 })
 
+// `companions.changeRange`: the files a selection of layers changed as one range, as git
+// lists them from the range's start to its end: a file added and deleted inside it is not
+// there, one renamed is one row, and its counts are the range's own, not the layers' added up.
+export const changeRange = z.strictObject({
+  files: z.array(changedFile).max(maxChangedFiles),
+  truncated: z.boolean(),
+})
+
 // `companions.changeFile`: one file as a selection of layers changed it. The selection is
 // one range (from the oldest layer's parent to the newest), so one run; `null` where it did
 // not change the file. A run has its file's diff as hunks (none, with `big`, where the
@@ -340,6 +417,28 @@ const textContent = z.discriminatedUnion("writable", [
   }),
 ])
 
+// One entry of a folder's listing. `kind` is told by the extension; `children` counts what a
+// folder holds (null where it is not counted or can't be read); `size` is a file's, in bytes,
+// and `modifiedAt` epoch milliseconds. A `secret` entry may hold secrets: it is named, never
+// opened, read or counted. A `link` is a symbolic link that leaves the opened folder (or points
+// at nothing): it is listed as itself, never entered or read. `stamp` names a file as
+// `companions.part` must read it ("" for an entry that is read through no part). `plain: false`
+// marks what is no regular file (a pipe, a socket, a device), and `linked: true` a symbolic link
+// that stays inside the opened folder, listed as the file or folder it leads to: neither is a
+// file of its own to step to. Both are absent otherwise.
+export const folderEntry = z.strictObject({
+  name: z.string().min(1).max(folderLimits.name),
+  kind: z.enum(["folder", "image", "video", "audio", "pdf", "model", "text", "other"]),
+  size: z.number().nonnegative(),
+  modifiedAt: z.number(),
+  children: z.int().nonnegative().nullable(),
+  secret: z.boolean(),
+  link: z.boolean(),
+  linked: z.literal(true).optional(),
+  plain: z.literal(false).optional(),
+  stamp: z.string().max(128),
+})
+
 // `companions.content`: what an item points at, read as it is now. `stamp` changes with
 // it. A file is the lines around the ones pointed at, numbered from `firstLine`, with
 // its line count where it was read to its end (`truncated` otherwise), and `clamped`
@@ -367,6 +466,13 @@ const textContent = z.discriminatedUnion("writable", [
 // parts for the client to play, and its stamp names the file as those parts must be read from; `shown` counts
 // the agent's shows, as a page's does, and `at` is the second the latest show starts it at.
 // A PDF is its size, its bytes read in parts as a video's are, and drawn by the client.
+// A 3D model is its format and size, read in parts as a PDF is, and the files beside it it
+// names, by name as the model writes it: each it reads with its size and stamp, which
+// `companions.part` reads by that name, and each it doesn't with why.
+// A folder is its listing, read again whenever it changes: `within` is the path of the folder
+// listed from the one the item points at (its top; "" for the top itself, "/" between names),
+// `path` its own, `entries` at most `folderLimits.entries` of what it holds, of `total` (the
+// rest is `truncated`).
 // Or why it can't be shown, with the file's size where known.
 // A file followed with `edit` is `text` where it can be edited whole (see `textContent`); one
 // that can't is the listing above, with `uneditable` saying why: `too-large` past 256 KiB or
@@ -413,6 +519,14 @@ export const itemContent = z.discriminatedUnion("state", [
         scroll: z.string().max(companionLimits.scroll).optional(),
       }),
       z.strictObject({
+        kind: z.literal("folder"),
+        path: z.string().max(companionLimits.path),
+        within: z.string().max(companionLimits.path),
+        entries: z.array(folderEntry).max(folderLimits.entries),
+        total: z.int().nonnegative(),
+        truncated: z.boolean(),
+      }),
+      z.strictObject({
         kind: z.literal("changes"),
         root: z.string().max(companionLimits.path),
         base: z.string().max(256),
@@ -426,9 +540,8 @@ export const itemContent = z.discriminatedUnion("state", [
           })
           .optional(),
         layers: z.array(changeLayer).max(maxChangeLayers),
-        // The files the change as a whole differs from main by, as git lists the range from
-        // main to the newest layer (the layers' own files added up are not that), up to
-        // `maxChangedFiles`.
+        // The files the change as a whole differs from main by, as `changeRange` lists a
+        // range (the layers' own files added up are not that), up to `maxChangedFiles`.
         files: z.array(changedFile).max(maxChangedFiles),
         read: z.array(z.string().max(companionLimits.path)).max(maxChangedFiles),
         truncated: z.boolean(),
@@ -493,6 +606,25 @@ export const itemContent = z.discriminatedUnion("state", [
         kind: z.literal("pdf"),
         size: z.int().nonnegative().max(pdfLimits.bytes),
       }),
+      z.strictObject({
+        kind: z.literal("model"),
+        format: z.enum(modelFormats),
+        size: z.int().nonnegative().max(modelLimits.bytes),
+        files: z
+          .array(
+            z.strictObject({
+              name: z.string().max(companionLimits.path),
+              size: z.int().nonnegative().max(modelLimits.bytes),
+              stamp: z.string().max(128),
+            }),
+          )
+          .max(modelLimits.files),
+        refused: z
+          .array(
+            z.strictObject({ name: z.string().max(companionLimits.path), reason: modelRefusal }),
+          )
+          .max(modelLimits.files),
+      }),
     ]),
   }),
   z.strictObject({
@@ -523,10 +655,43 @@ export const filePart = z.discriminatedUnion("state", [
   }),
 ])
 
+// `companions.folders`: how many folders it names at most, how many of a folder's entries it
+// reads to find them, and how many it counts in each before it says "that many or more".
+export const folderMatchLimits = { matches: 20, scanned: 5000, counted: 1000 } as const
+
+// `companions.folders`: the folders under the typed path's parent whose names start as its last
+// part does. `path` is written as the person typed the parent (a leading `~`, or relative to the
+// terminal's directory) and ends in the folder's own name, so it completes the typed text;
+// `real` is its absolute path through links, as a folder item showing it holds it, so lists that
+// write a folder differently tell it is the same one; `count` is how many entries the folder
+// holds, up to `folderMatchLimits.counted`; `open` says a folder item already shows it.
+export const folderMatch = z.strictObject({
+  path: z.string().min(1).max(companionLimits.path),
+  real: z.string().min(1).max(companionLimits.path),
+  count: z.int().min(0).max(folderMatchLimits.counted),
+  open: z.boolean(),
+})
+
+// How many folders `companions.wroteTo` names at most.
+export const maxWroteFolders = 8
+
+// `companions.wroteTo`: a folder outside the project that a session's agent wrote a file in, and
+// when (milliseconds since the epoch), with the terminal's handle and the agent's harness.
+// `path` is absolute, or led by `~` for one in the person's home; `real` is its absolute path
+// through links, as `folderMatch`'s is.
+export const wroteFolder = z.strictObject({
+  path: z.string().min(1).max(companionLimits.path),
+  real: z.string().min(1).max(companionLimits.path),
+  handle,
+  agent: agentName,
+  at: z.number(),
+})
+
 export type CompanionItem = z.infer<typeof companionItem>
 export type CompanionWindow = z.infer<typeof companionWindow>
 export type CompanionChange = z.infer<typeof companionChange>
 export type ItemContent = z.infer<typeof itemContent>
+export type FolderEntry = z.infer<typeof folderEntry>
 export type PageTrouble = z.infer<typeof pageTrouble>
 export type PageLook = z.infer<typeof pageLook>
 export type PageLookAnswer = z.infer<typeof pageLookAnswer>
@@ -534,5 +699,8 @@ export type ChangedFile = z.infer<typeof changedFile>
 export type ChangeLayer = z.infer<typeof changeLayer>
 export type DiffHunk = z.infer<typeof diffHunk>
 export type ChangeFileDiff = z.infer<typeof changeFileDiff>
+export type ChangeRange = z.infer<typeof changeRange>
 export type PlanSaveResult = z.infer<typeof planSaveResult>
 export type FilePart = z.infer<typeof filePart>
+export type FolderMatch = z.infer<typeof folderMatch>
+export type WroteFolder = z.infer<typeof wroteFolder>

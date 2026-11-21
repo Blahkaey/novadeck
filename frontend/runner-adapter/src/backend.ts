@@ -6,6 +6,7 @@ import type {
   BackendConnectionState,
   BackendSink,
   Approval,
+  AgentMode,
   TerminalKey,
   ThemeSource,
 } from "@novadeck/core/port"
@@ -86,6 +87,7 @@ import {
 } from "./terminals/activity"
 import { createBootProgress } from "./terminals/boot-progress"
 import { failedToCreate, launchFailure, lostStatus } from "./terminals/failures"
+import { terminalsInSight } from "./terminals/in-sight"
 import { terminalInUse } from "./terminals/in-use"
 import { crashLoop, restartingTooOften, restartWindowMs } from "./terminals/restarts"
 import { resumableProgram } from "./terminals/resumable"
@@ -145,11 +147,16 @@ export type RunnerBackendOptions = {
   readonly pickDirectory?: () => Promise<string | null>
   // Where the app's window follows the page's appearance.
   readonly showAppearance?: Backend["showAppearance"]
+  // Where the app's windows follow the person's scale.
+  readonly showScale?: Backend["showScale"]
   // Where the app shows desktop notifications.
   readonly notices?: Backend["notices"]
   // Where the app shows the Inbox count on the app icon.
   readonly badge?: Backend["badge"]
   readonly windowFocus?: Backend["windowFocus"]
+  // Where the window's own controls sit over the page's header (macOS).
+  readonly windowControls?: Backend["windowControls"]
+  readonly screenReader?: Backend["screenReader"]
   readonly panePicture?: Backend["panePicture"]
   // Where the app offers the update it has downloaded.
   readonly updates?: Backend["updates"]
@@ -171,6 +178,7 @@ export type RunnerBackendOptions = {
   // Where the app loads a page afresh, out of sight, to picture it for an agent's look.
   readonly pageLook?: Looks["fresh"]
   readonly pagePhone?: NonNullable<Backend["companions"]>["phone"]
+  readonly pageZoom?: NonNullable<Backend["companions"]>["zoom"]
   readonly now?: () => number
   // Whether the runner keeps transcripts, as it said at startup; unknown when absent.
   readonly transcripts?: boolean
@@ -180,6 +188,11 @@ export type RunnerBackendOptions = {
   // After how many idle minutes the runner stops an agent, null for never, as it said at
   // startup; not offered when absent.
   readonly hibernateAfterMinutes?: number | null
+  // Whether Solo and Swarm may be picked (an Experimental switch), as the runner said at
+  // startup; not offered when absent.
+  readonly agentModes?: boolean
+  // How agents work with each other, as the runner said at startup; not offered when absent.
+  readonly agentMode?: AgentMode
   // Whether the runner lets agents open worktrees, as it said at startup; not offered when
   // absent.
   readonly worktrees?: boolean
@@ -392,6 +405,16 @@ export const runnerBackend = (
     return work
   }
   const inUse = terminalInUse((terminalId) => runner.terminals.active(terminalId))
+  const inSight = terminalsInSight((terminalIds) => runner.terminals.seen(terminalIds))
+  // Every terminal a surface wants seen, told to the runner as it changes (see `terminals.seen`).
+  const tellSight = (): void =>
+    inSight.report(
+      new Set(
+        [...entries.values()]
+          .filter((each) => each.seen > 0 && !each.closed)
+          .map((each) => each.key.terminalId),
+      ),
+    )
   const created = Promise.resolve(true)
   // Whether each project and session exists on the runner yet; seeded ones already do.
   const projects = new Map(seed.projects.map((project) => [project.id, created]))
@@ -1437,6 +1460,7 @@ export const runnerBackend = (
     },
     track,
     messages.state,
+    () => connected(),
   )
   // The Inbox: built from the terminals' statuses, the messages and the requests of the
   // agents that ask, once the app binds it to its workspace. Every runner backend has it.
@@ -1503,6 +1527,7 @@ export const runnerBackend = (
     void ready.then((ok) => {
       if (!ok || !following || entry.closed || entry.ready !== ready) return
       messages.follow(entry.key)
+      conversations.ready(entry.key)
     })
   }
 
@@ -1556,6 +1581,7 @@ export const runnerBackend = (
         if (carried && !at(entry.key)?.[entry.key.terminalId]) noteUsage(entry, carried)
         noteUsage({ ...entry, key: from }, undefined)
         messages.unfollow(from)
+        conversations.moved(entry.key)
         followWhenReady(entry)
       })
       return entry
@@ -1700,6 +1726,7 @@ export const runnerBackend = (
       const entry = registry.get(key)?.entry
       if (!entry) return () => {}
       entry.seen += 1
+      if (entry.seen === 1) tellSight()
       wake(entry)
       let released = false
       return () => {
@@ -1707,6 +1734,7 @@ export const runnerBackend = (
         released = true
         entry.seen -= 1
         if (entry.seen > 0) return
+        tellSight()
         clearTimeout(entry.dwell)
         entry.dwell = undefined
       }
@@ -1819,6 +1847,7 @@ export const runnerBackend = (
       if (status.state === "connected") {
         saves.schedule()
         inUse.connected()
+        inSight.connected()
       }
     }
     const changes = runner.terminals.watch()
@@ -1995,6 +2024,7 @@ export const runnerBackend = (
         livePages: options.livePages === true,
         ...(options.pagePicture ? { picture: options.pagePicture } : {}),
         ...(options.pagePhone ? { phone: options.pagePhone } : {}),
+        ...(options.pageZoom ? { zoom: options.pageZoom } : {}),
         inOrder: items.inOrder,
       }),
       // Only where the app waits for the page before it quits.
@@ -2106,9 +2136,12 @@ export const runnerBackend = (
     ...(runner.tour && { tour: runnerTour(runner.tour, track) }),
     ...(options.pickDirectory ? { pickDirectory: options.pickDirectory } : {}),
     ...(options.showAppearance ? { showAppearance: options.showAppearance } : {}),
+    ...(options.showScale ? { showScale: options.showScale } : {}),
     ...(options.notices ? { notices: options.notices } : {}),
     ...(options.badge ? { badge: options.badge } : {}),
     ...(options.windowFocus ? { windowFocus: options.windowFocus } : {}),
+    ...(options.windowControls ? { windowControls: options.windowControls } : {}),
+    ...(options.screenReader ? { screenReader: options.screenReader } : {}),
     ...(options.panePicture ? { panePicture: options.panePicture } : {}),
     ...(options.updates ? { updates: options.updates } : {}),
     ...(options.version ? { version: options.version } : {}),

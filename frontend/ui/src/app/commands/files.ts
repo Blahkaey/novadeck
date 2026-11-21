@@ -6,6 +6,10 @@ import type { CommandContext } from "./context"
 import type { Leave, LeaveAll } from "./file-edits"
 
 export type FileCommands = {
+  // Opens a folder of the active project, by its path from the project's root, in the pane of the
+  // selected terminal (the session's first when a window is selected): listed there as a folder
+  // item, read-only. Rejects when the backend can't open it, or the session has no terminal.
+  readonly openFolderInPane: (path: string) => Promise<void>
   // Opens a file of the active project, by its path from the project's root, in the
   // session's project window: re-pointed to it when it is open, made when it is not, and
   // selected, with or without a terminal. Nothing happens where the backend can't open
@@ -14,9 +18,15 @@ export type FileCommands = {
   // merged) each time; without, as it is in main.
   // A file main lacks (an agent added it) opens at `copy` instead, an absolute path of an agent's
   // own copy, which `openInProject` takes wherever it is.
+  // With `keep`, a preview of the file the window already previews goes on as it was rather than
+  // starting over, as when the person clicks its row again.
   readonly openProjectFile: (
     path: string,
-    options?: { readonly preview?: boolean; readonly copy?: string | undefined },
+    options?: {
+      readonly preview?: boolean
+      readonly copy?: string | undefined
+      readonly keep?: boolean
+    },
   ) => Promise<void>
   // The person is about to rename, move or delete a file or folder of the project, by its path
   // from the project's root: the edits to each file a project window of the project's sessions
@@ -68,6 +78,21 @@ export const createFileCommands = (
   { workspace, navigation, effects, companions, ui }: CommandContext,
   { markCreated, pulse, leave, leaveAll }: SourceDependencies,
 ): FileCommands => ({
+  openFolderInPane: async (path) => {
+    const attach = companions?.attach
+    if (!attach) return
+    const before = workspace.getSnapshot()
+    const target = currentTarget(before)
+    const state = stateAt(before, target)
+    const terminal =
+      state?.roster.terminals.find((each) => each.id === state.selected) ??
+      state?.roster.terminals[0]
+    if (!terminal) throw new Error("There is no terminal to show the folder beside")
+    await attach(target, terminal.id, absolutePath(activeProject(before)!.directory, path))
+    // The item opens on the terminal's bar as the backend reports it; the person sees it there.
+    if (state?.selected !== terminal.id)
+      navigation.navigateWorkspace([{ type: "terminal/select", target, terminalId: terminal.id }])
+  },
   openProjectFile: async (path, options) => {
     const open = companions?.openInProject
     if (!open) return
@@ -75,7 +100,29 @@ export const createFileCommands = (
     const target = currentTarget(asking)
     const wanted = absolutePath(activeProject(asking)!.directory, path)
     // The edits to the file it shows reach that file before it shows another.
-    const shown = projectWindowFile(stateAt(asking, target))
+    const session = stateAt(asking, target)
+    const shown = projectWindowFile(session)
+    const context = `${target.projectId}/${target.workspaceSessionId}`
+    const saved = ui.getSnapshot().filePreviews[context]
+    // Re-pointing the same item gives it a new version and remounts its editor and diff.
+    // A repeated Files click can select the window already showing this request.
+    if (
+      options?.keep &&
+      shown &&
+      saved?.itemId === shown.id &&
+      saved.itemVersion === shown.version &&
+      saved.path === path &&
+      (!saved.backed || shown.path === options.copy)
+    ) {
+      const window = session?.roster.windows.find((each) => each.home === "project")
+      if (window) {
+        navigation.navigateWorkspace([
+          { type: "project/open", target, window, item: shown, made: false },
+        ])
+        pulse()
+        return
+      }
+    }
     const leaving = shown && shown.path !== wanted ? leave(target, shown, "switch") : undefined
     if (leaving && !(await leaving)) return
     const before = workspace.getSnapshot()
@@ -97,7 +144,6 @@ export const createFileCommands = (
     if (had && window.id === had.id && !state?.roster.windows.some((each) => each.id === had.id))
       return
     // Whether the window previews the file or shows main's copy, kept by the session.
-    const context = `${target.projectId}/${target.workspaceSessionId}`
     ui.update((now) => {
       const { [context]: _was, ...rest } = now.filePreviews
       return {

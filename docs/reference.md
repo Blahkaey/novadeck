@@ -432,7 +432,7 @@ the agent can keep working; your answer reaches that exact agent session later a
 Every row is open, resolved or withdrawn. A withdrawn one disappears: an ask its own
 agent withdrew. Everything else that ends stays, as history, in gray, until you clear it (below), saying how it ended: an
 ask answered here (with your answer), dismissed, or replied to by you writing in its terminal; a
-tell or `done` report once you opened it, saw its row in the list or looked at its terminal; a dialog answered here, in
+tell or `done` report once you opened it, or saw its row in the list and then left the list; a dialog answered here, in
 the chat (with your answer) or in the terminal, or closed in the terminal with no word of
 how (a No or Escape); a held message once you released it or stopped its thread; a failed turn or a usage
 limit once the agent works again, a failed turn too once you read it; messages held long once they
@@ -464,16 +464,23 @@ it stays until the agent's next turn, so Continue is there after the reset.
 Every item lands in the list at once. What concerns the terminal you are looking at (the
 selected one, while Novadeck has your focus, in every view) lands quietly: counted on the bell,
 but with no toast or system ping, because you see it happen there, and it stays quiet when you
-look away. An update (a `done` report or a `tell`) is read once you have looked at its terminal
-for about a second, whether it arrived while you looked or before, and turns resolved; a glance
-while passing reads nothing. Its row in the Inbox list reads it the same way: in sight for about
-a second while Novadeck has your focus and no dialog covers it, it turns resolved, as its subject
-is often all you need. Opening it reads it too. This second applies to Inbox updates only: the
-tab's unread marks of replies and failed turns clear as soon as you look. On a narrow window,
-while the Inbox list covers the screen, no terminal counts as looked at. An item you open by its
-id, as Answer in Messages or a click on a notification does, isn't read by looking. If a read
-fails, looking doesn't try it again, so you can read the update by hand. The tabs' and windows'
-"!" and "?" read the Inbox's raw items.
+look away. A new ask from that terminal, while its agent works, is held for a moment: it is in
+the list, but the bell, the app icon's badge and the "?" on its tab, window and session don't
+count it yet, as the agent is about to write the same question in the terminal you are reading.
+The hold ends at the first of the agent's next words in that terminal, the end of its turn and
+15 seconds (a turn that ended while background subagents run counts as ended); then it counts, quietly. If you look away first, it counts at once as a row that
+arrived elsewhere does, and rings after its two seconds. Permission requests, updates and asks
+from other terminals aren't held. Closing the asking terminal or switching session or project during a hold counts as looking away, and a row first seen late can be held up to 15 seconds past that. An update (a `done` report or a `tell`) is read in the Inbox, never by looking at
+its terminal. Its row counts as seen once it has been in sight in the list for about a second
+while Novadeck has your focus and no dialog covers it; a glance while scrolling past sees
+nothing. It stays as it came for as long as you look, and turns resolved when you then leave the
+list: you close the sidebar or turn it to another panel, Novadeck loses your focus, or a dialog
+opens over it. So what is new stays new while you read the list, and is history when you come
+back. Opening an update reads it at once. The tab's unread marks of replies and failed turns are
+apart from this: they clear as soon as you look at the terminal. On a narrow window, while the
+Inbox list covers the screen, no terminal counts as looked at. If a read fails it isn't tried
+again, so you can read the update by opening it. The tabs' and windows' "!" and "?" read the
+same landed items, so a held ask makes none.
 
 The rows that ask something of you keep the Inbox's own order (the row added last first) until
 you drag one: they drag among each other into your order, or move a place with Alt+↑/↓ on the
@@ -532,6 +539,7 @@ there.
 
 Right-click a file or folder for its menu:
 
+- **Open in the pane** shows the folder beside the selected terminal.
 - **New File…** and **New Folder…** make an empty one inside a folder, or beside a file
   (see below).
 - **Cut** (`Ctrl+X`; `Cmd+X` on macOS) and **Copy** (`Ctrl+C`; `Cmd+C`) keep it to paste
@@ -558,7 +566,7 @@ clipboard, puts a line above the tree saying so until you dismiss it or hide the
 
 ### Editing a file
 
-Double-click a file, or press `Enter` on it, to open it in the session's project window, where you
+Click a file, or press `Enter` on it, to open it in the session's project window, where you
 edit it in place: a Markdown file in its document, any other in a code editor. Your edits are saved
 to the file once you pause typing, when you click away from the window, and at once with `Ctrl+S`
 (`Cmd+S` on macOS). A save that fails is tried again, the window saying it isn't saved yet; after 5
@@ -974,10 +982,14 @@ Canvas navigation uses gestures and
 keyboard shortcuts: +/− to zoom and 0 to fit all terminals.
 Focus becomes an edge-to-edge terminal, while Grid and Canvas gain the available space.
 In any view, click the terminal icon beside the name to open the terminal switcher.
-Choose a terminal, or use Up/Down and Enter. Escape closes the switcher.
+Choose a terminal, or use Up/Down and Enter. Escape closes the switcher. A terminal that
+closes while it shows leaves its list, the highlight moving to the one below it.
 This also works outside Zen; double-click or double-tap the name still renames it.
 Terminal names stay visible; header actions appear on hover or keyboard focus on desktop
 and stay visible on touch devices. Search and terminal shortcuts remain available.
+On macOS, where the window's close, minimise and zoom buttons sit in the top bar, Zen hides them
+too; move the pointer to the window's top-left corner to bring them back. On Windows the window's
+buttons stay in the top-right corner in Zen.
 
 Zen preserves the active terminal and Canvas camera on entry. Exit Zen restores the
 previous sidebar visibility and panel. Explicit sidebar shortcuts or Browse sessions

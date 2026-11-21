@@ -16,6 +16,7 @@ import {
   updateChannels,
   updateVersionPattern,
   type DesktopApp,
+  isWindowControlsSide,
   parsePortableState,
   parseUpdateOffer,
   parseWhatsNew,
@@ -107,6 +108,35 @@ export const desktopWindowFocus = (app: DesktopApp | undefined): Backend["window
   return (listener) =>
     listen((focused) => {
       if (typeof focused === "boolean") listener(focused)
+    })
+}
+
+// The app's own window controls where they sit over the page (macOS, at its start): a known
+// side, and only a finite number crosses either way.
+export const desktopWindowControls = (app: DesktopApp | undefined): Backend["windowControls"] => {
+  const side = app?.windowControlsSide
+  const listen = app?.onWindowControls
+  const place = app?.placeWindowControls
+  if (!isWindowControlsSide(side) || !listen || !place) return undefined
+  return {
+    side,
+    place: (middle) => {
+      if (middle === null || Number.isFinite(middle)) place(middle)
+    },
+    onInset: (listener) =>
+      listen((inset) => {
+        if (typeof inset === "number" && Number.isFinite(inset)) listener(inset)
+      }),
+  }
+}
+
+// The app's report of whether a screen reader runs, where it has one: only a boolean crosses.
+export const desktopScreenReader = (app: DesktopApp | undefined): Backend["screenReader"] => {
+  const listen = app?.onScreenReader
+  if (!listen) return undefined
+  return (listener) =>
+    listen((running) => {
+      if (typeof running === "boolean") listener(running)
     })
 }
 
@@ -327,14 +357,18 @@ export const desktopOptions = (
   const pick = app?.pickDirectory
   const beforeQuit = app?.beforeQuit
   const showAppearance = app?.showAppearance
+  const showScale = app?.showScale
   const openLogs = app?.openLogs
   const pagePicture = app?.pagePicture
   const pageLook = app?.lookAtPage
   const pagePhone = app?.pagePhone
+  const pageZoom = app?.pageZoom
   const panePicture = app?.panePicture
   const notices = desktopNotices(app)
   const badge = desktopBadge(app)
   const windowFocus = desktopWindowFocus(app)
+  const windowControls = desktopWindowControls(app)
+  const screenReader = desktopScreenReader(app)
   const updates = desktopUpdates(app)
   const whatsNew = desktopWhatsNew(app)
   const version = desktopVersion(app)
@@ -346,9 +380,12 @@ export const desktopOptions = (
     ...(pick ? { pickDirectory: () => pick() } : {}),
     ...(beforeQuit ? { beforeQuit: (save) => beforeQuit(save) } : {}),
     ...(showAppearance ? { showAppearance: (look) => showAppearance(look) } : {}),
+    ...(showScale ? { showScale: (scale) => showScale(scale) } : {}),
     ...(notices ? { notices } : {}),
     ...(badge ? { badge } : {}),
     ...(windowFocus ? { windowFocus } : {}),
+    ...(windowControls ? { windowControls } : {}),
+    ...(screenReader ? { screenReader } : {}),
     ...(updates ? { updates } : {}),
     ...(whatsNew ? { whatsNew } : {}),
     ...(version ? { version } : {}),
@@ -363,6 +400,7 @@ export const desktopOptions = (
       : {}),
     ...(pageLook ? { pageLook: (request) => pageLook(request) } : {}),
     ...(pagePhone ? { pagePhone: (page, phone) => pagePhone(page, phone) } : {}),
+    ...(pageZoom ? { pageZoom: (page, factor) => pageZoom(page, factor) } : {}),
     ...(panePicture ? { panePicture: (rect) => panePicture(rect) } : {}),
   }
 }

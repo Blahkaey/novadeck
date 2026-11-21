@@ -6,9 +6,11 @@ import {
   type TranscriptItem,
   type TranscriptNote,
 } from "@novadeck/protocol"
+import { splitHookText } from "@novadeck/protocol/notices"
 
 import { cutText, ref } from "./decode.js"
-import type { TranscriptEntry } from "./harness.js"
+import type { EventBase, ActivityEvent } from "./events.js"
+import type { Harness, TranscriptEntry } from "./harness.js"
 import { ringOf } from "./prompts.js"
 
 /** When a record was written, from its ISO timestamp. */
@@ -136,6 +138,16 @@ export const noteEntry = (
 })
 
 /**
+ * The notices of Novadeck's own that a hook's output holds, an item each, in the order it
+ * printed them: the standing notices that ride on a prompt (Describe, Show, Inbox, Worktrees,
+ * the hook's lines), which each harness records as a record of its own. The same text may
+ * hold a delivery of agents' messages (`<novadeck-messages>`), which is the ring's and read
+ * apart; text that holds no notice of Novadeck's gives none.
+ */
+export const noticeEntries = (hook: string, when: number | null): readonly TranscriptEntry[] =>
+  splitHookText(hook).notices.map((text) => noteEntry({ type: "notice" }, when, text))
+
+/**
  * The item that shows where the person interrupted a turn, for a harness whose records hold
  * no interruption of their own (Antigravity's): the runner joins it to the transcript's
  * items, read as a harness's own record of one reads.
@@ -155,3 +167,24 @@ export const interruptionEntry = (when: number): TranscriptEntry => ({
   interrupted: true,
   ring: null,
 })
+
+/**
+ * The `words-written` fact one line of a session's transcript or rollout holds, read by
+ * its harness's own `items` (so the chat and this agree on what the agent said): the time of
+ * its latest assistant text that is no thinking, none for a line without one or with no time.
+ * `mentions` is a cheap test a line must pass before it is parsed, as most lines are long
+ * tool results.
+ */
+export const wordsIn = (
+  line: string,
+  items: NonNullable<Harness["transcripts"]>["items"],
+  mentions: (line: string) => boolean,
+  base: Omit<EventBase, "startedAt">,
+): ActivityEvent | undefined => {
+  if (!mentions(line)) return undefined
+  let startedAt: number | null = null
+  for (const item of items(line))
+    if (item.role === "assistant" && item.kind === "text" && !item.thinking && item.text.trim())
+      startedAt = item.at ?? startedAt
+  return startedAt === null ? undefined : { type: "words-written", ...base, startedAt }
+}
