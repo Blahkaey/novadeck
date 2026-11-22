@@ -40,6 +40,7 @@ import {
 } from "./workspaces/store.js"
 import { keepWorktreeChanges } from "./worktrees/changes-shown.js"
 import { MainCheckouts } from "./worktrees/main-checkout.js"
+import { repositoryKnown } from "./worktrees/repo.js"
 import { RootFolder } from "./worktrees/root-folder.js"
 import { Worktrees } from "./worktrees/worktrees.js"
 
@@ -411,6 +412,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
       service: worktrees,
       enabled: () => store.settings.runner().worktrees,
       ready: (startedAt, relists) => rootFolder.ready(startedAt, relists),
+      inRepository: repositoryKnown,
       // Read only by MCP calls, which come once the forges below are made.
       pullRequest: (commonDir, branch) => forges.pullRequest(commonDir, branch),
     },
