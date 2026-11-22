@@ -17,6 +17,7 @@ import { createDemoUpdates, pageUpdateChannel } from "./desktop/updates"
 import { createEmptyChats } from "./emptiness"
 import { createDemoFolders } from "./folders"
 import { createStaleMentions } from "./mentions"
+import { createNewerChat } from "./newer"
 import { createDemoNotices } from "./notices"
 import {
   atStartupScreen,
@@ -416,6 +417,7 @@ const gallery: readonly {
   { name: "Agent exited", state: (key) => agentRanHere(key) },
   { name: "Starting", state: (key) => starting(key) },
   { name: "Asleep", state: (key, harness) => sleeping(key, harness) },
+  { name: "Asleep, newer agent", state: (key) => sleeping(key, "newer") },
   {
     name: "Asleep, done",
     state: (key, harness) => sleeping(key, harness, true, Date.now() - doneAgoMs),
@@ -617,6 +619,7 @@ export const createDemoStates = (
   const chat = createChatFailures()
   const pictures = createChatPictures()
   const mentions = createStaleMentions()
+  const newerChat = createNewerChat()
   const emptyChats = createEmptyChats()
   const panelAsks: PanelAsks = new Set()
   const waitingActions = createWaitingActions(verbs, inbox, panelAsks)
@@ -676,6 +679,11 @@ export const createDemoStates = (
           "Asleep",
           "The agent has a saved session and no process",
           (key, { dispatch, harness }) => dispatch(hold(key, sleeping(key, harness))),
+        ),
+        setting(
+          "Asleep, a newer Novadeck's agent",
+          "The agent belongs to a harness only a newer Novadeck knows: its tab shows it asleep and this build never wakes it, whoever looks",
+          (key, { dispatch }) => dispatch(hold(key, sleeping(key, "newer"))),
         ),
         setting("Waking", "Its agent is on the way back", (key, { dispatch, harness }) =>
           dispatch(waking(key, harness)),
@@ -1085,6 +1093,11 @@ export const createDemoStates = (
     },
     {
       section: "Agents",
+      title: "Chat: a newer Novadeck's words",
+      actions: newerChat.actions,
+    },
+    {
+      section: "Agents",
       title: "Agent connections",
       actions: [
         {
@@ -1118,7 +1131,7 @@ export const createDemoStates = (
     pickDirectory,
     moveTerminal,
     chat: (conversations) =>
-      emptyChats.wrap(mentions.wrap(pictures.wrap(chat.wrap(conversations)))),
+      emptyChats.wrap(newerChat.wrap(mentions.wrap(pictures.wrap(chat.wrap(conversations))))),
     screens,
     failPaste: (key) => pasteFails.delete(terminalKeyId(key)),
     holds: (key) => held.has(terminalKeyId(key)),

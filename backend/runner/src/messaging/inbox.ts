@@ -4,7 +4,7 @@ import {
   agentAsk,
   askAnswer,
   hiddenIn,
-  inboxEntry,
+  inboxContent,
   inboxTextLimits,
   isAgentName,
   maxAskOptions,
@@ -14,7 +14,8 @@ import {
   type AgentAsk,
   type AgentName,
   type AskAnswer,
-  type InboxEntry,
+  type InboxEntry as ListedEntry,
+  type Sent,
   type TerminalMessages,
 } from "@novadeck/protocol"
 import { Latest } from "@novadeck/wire/server"
@@ -44,6 +45,9 @@ import {
   type LogWrite,
   type TurnContent,
 } from "./report-log.js"
+
+// The runner's own entries, which never hold the placeholders a UI reads in.
+type InboxEntry = Sent<ListedEntry>
 
 const log = logs.for("inbox")
 
@@ -425,7 +429,7 @@ export class Inbox {
         const content = clampedTurn(entry.content)
         if (!content) stale.push(entry.id)
         else this.keep({ ...entry, state: "open" as const, content })
-      } else if (inboxEntry.shape.content.safeParse(entry?.content).success) this.keep(entry)
+      } else if (inboxContent.safeParse(entry?.content).success) this.keep(entry)
       else if (entry?.id) stale.push(entry.id)
     }
     if (stale.length > 0) this.save(() => records.removeEntries(stale))

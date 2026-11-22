@@ -156,12 +156,17 @@ const useWorktrees = (
 }
 
 const noAsks: readonly never[] = []
-// The first approval an agent asked for that waits on the person, with the terminals it names.
-const useApproval = (approvals: Backend["approvals"]): ApprovalView | null => {
+// The first approval an agent asked for that waits on the person, with the terminals it names;
+// one the person put aside unanswered (a newer Novadeck's) waits, unshown, until they go to the
+// terminal that asked.
+const useApproval = (
+  approvals: Backend["approvals"],
+  setAside: ReadonlyMap<string, string>,
+): ApprovalView | null => {
   const first = useSyncExternalStore(
     approvals?.pending.subscribe ?? always,
     () => approvals?.pending.getSnapshot() ?? noAsks,
-  )[0]
+  ).find((each) => !setAside.has(each.requestId))
   return useWorkspaceState(
     (workspace) => (first ? approvalView(first, workspace) : null),
     sameApprovalView,
@@ -387,7 +392,18 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const tour = useTourOffer()
   const forgeList = useForges(backend.forges)
   const forgeRuns = useForgeRuns(backend.forges)
-  const approval = useApproval(backend.approvals)
+  // Approvals put aside unanswered, as this build can't answer them, by the terminal that asked:
+  // going to that terminal brings its approval back.
+  const [setAside, setSetAside] = useState<ReadonlyMap<string, string>>(new Map())
+  const selectedTerminal = useWorkspaceState((workspace) => currentState(workspace).selected)
+  // Going to a terminal, as the selection moves there, brings back what it asked.
+  const [passed, setPassed] = useState(selectedTerminal)
+  if (passed !== selectedTerminal) {
+    setPassed(selectedTerminal)
+    if ([...setAside.values()].includes(selectedTerminal))
+      setSetAside(new Map([...setAside].filter(([, asker]) => asker !== selectedTerminal)))
+  }
+  const approval = useApproval(backend.approvals, setAside)
   const voice = useVoice(backend.voice)
   const murmur = useMurmur(backend.murmur)
   const { go, closeDialog } = navigation
@@ -606,7 +622,13 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         returnFocus={(id) => terminalElement(id)?.querySelector<HTMLElement>("button") ?? null}
       />
       {backend.approvals && (
-        <ApprovalDialog approval={approval} onAnswer={backend.approvals.answer} />
+        <ApprovalDialog
+          approval={approval}
+          onAnswer={backend.approvals.answer}
+          onSetAside={(requestId) =>
+            setSetAside((held) => new Map(held).set(requestId, approval?.asker?.id ?? ""))
+          }
+        />
       )}
       <NameOffer />
       {backend.feedback?.ask && <AskAgent feedback={backend.feedback} />}

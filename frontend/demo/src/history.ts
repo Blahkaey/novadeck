@@ -160,6 +160,9 @@ const rowsOf = (projectId: string, samples: readonly Sample[], now: number): Clo
 export type DemoHistoryControl = {
   readonly setRestorable: (terminalId: string, restorable: boolean) => void
   readonly isRestorable: (terminalId: string) => boolean
+  // Adds (or moves to the top) a closed agent of a harness a newer Novadeck integrates, which this
+  // build can't restore.
+  readonly addNewer: (now: number) => void
   // Called whenever a terminal's restorable state changes by `setRestorable`.
   readonly onRestorable: (listener: () => void) => void
 }
@@ -208,6 +211,23 @@ export const createDemoHistory = (now: number, withSamples = true): DemoHistory 
         restorableChanged()
       },
       isRestorable: (terminalId) => !unrestorable.has(terminalId),
+      addNewer: (at) =>
+        change((rows) => [
+          {
+            id: "closed-newer",
+            projectId: "storefront",
+            title: "Gift cards",
+            summary: "Gift card balances at checkout",
+            handle: "mink",
+            agent: null,
+            program: "newer-agent",
+            cwd: "~/projects/storefront",
+            closedAt: at,
+            closedBy: null,
+            availability: { state: "disconnected", agent: "newer" },
+          },
+          ...rows.filter((row) => row.id !== "closed-newer"),
+        ]),
       onRestorable: (listener) => {
         restorableChanged = listener
       },

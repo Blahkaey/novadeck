@@ -576,6 +576,7 @@ export const createDemoChat = (
     if (
       !dialog ||
       dialog.type === "raw" ||
+      dialog.type === "newer" ||
       !outcome ||
       !{
         choices: ["choice"],
