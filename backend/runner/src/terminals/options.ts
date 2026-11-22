@@ -22,8 +22,15 @@ import type { TranscriptRedactor } from "./redaction.js"
 import type { TerminalRecords } from "./saved-terminals.js"
 import type { TranscriptSealer } from "./sealing.js"
 
-/** What the runner decides of an agent's `open_agent`, before anything starts. */
-export type OpenPolicy = { readonly refusal?: string }
+/**
+ * What the runner decides of an agent's `open_agent`, before anything starts: a refusal, or the
+ * flags the agent it opens starts with, by harness (the tour's write flags), for that launch only.
+ */
+export type OpenPolicy = {
+  readonly refusal?: string
+  /** The flags for the agent opened in `cwd`, the folder the call resolved. */
+  readonly flags?: (agent: AgentName, cwd: string) => readonly string[]
+}
 
 export type TerminalOptions = {
   shell?: string

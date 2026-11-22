@@ -27,6 +27,7 @@ import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
 import { SeenTerminals } from "./terminals/seen.js"
 import { Uploads } from "./terminals/uploads.js"
+import type { TourAssets } from "./tour/seed.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
@@ -84,6 +85,11 @@ export type RunnerOptions = {
    * the one `@novadeck/relay` built by default. The desktop app passes the one it ships.
    */
   relay?: string
+  /**
+   * Where the tour's seed project and the libraries it runs on are (`TourAssets`); the repository's
+   * own files and `node_modules` by default. The desktop app passes the ones it ships.
+   */
+  tour?: TourAssets
   /**
    * Voice input's speech engine: `engine` is the path to its manifest (`engine.json`),
    * `source` where its archive is, an https URL ending in `/` or a folder, and `directory`
@@ -389,6 +395,9 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
         hooksFolder: join(dirname(options.database), "no-hooks"),
       }),
   })
+  // The person's setting, except that the tour's terminals have worktrees whatever it says.
+  const worktreesOn = (terminalId?: string): boolean =>
+    store.settings.runner().worktrees || (terminalId !== undefined && tour.isTours(terminalId))
   const rootFolder = new RootFolder({
     enabled: () => store.settings.runner().worktrees,
     ...(options.worktreesRoot !== undefined && { path: options.worktreesRoot }),
@@ -410,8 +419,9 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     projects: () => store.projects().map(({ id }) => id),
     worktrees: {
       service: worktrees,
-      enabled: () => store.settings.runner().worktrees,
-      ready: (startedAt, relists) => rootFolder.ready(startedAt, relists),
+      enabled: (terminalId) => worktreesOn(terminalId),
+      ready: (startedAt, relists, terminalId) =>
+        rootFolder.ready(startedAt, relists, terminalId !== undefined && tour.isTours(terminalId)),
       inRepository: repositoryKnown,
       // Read only by MCP calls, which come once the forges below are made.
       pullRequest: (commonDir, branch) => forges.pullRequest(commonDir, branch),
@@ -454,7 +464,10 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   const projects = new Projects(store, terminals, items, worktrees)
   // In the person's home, where the agents are looked for too.
   const tour = new Tour({
+    ...(options.tour !== undefined && { assets: options.tour }),
     ...(options.agents?.home !== undefined && { home: options.agents.home }),
+    // Where the game's server command is looked for: the person's terminal's PATH.
+    environment: () => agents.environment(),
     connected: (agent) => agents.connected(agent),
     models: (agent) => agents.models(agent),
     // Every project, those being removed too, whose removal the tour waits for.
@@ -462,6 +475,8 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
     cwdOf: (terminalId) => terminals.get(terminalId).cwd,
     leadOf: (terminalId) => terminals.messaging.leadOf(terminalId)?.terminalId,
+    handleOf: (terminalId) => terminals.get(terminalId).handle,
+    worktreesFolder: () => rootFolder.make(),
   })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees
@@ -493,7 +508,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   keepWorktreeChanges({
     onMade: (listener) => worktrees.onMade(listener),
     onChanged: (listener) => worktrees.onChanged(listener),
-    enabled: () => store.settings.runner().worktrees,
+    enabled: (terminalId) => worktreesOn(terminalId),
     owner: (root) => worktrees.all().find((row) => row.path === root)?.terminalId,
     place: (terminalId) => terminals.place(terminalId),
     show: (place, root) => items.showChangesUnlessShown(place, root),

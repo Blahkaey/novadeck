@@ -1,7 +1,9 @@
 import type { InboxEntry, InboxState } from "@novadeck/core/inbox"
 import type { AgentMessage, MessagesState } from "@novadeck/core/messages"
+import type { Approval } from "@novadeck/core/port"
 import { itemFixture, terminalFixture, workspaceFixture } from "@novadeck/core/testing"
-import type { TerminalMetadata } from "@novadeck/core/types"
+import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
+import type { Work } from "@novadeck/core/works"
 
 import { leadState, noTeam, tourSignals } from "./signals"
 import { describe, expect, it } from "./test"
@@ -44,6 +46,37 @@ describe("The tour's lead", () => {
         }),
       ),
     ).toMatchObject({ named: true })
+  })
+})
+
+describe("The tour's lead, once its program ended", () => {
+  it("has left where an agent ran and the shell is back, not while its command hasn't run", () => {
+    expect(leadState(terminal({ state: "running", agentRan: true }))).toEqual({ kind: "left" })
+    expect(leadState(terminal({ state: "idle", agentRan: true }))).toEqual({ kind: "left" })
+    // A normal start: the shell is up and the command not yet an agent.
+    expect(leadState(terminal({ state: "running" }))).toEqual({ kind: "starting" })
+    expect(leadState(terminal({ state: "starting" }))).toEqual({ kind: "starting" })
+    // Its process gone is `ended`, and an agent there again is its agent.
+    expect(
+      leadState(terminal({ state: "exited", exitCode: 1, signal: null, agentRan: true })),
+    ).toEqual({
+      kind: "ended",
+    })
+    expect(
+      leadState(terminal({ state: "running", agentRan: true, agent: { working: false } })),
+    ).toMatchObject({ kind: "agent" })
+  })
+
+  it("is told of a teammate or the artist that left", () => {
+    const workspace = teamWorkspace()
+    const roster = workspace.projects[0]!.history[0]!.state.roster
+    Object.assign(roster, {
+      terminals: roster.terminals.map((each) =>
+        each.id === "04" ? { ...each, state: "running", agentRan: true } : each,
+      ),
+    })
+    expect(tourSignals(workspace, "01").teamLeft).toBeNull()
+    expect(tourSignals(workspace, "01", { artist: "04" }).teamLeft).toEqual({ terminalId: "04" })
   })
 })
 
@@ -128,21 +161,7 @@ const askRow = (terminalId: string, shape: "options" | "action" = "options"): In
 
 describe("The tour's story signals", () => {
   it("count the lead's teammates, and those that named themselves", () => {
-    expect(tourSignals(teamWorkspace(), "01").team).toEqual({ count: 2, named: 1 })
-  })
-
-  it("count each message the teammates sent the team once, and none from outside it", () => {
-    const messages = messagesOf([
-      message("m1", "02", "03"),
-      message("m2", "03", "01"),
-      message("m3", "04", "01"),
-    ])
-    expect(tourSignals(teamWorkspace(), "01", { messages }).talks).toBe(2)
-  })
-
-  it("leave out the lead's own messages to its teammates, as their tasks", () => {
-    const messages = messagesOf([message("t1", "01", "02"), message("t2", "01", "03")])
-    expect(tourSignals(teamWorkspace(), "01", { messages }).talks).toBe(0)
+    expect(tourSignals(teamWorkspace(), "01").team).toMatchObject({ count: 2, named: 1 })
   })
 
   it("see the person's answer delivered to a teammate, through a reload", () => {
@@ -265,26 +284,216 @@ describe("The tour's story signals", () => {
     expect(tourSignals(teamWorkspace(), "01", { inbox: elsewhere }).answered).toBe(false)
   })
 
-  it("see the lead's own shown card, an image, not a teammate's", () => {
+  it("count the lead's teammates by id, not the shell it opened for the game's server", () => {
     const workspace = teamWorkspace()
-    const state = workspace.projects[0]!.history[0]!.state
-    Object.assign(state, { items: [itemFixture("card", "01", { kind: "image" })] })
-    expect(tourSignals(workspace, "01").shown).toBe(true)
+    const roster = workspace.projects[0]!.history[0]!.state.roster
+    Object.assign(roster, {
+      terminals: roster.terminals.map((each) =>
+        each.id === "04" ? { ...each, openedBy: "01" } : each,
+      ),
+    })
+    expect(tourSignals(workspace, "01").team).toEqual({ count: 2, named: 1, ids: ["02", "03"] })
+  })
+})
+
+// What the agents showed, on the first session's bars.
+const withItems = (workspace: Workspace, ...items: ReturnType<typeof itemFixture>[]): Workspace => {
+  const state = workspace.projects[0]!.history[0]!.state
+  Object.assign(state, { items: [...state.items, ...items] })
+  return workspace
+}
+
+const work = (terminalId: string | null, ...paths: string[]) =>
+  ({
+    terminalId,
+    merged: false,
+    files: paths.map((path) => ({ path, status: "modified" })),
+  }) as unknown as Work
+
+const runApproval = (from: string, type = "run"): Approval =>
+  ({
+    requestId: "r1",
+    from,
+    terminalId: from,
+    action: { type, command: "node dev.mjs 4000" },
+  }) as Approval
+
+describe("The tour's signals of the game story", () => {
+  it("say the lead's run waits for a yes only while its own run approval is pending", () => {
+    const signals = (approvals: Approval[]) => tourSignals(teamWorkspace(), "01", { approvals })
+    expect(signals([runApproval("01")]).approving).toBe(true)
+    expect(signals([]).approving).toBe(false)
+    expect(signals([runApproval("02")]).approving).toBe(false)
+    expect(signals([runApproval("01", "close")]).approving).toBe(false)
   })
 
-  it("see the lead's own shown page or file, not a teammate's", () => {
-    const workspace = teamWorkspace()
-    const state = workspace.projects[0]!.history[0]!.state
-    Object.assign(state, { items: [itemFixture("card", "02", { kind: "page" })] })
-    expect(tourSignals(workspace, "01").shown).toBe(false)
-    Object.assign(state, { items: [itemFixture("card", "01", { kind: "page" })] })
-    expect(tourSignals(workspace, "01").shown).toBe(true)
+  it("say the run was allowed once the lead opened a terminal of its own, or showed its page", () => {
+    expect(tourSignals(teamWorkspace(), "01").served).toBe(false)
+    const opened = teamWorkspace()
+    const roster = opened.projects[0]!.history[0]!.state.roster
+    Object.assign(roster, {
+      terminals: roster.terminals.map((each) =>
+        each.id === "04" ? { ...each, openedBy: "01" } : each,
+      ),
+    })
+    expect(tourSignals(opened, "01").served).toBe(true)
+    const page = withItems(teamWorkspace(), itemFixture("game", "01", { kind: "page" }))
+    expect(tourSignals(page, "01")).toMatchObject({ served: true, shown: { page: "game" } })
   })
 
-  it("see the lead's own shown 3D model", () => {
+  it("find the sculptor by its model's work or its model shown or its question, never by title", () => {
+    const by = (parts: Parameters<typeof tourSignals>[2], workspace = teamWorkspace()) =>
+      tourSignals(workspace, "01", parts).roles
+    expect(by({}).sculptor).toBeUndefined()
+    expect(by({ works: [work("03", "worktrees/hero/model/hero.gltf")] }).sculptor).toBe("03")
+    expect(by({ works: [work("03", "C:\\w\\hero\\model\\hero.gltf")] }).sculptor).toBe("03")
+    expect(by({ works: [work("03", "other/model/hero.gltf.bak")] }).sculptor).toBeUndefined()
+    const shown = withItems(teamWorkspace(), itemFixture("hero", "02", { kind: "model" }))
+    expect(by({}, shown).sculptor).toBe("02")
+    const asking = { items: [askRow("03")] } as unknown as InboxState
+    expect(by({ inbox: asking }).sculptor).toBe("03")
+  })
+
+  it("find the fixer as another teammate, by the score's work or its changes shown", () => {
+    const hero = work("02", "model/hero.gltf")
+    const roles = (parts: Parameters<typeof tourSignals>[2]) =>
+      tourSignals(teamWorkspace(), "01", parts).roles
+    expect(roles({ works: [hero, work("03", "src/score.js")] })).toMatchObject({
+      lead: "01",
+      sculptor: "02",
+      fixer: "03",
+    })
+    // One teammate never plays both.
+    expect(roles({ works: [work("02", "model/hero.gltf", "src/score.js")] }).fixer).toBeUndefined()
+    const shown = withItems(teamWorkspace(), itemFixture("diff", "03", { kind: "changes" }))
+    expect(tourSignals(shown, "01").roles.fixer).toBe("03")
+  })
+
+  it("say which files were changed, whichever teammate's work did", () => {
+    const works = [work("02", "model/hero.gltf")]
+    expect(tourSignals(teamWorkspace(), "01", { works }).changed).toEqual({
+      hero: true,
+      score: false,
+    })
+    const both = [...works, work("03", "src/score.js")]
+    expect(tourSignals(teamWorkspace(), "01", { works: both }).changed).toEqual({
+      hero: true,
+      score: true,
+    })
+    const removed = [{ ...work("03"), files: [{ path: "src/score.js", status: "deleted" }] }]
+    expect(
+      tourSignals(teamWorkspace(), "01", { works: removed as unknown as Work[] }).changed.score,
+    ).toBe(false)
+  })
+
+  it("say what each role showed, on its own bar", () => {
+    const workspace = withItems(
+      teamWorkspace(),
+      itemFixture("model", "02", { kind: "model" }),
+      itemFixture("diff", "03", { kind: "changes" }),
+      itemFixture("cover", "04", { kind: "image" }),
+      // Another's image on the lead's bar is no one's cover.
+      itemFixture("elsewhere", "01", { kind: "image" }),
+    )
+    const works = [work("02", "model/hero.gltf"), work("03", "src/score.js")]
+    expect(tourSignals(workspace, "01", { works, artist: "04" }).shown).toEqual({
+      page: null,
+      model: "model",
+      changes: "diff",
+      cover: "cover",
+    })
+    expect(tourSignals(workspace, "01", { works }).shown.cover).toBeNull()
+  })
+
+  it("take the terminal the tour opened as the artist, and where its agent stands", () => {
     const workspace = teamWorkspace()
+    const roster = workspace.projects[0]!.history[0]!.state.roster
+    Object.assign(roster, {
+      terminals: roster.terminals.map((each) =>
+        each.id === "04"
+          ? {
+              ...each,
+              state: "running",
+              agent: { working: false },
+              titleSource: { kind: "agent", by: "pixel" },
+            }
+          : each,
+      ),
+    })
+    expect(tourSignals(workspace, "01").artist).toBeNull()
+    const signals = tourSignals(workspace, "01", { artist: "04" })
+    expect(signals.roles.artist).toBe("04")
+    expect(signals.artist).toMatchObject({ kind: "agent", named: true })
+    // It is on no team.
+    expect(signals.team.ids).toEqual(["02", "03"])
+  })
+
+  it("say whether the artist and the lead have written to each other", () => {
+    const said = (id: string, from: string, to: string) => message(id, from, to)
+    const talk = (...list: AgentMessage[]) =>
+      tourSignals(teamWorkspace(), "01", { artist: "04", messages: messagesOf(list) }).talk
+    expect(talk()).toEqual({ toLead: false, fromLead: false })
+    expect(talk(said("m1", "04", "01"))).toEqual({ toLead: true, fromLead: false })
+    expect(talk(said("m1", "04", "01"), said("m2", "01", "04"))).toEqual({
+      toLead: true,
+      fromLead: true,
+    })
+    // A teammate's message to the artist is not the lead's answer.
+    expect(talk(said("m3", "02", "04")).fromLead).toBe(false)
+  })
+
+  it("name the artist holding at a screen of its own, and its permission waits, like a teammate's", () => {
+    const workspace = teamWorkspace()
+    const roster = workspace.projects[0]!.history[0]!.state.roster
+    Object.assign(roster, {
+      terminals: roster.terminals.map((each) =>
+        each.id === "04"
+          ? {
+              ...each,
+              process: "claude",
+              state: "running",
+              agent: { working: false, startup: "startup" },
+            }
+          : each,
+      ),
+    })
+    expect(tourSignals(workspace, "01", { artist: "04" }).teamScreen).toEqual({
+      terminalId: "04",
+      screen: "startup",
+      program: "claude",
+    })
+    const permission = {
+      ...askRow("04"),
+      kind: "request",
+      request: { kind: "permission" },
+    } as unknown as InboxEntry
+    const inbox = { items: [permission] } as unknown as InboxState
+    expect(tourSignals(teamWorkspace(), "01", { inbox, artist: "04" }).permission).toEqual({
+      terminalId: "04",
+    })
+    expect(tourSignals(teamWorkspace(), "01", { inbox }).permission).toBeNull()
+  })
+
+  it("say what each role's pane shows: its open top tab, by what it is", () => {
+    const workspace = withItems(
+      teamWorkspace(),
+      itemFixture("model", "02", { kind: "model" }),
+      itemFixture("cover", "04", { kind: "image" }),
+    )
     const state = workspace.projects[0]!.history[0]!.state
-    Object.assign(state, { items: [itemFixture("card", "01", { kind: "model" })] })
-    expect(tourSignals(workspace, "01").shown).toBe(true)
+    Object.assign(state, {
+      bars: {
+        "02": { order: ["model"], hidden: [], stack: ["model"], open: true },
+        "04": {
+          order: ["messages", "cover"],
+          hidden: [],
+          stack: ["cover", "messages"],
+          open: false,
+        },
+        "01": { order: ["messages"], hidden: [], stack: ["messages"], open: true },
+      },
+    })
+    const open = tourSignals(workspace, "01", { artist: "04" }).open
+    expect(open).toMatchObject({ sculptor: "model", lead: "messages", artist: null })
   })
 })

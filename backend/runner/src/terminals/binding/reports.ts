@@ -87,8 +87,8 @@ export type ReportsHost = {
   /** The agent worktrees wiring, read live at each turn's start; none where there are none. */
   readonly worktrees: () =>
     | {
-        enabled: () => boolean
-        ready: (startedAt: number | undefined, relists: boolean) => boolean
+        enabled: (terminalId?: string) => boolean
+        ready: (startedAt: number | undefined, relists: boolean, terminalId?: string) => boolean
         /**
          * Whether a folder is in a git repository (`repositoryKnown`): a few stats, no git, kept
          * a few seconds; undefined where it can't be told. With `wait` false it never waits.
@@ -593,7 +593,7 @@ export class Reports {
     // An agent whose process started before the worktrees folder was there, or (where its
     // harness keeps the tool list) before the setting went on, can't use them until it
     // restarts; one whose start the relay couldn't read is taken to be such.
-    const enabled = wiring?.enabled() ?? false
+    const enabled = wiring?.enabled(record.summary.id) ?? false
     // The terminal's folder as its reports last said it (a harness that doesn't report a moved
     // folder keeps the one it started in); a turn that delivers something never waits on it.
     const inRepository =
@@ -605,7 +605,8 @@ export class Reports {
           enabled,
           toldOf(record.agents, record.root).worktrees,
           lasting,
-          wiring?.ready(report.processStart, messaging.toolsAtTurnStart) ?? false,
+          wiring?.ready(report.processStart, messaging.toolsAtTurnStart, record.summary.id) ??
+            false,
           inRepository,
         )
       : null

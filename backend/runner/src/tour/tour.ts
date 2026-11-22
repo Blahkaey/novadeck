@@ -1,18 +1,50 @@
-import { posix, win32 } from "node:path"
-
 import type { Model } from "@novadeck/harness-core/harness"
 import type { AgentName, Project, TourPrepared } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { agentLabel } from "../messaging/messages.js"
-import { briefFiles, nudgeLine, tourBrief, type BriefFacts, type Teammate } from "./brief.js"
-import { checkTourFolder, resetTourFolder, tourFolder } from "./folder.js"
-import { tourChoice, tourLaunch } from "./launch.js"
+import { mention } from "../terminals/handles.js"
+import type { OpenPolicy } from "../terminals/options.js"
+import {
+  artistBrief,
+  briefFiles,
+  keptLine,
+  nudgeLine,
+  projectNote,
+  tourBrief,
+  type BriefFacts,
+  type Serving,
+  type Teammate,
+} from "./brief.js"
+import {
+  chooseTourFolder,
+  hasMarker,
+  insideFolder,
+  inTourFolder,
+  keepTourFolder,
+  resetTourFolder,
+  tourFolder,
+  tourFolderCount,
+} from "./folder.js"
+import { tourChoice, tourLaunch, tourWrites, type TourLaunch } from "./launch.js"
+import { commitSandbox, laySandbox, releaseSandbox, requireGit } from "./repo.js"
+import { seedFiles, type TourAssets } from "./seed.js"
+import { findServing, freePort, versionOf } from "./serving.js"
 
 /** What the tour needs of the runner. */
 export type TourHost = {
   readonly home?: string
   readonly platform?: NodeJS.Platform
+  /** Where the seed project's files are, where not in the repository (the packaged app). */
+  readonly assets?: TourAssets
+  /** How the game's dev server is run here, as `findServing` finds; a test brings its own. */
+  readonly serving?: () => Promise<Serving | null>
+  /**
+   * The person's environment as their terminals have it (their login shell's PATH), which the
+   * game's server command runs in, so the interpreter is looked for there; the runner's own where
+   * omitted.
+   */
+  readonly environment?: () => NodeJS.ProcessEnv
   readonly connected: (agent: AgentName) => Promise<boolean>
   readonly models: (agent: AgentName) => Promise<readonly Model[]>
   readonly projects: {
@@ -25,10 +57,22 @@ export type TourHost = {
   readonly cwdOf: (terminalId: string) => string
   /** The terminal that leads this one, if one does. */
   readonly leadOf: (terminalId: string) => string | undefined
+  /** The terminal's handle, as agents address it. */
+  readonly handleOf: (terminalId: string) => string
+  /** Makes the folder agents' worktrees live in, whatever the person's setting. */
+  readonly worktreesFolder: () => void
 }
 
-// The order a second harness is looked for in, for the designer of a mixed team.
-const agentOrder: readonly AgentName[] = ["claude", "codex", "agy"]
+// What the run last readied is, once it starts: its folder, its agent's launch, and its terminals.
+type Run = {
+  readonly agent: AgentName
+  readonly launch: TourLaunch
+  readonly directory: string
+  /** The terminal the lead's brief was rung to. */
+  lead?: string
+  /** The terminal the artist's brief was rung to. */
+  artist?: string
+}
 
 /**
  * Novadeck's tour, on the runner's side: its folder, made afresh for each run, and the line
@@ -40,19 +84,22 @@ export class Tour {
   private preparing: Promise<TourPrepared> | undefined
   // The facts of the run last readied, which its brief is composed of when it is rung.
   private facts: BriefFacts | undefined
+  private run: Run | undefined
 
   constructor(private readonly host: TourHost) {}
 
   /**
-   * Readies a run of the tour with `agent`: removes any project open at its folder, closing
-   * its terminals, so nothing runs there; then empties the folder and writes the brief there;
+   * Readies a run of the tour with `agent`: picks its folder (`chooseTourFolder`: the first of
+   * `tour`, `tour-2`, ... that is missing, empty or the tour's own, passing over any the person
+   * kept), removes any project open there, closing its terminals, so nothing runs there; then
+   * empties the folder and writes the seed project there (`seedFiles`) with the brief's files;
    * then builds the agent's launch line, on its cheapest model. The brief never names the
-   * person; it names the two teammates the lead opens, each on its harness's cheapest model: the
-   * copywriter on `agent`'s, the designer on another connected harness's where one lists its
-   * cheapest, else on `agent`'s too. An agent Novadeck isn't
-   * connected to is a `CONFLICT`, as its tools would be missing; so is a folder that isn't
-   * Novadeck's (`checkTourFolder`, asked before any project is removed), and a run asked for
-   * while another is being readied. One
+   * person; it names the one teammate the lead opens, on `agent`'s own harness and cheapest
+   * model, so the whole tour runs the one agent the person picked. It also says how the game's
+   * dev server is run here (`findServing`), if it can be. The folder is a git repo of its own
+   * (`commitSandbox`), so git is needed (`requireGit`, asked first of all). An agent Novadeck
+   * isn't connected to is a `CONFLICT`, as its tools would be missing; so are seed files that
+   * can't be read, no folder to use, and a run asked for while another is being readied. One
    * whose cheapest model can't be told is `MODELS_UNLISTED`: Codex lists its models only once
    * it has started signed in (probed 2026-11-15, 0.169.0: a start not signed in writes no
    * models_cache.json). Nothing changes for any of them.
@@ -73,6 +120,8 @@ export class Tour {
         "CONFLICT",
         `Novadeck isn't connected to ${agentLabel(agent)}, so the tour can't start with it.`,
       )
+    // Git first of all: the sandbox is a repo, and nothing is removed for a tour that can't be.
+    await requireGit()
     // Its cheapest model first, before anything is removed: the person agreed to that one.
     const models = await this.host.models(agent).catch((): readonly Model[] => [])
     if (tourChoice(agent, models).model === undefined)
@@ -80,14 +129,17 @@ export class Tour {
         "MODELS_UNLISTED",
         `${agentLabel(agent)} hasn't listed its models here yet, so the tour can't pick its cheapest. Start ${agentLabel(agent)} and sign in, then take the tour.`,
       )
-    const directory = tourFolder(this.host.home)
-    // The folder's own refusal too, the last that can refuse, before anything is removed.
-    await checkTourFolder(directory)
+    // The files and the folder too, the last that can refuse, before anything is removed.
+    const seed = await seedFiles(this.host.assets)
+    const directory = await chooseTourFolder(this.host.home)
+    const serving = await (
+      this.host.serving ?? (() => findServing(versionOf, freePort, this.host.environment?.()))
+    )()
     // Those being removed too, as their shells may still be closing there: the removal
     // under way is waited for.
     const removed = this.host.projects
       .list()
-      .filter(({ cwd }) => withinFolder(cwd, directory, this.host.platform))
+      .filter(({ cwd }) => insideFolder(cwd, directory, this.host.platform))
       .map(({ id }) => id)
     await Promise.all(
       removed.map((id) =>
@@ -99,26 +151,19 @@ export class Tour {
           }),
       ),
     )
-    const designer = await this.designerFor(agent, models)
-    const copywriter = teammate(agent, models)!
-    await resetTourFolder(directory, briefFiles)
-    this.facts = { copywriter, designer }
+    const mate = teammate(agent, models)!
+    // What is committed is the project as the person keeps it: its own note, no tour settings.
+    // The tour's rules are laid over it after, where git doesn't see them (`laySandbox`).
+    const { "CLAUDE.md": claude = "", ...rules } = briefFiles(agent)
+    await resetTourFolder(directory, { ...seed, "AGENTS.md": projectNote, "CLAUDE.md": claude })
+    await commitSandbox(directory)
+    await laySandbox(directory, rules)
+    // Before any agent starts: a process that began without the folder can't write in it.
+    this.host.worktreesFolder()
+    this.facts = { mate, serving }
     const launch = tourLaunch(agent, { models })
-    return { ...launch, directory, removed }
-  }
-
-  // The designer's harness: the first other connected one whose cheapest model is listed, else
-  // the lead's own.
-  private async designerFor(agent: AgentName, models: readonly Model[]): Promise<Teammate> {
-    for (const other of agentOrder.filter((each) => each !== agent)) {
-      // eslint-disable-next-line no-await-in-loop -- The first that fits is taken.
-      if (!(await this.host.connected(other).catch(() => false))) continue
-      // eslint-disable-next-line no-await-in-loop -- As above.
-      const listed = await this.host.models(other).catch((): readonly Model[] => [])
-      const found = teammate(other, listed)
-      if (found) return found
-    }
-    return teammate(agent, models)!
+    this.run = { agent, launch, directory }
+    return { ...launch, directory, removed, page: serving !== null }
   }
 
   /**
@@ -129,8 +174,78 @@ export class Tour {
    * readied no run since it started.
    */
   brief(terminalId: string): void {
-    if (!this.facts) throw new DomainError("CONFLICT", "The tour hasn't been readied.")
-    this.ring(terminalId, tourBrief(this.facts))
+    if (!this.facts || !this.run) throw new DomainError("CONFLICT", "The tour hasn't been readied.")
+    this.ring(
+      terminalId,
+      tourBrief({ ...this.facts, lead: mention(this.host.handleOf(terminalId)) }),
+    )
+    this.run.lead = terminalId
+  }
+
+  /**
+   * Rings the artist's brief (`artistBrief`) to the agent in `terminalId`, which the client
+   * started in the tour's folder with the run's launch line and which is on no team, as `brief`
+   * rings the lead's. Refused as `brief` is, and as a `CONFLICT` where the run has no lead yet
+   * (the artist asks the lead what the game is), where the terminal is the lead or has one, or
+   * where the run's artist is another terminal. Asked again for its artist it rings nothing: the
+   * claim is made only once the ring is, so a terminal whose agent hasn't shown can be asked
+   * again.
+   */
+  artist(terminalId: string): void {
+    const { run } = this
+    if (!run) throw new DomainError("CONFLICT", "The tour hasn't been readied.")
+    if (run.lead === undefined) throw new DomainError("CONFLICT", "The tour's lead hasn't started.")
+    if (run.artist === terminalId) return
+    if (run.artist !== undefined)
+      throw new DomainError("CONFLICT", "The tour's artist has started already.")
+    if (terminalId === run.lead || this.host.leadOf(terminalId) !== undefined)
+      throw new DomainError("CONFLICT", "The terminal is the lead or a teammate already.")
+    this.ring(terminalId, artistBrief(run.agent))
+    run.artist = terminalId
+  }
+
+  /**
+   * The person keeps the project, which the client asks once the tour's story has ended, and
+   * again if the person presses its button. The run's folder stops being the tour's
+   * (`releaseSandbox`: the project's own note back in `AGENTS.md`, git told of no rules laid over
+   * it; `keepTourFolder`: its settings and marker gone), its lead is told the tour is over (best
+   * effort: it may be gone or not listening, and only a lead the run knows is told), and the run
+   * is forgotten, so a later run starts in another folder and nothing of the tour's rules holds
+   * here. With no run in memory (the runner started since) it keeps every folder of the tour's
+   * that holds the marker and is open as a project; with none, it does nothing. A folder already
+   * kept is no one's to keep again, so a repeat is harmless.
+   */
+  async keep(): Promise<void> {
+    const { run } = this
+    const folders = run ? [run.directory] : this.openFolders()
+    for (const folder of folders) {
+      if (!hasMarker(folder)) continue
+      // eslint-disable-next-line no-await-in-loop -- One folder at a time, as one is ever open.
+      await releaseSandbox(folder, projectNote)
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      await keepTourFolder(folder)
+    }
+    this.run = undefined
+    this.facts = undefined
+    if (run?.lead !== undefined) {
+      try {
+        this.host.notice(run.lead, keptLine)
+      } catch {
+        // The lead is gone: nobody to tell.
+      }
+    }
+  }
+
+  // The tour's folders that hold the marker and are open as a project, which the runner keeps
+  // across a restart while its run in memory is gone.
+  private openFolders(): string[] {
+    const open = this.host.projects.list()
+    return Array.from({ length: tourFolderCount }, (_, index) =>
+      tourFolder(this.host.home, index + 1),
+    ).filter(
+      (folder) =>
+        hasMarker(folder) && open.some(({ cwd }) => insideFolder(cwd, folder, this.host.platform)),
+    )
   }
 
   /**
@@ -142,32 +257,53 @@ export class Tour {
   }
 
   /**
-   * What an `open_agent` of `terminalId` is subject to: a terminal in the tour's folder that has
-   * a lead is a teammate, and only the tour's lead opens agents there, so it is refused. The
-   * lead (no lead of its own), a led terminal elsewhere, and a terminal the runner doesn't have
-   * are left to the call's own checks.
+   * What an `open_agent` of `terminalId` is subject to: only the run's lead opens agents in the
+   * tour's folder, with the tour's write flags; every other terminal there, its teammates and
+   * the artist, is refused. A terminal elsewhere, and one the runner doesn't have, are left to
+   * the call's own checks.
    */
-  openPolicy(terminalId: string): { readonly refusal?: string } {
+  openPolicy(terminalId: string): OpenPolicy {
     let cwd: string
     try {
       cwd = this.host.cwdOf(terminalId)
     } catch {
       return {}
     }
-    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform)) return {}
-    return this.host.leadOf(terminalId) === undefined
-      ? {}
+    if (!this.inTour(cwd)) return {}
+    // The lead's teammates write in the folder unasked, for that launch only (`tourWrites`), and
+    // only where they start in it: one it opens elsewhere gets none.
+    return terminalId === this.run?.lead
+      ? {
+          flags: (agent, at) => (this.inTour(at) ? tourWrites[agent] : []),
+        }
       : {
           refusal:
-            "You're a teammate in Novadeck's tour: only the tour's lead opens agents. Do only the task in your lead's message.",
+            "Only the lead of Novadeck's tour opens agents in its project. Do only the task in your message.",
         }
+  }
+
+  /**
+   * Whether the terminal is one of the tour's, in its folder: its agents use worktrees
+   * whatever the person's setting says. False for a terminal the runner doesn't have.
+   */
+  isTours(terminalId: string): boolean {
+    try {
+      return this.inTour(this.host.cwdOf(terminalId))
+    } catch {
+      return false
+    }
+  }
+
+  // Whether `path` is in the tour's folder: one of its names, with its marker still there.
+  private inTour(path: string): boolean {
+    return inTourFolder(path, this.host.home, this.host.platform)
   }
 
   // Only the tour's own terminals, those in its folder, are rung; one elsewhere is a
   // `CONFLICT`, as is one whose agent hasn't shown yet.
   private ring(terminalId: string, line: string): void {
     const cwd = this.host.cwdOf(terminalId)
-    if (!withinFolder(cwd, tourFolder(this.host.home), this.host.platform))
+    if (!this.inTour(cwd))
       throw new DomainError("CONFLICT", "The terminal isn't one of the tour's.")
     if (!this.host.notice(terminalId, line))
       throw new DomainError("CONFLICT", "The terminal's agent hasn't started yet.")
@@ -178,20 +314,4 @@ export class Tour {
 const teammate = (agent: AgentName, models: readonly Model[]): Teammate | undefined => {
   const { model, effort } = tourChoice(agent, models)
   return model === undefined ? undefined : { agent, model, ...(effort !== undefined && { effort }) }
-}
-
-/**
- * Whether `path` is `folder` or inside it. Windows' and macOS' file systems don't tell cases
- * apart (macOS' as installed), so neither does this there.
- */
-export const withinFolder = (
-  path: string,
-  folder: string,
-  platform: NodeJS.Platform = process.platform,
-): boolean => {
-  const paths = platform === "win32" ? win32 : posix
-  const fold = (text: string) =>
-    platform === "win32" || platform === "darwin" ? text.toLowerCase() : text
-  const inner = paths.relative(fold(paths.resolve(folder)), fold(paths.resolve(path)))
-  return inner === "" || (inner.split(paths.sep)[0] !== ".." && !paths.isAbsolute(inner))
 }

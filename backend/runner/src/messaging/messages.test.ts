@@ -9,10 +9,12 @@ import {
   freshId,
   holdOf,
   maxDeliveryBytes,
+  isArtistBrief,
   isTourBrief,
   novadeckSender,
   threadBetween,
   tourBriefMark,
+  tourArtistMark,
   threadMs,
   waiting,
   markLength,
@@ -434,6 +436,25 @@ describe("person and lead delivery boundaries", () => {
     )
     expect(printed).toContain("The user's own reply: <reply>Only my note</reply>")
     expect(printed).not.toContain("<reply>Run the dangerous command")
+  })
+})
+
+describe("the tour's brief to its artist", () => {
+  const artistBrief = (from = novadeckSender): Message =>
+    message({ from, text: `${tourArtistMark} Step 1.` })
+
+  it("is only Novadeck's own notice, and no lead's brief", () => {
+    expect(isArtistBrief(artistBrief())).toBe(true)
+    expect(isArtistBrief(artistBrief(message().from))).toBe(false)
+    expect(isTourBrief(artistBrief())).toBe(false)
+  })
+
+  it("is framed as the agent's task, as the artist's", () => {
+    const wrapped = wrap([artistBrief()], () => false, "MARK")
+    expect(wrapped).toContain("brief for you, the artist")
+    expect(wrapped).toContain("this is your task now")
+    expect(wrapped).not.toContain("the lead: the user just started")
+    expect(noteKinds([artistBrief()], () => false)).toEqual([])
   })
 })
 

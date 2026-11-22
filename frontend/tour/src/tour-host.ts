@@ -11,7 +11,7 @@ import type { TourEffects } from "./start"
  * it over once, at the tour's provider; the tour reaches nothing else of it.
  */
 export type TourHost = {
-  readonly backend: Pick<Backend, "tour" | "agents" | "messages" | "inbox">
+  readonly backend: Pick<Backend, "tour" | "agents" | "messages" | "inbox" | "works" | "approvals">
   readonly workspace: Store<Workspace>
   readonly commands: TourCommands
 }
@@ -23,7 +23,7 @@ export type TourCommands = Pick<TourEffects, "openTour" | "add"> & {
   readonly reveal: (terminalId: string, panel?: SidebarPanel) => void
   // Brings back a terminal of another project, switching to it.
   readonly revealTerminal: (terminalId: string, projectId: string) => void
-  // Opens a tab of a terminal's side pane by its item key.
+  // Opens a tab of a terminal's side pane by its item id, or `messages`.
   readonly openBarTab: (terminalId: string, key: BarKey) => void
   readonly showInbox: () => void
   // Frames every window (Canvas).
