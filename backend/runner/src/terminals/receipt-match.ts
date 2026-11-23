@@ -1,5 +1,6 @@
 import { withoutDoorbell } from "@novadeck/harness-core/prompts"
 import { normalisedText, shellCommand } from "@novadeck/protocol"
+import { imageMark } from "@novadeck/tui-input/box"
 
 /**
  * How a prompt given through `agents.prompt` is found in its agent's record, and when it
@@ -48,7 +49,10 @@ const runAt = (
   return -1
 }
 
-/** The placeholder a harness records for an image of a prompt: `[Image #1]`. */
+/**
+ * The placeholder a harness records for an image of a prompt, `[Image #1]`: a record isn't
+ * wrapped, so its two words stand on one line (a box's text may break them: `imageMark`).
+ */
 const mark = /\[Image #?\d+\]/g
 
 /**
@@ -141,9 +145,10 @@ const compact = (text: string): string => text.replace(/\s+/g, "")
 export const inBox = (box: string, lines: readonly string[], images = 0): boolean => {
   const words = compact(lines.join(""))
   // A prompt with images has their placeholders in the box, among the words or ahead of them.
-  const shown = images > 0 ? box.replace(mark, "") : box
+  // The box may wrap one between its two words.
+  const shown = images > 0 ? box.replace(imageMark, "") : box
   // Images alone are there when the box holds that many placeholders.
-  if (words === "") return images > 0 && (box.match(/\[Image #?\d+\]/g)?.length ?? 0) >= images
+  if (words === "") return images > 0 && (box.match(imageMark)?.length ?? 0) >= images
   return compact(shown).includes(words)
 }
 

@@ -164,10 +164,11 @@ const emptyBox = (): string => "\x03"
  * How many images it shows attached: each is `[Image 1]` in the box's text, at the place it
  * was pasted, as a path to an image file pasted alone becomes (probed 2026-11-22, 1.19.6; a path
  * to a file that isn't there stays text). Enter sends a prompt of images alone, and Ctrl-U takes
- * a row's, chips and all, so erasing the rows empties it.
+ * a row's, chips and all, so erasing the rows empties it. A row may end between its two words,
+ * as Claude Code's box wraps its own (`imageMark`).
  */
 const images: ProfileImages = {
-  attached: (screen) => read(screen)?.text.match(/\[Image \d+\]/g)?.length ?? 0,
+  attached: (screen) => read(screen)?.text.match(/\[Image\s+\d+\]/g)?.length ?? 0,
   alone: true,
   discard: (screen) => {
     const box = read(screen)

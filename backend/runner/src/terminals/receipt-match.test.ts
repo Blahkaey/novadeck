@@ -44,6 +44,12 @@ describe("settledBy", () => {
     expect(settledBy(waiting(text), "first\nthird")).toEqual([])
   })
 
+  it("settles a prompt whose own words break a placeholder's look across lines", () => {
+    // A record isn't wrapped: `[Image` and `#1]` on two lines are the person's words.
+    const prompt = [{ ref: "r", lines: ["see [Image", "#1] ok"], images: 1 }]
+    expect(settledBy(prompt, "[Image #2] see [Image\n#1] ok")).toEqual(["r"])
+  })
+
   it("settles two sends an Antigravity item joined by a line break, in order", () => {
     expect(settledBy(waiting("one", "two"), "one\ntwo")).toEqual(["r0", "r1"])
   })
@@ -88,6 +94,11 @@ describe("inBox", () => {
 
   it("finds words among a draft's other text", () => {
     expect(inBox("> earlier thought deploy now", ["deploy now"])).toBe(true)
+  })
+
+  it("finds words beside an image's placeholder the box wrapped between its two words", () => {
+    expect(inBox("> look at this [Image\n  #1]", ["look at this "], 1)).toBe(true)
+    expect(inBox("> [Image\n  #1]", [], 1)).toBe(true)
   })
 
   it("does not find other words, or any in an empty prompt", () => {
