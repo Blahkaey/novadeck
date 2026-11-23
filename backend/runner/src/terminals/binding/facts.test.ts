@@ -37,9 +37,13 @@ const bindings = (shown?: AgentName, cards?: BindingsHost["cards"]) => {
   return { bindings: new Bindings(host), announce, detailed }
 }
 
+/** A shell's pty as far as a session's end tells it: by its pid, told its agent's runs. */
+const ptyOf = (pid: number) => ({ pid, agentStarted: () => {}, agentEnded: () => {} })
+
 /** A terminal with a Claude Code session bound in its shell, shown as the summary says. */
 const record = (summary: Partial<Record["summary"]> = {}) =>
   ({
+    terminal: { pty: ptyOf(1), exit: null, exiting: false },
     summary: {
       id: "t1",
       agent: null,
@@ -279,7 +283,7 @@ describe("the lead of an agent found gone", () => {
     const worker = record({ ledBy: "id-moth" })
     Object.assign(worker, {
       closed: false,
-      terminal: { pty: { pid: 1 }, exit: null, exiting: false },
+      terminal: { pty: ptyOf(1), exit: null, exiting: false },
     })
     return { ends: new Bindings(host), worker, ended, save }
   }
@@ -444,7 +448,7 @@ describe("the lead of an agent found gone", () => {
     for (const { ends, worker } of runs) ends.endLeadGone(worker)
     const [ending, replaced, closed] = runs.map(({ worker }) => worker)
     ending!.terminal = { ...ending!.terminal, exiting: true } as Record["terminal"]
-    replaced!.terminal = { ...replaced!.terminal, pty: { pid: 2 } } as Record["terminal"]
+    replaced!.terminal = { ...replaced!.terminal, pty: ptyOf(2) } as unknown as Record["terminal"]
     closed!.closed = true
     vi.advanceTimersByTime(graceSamples * pollMs)
     for (const { worker, ended } of runs) {
