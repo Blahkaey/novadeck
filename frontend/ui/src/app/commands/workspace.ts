@@ -139,7 +139,7 @@ export type WorkspaceCommands = ShellCommands &
     // Brings a terminal into view wherever it is, as a click on an Inbox entry or a desktop
     // notification about it asks: its project and session to the front, the terminal
     // selected, and on Canvas the camera flown in to it. A panel given turns the sidebar to
-    // it in the same step. With project windows on, a terminal of a project another window
+    // it in the same step. Where the app opens project windows, a terminal of a project another window
     // shows goes to that window, which comes forward; this window stays as it is.
     readonly reveal: (terminalId: string, panel?: SidebarPanel) => void
     // Brings a terminal of the session on screen into view for a guided look (the tour): selected,
@@ -299,10 +299,10 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
   const switchProject = (next: Project): void => {
     if (next.id === workspace.getSnapshot().activeProjectId) return
     const pick = ++latestMove
-    // With project windows on, a project is read from the runner as it is shown: another
-    // window may have changed it since this one loaded it, and the latest pick wins however
+    // Once another window has shown a project, a project is read from the runner as it is shown:
+    // that window may have changed it since this one loaded it, and the latest pick wins however
     // long its reading took.
-    if (!ctx.syncProject || !windows.windowsOn()) return switchHere(next)
+    if (!ctx.syncProject || !windows.windowsShared()) return switchHere(next)
     void (async () => {
       await windows.readProject(next.id)
       if (pick === latestMove) switchHere(next)
