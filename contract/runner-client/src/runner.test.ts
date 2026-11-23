@@ -388,3 +388,10 @@ describe("the person's Send or Stop over a question", () => {
     expect(seen[3]).not.toHaveProperty("setAside")
   })
 })
+
+describe("supports", () => {
+  it("answers for a procedure by its path", async () => {
+    const { runner } = await fakeRunner({})
+    expect(runner.supports("projects.list")).toBe(true)
+  })
+})
