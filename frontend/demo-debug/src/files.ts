@@ -111,6 +111,22 @@ export const filesGroups = (
               run: () => files.slowNextPaste(5000),
             },
             {
+              label: "Copy a folder in Finder",
+              hint: "In Files, Paste shows preparation and transfer progress, then adds Finder files with Notes.txt and an empty folder",
+              run: () => {
+                files.prepareFinderPaste()
+                files.slowNextPaste(5000)
+              },
+            },
+            {
+              label: "Finder paste fails",
+              hint: "In Files, Paste from the menu or keyboard shows an error above the tree after the transfer starts",
+              run: () => {
+                files.prepareFinderPaste()
+                files.failNextPaste()
+              },
+            },
+            {
               label: "Next change's answer is lost",
               hint: "In Files, the next Paste, Rename… or Delete is made, but answers as though the connection to the runner dropped first: after a copy or a Delete a red-edged line above the tree says Novadeck lost its connection before it heard whether it could do it, that it may have been done or may still be under way, and the tree, read again, shows it done; a cut or a Rename shows done with no line, as the folders read say it moved. Files read normally again lifts it before then",
               run: () => files.loseNextAnswer(),
@@ -140,6 +156,7 @@ export const filesGroups = (
                 files.failNextChange(false)
                 files.failNextPaste(false)
                 files.slowNextPaste()
+                files.prepareFinderPaste(false)
                 files.loseNextAnswer(false)
                 files.failNextExcludeSave(false)
                 files.failExcludeReads(false)

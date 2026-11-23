@@ -409,6 +409,7 @@ export type DemoFiles = ProjectFiles & {
   readonly move: NonNullable<ProjectFiles["move"]>
   readonly copy: NonNullable<ProjectFiles["copy"]>
   readonly remove: NonNullable<ProjectFiles["remove"]>
+  readonly prepareFinderPaste: (ready?: boolean) => void
   // Has the storefront's checkout stand as `checkout` says (undefined: up to date).
   readonly stand: (checkout: DemoCheckout | undefined) => void
   // Has main move the checkout, as a fetch does where nothing holds it back: the files on disk
@@ -683,6 +684,39 @@ export const createDemoFiles = (
     edits?.copied(id, from, to)
     return answered(to)
   }
+  const finderReady = createStore(false)
+  const prepareFinderPaste = (ready = true): void => {
+    finderReady.update(() => ready)
+  }
+  const clipboard: NonNullable<ProjectFiles["clipboard"]> = {
+    available: finderReady,
+    mark: async () => prepareFinderPaste(false),
+    paste: async (id, into, _marker, progress) => {
+      if (!finderReady.getSnapshot()) return "empty"
+      prepareFinderPaste(false)
+      // Leave both the transfer and finishing phases visible in the debug panel.
+      await new Promise<void>((resolve) => void clock.after(500, resolve))
+      progress(1, 2)
+      await fault(true)
+      progress(2, 2)
+      await new Promise<void>((resolve) => void clock.after(1000, resolve))
+      const { made, copyName } = await changes()
+      let name = "Finder files"
+      const pathOf = () => (into === "" ? name : `${into}/${name}`)
+      while (holds(treeNow(id), pathOf())) name = copyName(name, true)
+      const path = pathOf()
+      const note = `${path}/Notes.txt`
+      const edited = await editing()
+      settle(
+        id,
+        made(made(treeNow(id), note, false), `${path}/Empty folder`, true),
+        undefined,
+        path,
+      )
+      edited.made(id, note)
+      return answered([{ path, folder: true }])
+    },
+  }
   const remove: DemoFiles["remove"] = async (id, path) => {
     await fault(false)
     const { removed, removedIn } = await changes()
@@ -783,6 +817,8 @@ export const createDemoFiles = (
     move,
     copy,
     remove,
+    clipboard,
+    prepareFinderPaste,
     failNextChange,
     failNextPaste,
     slowNextPaste,

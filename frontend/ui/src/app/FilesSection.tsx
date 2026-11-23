@@ -56,12 +56,18 @@ export const FilesSection = ({ files }: { readonly files: ProjectFiles }): React
   // move or a delete of the file a project window shows, or of a folder holding it, saves the
   // edits to it first (`savingFirst`).
   const entries = useMemo(() => {
-    const { create, move, copy, remove } = files
+    const { create, move, copy, remove, clipboard } = files
     return {
       ...(create && {
         create: (path: string, folder: boolean) => create(projectId, path, folder),
       }),
       ...(copy && { copy: (from: string, into: string) => copy(projectId, from, into) }),
+      ...(clipboard && {
+        clipboard: {
+          ...clipboard,
+          paste: clipboard.paste.bind(undefined, projectId),
+        },
+      }),
       ...savingFirst(
         {
           ...(move && { move: (from: string, to: string) => move(projectId, from, to) }),

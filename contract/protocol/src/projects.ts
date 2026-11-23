@@ -31,7 +31,8 @@ export const folderListing = z.strictObject({
 // names, as the Files panel makes, renames, moves, copies and deletes them
 // (`projects.createEntry`, `moveEntry`, `copyEntry`, `removeEntry`). The runner refuses "" (the
 // root itself), but as the folder a copy goes into, and anything that leads out of the root.
-export const entryPath = z.string().max(4096)
+export const maxEntryPathLength = 4096
+export const entryPath = z.string().max(maxEntryPathLength)
 
 // What a change to a project's entries made: the path of the entry it made, moved or copied.
 export const entryChanged = z.strictObject({ path: entryPath })

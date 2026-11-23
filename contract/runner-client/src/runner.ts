@@ -1,5 +1,6 @@
 import {
   contract,
+  fileImportLimits,
   maxUploadBytes,
   maxUploadPartLength,
   maxVoicePartLength,
@@ -19,6 +20,7 @@ import {
   type CheckoutState,
   type CheckoutUpdate,
   type FilesExclude,
+  type FileImportWrite,
   type FolderBrowse,
   type FolderListing,
   type ForgeIntegration,
@@ -213,6 +215,14 @@ export type Runner = {
       readonly from: string
       readonly into: string
     }): Promise<EntryChanged>
+    beginImport(input: {
+      readonly projectId: string
+      readonly into: string
+      readonly transfer: string
+    }): Promise<void>
+    writeImport(transfer: string, change: Exclude<FileImportWrite, { kind: "part" }>): Promise<void>
+    writeImportPart(transfer: string, offset: number, bytes: Uint8Array): Promise<void>
+    finishImport(transfer: string): Promise<{ path: string; folder: boolean }[]>
     /**
      * Deletes the file or folder at `path` for good, a folder with everything in it, a link as a
      * link. Rejects as `moveEntry` does.
@@ -1015,6 +1025,21 @@ export const connectRunner = async (
       createEntry: (input) => call((client) => client.projects.createEntry(input)),
       moveEntry: (input) => call((client) => client.projects.moveEntry(input)),
       copyEntry: (input) => call((client) => client.projects.copyEntry(input)),
+      beginImport: (input) => call((client) => client.projects.beginImport(input)),
+      writeImport: (transfer, change) =>
+        call((client) => client.projects.writeImport({ transfer, change })),
+      async writeImportPart(transfer, offset, bytes) {
+        if (bytes.length === 0 || bytes.length > fileImportLimits.partBytes)
+          throw new WireError<RunnerErrorCode>("UPLOAD_TOO_LARGE")
+        const [part] = base64Parts(bytes, (fileImportLimits.partBytes / 3) * 4)
+        await call((client) =>
+          client.projects.writeImport({
+            transfer,
+            change: { kind: "part", offset, data: part!.data },
+          }),
+        )
+      },
+      finishImport: (transfer) => call((client) => client.projects.finishImport({ transfer })),
       removeEntry: (input) => call((client) => client.projects.removeEntry(input)),
       browse: (input) => call((client) => client.projects.browse(input)),
       checkout: (input) => call((client) => client.projects.checkout(input)),

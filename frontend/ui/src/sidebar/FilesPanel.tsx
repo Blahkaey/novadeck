@@ -89,6 +89,7 @@ import {
 } from "./useProjectExclude"
 import { usePulses } from "./usePulses"
 import { useShowingNow } from "./useShowingNow"
+import { useSystemFilesPaste } from "./useSystemFilesPaste"
 import { useTreeMeasure } from "./useTreeMeasure"
 import { useTreeScroll } from "./useTreeScroll"
 
@@ -747,6 +748,49 @@ const FilesPanelView = ({
     failing,
   })
   const { actions: clipActions } = clipboard
+  const systemPaste = useSystemFilesPaste(entries?.clipboard)
+  const { available: systemPasteReady, progress: pasteProgress } = systemPaste
+  const take = (row: FilesRow, mode: "cut" | "copy"): void => {
+    clipActions?.take(row, mode)
+    systemPaste.mark(() => say("Couldn't copy to the system clipboard."))
+  }
+  const pasteAt = (row: FilesRow | undefined): void => {
+    if (row && !changeable(row.node)) return
+    if (!systemPasteReady) {
+      clipActions?.paste(row)
+      return
+    }
+    const into = newEntryIn(row)
+    const asked = row?.node.path ?? null
+    const was = placeNow()
+    const pasting = systemPaste.paste(into, clipboard.clip !== null, clipboard.letGo)
+    if (!pasting) return
+    setFailure(null)
+    void pasting
+      .then((result) => {
+        if (result === "ours") {
+          clipActions?.paste(row)
+          return
+        }
+        clipboard.letGo()
+        if (result === "empty") return
+        const first = result[0]
+        if (!first) return
+        setListings((known) =>
+          result.reduce((next, entry) => listingsCopied(next, entry.path, entry.folder), known),
+        )
+        if (into !== "" && !open.has(into)) toggle(into, true)
+        read(into)
+        const atRoot =
+          asked === null && panelView.document.activeElement?.classList.contains("files-body")
+        changed(first.path, first.folder, "Copied to", {
+          focus: atRoot || focusStays(treeNode, asked),
+          instead: asked,
+          was,
+        })
+      })
+      .catch(failing(`paste files into ${into || "the project's folder"}`, [into]))
+  }
   // Makes or renames what the person named, which the menu and the keys ask for only where the
   // backend makes that change. With a key, the row it was asked on holds the focus meanwhile,
   // and keeps it if the change is refused.
@@ -789,6 +833,8 @@ const FilesPanelView = ({
   // The tree keyboard pattern; Space and a folder's Enter are the buttons' own click, a file's
   // Enter opens it. Escape lets go of what was cut first, and of the kept agents only then.
   const onKeyDown = (event: React.KeyboardEvent): void => {
+    if (isElement(event.target) && event.target.closest("input, textarea, [contenteditable]"))
+      return
     const plain = !(event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
     if (event.key === "Escape" && plain && clipboard.letGo()) {
       event.stopPropagation()
@@ -798,8 +844,21 @@ const FilesPanelView = ({
     const path = pathAt(event.target)
     const index = rows.findIndex((row) => row.node.path === path)
     const row = rows[index]
-    if (!row) return
     const keys = filesShortcutBindings(platform)
+    const pasting = matchesFilesShortcut(event, keys.paste)
+    if (
+      pasting &&
+      !row &&
+      systemPasteReady &&
+      event.target === event.currentTarget &&
+      rootRead !== "failed"
+    ) {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!event.repeat) pasteAt(undefined)
+      return
+    }
+    if (!row) return
     // Shift+Alt+C copies the focused row's path. It stops here, or the workspace would type its
     // character into the selected terminal.
     if (matchesFilesShortcut(event, keys.copyPath)) {
@@ -808,19 +867,16 @@ const FilesPanelView = ({
       copy(absolutePath(directory, row.node.path))
       return
     }
-    // Ctrl or ⌘ with X, C and V cut, copy and paste the row with the panel's own clipboard, never
-    // the system's, where the backend may and the row is the project's. They stop here whatever
-    // they do. A paste held down pastes once.
+    // Ctrl or ⌘ with X, C and V cut, copy and paste in Files. A paste held down pastes once.
     const cutting = matchesFilesShortcut(event, keys.cut)
     const copying = matchesFilesShortcut(event, keys.copy)
-    const pasting = matchesFilesShortcut(event, keys.paste)
     if (cutting || copying || pasting) {
       event.preventDefault()
       event.stopPropagation()
-      if (!changeable(row.node) || !clipActions) return
-      if (cutting) clipActions.take(row, "cut")
-      if (copying) clipActions.take(row, "copy")
-      if (pasting && !event.repeat) clipActions.paste(row)
+      if (!changeable(row.node)) return
+      if (cutting && clipActions) take(row, "cut")
+      if (copying && clipActions) take(row, "copy")
+      if (pasting && !event.repeat) pasteAt(row)
       return
     }
     // F2 renames the row and Delete deletes it, where the backend may and the row is the
@@ -951,6 +1007,11 @@ const FilesPanelView = ({
           </button>
         </div>
       )}
+      {pasteProgress !== null && (
+        <p className="text-control px-3 py-1" role="status">
+          {pasteProgress}
+        </p>
+      )}
       {slots.length > 0 && (
         <FilesStrip
           slots={slots}
@@ -975,10 +1036,12 @@ const FilesPanelView = ({
             ...(entries?.create && { onNew: startNew }),
             ...(clipActions && {
               clipboard: {
-                onCut: (row: FilesRow) => clipActions.take(row, "cut"),
-                onCopy: (row: FilesRow) => clipActions.take(row, "copy"),
-                ready: clipboard.ready,
-                onPaste: clipActions.paste,
+                onCut: (row: FilesRow) => take(row, "cut"),
+                onCopy: (row: FilesRow) => take(row, "copy"),
+                ready:
+                  pasteProgress === null &&
+                  ((systemPasteReady && rootRead !== "failed") || clipboard.ready),
+                onPaste: pasteAt,
               },
             }),
             ...(entries?.move && { onRename: startRename }),
@@ -989,6 +1052,25 @@ const FilesPanelView = ({
             // the project's folder.
             <div
               className="files-body flex min-h-0 flex-1 flex-col"
+              tabIndex={
+                systemPasteReady && rootRead !== "failed"
+                  ? inPlace === undefined
+                    ? -1
+                    : 0
+                  : undefined
+              }
+              onKeyDown={onKeyDown}
+              onPaste={(event) => {
+                if (!systemPasteReady || rootRead === "failed" || naming !== null) return
+                if (
+                  isElement(event.target) &&
+                  event.target.closest("input, textarea, [contenteditable]")
+                )
+                  return
+                event.preventDefault()
+                event.stopPropagation()
+                pasteAt(rowAt(event.target))
+              }}
               onContextMenu={aim}
               // A long press, as on a phone, may open the menu with no right-click: a touch aims it.
               onPointerDown={(event) => {
@@ -1015,7 +1097,6 @@ const FilesPanelView = ({
                   }
                   className="files-tree sidebar-scroll mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto pb-3"
                   data-lit={lit.size > 0 ? [...lit].join(" ") : undefined}
-                  onKeyDown={onKeyDown}
                   onPointerLeave={() => setHovered(undefined)}
                 >
                   <div

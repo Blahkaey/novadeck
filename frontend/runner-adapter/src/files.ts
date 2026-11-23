@@ -1,6 +1,60 @@
-import { ChangeUnanswered, type FilesState, type ProjectFiles } from "@novadeck/core/files"
+import {
+  ChangeUnanswered,
+  type FilesState,
+  type ProjectFiles,
+  type ProjectFilesClipboard,
+} from "@novadeck/core/files"
 import { createStore } from "@novadeck/core/store"
+import type { DesktopFilesClipboard } from "@novadeck/protocol/bridge"
 import { hasCode, type Runner } from "@novadeck/runner-client"
+
+type Imports = Pick<
+  Runner["projects"],
+  "beginImport" | "writeImport" | "writeImportPart" | "finishImport"
+>
+
+const fileClipboard = (
+  clipboard: DesktopFilesClipboard,
+  projects: Imports,
+  answered: <T>(send: () => Promise<T>) => Promise<T>,
+): ProjectFilesClipboard => ({
+  mark: (marker) => clipboard.mark(marker),
+  async paste(projectId, into, marker, progress) {
+    const selection = await clipboard.read(marker)
+    if (typeof selection === "string") return selection
+    const { id: transfer, entries } = selection
+    let sent = 0
+    const total = entries.reduce((size, entry) => size + (entry.size ?? 0), 0)
+    try {
+      await projects.beginImport({ projectId, into, transfer }).catch((error: unknown) => {
+        if (hasCode(error, "NOT_FOUND") && error instanceof Error && error.message === "Not Found")
+          throw new Error("Update the runner to paste files from Finder.", { cause: error })
+        throw error
+      })
+      progress(sent, total)
+      for (const [index, entry] of entries.entries()) {
+        // eslint-disable-next-line no-await-in-loop -- A file's entry precedes its bytes.
+        await projects.writeImport(transfer, { kind: "entry", entry })
+        for (let offset = 0; offset < (entry.size ?? 0);) {
+          // eslint-disable-next-line no-await-in-loop -- Keep only one part of the file in memory.
+          const bytes = await clipboard.chunk(transfer, index, offset)
+          if (bytes.length === 0) throw new Error("A file ended before its copy was complete.")
+          // eslint-disable-next-line no-await-in-loop -- Send the next part only after this one is saved.
+          await projects.writeImportPart(transfer, offset, bytes)
+          offset += bytes.length
+          sent += bytes.length
+          progress(sent, total)
+        }
+      }
+      return await answered(() => projects.finishImport(transfer))
+    } catch (error) {
+      await projects.writeImport(transfer, { kind: "cancel" }).catch(() => {})
+      throw error
+    } finally {
+      await clipboard.release(transfer).catch(() => {})
+    }
+  },
+})
 
 // The runner's project folders as the Files panel reads them, each folder when it is asked
 // for, each project's own patterns for hiding files, which the runner keeps, and the person's
@@ -23,10 +77,12 @@ export const createRunnerFiles = (
       | "moveEntry"
       | "copyEntry"
       | "removeEntry"
-    >
+    > &
+      Imports
     readonly status: Pick<Runner["status"], "state">
   },
   connected: () => Promise<void>,
+  clipboard?: DesktopFilesClipboard,
 ): ProjectFiles => {
   const { projects } = runner
   const state = createStore<FilesState>({ projects: {} })
@@ -58,6 +114,7 @@ export const createRunnerFiles = (
       (await answered(() => projects.moveEntry({ projectId, from, to }))).path,
     copy: async (projectId, from, into) =>
       (await answered(() => projects.copyEntry({ projectId, from, into }))).path,
+    ...(clipboard && { clipboard: fileClipboard(clipboard, projects, answered) }),
     remove: (projectId, path) => answered(() => projects.removeEntry({ projectId, path })),
     checkout: (projectId) => projects.checkout({ projectId }),
     update: (projectId) => projects.updateCheckout({ projectId }),

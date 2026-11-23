@@ -346,8 +346,17 @@ folder. Only a client holding the runner's token, or the desktop app's own windo
 port (see Terminal Runner), calls them, as the UI does when the person asks; a terminal's report
 token can't, so an agent's tool calls change no file through them. Whoever can call them can
 change any file through a shell anyway: these procedures keep a slip of the person's inside the
-project, and are no sandbox. The panel's Cut and Copy keep a path in the panel only, never on the
-system's clipboard, and Paste moves or copies within the same project.
+project, and are no sandbox. The panel's Cut and Copy keep the path in the panel. On macOS
+they put an opaque marker on the system clipboard so a later Finder copy takes precedence.
+
+Finder paste reads typed file URLs in the desktop main process when the focused app window
+asks. The preload exchanges relative names, sizes and bounded chunks by a selection ID
+scoped to that window. Absolute source paths stay in the main process. Folder walks and
+reads refuse symbolic links and special files. The runner stages regular files and directories
+in a private temporary folder, with an entry and byte limit per import. The authenticated
+connection owns the import and releases it on cancellation, inactivity or disconnect. To
+publish, the runner applies the same project path validation and exclusive copy naming as
+the other file operations.
 
 Each takes a path from the project's root, `/` between names: a leading `/`, `..`, `.`, an empty
 name, a backslash and NUL are refused (`segments` in

@@ -62,7 +62,7 @@ const childOf = (folder: string, name: string): string =>
 // The name to try after `name` for a copy of a file or, with `folder`, a folder, as the runner
 // names copies (`copyName` in backend/runner/src/workspaces/copy.ts), as VS Code does: `cart.ts`,
 // `cart copy.ts`, `cart copy 2.ts`; a folder's whole name, and a dotfile's, take it at their end.
-const copyName = (name: string, folder: boolean): string => {
+export const copyName = (name: string, folder: boolean): string => {
   const dot = folder ? -1 : name.lastIndexOf(".")
   const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""]
   const counted = /^(.+ copy)(?: (\d+))?$/.exec(stem)

@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
-import type { EntryChanged } from "@novadeck/protocol"
+import { fileImportLimits, type EntryChanged } from "@novadeck/protocol"
 
 import { DomainError } from "../errors.js"
 import { copyInto, copyName, copyTop, type Copied } from "./copy.js"
@@ -322,6 +322,33 @@ const holds = async (
 
 // How many names a copy tries before it gives up, the first included.
 const copyTries = 1000
+
+export const importNames = newNames
+
+export const importTarget = async (root: string, into: string): Promise<string> =>
+  folderIn(await projectFolder(root), pathNames(into))
+
+/** Publishes an entry from the runner's private staging directory, taking each name exclusively. */
+export const publishImportedEntry = async (
+  root: string,
+  into: string,
+  source: string,
+  name: string,
+): Promise<{ path: string; folder: boolean }> => {
+  const target = await importTarget(root, into)
+  const entry = await act(lstat(source, { bigint: true }), name)
+  const folder = entry.isDirectory()
+  let candidate = name
+  for (let left = copyTries; left > 0; left--) {
+    const path = into === "" ? candidate : `${into}/${candidate}`
+    if (path.length > fileImportLimits.pathCharacters)
+      throw invalid("The pasted entry's path in the project is too long.")
+    // eslint-disable-next-line no-await-in-loop -- The next name is tried only after a collision.
+    if (await copyAs(source, entry, join(target, candidate), name, path)) return { path, folder }
+    candidate = copyName(candidate, folder)
+  }
+  throw takenIn(pathNames(into), name)
+}
 
 /**
  * Copies the file, folder or link at `from` into the folder `into` (`""` for the project's own),

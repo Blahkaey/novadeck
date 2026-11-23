@@ -653,7 +653,10 @@ Agents:
   selection, a file, unless another file was selected meanwhile, and the keyboard focus only where
   it is still on the row pasted on (press Ctrl+V on `public`, then ArrowDown: the focus stays where
   it went); a failure that comes once the panel was hidden and shown again shows, one that comes
-  while it is hidden never does. "Next change's answer is lost" has the next Paste, Rename… or
+  while it is hidden never does. "Copy a folder in Finder" prepares a simulated clipboard
+  selection. Paste shows preparation, file transfer, and saving before adding `Finder files`
+  to the destination. "Finder paste fails" shows the transfer error above the tree.
+  "Next change's answer is lost" has the next Paste, Rename… or
   Delete made but answer as though the connection to the runner dropped first: a copy or a Delete
   puts a red-edged line above the tree saying Novadeck lost its connection before it heard whether
   it could do it, that it may have been done or may still be under way, and the tree, read again,

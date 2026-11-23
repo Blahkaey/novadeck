@@ -2928,6 +2928,59 @@ describe("The Files panel", () => {
           (each) => each.textContent ?? "",
         )
 
+      it("pastes a newer Finder selection instead of moving the row cut earlier", async () => {
+        const fake = changing()
+        let system: string | undefined
+        const panel = await mountChanging(fake, {
+          entries: {
+            ...fake.entries,
+            clipboard: {
+              mark: async (marker) => {
+                system = marker
+              },
+              paste: async (into, marker, progress) => {
+                if (system && system === marker) return "ours"
+                progress(1, 3)
+                const path = await fake.entries.create(`${into}/Finder.txt`, false)
+                return [{ path, folder: false }]
+              },
+            },
+          },
+        })
+        await chord(item(panel, "package.json"), "x")
+        expect(cutRows(panel)).toEqual(["package.json"])
+        system = undefined
+        act(() => item(panel, "docs").focus())
+        await chord(item(panel, "docs"), "v")
+        await eventually(() => expect(at(panel, "docs/Finder.txt")).not.toBeNull())
+        expect(fake.changes).toEqual(["create docs/Finder.txt"])
+        expect(cutRows(panel)).toEqual([])
+        panel.view.unmount()
+      })
+
+      it("accepts paste at the root of an empty project", async () => {
+        const fake = changing([])
+        const panel = await mountChanging(fake, {
+          entries: {
+            ...fake.entries,
+            clipboard: {
+              mark: async () => {},
+              paste: async (into) => {
+                expect(into).toBe("")
+                const path = await fake.entries.create("Finder.txt", false)
+                return [{ path, folder: false }]
+              },
+            },
+          },
+        })
+        const root = panel.view.container.querySelector<HTMLElement>(".files-body")!
+        act(() => root.focus())
+        expect(document.activeElement).toBe(root)
+        await chord(root, "v")
+        await eventually(() => expect(at(panel, "Finder.txt")).not.toBeNull())
+        panel.view.unmount()
+      })
+
       context("in the menu", () => {
         it("greys Paste until a row is cut or copied, then pastes it on a row or off one", async () => {
           const fake = changing()

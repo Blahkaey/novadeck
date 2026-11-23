@@ -131,6 +131,7 @@ import {
   registerControlsIpc,
   type WindowControls,
 } from "./window/controls.js"
+import { registerFilesClipboard } from "./window/files-clipboard.js"
 import { registerWindowFocusIpc } from "./window/focus.js"
 import { linuxMenu, macMenu, runnerMenu, windowsMenu } from "./window/menu.js"
 import { registerPanePictureIpc } from "./window/pane-pictures.js"
@@ -886,6 +887,7 @@ const launch = async (): Promise<void> => {
   registerPanePictureIpc(ipcMain, (event) => appWindow(event) !== undefined)
   // Only the app's own pages learn the version it runs.
   ipcMain.handle(versionChannel, (event) => (appWindow(event) ? app.getVersion() : ""))
+  if (process.platform === "darwin") registerFilesClipboard(ipcMain, appWindow)
   ipcMain.handle(directoryPickerChannel, async (event) => {
     const window = appWindow(event)
     if (!window) return null

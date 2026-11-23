@@ -39,6 +39,8 @@ import {
   scaleChannel,
   badgeChannel,
   directoryPickerChannel,
+  filesClipboardChannel,
+  type FilesClipboardReply,
   dismissWhatsNewChannel,
   feedbackAboutChannel,
   feedbackArgumentPrefix,
@@ -88,6 +90,12 @@ import { captionView, relayCaptionRoom } from "./caption-room.js"
 
 // The edge of the page's top the window's own controls sit over, if they sit over it.
 const controlsSide = windowControlsSide(process.platform)
+
+const clipboardRequest = async <T>(request: object): Promise<T> => {
+  const reply: FilesClipboardReply<T> = await ipcRenderer.invoke(filesClipboardChannel, request)
+  if (!reply.ok) throw new Error(reply.message)
+  return reply.value
+}
 
 const argument = process.argv.find((value) => value.startsWith(apiUrlArgumentPrefix))
 
@@ -506,6 +514,14 @@ const bridge = {
       return ""
     }
   },
+  ...(process.platform === "darwin" && {
+    filesClipboard: {
+      mark: (marker) => clipboardRequest({ kind: "mark", marker }),
+      read: (marker) => clipboardRequest({ kind: "read", marker }),
+      chunk: (id, index, offset) => clipboardRequest({ kind: "chunk", id, index, offset }),
+      release: (id) => clipboardRequest({ kind: "release", id }),
+    },
+  }),
 } satisfies DesktopBridge
 
 contextBridge.exposeInMainWorld("novadeck", {

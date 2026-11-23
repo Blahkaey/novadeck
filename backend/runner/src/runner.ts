@@ -29,6 +29,7 @@ import { readAccount, readGitName } from "./tour/name.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
+import { FileImports } from "./workspaces/file-imports.js"
 import { Notes } from "./workspaces/notes.js"
 import { Projects } from "./workspaces/projects.js"
 import { effectiveAgentMode } from "./workspaces/settings.js"
@@ -638,6 +639,10 @@ const startRunner = (options: RunnerOptions): Runner => {
     activity,
     seen,
   } = wire(options)
+  const fileImports = new FileImports((projectId) => {
+    projects.ensureNotRemoving(projectId)
+    return store.project(projectId).cwd
+  })
   let closing: Promise<void> | undefined
   return {
     sessions: createSessions({
@@ -655,6 +660,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         items,
         agents,
         uploads,
+        fileImports,
         voice,
         murmur,
         transcriptsAvailable: () => transcriptsAvailable(sealer),
@@ -677,6 +683,7 @@ const startRunner = (options: RunnerOptions): Runner => {
         works.release(session.id)
         voice.release(session.id)
         murmur.release(session.id)
+        void fileImports.release(session.id).catch(() => {})
       },
     }),
     snapshotBytes: options.terminals?.snapshotBytes ?? 32 * 1024 * 1024,

@@ -156,6 +156,11 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
         note(`copy entry ${input.from} into ${input.into || "the root"}`, () =>
           runner.projects.copyEntry(input),
         ),
+      beginImport: (input) => runner.projects.beginImport(input),
+      writeImport: (transfer, change) => runner.projects.writeImport(transfer, change),
+      writeImportPart: (transfer, offset, bytes) =>
+        runner.projects.writeImportPart(transfer, offset, bytes),
+      finishImport: (transfer) => runner.projects.finishImport(transfer),
       removeEntry: (input) =>
         note(`remove entry ${input.path}`, () => runner.projects.removeEntry(input)),
       browse: (input) => runner.projects.browse(input),

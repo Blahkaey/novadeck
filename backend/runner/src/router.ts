@@ -32,6 +32,7 @@ import type { Tour } from "./tour/tour.js"
 import type { Voice } from "./voice/service.js"
 import type { Works } from "./works/works.js"
 import { copyEntry, createEntry, moveEntry, removeEntry } from "./workspaces/entries.js"
+import type { FileImports } from "./workspaces/file-imports.js"
 import { filesExcludeOf, saveFilesExclude } from "./workspaces/files-exclude.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
@@ -141,6 +142,7 @@ export const createRouter = (options: {
   /** The forges pull requests come from; without it none is offered. */
   forges?: Forges
   uploads: Uploads
+  fileImports: FileImports
   voice: Voice
   murmur: Murmur
   /** Whether transcripts can be kept: not once it is known there is no key to seal them with. */
@@ -212,6 +214,15 @@ export const createRouter = (options: {
         projects.ensureNotRemoving(input.projectId)
         return copyEntry(store.project(input.projectId).cwd, input.from, input.into)
       }),
+      beginImport: api.projects.beginImport.handler(({ input, context }) =>
+        options.fileImports.begin(context.session.id, input.transfer, input.projectId, input.into),
+      ),
+      writeImport: api.projects.writeImport.handler(({ input, context }) =>
+        options.fileImports.write(context.session.id, input.transfer, input.change),
+      ),
+      finishImport: api.projects.finishImport.handler(({ input, context }) =>
+        options.fileImports.finish(context.session.id, input.transfer),
+      ),
       removeEntry: api.projects.removeEntry.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         return removeEntry(store.project(input.projectId).cwd, input.path)

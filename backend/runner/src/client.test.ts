@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { MessageChannel } from "node:worker_threads"
 
 import { createScreen, readScreen } from "@novadeck/emulator/headless"
-import { maxUploadBytes, type TerminalEvent } from "@novadeck/protocol"
+import { fileImportLimits, maxUploadBytes, type TerminalEvent } from "@novadeck/protocol"
 import {
   connectRunner,
   type AttachedTerminal,
@@ -1532,6 +1532,97 @@ describe("runner client uploads", () => {
         data: new Uint8Array(maxUploadBytes + 1),
       }),
     ).rejects.toMatchObject({ name: "WireError", code: "UPLOAD_TOO_LARGE" })
+  })
+})
+
+describe("runner client project imports", () => {
+  it("pastes binary files and empty folders over WebSocket without overwriting earlier work", async ({
+    resources,
+  }) => {
+    const app = await deployed(resources)
+    const root = join(app.directory, "project")
+    await mkdir(join(root, "docs", "Design"), { recursive: true })
+    await writeFile(join(root, "docs", "Design", "keep.txt"), "original")
+    const runner = await app.connect()
+    const project = await runner.projects.create({
+      id: crypto.randomUUID(),
+      name: "Import",
+      cwd: root,
+    })
+    const transfer = crypto.randomUUID()
+    const payload = Uint8Array.from(
+      { length: fileImportLimits.partBytes * 2 + 7 },
+      (_, at) => (at * 31) % 256,
+    )
+    await runner.projects.beginImport({ projectId: project.id, into: "docs", transfer })
+    await runner.projects.writeImport(transfer, {
+      kind: "entry",
+      entry: { path: "Design", size: null },
+    })
+    await runner.projects.writeImport(transfer, {
+      kind: "entry",
+      entry: { path: "Design/Empty", size: null },
+    })
+    await runner.projects.writeImport(transfer, {
+      kind: "entry",
+      entry: { path: "Design/Images.bin", size: payload.length },
+    })
+    for (let offset = 0; offset < payload.length; offset += fileImportLimits.partBytes)
+      // eslint-disable-next-line no-await-in-loop -- The runner receives each part in order.
+      await runner.projects.writeImportPart(
+        transfer,
+        offset,
+        payload.subarray(offset, offset + fileImportLimits.partBytes),
+      )
+    expect(await readdir(join(root, "docs"))).toEqual(["Design"])
+
+    await expect(runner.projects.finishImport(transfer)).resolves.toEqual([
+      { path: "docs/Design copy", folder: true },
+    ])
+    expect(await readFile(join(root, "docs", "Design", "keep.txt"), "utf8")).toBe("original")
+    expect(await readdir(join(root, "docs", "Design copy", "Empty"))).toEqual([])
+    expect(new Uint8Array(await readFile(join(root, "docs", "Design copy", "Images.bin")))).toEqual(
+      payload,
+    )
+  })
+
+  it("rejects another connection, incomplete uploads and paths outside the project", async ({
+    resources,
+  }) => {
+    const app = await deployed(resources)
+    const root = join(app.directory, "project")
+    await mkdir(root)
+    const runner = await app.connect()
+    const other = await app.connect()
+    const project = await runner.projects.create({
+      id: crypto.randomUUID(),
+      name: "Import",
+      cwd: root,
+    })
+    const transfer = crypto.randomUUID()
+    await expect(
+      runner.projects.beginImport({ projectId: project.id, into: "..", transfer }),
+    ).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })
+    await runner.projects.beginImport({ projectId: project.id, into: "", transfer })
+    await runner.projects.writeImport(transfer, {
+      kind: "entry",
+      entry: { path: "partial.bin", size: 2 },
+    })
+    await runner.projects.writeImportPart(transfer, 0, Uint8Array.of(1))
+    await expect(other.projects.finishImport(transfer)).rejects.toMatchObject({ code: "CONFLICT" })
+    await expect(runner.projects.finishImport(transfer)).rejects.toThrow("only partly received")
+    await runner.projects.beginImport({ projectId: project.id, into: "", transfer })
+    await expect(
+      runner.projects.writeImport(transfer, { kind: "entry", entry: { path: ".git", size: null } }),
+    ).rejects.toMatchObject({ code: "INVALID_DIRECTORY" })
+    await runner.projects.beginImport({ projectId: project.id, into: "", transfer })
+    await runner.projects.writeImport(transfer, {
+      kind: "entry",
+      entry: { path: "empty.txt", size: 0 },
+    })
+    runner.close()
+    await expect(other.projects.finishImport(transfer)).rejects.toMatchObject({ code: "CONFLICT" })
+    expect(await readdir(root)).toEqual([])
   })
 })
 

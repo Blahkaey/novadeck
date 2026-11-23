@@ -1,5 +1,6 @@
 import type { PageTrouble } from "./companions.js"
 import type { FeedbackKind } from "./feedback.js"
+import type { FileImportEntry } from "./file-import.js"
 import type { NoticeSound } from "./sounds.js"
 
 /**
@@ -18,6 +19,18 @@ export type WindowControlsSide = "start" | "end"
 /** Whether `value` is a `WindowControlsSide`. */
 export const isWindowControlsSide = (value: unknown): value is WindowControlsSide =>
   value === "start" || value === "end"
+
+export type FilesClipboardSelection =
+  | "ours"
+  | "empty"
+  | { readonly id: string; readonly entries: readonly FileImportEntry[] }
+
+export type DesktopFilesClipboard = {
+  mark(marker: string): Promise<void>
+  read(marker: string | undefined): Promise<FilesClipboardSelection>
+  chunk(id: string, index: number, offset: number): Promise<Uint8Array>
+  release(id: string): Promise<void>
+}
 
 export type DesktopBridge = {
   requestRunner(id: string): void
@@ -55,6 +68,8 @@ export type DesktopBridge = {
    * Absent from apps that came before it.
    */
   pathForFile?(file: File): string
+  /** Finder selections and the opaque marker belonging to a Files panel's own clipboard. */
+  filesClipboard?: DesktopFilesClipboard
   /**
    * Shows a desktop notification that the agent in a terminal finished: `title` and
    * `body` one line each, without control characters (`unsafeInLine` in

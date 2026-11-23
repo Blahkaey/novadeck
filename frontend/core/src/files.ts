@@ -82,6 +82,23 @@ export type CheckoutState = {
 // What an update of the checkout did: it moved (or had nothing to move), or git's reason.
 export type CheckoutUpdate = { readonly ok: true } | { readonly ok: false; readonly said: string }
 
+export type PastedEntry = { readonly path: string; readonly folder: boolean }
+export type FilePasteProgress = (sent: number, total: number) => void
+export type FilePasteResult = "ours" | "empty" | readonly PastedEntry[]
+
+/** The desktop clipboard, where Files can copy local entries to the project's runner. */
+export type ProjectFilesClipboard = {
+  /** A simulated clipboard can report when its fixture is loaded. */
+  readonly available?: Store<boolean>
+  readonly mark: (marker: string) => Promise<void>
+  readonly paste: (
+    projectId: string,
+    into: string,
+    marker: string | undefined,
+    progress: FilePasteProgress,
+  ) => Promise<FilePasteResult>
+}
+
 export type ProjectFiles = {
   readonly state: Store<FilesState>
   // A folder of the project's directory as it is now, by its path from the project's root
@@ -113,6 +130,7 @@ export type ProjectFiles = {
   readonly move?: (projectId: string, from: string, to: string) => Promise<string>
   readonly copy?: (projectId: string, from: string, into: string) => Promise<string>
   readonly remove?: (projectId: string, path: string) => Promise<void>
+  readonly clipboard?: ProjectFilesClipboard
   // How the project's own checkout stands as it is now. Rejects when the project has gone.
   // Absent where a backend has no checkout to move.
   readonly checkout?: (projectId: string) => Promise<CheckoutState>

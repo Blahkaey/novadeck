@@ -1,4 +1,9 @@
-import type { FolderEntry } from "@novadeck/core/files"
+import type {
+  FilePasteProgress,
+  FilePasteResult,
+  FolderEntry,
+  ProjectFilesClipboard,
+} from "@novadeck/core/files"
 
 import type { FilesNode, FilesRow, FolderRead, Listings } from "./files-tree"
 
@@ -26,6 +31,15 @@ export type EntryChanges = {
   readonly move?: ((from: string, to: string) => Promise<string>) | undefined
   readonly copy?: ((from: string, into: string) => Promise<string>) | undefined
   readonly remove?: ((path: string) => Promise<void>) | undefined
+  readonly clipboard?: {
+    readonly available?: ProjectFilesClipboard["available"]
+    readonly mark: ProjectFilesClipboard["mark"]
+    readonly paste: (
+      into: string,
+      marker: string | undefined,
+      progress: FilePasteProgress,
+    ) => Promise<FilePasteResult>
+  }
 }
 
 // What the person cut or copied in the panel, to paste: the entry at `path`, a folder or not, to be

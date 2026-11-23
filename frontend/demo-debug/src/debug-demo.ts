@@ -135,6 +135,7 @@ const readOnly = ({
   move: _move,
   copy: _copy,
   remove: _remove,
+  clipboard: _clipboard,
   ...files
 }: ProjectFiles) => files
 

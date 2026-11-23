@@ -49,6 +49,7 @@ import {
 import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
 import { directory, id, name } from "./fields.js"
+import { fileImportLimits, fileImportWrite } from "./file-import.js"
 import { forgeIntegration, forgeName } from "./forges.js"
 import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
 import { askAnswer, inboxEntry } from "./inbox.js"
@@ -222,6 +223,20 @@ export const contract = {
     copyEntry: procedure
       .input(z.strictObject({ projectId: id, from: entryPath, into: entryPath }))
       .output(entryChanged),
+    // An import belongs to this connection. Nothing reaches the project until finish.
+    beginImport: procedure
+      .input(z.strictObject({ projectId: id, into: entryPath, transfer: z.uuid() }))
+      .output(z.void()),
+    writeImport: procedure
+      .input(z.strictObject({ transfer: z.uuid(), change: fileImportWrite }))
+      .output(z.void()),
+    finishImport: procedure
+      .input(z.strictObject({ transfer: z.uuid() }))
+      .output(
+        z
+          .array(z.strictObject({ path: entryPath, folder: z.boolean() }))
+          .max(fileImportLimits.entries),
+      ),
     // Deletes the file or folder at `path` for good, a folder with everything in it; a link
     // goes, not what it leads to. An entry that is missing, and what `createEntry` refuses, are
     // INVALID_DIRECTORY; the system refusing, as when something is added inside a folder while

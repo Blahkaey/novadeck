@@ -378,6 +378,7 @@ export const desktopOptions = (
   const uninstall = desktopUninstall(app)
   return {
     ...(pick ? { pickDirectory: () => pick() } : {}),
+    ...(app?.filesClipboard ? { filesClipboard: app.filesClipboard } : {}),
     ...(beforeQuit ? { beforeQuit: (save) => beforeQuit(save) } : {}),
     ...(showAppearance ? { showAppearance: (look) => showAppearance(look) } : {}),
     ...(showScale ? { showScale: (scale) => showScale(scale) } : {}),

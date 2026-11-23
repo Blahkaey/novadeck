@@ -220,6 +220,12 @@ export const quitAppChannel = "novadeck:quit-app"
 /** Renderer-to-main request for a folder picker; answers the chosen path or null. */
 export const directoryPickerChannel = "novadeck:pick-directory"
 
+/** Commands for reading a Finder selection without exposing paths to the page. */
+export const filesClipboardChannel = "novadeck:files-clipboard"
+export type FilesClipboardReply<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly message: string }
+
 /** Renderer-to-main request to open the logs folder in the system's file manager. */
 export const openLogsChannel = "novadeck:open-logs"
 

@@ -21,6 +21,10 @@ type Projects = Pick<
   | "createEntry"
   | "moveEntry"
   | "copyEntry"
+  | "beginImport"
+  | "writeImport"
+  | "writeImportPart"
+  | "finishImport"
   | "removeEntry"
 >
 
@@ -43,6 +47,10 @@ const projects = (
     createEntry: unused,
     moveEntry: unused,
     copyEntry: unused,
+    beginImport: unused,
+    writeImport: unused,
+    writeImportPart: unused,
+    finishImport: unused,
     removeEntry: unused,
     ...given,
   },
@@ -53,6 +61,41 @@ const projects = (
 const there = async (): Promise<void> => {}
 
 describe("the runner's files", () => {
+  it("cancels staging and releases the Finder selection when a file can't be read", async () => {
+    const asked: string[] = []
+    const files = createRunnerFiles(
+      projects({
+        beginImport: async ({ projectId, into, transfer }) => {
+          asked.push(`begin ${projectId} ${into} ${transfer}`)
+        },
+        writeImport: async (transfer, change) => {
+          asked.push(`${change.kind} ${transfer}`)
+        },
+      }),
+      there,
+      {
+        mark: unused,
+        read: async () => ({ id: "picked", entries: [{ path: "Notes.txt", size: 3 }] }),
+        chunk: async () => {
+          throw new Error("The file changed.")
+        },
+        release: async (id) => {
+          asked.push(`release ${id}`)
+        },
+      },
+    )
+
+    await expect(files.clipboard!.paste("project", "docs", undefined, () => {})).rejects.toThrow(
+      "The file changed.",
+    )
+    expect(asked).toEqual([
+      "begin project docs picked",
+      "entry picked",
+      "cancel picked",
+      "release picked",
+    ])
+  })
+
   it("has no changes to tell of", () => {
     const files = createRunnerFiles(
       projects({ folder: async () => ({ entries: [], truncated: false }) }),

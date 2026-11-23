@@ -135,7 +135,7 @@ export const useFilesClipboard = ({
     },
     letGo: () => {
       if (clip?.mode !== "cut") return false
-      setClip(null)
+      setClip((current) => (current === clip ? null : current))
       return true
     },
     moved: (from, to) => setClip((current) => clipMoved(current, from, to)),

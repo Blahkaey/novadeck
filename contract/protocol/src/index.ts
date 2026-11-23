@@ -156,6 +156,7 @@ export {
   workPreviewWork,
 } from "./works.js"
 export { fitsRunner, maxWebSocketMessageBytes, protocolVersion } from "./connection.js"
+export { fileImportLimits, type FileImportEntry, type FileImportWrite } from "./file-import.js"
 export {
   type ForgeHost,
   forgeHost,

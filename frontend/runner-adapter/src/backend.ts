@@ -135,6 +135,7 @@ export const runnerTour = (
 })
 
 export type RunnerBackendOptions = {
+  readonly filesClipboard?: import("@novadeck/protocol/bridge").DesktopFilesClipboard
   readonly newId?: () => string
   // How long saving waits for more changes, in milliseconds.
   readonly saveDelay?: number
@@ -2095,7 +2096,7 @@ export const runnerBackend = (
           await untilAnswered(() => runner.projects.arrange(arrangement))
         }),
       ),
-    files: createRunnerFiles(runner, () => connected()),
+    files: createRunnerFiles(runner, () => connected(), options.filesClipboard),
     history: history.history,
     notes: notes.notes,
     // Once the session it goes to exists on the runner, as one the person just made does

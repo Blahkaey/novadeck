@@ -573,6 +573,12 @@ pastes there, **Copy Path** copies the folder's own path, and **Refresh** reads 
 copy that works says nothing. One that can't, as where a browser doesn't let the page use the
 clipboard, puts a line above the tree saying so until you dismiss it or hide the panel.
 
+On the Mac desktop app, copy files or folders in Finder and paste them in **Files** with
+`Cmd+V` or **Paste** in the right-click menu. Files uploads them to the project's runner,
+including a runner on another computer. A taken name gets a suffix such as `Notes copy.txt`.
+Each paste can carry up to 10,000 entries and 512 MiB. Symbolic links, special files and
+`.git` entries are refused. A remote runner needs a version that supports Finder paste.
+
 ### Editing a file
 
 Click a file, or press `Enter` on it, to open it in the session's project window, where you
