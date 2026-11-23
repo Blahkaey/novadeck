@@ -1,5 +1,6 @@
 // A process with no screen: the pty it runs in and how it ends, its process facts, on
-// Windows its process tree, and on Linux the systemd scope it is kept in.
+// Windows its process tree, and on Linux the systemd scope it is kept in, on macOS what its
+// processes' environment names.
 export {
   foregroundProcess,
   hasChildProcess,
@@ -33,6 +34,7 @@ export { processesUnder, startResolutionMs, type Spawn } from "./pty/spawned.js"
 export { anyRunning, chainTo, relayMs, Trees, type Member } from "./pty/trees.js"
 export { spawnPty, type ProcessTrees, type Pty, type PtyOptions } from "./pty/pty.js"
 export { activeCpuWeight, setScopeWeight, terminalCpuWeight, userScopes } from "./pty/scopes.js"
+export { taggedScopes } from "./pty/tagged.js"
 export { WindowsJobs, windowsJobs } from "./pty/jobs.js"
 export type { Activity } from "./pty/boost.js"
 export { priorityFor, terminalPriorities, terminalPriority, type Priority } from "./pty/priority.js"

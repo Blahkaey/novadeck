@@ -1020,6 +1020,30 @@ see them change.
   with its own bundled `xdg-open` (`vite --open`), or through the person's own `BROWSER`.
   Hibernation keeps an agent with such a program awake (`detached`),
   and the update's restart check counts it as work a restart would end.
+- On macOS a close or a shutdown ends what an agent left the same way, with the terminal's
+  scope read another way (`TaggedScopes`, `libraries/terminal/src/pty/tagged.ts`): macOS has
+  no cgroup, but every shell starts with `NOVADECK_TERMINAL_ID` naming its terminal, and a
+  process keeps the environment it started with through `setsid`, `nohup` and a double fork
+  and passes it on, so the terminal's members are the user's processes that started with its
+  id, in the app's own resource coalition, which a process keeps however it detached, as the
+  relay lists them (`novadeck-relay tagged`, under "Relay protocol"). Runs and
+  starts are in the wall clock, to the microsecond, as the relay reads a process's start;
+  `ps` gives only its second. An Apple shell (macOS's bash and zsh) is never a member,
+  so the shell's tree while it runs is told by the listing's parents, and so is the root of a
+  tree whose members run under another Apple program, as a `bash` loop or `make` the person
+  started before the agent, whose own start decides. Spared as on Linux, and what launchd
+  started, in a coalition of its own: an app the agent opens, with `open`, `osascript` or any
+  LaunchServices call, which passes the app the caller's environment, the terminal's id in it
+  (measured 2026-11-23), so no shim is needed as on Linux; and a launchd job (`launchctl`,
+  `brew services`); and what started without the id, as with `env -i`. Not seen, so it outlives the terminal as before: what macOS keeps the
+  environment of from other processes, every Apple program (a detached `caffeinate`, `tail
+  -f`, `ssh -fN`, or a `bash` loop, though a non-Apple program it runs is seen) and apps with
+  restricted entitlements (Chrome started by its binary); and a daemon that wrote over its
+  own environment, as redis's and postgres's `setproctitle` do. Where the person's Codex sets
+  its commands' environment (`shell_environment_policy`), whose `inherit = "core"` would drop
+  the id, Novadeck's codex shim sets it again (`shell_environment_policy.set`); an
+  `include_only` of theirs that leaves it out still drops it. An Apple `ssh` is never seen, so
+  an ssh `ControlMaster` an agent started stays, unlike on Linux.
 - On Windows the same is done with a job object per terminal in place of the scope
   (`libraries/terminal/src/pty/jobs.ts`, `backend/relay/src/jobs.rs`). Windows keeps a
   process's recorded parent once that parent has ended, and the tree read above walks only
@@ -1051,7 +1075,7 @@ see them change.
   second after the command does, detached or not, so nothing of it is left for a close;
   under Codex it mostly ends with the agent itself when it dies, its sandbox off too, though
   not always (measured); under Claude Code and opencode it runs on until the terminal closes.
-- Otherwise, and on macOS and Linux without the user's systemd, it is not a
+- Otherwise, on Linux without the user's systemd, it is not a
   process-tree kill guarantee: daemonized jobs and descendants that ignore hangup may
   continue, as with an ordinary terminal emulator, and so may a daemon an agent left in a
   group of its own.
@@ -1237,6 +1261,17 @@ or taskkill for:
   terminal whose hold it doesn't answer in time gets no job, and the rest go on.
 - `novadeck-relay held <file>` waits up to about a quarter of a second for `file`, then
   removes it: a cmd terminal's startup command runs after it, so it starts inside its job.
+
+On macOS the runner runs it to list each terminal's processes (see "Closing"):
+
+- `novadeck-relay tagged <variable>` prints, a JSON line per process of the user's that
+  started with `<variable>` in its environment, `{"pid","startedUs","value"}`: its start in
+  microseconds since the epoch, and the variable's value there. It reads each process's
+  `KERN_PROCARGS2` (never its arguments for the variable) and leaves out one whose start
+  changed while it read, and one outside the relay's own resource coalition, the app's, as
+  what launchd started. macOS keeps the environment of a restricted program (every Apple one,
+  and apps with restricted entitlements) from other processes, so those are never listed.
+  It fails where its own coalition can't be read, and the runner then ends nothing.
 
 `works.watch` reports a work per tracked worktree, keyed by its root (`{ root, terminalId | null,
 projectId, working, branch, base, firstSeenAt, merged, added, removed, files, conflicts, … }`; `removed`

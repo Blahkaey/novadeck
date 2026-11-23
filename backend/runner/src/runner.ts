@@ -6,7 +6,7 @@ import { dirname, join } from "node:path"
 import { compatibility, errors } from "@novadeck/protocol"
 import { relayPath } from "@novadeck/relay"
 import { TerminalError } from "@novadeck/terminal"
-import { terminalPriorities, userScopes, windowsJobs } from "@novadeck/terminal/pty"
+import { taggedScopes, terminalPriorities, userScopes, windowsJobs } from "@novadeck/terminal/pty"
 import { createSessions, type Sessions, type Verdict } from "@novadeck/wire/server"
 import { ORPCError } from "@orpc/server"
 
@@ -374,10 +374,15 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   started.push(murmur)
   // On Linux each shell runs in a systemd scope of its own, so one killed for memory
   // takes down its terminal, not the app. On Windows each runs in a job object of its own,
-  // kept by the runner's own relay. In both, what an agent left there ends with the terminal.
+  // kept by the runner's own relay. On macOS a terminal's processes are those that started
+  // with it named in their environment, as every shell starts (`launching.ts`), read through
+  // the relay. On all three, what an agent left there ends with the terminal.
   const jobs = windowsJobs(async () => options.relay ?? relayPath)
   if (jobs) started.push({ close: async () => jobs.close() })
-  const scopes = userScopes() ?? jobs
+  const scopes =
+    userScopes() ??
+    jobs ??
+    taggedScopes(() => Promise.resolve(options.relay ?? relayPath), "NOVADECK_TERMINAL_ID")
   // On macOS and Windows each shell and what it starts run below the window's priority.
   const priority = terminalPriorities()
   // The terminal the person uses in each window keeps the normal share of both.

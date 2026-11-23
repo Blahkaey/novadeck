@@ -120,7 +120,7 @@ export class WindowsJobs implements Scopes {
       weigh: () => Promise.resolve(),
       held,
       listed,
-      members: async () => (await listed())?.map((row) => row.pid),
+      members: async () => (await listed())?.map((row) => ({ pid: row.pid })),
       end: async (ones) => {
         if (ones.length > 0) await this.ask(`end ${ones.map(named).join(" ")}`)
       },

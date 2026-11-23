@@ -6,6 +6,8 @@
 //!
 //! On Windows it also reads for the runner what it would otherwise start PowerShell or
 //! taskkill for: the registry's environment, and a terminal's process tree, which it ends.
+//! On macOS it lists the processes each terminal started, by the variable that names it in
+//! the environment they started with, among the app's own coalition (`tagged`).
 
 mod allow;
 mod ancestors;
@@ -23,6 +25,8 @@ mod processes;
 #[cfg(windows)]
 mod registry;
 mod status_line;
+#[cfg(target_os = "macos")]
+mod tagged;
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -57,7 +61,8 @@ const USAGE: &str = "usage: novadeck-relay mcp <server-version> <protocol-versio
        novadeck-relay tree <pid>[:<started-ms>]...   (Windows)
        novadeck-relay end <pid>:<started-ms>...      (Windows)
        novadeck-relay jobs                           (Windows)
-       novadeck-relay held <file>";
+       novadeck-relay held <file>
+       novadeck-relay tagged <variable>              (macOS)";
 
 /// The leading `--name value` options, and the arguments after them. Every option takes a
 /// value, so one this relay doesn't know, from a newer runner's launcher, is passed over
@@ -139,6 +144,15 @@ fn main() -> ExitCode {
         Some((mode, _)) if mode == "environment" => {
             registry::print();
             ExitCode::SUCCESS
+        }
+        // The user's processes that started with the variable, as JSON lines.
+        #[cfg(target_os = "macos")]
+        Some((mode, [name])) if mode == "tagged" && !name.is_empty() => {
+            if tagged::print(name) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         #[cfg(windows)]
         Some((mode, rest)) if mode == "tree" => match roots(rest) {

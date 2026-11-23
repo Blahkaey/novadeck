@@ -60,7 +60,8 @@ export type NativeSpawn = (
 
 /**
  * How ptys start: node-pty's `spawn` unless a test plays one, the platform their ending
- * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux,
+ * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux
+ * and `taggedScopes()` tells on macOS,
  * and how far its priority yields to the app's, as `terminalPriorities()` gives on macOS and
  * Windows. `trees` reads a Windows shell's programs, which may have started before its
  * priority could be lowered.
@@ -133,7 +134,7 @@ export type EndOptions = {
       }
     | undefined
   /**
-   * On Linux, where an agent ran in the terminal (`Pty.agentStarted`), what it left in the
+   * On Linux and macOS, where an agent ran in the terminal (`Pty.agentStarted`), what it left in the
    * terminal's scope is ended too (see `Pty.endLeft`): as the hangup goes out, what has left the
    * shell's tree, and once the shell and what the follow waits on have ended, what is left.
    */
@@ -160,8 +161,9 @@ export type Pty = {
   end(options: EndOptions): Promise<void>
   /**
    * An agent runs in it now, by its pid where known: what starts in the terminal's scope from
-   * then until `agentEnded` is the agent's, to end with the terminal (`endLeft`). On Linux with
-   * a scope; elsewhere it records nothing. Told again while the run is open, it adds nothing.
+   * then until `agentEnded` is the agent's, to end with the terminal (`endLeft`). On Linux and
+   * macOS with a scope; elsewhere it records nothing. Told again while the run is open, it adds
+   * nothing.
    */
   agentStarted(agent: number | undefined): void
   /** The agent's session there has ended: what starts from now is no agent's. */
@@ -177,7 +179,7 @@ export type Pty = {
   /**
    * Ends what agents left in the terminal's scope, as a close does once its shell has exited:
    * SIGTERM, then SIGKILL half a second on, or by `by()` (see `endLeftovers`). Nothing where no
-   * agent ran there, or off Linux.
+   * agent ran there, or on Windows.
    */
   endLeft(left: LeftOptions, by?: () => number): Promise<void>
 }
@@ -360,7 +362,10 @@ export const spawnPty = (
     useConptyDll: platform === "win32",
   })
   // Its scope, asked for as it starts; a Windows shell's job once node-pty names its pid (below).
-  let scope = child.pid > 0 && platform !== "win32" ? options.scopes?.contain(child.pid) : undefined
+  let scope =
+    child.pid > 0 && platform !== "win32"
+      ? options.scopes?.contain(child.pid, options.env)
+      : undefined
   const boost = boosting({
     scope,
     priority: options.priority,
@@ -458,6 +463,17 @@ export const spawnPty = (
   const exit = new Promise<void>((resolve) => {
     resolveExit = resolve
   })
+  // Agents' runs in the terminal, kept where its scope can say what they left (Linux, macOS,
+  // Windows), in the clock its platform lists processes' starts in. `agent` is the agent whose
+  // own start `since` has been read as, once.
+  const runs: { since: number; until?: number; agent?: number }[] = []
+  const tracksRuns = () =>
+    (platform === "linux" || platform === "darwin" || platform === "win32") && scope !== undefined
+  const clock = runClock(platform)
+  const closeRun = (): void => {
+    const run = runs.at(-1)
+    if (run && run.until === undefined) run.until = Math.max(run.since, clock.now() ?? run.since)
+  }
   // Before any listener, so a terminal has drawn by the time its first output is handled.
   child.onData(() => {
     drawn = true
@@ -481,11 +497,6 @@ export const spawnPty = (
   // An exit taken as one, where the program's own may never be reported.
   const takenAsEnded = () => report({ code: null, signal: null })
 
-  // Agents' runs in the terminal, kept where its scope can say what they left (Linux, Windows).
-  const runs: { since: number; until?: number }[] = []
-  const tracksRuns = () => (platform === "linux" || platform === "win32") && scope !== undefined
-  // Now, in the clock a process's start is listed in.
-  const clock = () => runClock(platform)
   // What agents left in the scope now; `skip` leaves out what a follow still waits on.
   const findLeft =
     (left: LeftOptions, skip?: ReadonlySet<string>) =>
@@ -504,6 +515,9 @@ export const spawnPty = (
         shell: gone ? undefined : pty.pid,
         apart: listedApart(read.rows, left.apart ?? [], platform),
         ...(skip && { skip }),
+        clock,
+        // macOS's scope leaves out every Apple program it holds.
+        partial: platform === "darwin",
       })
     }
   // Ends what agents left there, as a close does, after which nothing reads the scope again.
@@ -664,29 +678,30 @@ export const spawnPty = (
       if (!tracksRuns()) return
       let run = runs.at(-1)
       if (!run || run.until !== undefined) {
-        const now = clock()
+        const now = clock.now()
         if (now === undefined) return
         run = { since: now }
         runs.push(run)
       }
       // From the agent's own start where the listing shows it, as it may have started its
-      // helpers before it bound; the time it bound stands only where it can't be read. A
-      // Windows job lists its own, which no listing sees.
+      // helpers before it bound; the time it bound stands only where it can't be read. macOS's
+      // scope gives that start to the microsecond, the listing to the second; a Windows job
+      // lists its own, which no listing sees.
       const held = scope
       const listing = held?.listed ? () => held.listed!() : options.listing
-      if (agent === undefined || !listing) return
+      if (agent === undefined || !listing || run.agent === agent) return
       const open = run
-      void listing()
-        .then((rows) => {
-          const start = rows && runStart(rows, agent)
-          if (start !== undefined && open.until === undefined) open.since = start
-        })
-        .catch(() => {})
+      void (async () => {
+        const members = platform === "darwin" ? await held?.members() : undefined
+        const rows = await listing()
+        const start = rows && runStart(rows, agent, clock, members)
+        if (start === undefined || open.until !== undefined) return
+        open.since = start
+        // Read once a run: an agent's harness may tell of its session at every turn.
+        open.agent = agent
+      })().catch(() => {})
     },
-    agentEnded: () => {
-      const run = runs.at(-1)
-      if (run && run.until === undefined) run.until = Math.max(run.since, clock() ?? run.since)
-    },
+    agentEnded: closeRun,
     get agentRan() {
       return runs.length > 0
     },

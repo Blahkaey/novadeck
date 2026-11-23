@@ -105,7 +105,10 @@ resolve it.
     terminal, which the relay's `jobs` mode holds (started at once, let go by `close()`): the
     shell goes into it once node-pty names
     its pid, and `scopeFile` is made once that has settled; the job lists its own processes
-    (`listed`) and ends them by pid and start (`end`).
+    (`listed`) and ends them by pid and start (`end`). On macOS, `taggedScopes()` gives each pty the scope of the processes that
+    started with its terminal's variable in their environment, as the caller's relay lists them
+    (`TaggedScopes`), with each start to the microsecond, the clock its runs are kept in
+    (`wallClock`; Linux's is `tickClock`, Windows' `windowsClock`).
   - `sampleForeground(child, last)` names the program in a terminal's foreground, cheaply
     enough to sample, from `/proc` on Linux and `ps` on macOS (Windows can't tell).
     `terminalForeground`, `processGroup`, `foregroundProcess`, `foregroundRuns`, `openFiles`,

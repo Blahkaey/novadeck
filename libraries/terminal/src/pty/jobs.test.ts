@@ -59,7 +59,7 @@ describe("a Windows terminal's job", () => {
     const jobs = new WindowsJobs(async () => "relay.exe", relay.start)
     const scope = jobs.contain(10)
     expect(await scope.held).toBe(true)
-    expect(await scope.members()).toEqual([10, 30])
+    expect(await scope.members()).toEqual([{ pid: 10 }, { pid: 30 }])
     expect(await scope.listed!()).toEqual([
       {
         pid: 10,
