@@ -12,7 +12,9 @@ import { badgeOf, dimmed, legible } from "./doorbell-colour.js"
 import {
   blockFits,
   layoutBlock,
+  layoutFull,
   layoutRing,
+  showsMore,
   type RingPart,
   type Run,
   type Tone,
@@ -169,6 +171,21 @@ type Entry = {
   /** The nonce or message id whose content it draws, which drops it when that goes. */
   readonly source: string
   readonly pieces: Piece[]
+  /** What it says in full, which a click opens where its rows don't show all its words. */
+  readonly parts: readonly RingPart[]
+  readonly more: number
+  /** The cells the opened drawing takes: from the first row's column, as wide as its lines. */
+  readonly x: number
+  readonly width: number
+  readonly opens: boolean
+}
+
+// A drawing opened on a click: its messages in full, laid over the rows from its first one down
+// (up, at the screen's foot), until a click or a key closes it.
+type Opened = {
+  readonly entry: Entry
+  readonly element: HTMLElement
+  lines: Run[][]
 }
 
 type Hit = {
@@ -234,9 +251,20 @@ export type Doorbell = {
   /** Draws again, as after a change of theme, font or scale. */
   readonly refresh: () => void
   readonly drawn: () => number
+  /**
+   * Opens the drawing over the cell at buffer row `row`, column `col`, as a click there does, where
+   * its rows don't show all its words (or closes the one open); whether one opened.
+   */
+  readonly openAt: (row: number, col: number) => boolean
+  /** Closes the opened drawing. */
+  readonly close: () => void
+  /** The opened drawing's lines, as they read. */
+  readonly opened: () => string[] | undefined
   /** What each drawn entry covers now: the cells under it as the buffer holds them. */
   readonly audit: () => {
     key: string
+    /** Whether a click opens it in full. */
+    opens: boolean
     pieces: {
       row: number
       x: number
@@ -564,23 +592,43 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
     ].join("|")
     if (element.dataset["novadeckDoorbell"] === signature) return
     const t0 = performance.now()
+    element.style.cssText += ";pointer-events:none;"
+    element.dataset["novadeckDoorbell"] = signature
+    fill(element, { runs: piece.runs ?? [], pad: piece.pad, bg, ink, selected, size })
+    stats.paints += 1
+    stats.paintMs += performance.now() - t0
+  }
+
+  // Writes a row's runs into `element`, a cell's width to each character, on the row's ground.
+  const fill = (
+    element: HTMLElement,
+    row: {
+      readonly runs: readonly Run[]
+      readonly pad: number
+      readonly bg: string
+      readonly ink: string
+      readonly selected: boolean
+      readonly size: { readonly w: number; readonly h: number }
+    },
+  ): void => {
+    const { runs, pad, bg, ink, selected, size } = row
+    const t = theme()
     element.replaceChildren()
-    element.style.cssText += `;background:${bg};overflow:hidden;white-space:pre;pointer-events:none;`
+    element.style.cssText += `;background:${bg};overflow:hidden;white-space:pre;`
     element.style.fontFamily = terminal.options.fontFamily ?? "monospace"
     element.style.fontSize = `${terminal.options.fontSize ?? 15}px`
     element.style.lineHeight = `${size.h}px`
     element.style.fontVariantLigatures = "none"
-    element.dataset["novadeckDoorbell"] = signature
     element.style.backgroundImage =
       selected && t.selectionBackground
         ? `linear-gradient(${t.selectionBackground}, ${t.selectionBackground})`
         : ""
-    if (piece.pad > 0) {
+    if (pad > 0) {
       const spacer = document.createElement("span")
-      spacer.style.cssText = `display:inline-block;width:${piece.pad * size.w}px`
+      spacer.style.cssText = `display:inline-block;width:${pad * size.w}px`
       element.append(spacer)
     }
-    for (const run of piece.runs ?? []) {
+    for (const run of runs) {
       const color = run.badge ? badgeOf(ink, bg).text : colourOf(run.tone, bg, ink)
       // The badge's tint, under the selection's colour where the row is selected: the row's own
       // selection gradient sits on the element, which the badge's spans would cover.
@@ -599,8 +647,6 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
         element.append(span)
       }
     }
-    stats.paints += 1
-    stats.paintMs += performance.now() - t0
   }
 
   // Puts an alternate screen piece's element over its row, as xterm's decorations are over theirs.
@@ -617,6 +663,8 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
   }
 
   const remove = (entry: Entry): void => {
+    if (opened?.entry === entry) close()
+    onLeave()
     for (const piece of entry.pieces) {
       piece.alt?.remove()
       piece.decoration?.dispose()
@@ -636,6 +684,7 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
     // block's do (with no rules to say), rather than one row cut short over rows left blank. Rows
     // fewer than its messages (and their "+N more") say them on one row, as a ring row does.
     const wraps = hit.rows.length > 1 && blockFits(hit.parts, hit.rows.length, hit.more)
+    const width = hit.kind === "ring" && !wraps ? hit.rows[0]!.width : widest
     const lines =
       hit.kind === "block"
         ? layoutBlock(hit.parts, widest, hit.rows.length, { extra: hit.more })
@@ -687,8 +736,224 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
       decoration.onRender((element) => paint(element, piece))
       pieces.push(piece)
     })
-    entries.set(hit.key, { key: hit.key, kind: hit.kind, source: hit.source, pieces })
+    entries.set(hit.key, {
+      key: hit.key,
+      kind: hit.kind,
+      source: hit.source,
+      pieces,
+      parts: hit.parts,
+      more: hit.more,
+      x: left,
+      width,
+      // Opened, it shows more than its rows do: at most a screen's rows, as the opened drawing has.
+      opens:
+        pieces.length > 0 &&
+        showsMore(
+          layoutFull(hit.parts, width, { extra: hit.more, most: terminal.rows }),
+          lines.slice(0, pieces.length),
+        ),
+    })
     stats.drawn += 1
+    bind()
+  }
+
+  // --- Opening ---------------------------------------------------------------------------------
+
+  let opened: Opened | undefined
+
+  const screenOf = (): HTMLElement | null | undefined =>
+    terminal.element?.querySelector<HTMLElement>(".xterm-screen")
+
+  // The opened drawing over its rows: from its first row down, or up from the screen's foot where
+  // the rows below are fewer than its lines. Closed once its first row leaves the screen.
+  const placeOpened = (): void => {
+    if (!opened) return
+    const size = cellSize()
+    const row = opened.entry.pieces[0]!.marker.line - buffer().viewportY
+    if (row < 0 || row >= terminal.rows) {
+      close()
+      return
+    }
+    if (!size) return
+    const { element, entry } = opened
+    const top = Math.max(0, Math.min(row, terminal.rows - opened.lines.length))
+    element.style.left = `${entry.x * size.w}px`
+    element.style.top = `${top * size.h}px`
+    element.style.width = `${entry.width * size.w}px`
+  }
+
+  const paintOpened = (): void => {
+    if (!opened) return
+    const size = cellSize()
+    if (!size) return
+    const { element, entry } = opened
+    const t = theme()
+    const first = entry.pieces[0]!
+    const bg = first.bg ?? t.background ?? "#000000"
+    const ink = first.ink ?? t.foreground ?? "#cccccc"
+    element.style.boxShadow = `0 0 0 1px ${dimmed(legible(ink, bg), bg)}, 0 6px 16px rgba(0,0,0,0.35)`
+    element.style.background = bg
+    element.replaceChildren(
+      ...opened.lines.map((runs) => {
+        const line = document.createElement("div")
+        line.style.height = `${size.h}px`
+        fill(line, { runs, pad: 0, bg, ink, selected: false, size })
+        return line
+      }),
+    )
+    placeOpened()
+  }
+
+  const open = (entry: Entry): void => {
+    close()
+    const host = screenOf()
+    if (!host) return
+    const element = document.createElement("div")
+    // Above xterm's decorations; it takes its own clicks, so none reaches the program below it.
+    element.style.cssText =
+      "position:absolute;z-index:8;pointer-events:auto;cursor:pointer;user-select:none;"
+    element.dataset["novadeckDoorbellOpen"] = entry.key
+    host.append(element)
+    document.addEventListener("mousedown", onOutside, true)
+    opened = {
+      entry,
+      element,
+      lines: layoutFull(entry.parts, entry.width, { extra: entry.more, most: terminal.rows }),
+    }
+    paintOpened()
+  }
+
+  const close = (): void => {
+    if (!opened) return
+    opened.element.remove()
+    opened = undefined
+    document.removeEventListener("mousedown", onOutside, true)
+  }
+
+  // A press outside the terminal (another pane, the sidebar) closes the opened drawing too.
+  const onOutside = (event: MouseEvent): void => {
+    if (!(event.target instanceof Node) || !terminal.element?.contains(event.target)) close()
+  }
+
+  // The drawing a click on the cell at buffer row `row`, column `col` would open.
+  const entryAt = (row: number, col: number): Entry | undefined => {
+    for (const entry of entries.values())
+      if (
+        entry.opens &&
+        entry.pieces.some(
+          (piece) => piece.marker.line === row && col >= piece.x && col < piece.x + piece.width,
+        )
+      )
+        return entry
+    return undefined
+  }
+
+  const openAt = (row: number, col: number): boolean => {
+    if (opened) {
+      close()
+      return false
+    }
+    const entry = entryAt(row, col)
+    if (!entry) return false
+    open(entry)
+    return true
+  }
+
+  // The buffer cell under a pointer, by the screen's box as drawn (a zoomed view's included).
+  const cellAt = (event: MouseEvent): { row: number; col: number } | undefined => {
+    const screen = screenOf()
+    if (!screen || !terminal.cols || !terminal.rows) return undefined
+    const box = screen.getBoundingClientRect()
+    if (!box.width || !box.height) return undefined
+    const col = Math.floor(((event.clientX - box.left) / box.width) * terminal.cols)
+    const row = Math.floor(((event.clientY - box.top) / box.height) * terminal.rows)
+    if (col < 0 || col >= terminal.cols || row < 0 || row >= terminal.rows) return undefined
+    return { row: buffer().viewportY + row, col }
+  }
+
+  // Whether the program has the mouse (a TUI's mouse tracking): xterm then sends it every press.
+  const tracking = (): boolean => terminal.modes.mouseTrackingMode !== "none"
+
+  // A plain click on a drawing that doesn't show all its words opens it; a press anywhere closes
+  // the one open. A drag that selects, a double click and other buttons are the terminal's own.
+  // Pressed before xterm hears it (capture): a press on the opened drawing, or one that opens or
+  // closes a drawing while the program has the mouse, never reaches the program; a double click's
+  // second press closes it and goes on, so the word under it is selected as before.
+  let pointing = false
+  // The press closed the opened drawing: its click opens nothing.
+  let closing = false
+  // A click opens its drawing once no second press has followed it: the second press of a double
+  // click lands where it would open, and the browser counts a press on another element as a first.
+  const doubleMs = 300
+  let pending: ReturnType<typeof setTimeout> | undefined
+  const cancel = (): void => {
+    clearTimeout(pending)
+    pending = undefined
+  }
+  const onPress = (event: MouseEvent): void => {
+    closing = false
+    cancel()
+    if (event.button !== 0) return
+    if (opened) {
+      const onIt = event.target instanceof Node && opened.element.contains(event.target)
+      close()
+      closing = true
+      if (event.detail > 1) return
+      if (onIt || tracking()) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      return
+    }
+    if (!tracking() || event.detail > 1) return
+    const cell = cellAt(event)
+    if (!cell || !entryAt(cell.row, cell.col)) return
+    event.preventDefault()
+    event.stopPropagation()
+    openAt(cell.row, cell.col)
+    closing = true
+  }
+  const onClick = (event: MouseEvent): void => {
+    if (closing || event.button !== 0 || event.detail > 1 || tracking()) return
+    if (terminal.hasSelection()) return
+    const cell = cellAt(event)
+    if (!cell || !entryAt(cell.row, cell.col)) return
+    pending = setTimeout(() => {
+      pending = undefined
+      if (!terminal.hasSelection()) openAt(cell.row, cell.col)
+    }, doubleMs)
+  }
+  const onMove = (event: MouseEvent): void => {
+    const screen = screenOf()
+    if (!screen) return
+    const cell = cellAt(event)
+    const over = cell !== undefined && entryAt(cell.row, cell.col) !== undefined
+    if (over === pointing) return
+    pointing = over
+    screen.style.cursor = over ? "pointer" : ""
+  }
+  const onLeave = (): void => {
+    if (!pointing) return
+    pointing = false
+    const screen = screenOf()
+    if (screen) screen.style.cursor = ""
+  }
+
+  // Listens on the terminal's element once it has one: a terminal opened after the overlay was
+  // attached has none until then.
+  let bound: HTMLElement | undefined
+  const bind = (): void => {
+    const element = terminal.element
+    if (bound || !element) return
+    bound = element
+    element.addEventListener("mousedown", onPress, true)
+    element.addEventListener("click", onClick)
+    // Typing closes the opened drawing: keys (a shortcut the app takes included), composing, a paste.
+    terminal.textarea?.addEventListener("keydown", close, true)
+    terminal.textarea?.addEventListener("compositionstart", close)
+    terminal.textarea?.addEventListener("paste", close, true)
+    element.addEventListener("mousemove", onMove)
+    element.addEventListener("mouseleave", onLeave)
   }
 
   // --- Keeping honest --------------------------------------------------------------------------
@@ -840,6 +1105,7 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
     }),
     // Where a cell's size changed (a font, a zoom), the alternate screen's own elements follow.
     terminal.onRender(() => {
+      placeOpened()
       if (buffer().type !== "alternate") return
       for (const entry of entries.values())
         for (const piece of entry.pieces) {
@@ -853,6 +1119,7 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
       scanAll()
       forceScan = true
     }),
+    terminal.onScroll(() => placeOpened()),
     terminal.onSelectionChange(() => {
       const position = terminal.getSelectionPosition()
       selection = position
@@ -861,6 +1128,8 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
       doorbell.refresh()
     }),
   ]
+
+  bind()
 
   const doorbell: Doorbell = {
     setContent: (next) => {
@@ -884,11 +1153,16 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
           const element = piece.alt ?? piece.decoration?.element
           if (element) paint(element, piece)
         }
+      paintOpened()
     },
     drawn: () => entries.size,
+    openAt,
+    close,
+    opened: () => opened?.lines.map((runs) => runs.map((run) => run.text).join("")),
     audit: () =>
       [...entries.values()].map((entry) => ({
         key: entry.key,
+        opens: entry.opens,
         pieces: entry.pieces.map((piece) => ({
           row: piece.marker.line,
           x: piece.x,
@@ -907,6 +1181,16 @@ export const attachDoorbell = (terminal: Terminal, options: DoorbellOptions): Do
     dispose: () => {
       subscriptions.forEach((subscription) => subscription.dispose())
       dropAll()
+      close()
+      cancel()
+      bound?.removeEventListener("mousedown", onPress, true)
+      bound?.removeEventListener("click", onClick)
+      terminal.textarea?.removeEventListener("keydown", close, true)
+      terminal.textarea?.removeEventListener("compositionstart", close)
+      terminal.textarea?.removeEventListener("paste", close, true)
+      bound?.removeEventListener("mousemove", onMove)
+      bound?.removeEventListener("mouseleave", onLeave)
+      onLeave()
     },
   }
   return doorbell

@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest"
 import {
   blockFits,
   layoutBlock,
+  layoutFull,
   layoutRing,
   shares,
+  showsMore,
   type RingPart,
   type Run,
 } from "./doorbell-layout.js"
@@ -261,6 +263,77 @@ describe("a delivery block's layout", () => {
       `        ${"x".repeat(32)}`,
       `        ${"x".repeat(32)}`,
       `        ${"x".repeat(4)}`,
+    ])
+  })
+})
+
+describe("a drawing opened in full", () => {
+  it("wraps each message under its sender over every row it needs, none cut", () => {
+    const long = "word ".repeat(30).trim()
+    const rows = layoutFull([agent("newtz", long), agent("hushz", "Done")], 40)
+    expect(rows.every((runs) => width(runs) <= 40)).toBe(true)
+    expect(rows.map(text).join(" ")).not.toContain("…")
+    expect(text(rows[0]!)).toMatch(/^@newtz: word/)
+    expect(text(rows.at(-1)!)).toBe("@hushz: Done")
+    expect(
+      rows
+        .slice(0, -1)
+        .map(text)
+        .join(" ")
+        .replace(/^@newtz: /, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    ).toBe(long)
+  })
+
+  it("gives notices that follow one another one badge and a row per line, then the count", () => {
+    const rows = layoutFull(
+      [notice("You notice a worktree."), notice("You notice CI is busy."), agent("newtz", "Hi")],
+      60,
+      { extra: 2 },
+    )
+    expect(rows.map((runs) => text(runs).trimEnd())).toEqual([
+      " novadeck  You notice a worktree.",
+      "           You notice CI is busy.",
+      "@newtz: Hi",
+      "+2 more",
+    ])
+  })
+
+  it("shares its rows as a block does where the screen has fewer than it needs", () => {
+    const parts = [agent("newtz", "word ".repeat(40)), agent("hushz", "word ".repeat(40))]
+    const rows = layoutFull(parts, 30, { most: 4 })
+    expect(rows).toHaveLength(4)
+    expect(text(rows[0]!)).toMatch(/^@newtz/)
+    expect(rows.map(text).some((row) => row.startsWith("@hushz"))).toBe(true)
+  })
+
+  it("is worth opening only where the drawing doesn't show all the words", () => {
+    const opens = (parts: readonly RingPart[], cols: number): boolean =>
+      showsMore(layoutFull(parts, cols), [layoutRing(parts, cols)])
+    expect(opens([agent("newtz", "Start on the parser tests")], 80)).toBe(false)
+    expect(opens([agent("newtz", "Start on it"), agent("hushz", "Done")], 80)).toBe(false)
+    expect(opens([agent("newtz", "word ".repeat(30))], 60)).toBe(true)
+    const many = ["a", "b", "c", "d"].map((handle) => agent(handle, "Start on the parser tests"))
+    expect(opens(many, 80)).toBe(true)
+    expect(opens([], 80)).toBe(false)
+  })
+
+  it("opens a block that cuts a few characters, its rules row saying none of the words", () => {
+    for (let n = 20; n <= 28; n += 1) {
+      const parts = [agent("newtz", `aaaaaaaa${" bb".repeat(n)}`)]
+      const block = layoutBlock(parts, 40, 3)
+      const cutShort = block.flat().some((run) => run.text === "…")
+      expect(showsMore(layoutFull(parts, 40), block)).toBe(cutShort)
+    }
+  })
+
+  it("wraps a notice's line in full beside its badge", () => {
+    const rows = layoutFull([notice("You notice shared resources are busy right now.")], 30)
+    expect(rows.map((runs) => text(runs).trimEnd())).toEqual([
+      " novadeck  You notice shared",
+      "           resources are busy",
+      "           right now.",
     ])
   })
 })

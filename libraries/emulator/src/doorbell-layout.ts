@@ -131,6 +131,8 @@ export const shares = (wanted: readonly number[], total: number): number[] => {
   return out
 }
 
+const rulesText = "rules for the agent"
+
 const moreText = (count: number): string => `${gap}+${count} more`
 
 /**
@@ -273,7 +275,7 @@ export const layoutBlock = (
   const tail: Run[][] = []
   if ((options.extra ?? 0) > 0)
     tail.push([{ text: cut(`+${options.extra} more`, width), tone: dim }])
-  if (rules) tail.push([{ text: cut("rules for the agent", width), tone: dim }])
+  if (rules) tail.push([{ text: cut(rulesText, width), tone: dim }])
   // Notices that follow one another say one row, as on a ring row: one badge, each line once.
   const groups = groupsOf(parts)
   const room = rows - tail.length
@@ -324,6 +326,65 @@ const groupsOf = (parts: readonly RingPart[]): RingPart[][] => {
   }
   return out
 }
+
+/**
+ * The parts in full over rows of `width` cells, as a drawing opened on a click shows them: each
+ * message wrapped under its sender over all the rows it needs, notices that follow one another
+ * one badge with a row per line, then how many messages the ring held beyond them. At most `most`
+ * rows, shared as a block's are where the parts need more.
+ */
+export const layoutFull = (
+  parts: readonly RingPart[],
+  width: number,
+  options: { readonly extra?: number; readonly most?: number } = {},
+): Run[][] => {
+  const extra = options.extra ?? 0
+  const out: Run[][] = []
+  for (const group of groupsOf(parts)) {
+    const [part] = group
+    if (part!.kind !== "notice") {
+      out.push(...wrappedRows(part!, width, Infinity))
+      continue
+    }
+    const lines = [...new Set(group.map((each) => flatten(each.text)))]
+    if (width <= badgeWidth + 1) {
+      out.push(layoutRing(group, width))
+      continue
+    }
+    // Each line wrapped beside the badge, under where its words start.
+    const rows = lines.flatMap((line) => wrapText(line, width - badgeWidth - 1))
+    rows.forEach((row, index) =>
+      out.push([
+        index === 0
+          ? { text: badgeText, tone: ink, badge: true }
+          : { text: " ".repeat(badgeWidth), tone: dim },
+        { text: " ", tone: dim },
+        { text: row, tone: dim, italic: true },
+      ]),
+    )
+  }
+  if (extra > 0) out.push([{ text: cut(`+${extra} more`, width), tone: dim }])
+  const most = options.most ?? Infinity
+  if (out.length <= most) return out
+  return layoutBlock(parts, width, Math.max(most, 1), { rules: false, extra })
+}
+
+// How many of the parts' characters a drawing shows: its runs' text, without its blanks,
+// separators, cuts, counts and a block's rules row, which say nothing of the parts.
+const wordsOf = (lines: readonly (readonly Run[])[]): number =>
+  lines
+    .filter((runs) => !(runs.length === 1 && runs[0]!.text === rulesText))
+    .flat()
+    .filter((run) => !run.badge)
+    .map((run) => run.text)
+    .join("")
+    .replace(/\+\d+ more|[\s·…]/g, "").length
+
+/** Whether `full` (as `layoutFull` lays the parts out) shows more of their words than `lines`. */
+export const showsMore = (
+  full: readonly (readonly Run[])[],
+  lines: readonly (readonly Run[])[],
+): boolean => wordsOf(full) > wordsOf(lines)
 
 /**
  * Whether a block of `rows` rows gives each of the parts a row of its own, with a row for the
