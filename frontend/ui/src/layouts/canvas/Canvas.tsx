@@ -99,6 +99,7 @@ const TerminalCanvas = ({
   reordered,
   fitOnNavigate,
   fitAllOnNavigate,
+  travelOnNavigate,
   flyOnNavigate,
   terminals,
   hidden,
@@ -315,6 +316,7 @@ const TerminalCanvas = ({
     hidden,
     fitOnNavigate,
     fitAllOnNavigate,
+    travelOnNavigate,
     flyOnNavigate,
     restored: kept !== undefined,
     initialViewport,
@@ -571,6 +573,12 @@ const TerminalCanvas = ({
       data-has-selection={Boolean(selected)}
       tabIndex={0}
       {...backgroundPointerHandlers}
+      // The keyboard landing in a window selects it, as in Focus and Grid: as files dropped on
+      // one type into it.
+      onFocusCapture={(event) => {
+        const id = (event.target as Element).closest<HTMLElement>("[data-node]")?.dataset.node
+        if (id && id !== selected) onSelect(id)
+      }}
       onKeyDown={(event) => {
         if (
           event.defaultPrevented ||

@@ -1,4 +1,4 @@
-import type { Install, Model } from "@novadeck/harness-core/harness"
+import type { Effort, Install, Model } from "@novadeck/harness-core/harness"
 import type { AgentMode, AgentName } from "@novadeck/protocol"
 import type { ProcessTrees, PtyOptions } from "@novadeck/terminal/pty"
 import type { InterruptOptions, PromptOptions } from "@novadeck/tui-input"
@@ -9,10 +9,12 @@ import type { InboxRecords } from "../messaging/inbox.js"
 import type { MessageRecords } from "../messaging/records.js"
 import type { Describer } from "../murmur/describer.js"
 import type { InstalledShell } from "../shell/install.js"
+import type { Shipping } from "../shipping/service.js"
 import type { ClosedRecords } from "../workspaces/closed.js"
 import type { Notes } from "../workspaces/notes.js"
 import type { WorktreesWiring } from "../worktrees/calls.js"
 import type { AnswersOptions } from "./answers.js"
+import type { ClientWindows } from "./client-windows.js"
 import type { MurmurTimes } from "./descriptions.js"
 import type { DialogsOptions } from "./dialogs.js"
 import type { HibernationOptions } from "./hibernation.js"
@@ -21,8 +23,24 @@ import type { TranscriptRedactor } from "./redaction.js"
 import type { TerminalRecords } from "./saved-terminals.js"
 import type { TranscriptSealer } from "./sealing.js"
 
-/** What the runner decides of an agent's `open_agent`, before anything starts. */
-export type OpenPolicy = { readonly refusal?: string }
+/**
+ * What the runner decides of an agent's `open_agent`, before anything starts: a refusal, or the
+ * flags the agent it opens starts with, by harness (the tour's write flags), for that launch only.
+ */
+export type OpenPolicy = {
+  readonly refusal?: string
+  /** The flags for the agent opened in `cwd`, the folder the call resolved. */
+  readonly flags?: (agent: AgentName, cwd: string) => readonly string[]
+  /**
+   * The model, and its effort, a new agent the call names neither for starts on in `cwd`, the
+   * folder the call asks for (the tour's teammates' cheapest model): the person's own default
+   * when none. A resume keeps its session's own.
+   */
+  readonly choice?: (
+    agent: AgentName,
+    cwd: string,
+  ) => { readonly model: string; readonly effort?: Effort } | undefined
+}
 
 export type TerminalOptions = {
   shell?: string
@@ -82,6 +100,8 @@ export type TerminalOptions = {
    * asked each time it looks; null for never, as when omitted.
    */
   hibernateAfterMinutes?: () => number | null
+  /** The shipping gate, answering shell commands agents are about to run; none where it isn't offered. */
+  shipping?: Shipping
   /** How agents work with each other, asked each time an agent's tools are listed: Herd when omitted. */
   agentMode?: () => AgentMode
   /** The waits of hibernation, as in some tests. */
@@ -105,6 +125,11 @@ export type TerminalOptions = {
    * agents show nothing without it.
    */
   items?: CompanionItems
+  /**
+   * Which project each client shows (see `ClientWindows`), which agents' requests to a
+   * client go by; without it they go to the client that connected last.
+   */
+  clients?: ClientWindows
   /** The folder of the project a session belongs to, which names the files its agents show. */
   projectFolder?: (sessionId: string) => string | undefined
   /** How long an agent's request for a new terminal waits for the client's answer, in milliseconds. */

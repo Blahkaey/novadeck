@@ -1,6 +1,6 @@
 import { finishGraceMs } from "@novadeck/core/agents/finish"
 import { harnesses, type AgentName } from "@novadeck/core/harnesses"
-import { inboxType, type Inbox, type InboxRow, type InboxTurn } from "@novadeck/core/inbox"
+import { inboxType, type Inbox, type InboxEntry, type InboxTurn } from "@novadeck/core/inbox"
 import type { BackendAction, TerminalKey } from "@novadeck/core/port"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { workspaceReducer } from "@novadeck/core/state"
@@ -340,7 +340,7 @@ describe("demo states", () => {
   it("lets the agents that end a turn and then sleep go, leaving their turns to the Inbox", async () => {
     const { run, added, terminal, released } = panel("04")
     await run("Every state at once")
-    // Not before the completed turn's row is stored: that waits out the finish's grace while
+    // Not before the completed turn's entry is stored: that waits out the finish's grace while
     // the terminal still runs its agent.
     vi.advanceTimersByTime(3000 + finishGraceMs)
     const early = added.find(
@@ -363,7 +363,7 @@ describe("demo states", () => {
     const tile = added.find(
       (one) => terminal(terminalSlot(one.terminalId))?.name === "Asleep, reply unread",
     )!
-    const row = (at: number): InboxTurn => ({
+    const entry = (at: number): InboxTurn => ({
       id: `turn:${tile.terminalId}:${at}`,
       projectId: tile.projectId,
       workspaceSessionId: tile.workspaceSessionId,
@@ -376,10 +376,10 @@ describe("demo states", () => {
       error: null,
       files: [],
     })
-    // Well past when the timers alone would have put it to sleep: the row is not stored yet.
+    // Well past when the timers alone would have put it to sleep: the entry is not stored yet.
     vi.advanceTimersByTime(8000)
     expect(terminal(terminalSlot(tile.terminalId))).not.toMatchObject({ state: "sleeping" })
-    turns.update(() => [row(Date.now())])
+    turns.update(() => [entry(Date.now())])
     vi.advanceTimersByTime(1)
     expect(terminal(terminalSlot(tile.terminalId))).toMatchObject({ state: "sleeping" })
   })
@@ -471,6 +471,13 @@ describe("demo states", () => {
       expect(states.holds(key("05"))).toBe(false)
     })
 
+    it("holds a sleeper whose agent a newer Novadeck integrates, which this build never wakes", () => {
+      const { run, terminal, states } = panel("04")
+      run("Asleep, a newer Novadeck's agent")
+      expect(terminal("04")).toMatchObject({ state: "sleeping", agent: "newer" })
+      expect(states.holds(key("04"))).toBe(true)
+    })
+
     it("holds every sleeper the gallery sets, not the waking ones", async () => {
       const { run, added, terminal, states } = panel("04")
       await run("Every state at once")
@@ -482,6 +489,7 @@ describe("demo states", () => {
       for (const name of [
         "Asleep",
         "Asleep, done",
+        "Asleep, newer agent",
         "Asleep, asks (MCP)",
         "Asleep, reply unread",
         "Asleep, stopped with an error",
@@ -602,13 +610,13 @@ describe("demo states", () => {
     it("lets go of the terminals of the gallery's metadata tiles, not its agents'", async () => {
       const { run, released, added } = panel("04")
       await run("Every state at once")
-      // The sixteen that set no agent verb: four that ask through MCP (their Inbox rows are the
+      // The seventeen that set no agent verb: four that ask through MCP (their Inbox entries are the
       // demo's own), unheard, at its startup screen, program, a shell an agent opened, one an
-      // agent exited from, starting, asleep (twice more with a done report and an ask), waking
+      // agent exited from, starting, asleep (three times more with a done report, a newer agent and an ask), waking
       // (twice, one with an ask), and the three ways to end.
-      expect(released).toHaveLength(16)
+      expect(released).toHaveLength(17)
       for (const each of released) expect(added).toContainEqual(each)
-      expect(new Set(released.map((each) => each.terminalId)).size).toBe(16)
+      expect(new Set(released.map((each) => each.terminalId)).size).toBe(17)
     })
 
     it("calls its verbs without letting go", () => {
@@ -938,27 +946,27 @@ const openOver = (variant: "plain" | "agents" | "inbox", harness: AgentName = "c
       .flatMap((group) => group.actions)
       .find((action) => action.label === label)!
       .run(surface)
-  const rows = (): readonly InboxRow[] => inbox.state.getSnapshot().items
-  return { backend, workspace, viewed, run, rows }
+  const entries = (): readonly InboxEntry[] => inbox.state.getSnapshot().items
+  return { backend, workspace, viewed, run, entries }
 }
 
-// The rows that wait on the person, as the Inbox header counts them (`asks` in
+// The entries that wait on the person, as the Inbox header counts them (`asks` in
 // frontend/ui/src/inbox/inbox-state.ts, which this package can't import): what asks and
 // hasn't settled, never an update nor a failed turn that only informs.
-const waitingRows = (rows: readonly InboxRow[]): readonly InboxRow[] =>
-  rows.filter(
-    (row) =>
-      !row.settled &&
-      inboxType(row) !== "update" &&
+const waitingRows = (entries: readonly InboxEntry[]): readonly InboxEntry[] =>
+  entries.filter(
+    (entry) =>
+      !entry.settled &&
+      inboxType(entry) !== "update" &&
       !(
-        row.kind === "trouble" &&
-        row.trouble.type === "failed" &&
-        row.trouble.stored &&
-        !row.stopped
+        entry.kind === "trouble" &&
+        entry.trouble.type === "failed" &&
+        entry.trouble.stored &&
+        !entry.stopped
       ),
   )
-const updateRows = (rows: readonly InboxRow[]): readonly InboxRow[] =>
-  rows.filter((row) => !row.settled && inboxType(row) === "update")
+const updateRows = (entries: readonly InboxEntry[]): readonly InboxEntry[] =>
+  entries.filter((entry) => !entry.settled && inboxType(entry) === "update")
 
 describe("demo states over the real agents", () => {
   beforeEach(() => vi.useFakeTimers())
@@ -989,11 +997,11 @@ describe("demo states over the real agents", () => {
       }
     })
 
-    it("fills the Inbox with that agent's rows", () => {
-      const { run, rows, workspace, viewed } = openOver("plain", harness)
+    it("fills the Inbox with that agent's entries", () => {
+      const { run, entries, workspace, viewed } = openOver("plain", harness)
       run("Fill the Inbox")
       vi.advanceTimersByTime(3_500)
-      const agents = rows().map((row) => row.source.agent)
+      const agents = entries().map((entry) => entry.source.agent)
       expect(agents.length).toBeGreaterThan(0)
       expect(new Set(agents)).toEqual(new Set([harness]))
       expect(processOf(workspace.getSnapshot(), viewed)).not.toBe(harness)
@@ -1016,7 +1024,7 @@ describe("demo states over the real agents", () => {
     })
 
     it("makes every agent of the gallery that harness, with its asks in the Inbox", () => {
-      const { run, rows, workspace, viewed } = openOver("plain", harness)
+      const { run, entries, workspace, viewed } = openOver("plain", harness)
       const before = rosterOf(workspace.getSnapshot(), viewed).length
       run("Every state at once")
       const added = rosterOf(workspace.getSnapshot(), viewed).slice(before)
@@ -1027,15 +1035,15 @@ describe("demo states over the real agents", () => {
       const agents = shown.filter(({ process }) => isAgentProgram(process))
       expect(agents.length).toBeGreaterThan(15)
       expect(new Set(agents.map(({ process }) => process))).toEqual(new Set([harness]))
-      const asks = rows().filter((row) => row.kind === "ask")
-      expect(asks.map((row) => row.source.title).toSorted()).toEqual([
+      const asks = entries().filter((entry) => entry.kind === "ask")
+      expect(asks.map((entry) => entry.source.title).toSorted()).toEqual([
         "Asks (MCP)",
         "Asleep, asks (MCP)",
         "Needs a sign-in",
         "Waking, asks (MCP)",
         "Working, a side question",
       ])
-      expect(new Set(asks.map((row) => row.source.agent))).toEqual(new Set([harness]))
+      expect(new Set(asks.map((entry) => entry.source.agent))).toEqual(new Set([harness]))
     })
 
     it("leaves a terminal that already runs another agent as it is", () => {
@@ -1047,12 +1055,12 @@ describe("demo states over the real agents", () => {
     })
   })
 
-  it("clears what the panel and the agents made, leaving the variant's own rows (inbox)", () => {
-    const { run, rows } = openOver("inbox")
-    const own = rows().filter(
-      (row) =>
-        row.kind === "ask" ||
-        (row.kind === "update" && !row.id.startsWith("entry:demo-done-") && !row.settled),
+  it("clears what the panel and the agents made, leaving the variant's own entries (inbox)", () => {
+    const { run, entries } = openOver("inbox")
+    const own = entries().filter(
+      (entry) =>
+        entry.kind === "ask" ||
+        (entry.kind === "update" && !entry.id.startsWith("entry:demo-done-") && !entry.settled),
     )
     expect(own.length).toBeGreaterThan(0)
     run("Every state at once")
@@ -1060,17 +1068,18 @@ describe("demo states over the real agents", () => {
     run("Clear waiting agents")
     vi.advanceTimersByTime(10_000)
     for (const each of own) {
-      const kept = rows().find((row) => row.id === each.id)
+      const kept = entries().find((entry) => entry.id === each.id)
       expect(kept?.kind, each.id).toBe(each.kind)
       expect(kept?.settled, each.id).toEqual(each.settled)
     }
-    // The done reports are read, which keeps them as resolved rows.
-    expect(rows().filter((row) => row.id.startsWith("entry:demo-done-") && !row.settled)).toEqual(
-      [],
-    )
+    // The done reports are read, which keeps them as resolved entries.
     expect(
-      rows().filter(
-        (row) => row.kind === "ask" && !row.settled && !own.some((each) => each.id === row.id),
+      entries().filter((entry) => entry.id.startsWith("entry:demo-done-") && !entry.settled),
+    ).toEqual([])
+    expect(
+      entries().filter(
+        (entry) =>
+          entry.kind === "ask" && !entry.settled && !own.some((each) => each.id === entry.id),
       ),
     ).toEqual([])
   })
@@ -1087,36 +1096,36 @@ describe("demo states over the real agents", () => {
     })
 
     it(`adds as many waits and done reports to the Inbox as its hint says (${variant})`, () => {
-      const { run, rows } = openOver(variant)
+      const { run, entries } = openOver(variant)
       // From an empty Inbox, so what the variant's agents already ask doesn't count.
       run("Clear waiting agents")
       vi.advanceTimersByTime(10_000)
       run("Fill the Inbox")
       vi.advanceTimersByTime(3_500)
-      expect(waitingRows(rows())).toHaveLength(10)
-      expect(updateRows(rows())).toHaveLength(2)
+      expect(waitingRows(entries())).toHaveLength(10)
+      expect(updateRows(entries())).toHaveLength(2)
     })
 
     it(`leaves no ask open nor update unread after every state, then Clear (${variant})`, () => {
-      const { run, rows } = openOver(variant)
+      const { run, entries } = openOver(variant)
       run("Every state at once")
       vi.advanceTimersByTime(3_500)
-      expect(rows().some((row) => row.kind === "ask")).toBe(true)
-      expect(updateRows(rows()).length).toBeGreaterThan(0)
+      expect(entries().some((entry) => entry.kind === "ask")).toBe(true)
+      expect(updateRows(entries()).length).toBeGreaterThan(0)
       run("Clear waiting agents")
       vi.advanceTimersByTime(10_000)
-      expect(waitingRows(rows())).toEqual([])
-      expect(updateRows(rows())).toEqual([])
+      expect(waitingRows(entries())).toEqual([])
+      expect(updateRows(entries())).toEqual([])
     })
 
     it(`leaves nothing to read, ask or work after Fill then Clear (${variant})`, () => {
-      const { run, workspace, backend, rows } = openOver(variant)
+      const { run, workspace, backend, entries } = openOver(variant)
       run("Fill the Inbox")
       vi.advanceTimersByTime(3_500)
       run("Clear waiting agents")
       vi.advanceTimersByTime(10_000)
-      expect(waitingRows(rows())).toEqual([])
-      expect(updateRows(rows())).toEqual([])
+      expect(waitingRows(entries())).toEqual([])
+      expect(updateRows(entries())).toEqual([])
       for (const each of workspace.getSnapshot().projects)
         for (const owner of each.history)
           for (const terminal of owner.state.roster.terminals) {

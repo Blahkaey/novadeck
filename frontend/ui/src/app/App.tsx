@@ -1,11 +1,13 @@
 import { allTeams, leadChain, litTeams, sameLitTeams, sameTeams } from "@novadeck/core/derivations"
 import { noNotes, todosLeft, type NotesState } from "@novadeck/core/notes"
+import { watchPerson } from "@novadeck/core/person"
 import type { Backend, BackendSelection, CreateBackend, TerminalKey } from "@novadeck/core/port"
 import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
 import { panelLabels, railPanelOf, type RailPanel } from "@novadeck/core/types"
 import type { WorksMade } from "@novadeck/core/works"
 import { failViewLoads } from "@novadeck/items/lazy-view"
+import { guardFileDrops } from "@novadeck/toolkit/file-drops"
 import {
   useCallback,
   useEffect,
@@ -27,7 +29,7 @@ import { HistoryDropNotice } from "../shell/HistoryDot"
 import { refuseNextOwnWindow } from "../shell/own-windows"
 import { createPanelNodes, PanelNodesContext } from "../shell/panel-nodes"
 import { sidebarVisible } from "../shell/shell-state"
-import { readSidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
+import { readSidebarOrder, sidebarOrder, writeSidebarOrder } from "../shell/shell-storage"
 import { SidebarRail } from "../shell/SidebarRail"
 import { WorkspacePanels } from "../shell/WorkspacePanels"
 import { ZenDock } from "../shell/ZenDock"
@@ -54,7 +56,7 @@ import { historyShown, filesShown, notesShown, panelShownOn } from "./routing"
 import { currentContext, currentState, currentTarget, sameItems, shallowEqual } from "./selectors"
 import { SidebarSection } from "./SidebarSection"
 import { previewTeamFold, toggleTeamFold, useFoldedLeads } from "./team-fold"
-import { TourProvider } from "./TourProvider"
+import { TourRoot } from "./TourRoot"
 import { useWorktreesShown, useLeaveHiddenWorktrees } from "./use-worktrees-shown"
 import { useInboxBadge } from "./useInboxBadge"
 import { useSessionMarks } from "./useSessionMarks"
@@ -121,6 +123,9 @@ export const App = ({
   }
   // Framed, the wheel is the framing page's until the visitor engages the app there.
   useEffect(() => (embedded ? holdInputUntilEngaged(held.current) : undefined), [embedded])
+  // Files dropped anywhere but on what takes them, as a terminal, do nothing: the page never
+  // leaves for them, as a browser's would.
+  useEffect(() => guardFileDrops(), [])
   return (
     <EmbeddedContext value={embedded}>
       <BackendGate
@@ -328,6 +333,10 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   const voice = useDictationController(services)
   useKeyboard(voice?.dictation)
   const { backend } = services
+  // Where macOS's window buttons sit over the page, the rail and the sidebar run to the window's
+  // top, as a Mac app's sidebar does, with the buttons on them, and the header heads the
+  // terminals' column alone (shell/region.css). The side is the window's for its life.
+  const [besideSidebar] = useState(() => backend.windowControls?.side === "start")
   const worktreesShown = useWorktreesShown()
   useLeaveHiddenWorktrees(worktreesShown)
   // The terminals' font follows Preferences.
@@ -336,7 +345,15 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   }, [backend, fontSize, fontFamily])
   // The order the person left the rail's toggles in, kept for their next visit; one order
   // for both rails, the drawer's on a phone and the window's.
+  // The person's, so it follows another device's change (core's person.ts).
   const [railOrder, setRailOrder] = useState(readSidebarOrder)
+  useEffect(
+    () =>
+      watchPerson((key) => {
+        if (key === sidebarOrder.key) setRailOrder(readSidebarOrder())
+      }),
+    [],
+  )
   const sidebarRail = (mobile = false): React.JSX.Element => (
     <RailWithBadge
       mobile={mobile}
@@ -358,7 +375,7 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
   )
   return (
     <DictationContext.Provider value={voice}>
-      <TourProvider>
+      <TourRoot>
         <InboxHost active={inboxShowing}>
           <main
             className="workspace flex h-dvh min-h-100 flex-col overflow-hidden"
@@ -372,13 +389,22 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
             }
           >
             <WorkspaceEffects />
+            {/* Windows' caption buttons' strip in Zen, where the header hides (shell/region.css). */}
+            <div className="window-caption" aria-hidden="true" />
             <VisitorBar />
-            <HeaderSection />
+            {!besideSidebar && <HeaderSection />}
             <TabListContext.Provider value={tabList}>
               <MoveSessionsProvider>
                 <PanelNodesContext value={panelNodes}>
-                  <div className="workspace-body relative flex min-h-0 flex-1">
+                  <div
+                    className="workspace-body relative flex min-h-0 flex-1"
+                    data-titlebar={besideSidebar || undefined}
+                    // Open only where the sidebar sits beside the rail: on a narrow screen it
+                    // is a drawer over the page, and the header keeps clear of the buttons.
+                    data-sidebar={desktop && !zen && !sidebarCollapsed ? "open" : "closed"}
+                  >
                     {sidebarRail()}
+                    {besideSidebar && <div className="rail-titlebar" aria-hidden="true" />}
                     <TeamWireSection
                       // Beside the rail, so only while the sidebar holds the list and shows it.
                       shown={
@@ -405,8 +431,16 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
                       }
                       mobileFinalFocusEl={() => sidebarToggle(sidebarPanel)}
                       sidebar={<SidebarSection />}
+                      titlebar={besideSidebar}
                     >
-                      <WorkspaceStage canvas={canvas} />
+                      {besideSidebar ? (
+                        <div className="workspace-column flex h-full min-h-0 min-w-0 flex-1 flex-col">
+                          <HeaderSection />
+                          <WorkspaceStage canvas={canvas} />
+                        </div>
+                      ) : (
+                        <WorkspaceStage canvas={canvas} />
+                      )}
                     </WorkspacePanels>
                     {/* Before the panels, so a window of its own holds its panel before the
                         panel's own effects ask which window it is in. */}
@@ -435,7 +469,7 @@ export const WorkspaceApp = ({ panel }: Pick<AppProps, "panel"> = {}): React.JSX
             <PanelSection panel={panel} />
           </main>
         </InboxHost>
-      </TourProvider>
+      </TourRoot>
     </DictationContext.Provider>
   )
 }

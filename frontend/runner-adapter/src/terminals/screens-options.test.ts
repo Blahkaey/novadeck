@@ -1,3 +1,4 @@
+import { noMessages, type MessagesState, type TerminalThreads } from "@novadeck/core/messages"
 import type { BackendConnectionState } from "@novadeck/core/port"
 import { createStore } from "@novadeck/core/store"
 import type { TerminalEvent } from "@novadeck/protocol"
@@ -9,7 +10,7 @@ import { afterEach, vi } from "vitest"
 
 import type { SurfaceRuntime } from "../backend"
 import { context, describe, expect, it } from "../test"
-import { pasteNotice, retainMs, screensOptions } from "./screens-options"
+import { pasteNotice, retainMs, ringFeed, screensOptions } from "./screens-options"
 
 describe("a failed paste's notice", () => {
   it("says the clipboard could not be read", () => {
@@ -27,6 +28,12 @@ describe("a failed paste's notice", () => {
     expect(
       pasteNotice({ kind: "file", type: "image/png", tooLarge: true, error: new Error("big") }),
     ).toBe("Couldn't paste the image: it's over 32 MB")
+  })
+
+  it("says a folder can go in only by its own path, which this page doesn't know", () => {
+    expect(
+      pasteNotice({ kind: "file", type: "", tooLarge: false, folder: true, error: new Error() }),
+    ).toBe("Couldn't paste the folder: only files can be uploaded")
   })
 
   it("says only that it failed for any other reason, as a lost connection", () => {
@@ -95,6 +102,8 @@ describe("the runner's terminal screens' options", () => {
     const attached: AttachedTerminal = {
       id: "t",
       mode: "control",
+      onMode: () => () => {},
+      take: async () => {},
       [Symbol.asyncIterator]: () => attached,
       next: async () => ({ value: undefined, done: true }),
       return: async () => ({ value: undefined, done: true }),
@@ -133,6 +142,37 @@ describe("the runner's terminal screens' options", () => {
     expect(classify(new WireError("DISCONNECTED"))).toBe("offline")
     expect(classify(new WireError("CONTROL_IN_USE"))).toBe("fatal")
     expect(classify(new Error("boom"))).toBe("fatal")
+  })
+
+  it("tell the surface its terminal is open in another window, for that refusal alone", () => {
+    const { runtime } = runtimeOf({} as AttachedTerminal)
+    const told: string[] = []
+    const options = screensOptions(
+      { ...runtime, elsewhere: (waiting) => void told.push(waiting.terminalId) },
+      { theme: noTheme },
+    )
+    options.on?.waiting?.(key, new WireError("CONTROL_IN_USE"))
+    options.on?.waiting?.(key, new WireError("RESOURCE_LIMIT"))
+    expect(told).toEqual(["t"])
+  })
+
+  it("wait for a terminal another window controls where windows share the terminals by project", () => {
+    const { runtime } = runtimeOf({} as AttachedTerminal)
+    const { classify } = screensOptions({ ...runtime, sharing: () => true }, { theme: noTheme })
+    expect(classify(new WireError("CONTROL_IN_USE"))).toBe("busy")
+    // Anything else is as it was.
+    expect(classify(new WireError("TERMINAL_LIMIT"))).toBe("fatal")
+    const alone = screensOptions({ ...runtime, sharing: () => false }, { theme: noTheme })
+    expect(alone.classify(new WireError("CONTROL_IN_USE"))).toBe("fatal")
+  })
+
+  it("never wait on a runner that hands control over: another window's terminal is observed", () => {
+    const { runtime } = runtimeOf({} as AttachedTerminal)
+    const { classify } = screensOptions(
+      { ...runtime, sharing: () => true, observes: () => true },
+      { theme: noTheme },
+    )
+    expect(classify(new WireError("CONTROL_IN_USE"))).toBe("fatal")
   })
 
   it("wait for Enter after an exit that can start again, not after a clean one", () => {
@@ -196,6 +236,8 @@ describe("the runner's terminal screens over a runtime", () => {
     const attached: AttachedTerminal = {
       id: "t",
       mode: "control",
+      onMode: () => () => {},
+      take: async () => {},
       [Symbol.asyncIterator]: () => attached,
       next: async () =>
         queue.length ? { value: queue.shift()!, done: false } : { value: undefined, done: true },
@@ -341,5 +383,48 @@ describe("the runner's terminal screens over a runtime", () => {
     element.querySelector("textarea")!.dispatchEvent(paste)
     await vi.waitFor(() => expect(hold.state.getSnapshot().notice).toBe("Couldn't paste the image"))
     expect(upload).toHaveBeenCalledWith("t", expect.objectContaining({ name: expect.any(String) }))
+  })
+})
+
+describe("the doorbell rows' feed", () => {
+  const terminal = (terminalId: string, handle: string, more: Partial<TerminalThreads> = {}) => ({
+    terminalId,
+    handle,
+    agent: true,
+    threads: [],
+    ...more,
+  })
+
+  it("reads the terminal's rings and deliveries, and whether an agent runs there", () => {
+    const rings = [
+      { seq: 1, nonce: "n7Q2xk", at: 1, parts: [{ kind: "notice" as const, text: "x" }] },
+    ]
+    const store = createStore<MessagesState>({
+      ...noMessages,
+      terminals: {
+        "p/s/t": terminal("t", "fox", { rings }),
+        "p/s/u": terminal("u", "moth"),
+      },
+    })
+    const feed = ringFeed(store, "t")
+    expect(feed.get()).toEqual({
+      rings,
+      deliveries: [],
+      agent: true,
+    })
+    expect(ringFeed(store, "u").get().rings).toEqual([])
+    expect(ringFeed(store, "none").get().rings).toEqual([])
+  })
+
+  it("tells of each change of the messages, until stopped", () => {
+    const store = createStore<MessagesState>(noMessages)
+    const feed = ringFeed(store, "t")
+    const heard = vi.fn<() => void>()
+    const stop = feed.subscribe(heard)
+    store.update((current) => ({ ...current, paused: true }))
+    expect(heard).toHaveBeenCalledOnce()
+    stop()
+    store.update((current) => ({ ...current, paused: false }))
+    expect(heard).toHaveBeenCalledOnce()
   })
 })

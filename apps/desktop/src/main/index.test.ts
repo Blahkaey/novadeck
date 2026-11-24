@@ -120,7 +120,9 @@ describe("the compiled desktop app", () => {
       // The server that starts after the quit closed what it found is closed in turn, and
       // the window waits on both checks.
       const started = main.indexOf("const started = await startHttpServer(")
-      const window = main.indexOf("createWindow(server.origin);\n  void updates")
+      const window = main.indexOf(
+        "openFirstWindows(server.origin, await savedWindows.load());\n  void updates",
+      )
       expect(started).toBeGreaterThan(-1)
       expect(window).toBeGreaterThan(started)
       const tail = main.slice(started, window)
@@ -222,12 +224,12 @@ describe("the compiled desktop app", () => {
       expect(main.match(/app\.relaunch\(/gu)).toHaveLength(3)
     })
 
-    it("opens a window for a second launch when the app has none, as on macOS", async () => {
+    it("opens the kept windows for a second launch when the app has none, as on macOS", async () => {
       const main = await read("main/index.js")
       const handler = main.slice(main.indexOf('app.on("second-instance"'))
 
       expect(handler.slice(0, handler.indexOf("\n});"))).toMatch(
-        /bringForward\(window\);\s*else if \(server && !quitting\.stopping\) createWindow\(server\.origin\);\s*if \(process\.platform === "darwin"\) app\.focus\(\{ steal: true \}\)/u,
+        /bringForward\(window\);\s*else if \(server && !quitting\.stopping\) openFirstWindows\(server\.origin, savedWindows\.current\(\)\);\s*if \(process\.platform === "darwin"\) app\.focus\(\{ steal: true \}\)/u,
       )
     })
 

@@ -11,7 +11,7 @@ Before changing this repository, read each file in this list:
 
 # Harness Parity
 
-Every agent feature works the same in Claude Code, Codex and Antigravity. When one
+Every agent feature works the same in Claude Code, Codex, Antigravity and opencode. When one
 harness lacks the signal a feature relies on, find and probe that harness's own
 equivalent: a hook, its transcript or rollout, its status line, or the screen. Don't
 ship a feature for some harnesses and leave the others behind. A gap no source can close
@@ -34,6 +34,20 @@ release finds on their computer is theirs, so it carries forward:
 Code moving inside the repository needs no shims, but nothing on a person's computer is
 code moving inside the repository.
 
+# The Contract's Window
+
+A change to `contract/protocol` follows docs/backend-api.md ("Versions"): it raises
+`revision` in `compatibility.ts` past main's (released or not: the next release ships it), and a
+change that can't be additive moves `oldestClient` or `oldestRunner` past the revision it
+leaves behind. A new value in an
+existing input's enum, or a new variant in its union, uses `inputEnum` / `inputUnion` with the
+revision it came in rather than moving `oldestRunner` (an enum an output shares still needs `openEnum`). An output's enum or
+union that grows takes new values freely once it is open (`openEnum`, `openUnion`, "Open
+schemas" there), and its UI handles `newer`. Write `contract.json`
+again with `pnpm --filter @novadeck/protocol test -u`. On a conflict in it, take either side,
+write it again the same way, then run `node scripts/compatibility/main.ts --peer origin/main`, as
+Quality's Contract job does with the base: a change merged first may need yours raised once more.
+
 # Shared CI Runners
 
 macOS CI has three runners, shared by every pull request's Quality and E2E runs and the
@@ -50,7 +64,7 @@ When the demo can't produce a new state yet — a dialog, an error, a badge, a t
 window phase, a backend field it never sets — add it in the same change:
 
 - Terminal, waiting-agent and picker states go in `frontend/demo-debug/src/states.ts`,
-  with pure action builders in `frontend/demo-debug/src/terminals.ts`; an Inbox row of a kind no demo agent
+  with pure action builders in `frontend/demo-debug/src/terminals.ts`; an Inbox entry of a kind no demo agent
   makes goes in `frontend/demo/src/inbox/fixtures.ts`, with its action in
   `frontend/demo-debug/src/inbox.ts`. A new tab or window phase also
   joins the "Every state at once" gallery in `states.ts`.

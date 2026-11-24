@@ -5,9 +5,11 @@ import { describe, expect, it, vi } from "vitest"
 import { wireContract } from "./handshake.js"
 import {
   createSessions,
+  revokeGraceMs,
   type Session,
   type SessionContext,
   type SessionsOptions,
+  type Verdict,
 } from "./sessions.js"
 
 const contract = {
@@ -23,7 +25,9 @@ const contract = {
   idle: oc.input(type<void>()).output(eventIterator(type<number>())),
 }
 
-const protocolVersion = 7
+// The revision the server speaks, and the oldest client it serves.
+const revision = 7
+const oldestClient = 5
 
 class AppError extends Error {}
 
@@ -38,7 +42,8 @@ const serve = (options: Partial<SessionsOptions> = {}) => {
   const { wire: _, ...app } = contract
   const api = implement(app).$context<SessionContext>()
   const sessions = createSessions({
-    protocolVersion,
+    revision,
+    oldestClient,
     router: api.router({
       echo: api.echo.handler(({ input }) => input),
       held: api.held.handler(
@@ -88,11 +93,17 @@ const serve = (options: Partial<SessionsOptions> = {}) => {
         : error,
     ...options,
   })
-  const open = (transport: { maxCalls?: number; token?: string } = {}) => {
+  const open = (
+    transport: {
+      maxCalls?: number
+      token?: string
+      verify?: (token: string | undefined) => Verdict
+    } = {},
+  ) => {
     const terminate = vi.fn<() => void>()
     const authenticated = vi.fn<() => void>()
     const session = sessions.open({
-      verify: (token) => token === (transport.token ?? "secret"),
+      verify: transport.verify ?? ((token) => token === (transport.token ?? "secret")),
       terminate,
       authenticated,
       maxCalls: transport.maxCalls ?? 8,
@@ -103,7 +114,12 @@ const serve = (options: Partial<SessionsOptions> = {}) => {
           protocolVersion: number
           token?: string
           clientId?: string
-        }) => Promise<{ epoch: string; protocolVersion: number }>
+          [key: string]: unknown
+        }) => Promise<{
+          epoch: string
+          protocolVersion: number
+          device?: { id: string; name: string }
+        }>
       }
       echo: (input: string) => Promise<string>
       held: () => Promise<string>
@@ -114,7 +130,7 @@ const serve = (options: Partial<SessionsOptions> = {}) => {
     }
     const handshake = (clientId?: string) =>
       client.wire.handshake({
-        protocolVersion,
+        protocolVersion: revision,
         token: "secret",
         ...(clientId !== undefined && { clientId }),
       })
@@ -189,31 +205,58 @@ describe("createSessions", () => {
     const { sessions, open } = serve()
     const { session, client, authenticated, handshake } = open()
     await expect(client.echo("hi")).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 })
-    await expect(client.wire.handshake({ protocolVersion, token: "wrong" })).rejects.toMatchObject({
+    await expect(
+      client.wire.handshake({ protocolVersion: revision, token: "wrong" }),
+    ).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     })
     await expect(client.echo("hi")).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     expect(authenticated).not.toHaveBeenCalled()
-    await expect(handshake()).resolves.toEqual({ epoch: sessions.epoch, protocolVersion })
+    await expect(handshake()).resolves.toEqual({ epoch: sessions.epoch, protocolVersion: revision })
     expect(session.authenticated).toBe(true)
     expect(authenticated).toHaveBeenCalledOnce()
     await expect(client.echo("hi")).resolves.toBe("hi")
   })
 
-  it("refuses a client that speaks another protocol", async () => {
+  it("refuses a client older than it serves, telling it its window", async () => {
     const { open } = serve()
     const { client } = open()
     await expect(
-      client.wire.handshake({ protocolVersion: protocolVersion + 1, token: "secret" }),
-    ).rejects.toMatchObject({ code: "INCOMPATIBLE_PROTOCOL", status: 409 })
+      client.wire.handshake({ protocolVersion: oldestClient - 1, token: "secret" }),
+    ).rejects.toMatchObject({
+      code: "INCOMPATIBLE_PROTOCOL",
+      status: 409,
+      data: { revision, oldestClient },
+    })
     await expect(client.echo("hi")).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  })
+
+  it("serves a client inside its window, and a newer one, which judges for itself", async () => {
+    const { open } = serve()
+    for (const protocolVersion of [oldestClient, revision, revision + 3]) {
+      const { client } = open()
+      // eslint-disable-next-line no-await-in-loop -- One client after another.
+      await expect(client.wire.handshake({ protocolVersion, token: "secret" })).resolves.toEqual(
+        expect.objectContaining({ protocolVersion: revision }),
+      )
+      // eslint-disable-next-line no-await-in-loop -- One client after another.
+      await expect(client.echo("hi")).resolves.toBe("hi")
+    }
+  })
+
+  it("drops what a newer client's handshake says that it doesn't know", async () => {
+    const { open } = serve()
+    const { client } = open()
+    await expect(
+      client.wire.handshake({ protocolVersion: revision, token: "secret", build: "9.9.9" }),
+    ).resolves.toEqual(expect.objectContaining({ protocolVersion: revision }))
   })
 
   it("tells a client with a wrong token nothing about the protocol", async () => {
     const { open } = serve()
     const { client } = open()
     await expect(
-      client.wire.handshake({ protocolVersion: protocolVersion + 1, token: "wrong" }),
+      client.wire.handshake({ protocolVersion: oldestClient - 1, token: "wrong" }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" })
   })
 
@@ -226,7 +269,9 @@ describe("createSessions", () => {
       },
     })
     const { session, client, handshake } = open()
-    await expect(client.wire.handshake({ protocolVersion, token: "wrong" })).rejects.toMatchObject({
+    await expect(
+      client.wire.handshake({ protocolVersion: revision, token: "wrong" }),
+    ).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     })
     expect(admitted).toEqual([])
@@ -278,7 +323,8 @@ describe("createSessions", () => {
   it("refuses a lazy router, which would hide the handshake", () => {
     expect(() =>
       createSessions({
-        protocolVersion,
+        revision,
+        oldestClient,
         // The types refuse one already; a caller that casts is refused here.
         router: lazy(async () => ({ default: {} })) as unknown as AnyRouter,
       }),
@@ -286,7 +332,7 @@ describe("createSessions", () => {
   })
 
   it("refuses an app router that serves the wire's procedures itself", () => {
-    expect(() => createSessions({ protocolVersion, router: { wire: {} } })).toThrow(
+    expect(() => createSessions({ revision, oldestClient, router: { wire: {} } })).toThrow(
       "can't serve the wire's procedures",
     )
   })
@@ -393,7 +439,7 @@ describe("createSessions", () => {
     const closed = vi.fn<(session: Session) => void>()
     const { open } = serve({ closed })
     const { session, client, terminate } = open()
-    const wrong = () => client.wire.handshake({ protocolVersion, token: "wrong" })
+    const wrong = () => client.wire.handshake({ protocolVersion: revision, token: "wrong" })
     await expect(wrong()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     await expect(client.echo("hi")).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     await expect(wrong()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
@@ -404,5 +450,81 @@ describe("createSessions", () => {
     // Closed, it's refused as ever, and not ended again.
     await expect(wrong()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     expect(terminate).toHaveBeenCalledOnce()
+  })
+
+  it("knows each device by the credential it proved, and tells the client which it is", async () => {
+    const { open } = serve()
+    const verify = (token: string | undefined): Verdict =>
+      token === "phone" ? { device: { id: "d1", name: "Phone" } } : token === "secret"
+    const phone = open({ verify })
+    await expect(
+      phone.client.wire.handshake({ protocolVersion: revision, token: "phone" }),
+    ).resolves.toEqual({
+      epoch: expect.any(String),
+      protocolVersion: revision,
+      device: { id: "d1", name: "Phone" },
+    })
+    expect(phone.session.device).toEqual({ id: "d1", name: "Phone" })
+    // The owner's token proves no device, and the answer names none.
+    const owner = open({ verify })
+    await expect(owner.handshake()).resolves.toEqual({
+      epoch: expect.any(String),
+      protocolVersion: revision,
+    })
+    expect(owner.session.device).toBeUndefined()
+    // A session that proves itself again is whoever its latest token proves.
+    await phone.handshake()
+    expect(phone.session.device).toBeUndefined()
+  })
+
+  it("tells a refused client why, when the transport says", async () => {
+    const { open } = serve()
+    const { client, session } = open({ verify: () => ({ refused: "revoked" }) })
+    const refused = client.wire.handshake({ protocolVersion: revision, token: "old" })
+    await expect(refused).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+      data: { reason: "revoked" },
+    })
+    expect(session.authenticated).toBe(false)
+    // One refused with no reason is told none.
+    const plain = open({ verify: () => false })
+    await expect(
+      plain.client.wire.handshake({ protocolVersion: revision, token: "old" }),
+    ).rejects.toSatisfy((error: ORPCError<string, unknown>) => error.data === undefined)
+  })
+
+  it("ends every session of a revoked device at once, and only those", async () => {
+    const closed = vi.fn<(session: Session) => void>()
+    const { sessions, open } = serve({ closed })
+    const verify = (token: string | undefined): Verdict =>
+      token === "secret" || { device: { id: token ?? "", name: "Device" } }
+    const proved = async (token: string) => {
+      const opened = open({ verify })
+      await opened.client.wire.handshake({ protocolVersion: revision, token })
+      return opened
+    }
+    const laptop = await proved("d1")
+    const phone = await proved("d2")
+    const again = await proved("d1")
+    const owner = await proved("secret")
+    const stream = await laptop.client.idle()
+    const read = stream.next()
+    expect(sessions.connected("d1")).toBe(true)
+
+    sessions.revoke("d1")
+    expect(closed.mock.calls.map(([session]) => session)).toEqual([laptop.session, again.session])
+    expect(sessions.connected("d1")).toBe(false)
+    // Their transports end a moment later, once a device that revoked itself is answered.
+    expect(laptop.terminate).not.toHaveBeenCalled()
+    await new Promise((resolve) => setTimeout(resolve, revokeGraceMs + 20))
+    expect(laptop.terminate).toHaveBeenCalledOnce()
+    expect(again.terminate).toHaveBeenCalledOnce()
+    await expect(read).resolves.toEqual({ done: true, value: undefined })
+    await expect(laptop.client.echo("hi")).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    // The other device and the owner go on.
+    expect(phone.terminate).not.toHaveBeenCalled()
+    await expect(phone.client.echo("hi")).resolves.toBe("hi")
+    await expect(owner.client.echo("hi")).resolves.toBe("hi")
+    expect(sessions.connected("d2")).toBe(true)
   })
 })

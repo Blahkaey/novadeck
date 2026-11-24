@@ -112,7 +112,11 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
   const attachment = (attached: AttachedTerminal): AttachedTerminal => {
     const wrapped: AttachedTerminal = {
       id: attached.id,
-      mode: attached.mode,
+      get mode() {
+        return attached.mode
+      },
+      onMode: (listener) => attached.onMode(listener),
+      take: (options) => attached.take(options),
       [Symbol.asyncIterator]: () => wrapped,
       next: () => attached.next(),
       return: async () => {
@@ -134,10 +138,12 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       return runner.status
     },
     watch: () => runner.watch(),
+    supports: (path, input) => runner.supports(path, input),
     projects: {
       list: () => runner.projects.list(),
       create: (input) => note(`create project ${input.id}`, () => runner.projects.create(input)),
       rename: (input) => runner.projects.rename(input),
+      watch: () => runner.projects.watch(),
       arrange: (input) =>
         note(`arrange ${input.order.join(",")}|${input.pinned.join(",")}`, () =>
           runner.projects.arrange(input),
@@ -177,6 +183,8 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       remove: (input) =>
         note(`remove session ${input.sessionId}`, () => runner.sessions.remove(input)),
       save: (input) => note(`save ${input.sessionId}`, () => runner.sessions.save(input)),
+      change: (input) => note(`change ${input.sessionId}`, () => runner.sessions.change(input)),
+      watch: () => runner.sessions.watch(),
     },
     terminals: {
       list: (input) => runner.terminals.list(input),
@@ -198,6 +206,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       rename: (id, title) => note(`rename ${id}`, () => runner.terminals.rename(id, title)),
       resetTitle: (id) => note(`reset title ${id}`, () => runner.terminals.resetTitle(id)),
       active: (id) => note(`active ${id}`, () => runner.terminals.active(id)),
+      showing: (id) => note(`showing ${id}`, () => runner.terminals.showing(id)),
       seen: (ids) => runner.terminals.seen(ids),
       busy: () => runner.terminals.busy(),
       upload: (id, file) => note(`upload ${id}`, () => runner.terminals.upload(id, file)),
@@ -231,6 +240,8 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
         note(`saveDialog ${terminalId} ${request}`, () =>
           runner.agents.saveDialog(terminalId, request),
         ),
+      takeBack: (terminalId, permit) =>
+        note(`takeBack ${terminalId} ${permit}`, () => runner.agents.takeBack(terminalId, permit)),
       set: (agent, connected) =>
         note(`agent ${agent} ${connected}`, () => runner.agents.set(agent, connected)),
     },
@@ -238,6 +249,7 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
     feedback: runner.feedback,
     messages: {
       list: (terminalId) => runner.messages.list(terminalId),
+      rings: (terminalId, since) => runner.messages.rings(terminalId, since),
       watch: (terminalId) => runner.messages.watch(terminalId),
       pause: (paused) => note(`pause messages ${paused}`, () => runner.messages.pause(paused)),
       release: (thread) => note(`release ${thread}`, () => runner.messages.release(thread)),
@@ -326,6 +338,13 @@ export const recordingRunner = (runner: Runner, io: string[]): RunnerApi => {
       get: () => runner.settings.get(),
       set: (settings) =>
         note(`settings ${JSON.stringify(settings)}`, () => runner.settings.set(settings)),
+      watch: () => runner.settings.watch(),
+    },
+    preferences: {
+      get: () => runner.preferences.get(),
+      set: (key, value, writer) =>
+        note(`preference ${key}`, () => runner.preferences.set(key, value, writer)),
+      watch: () => runner.preferences.watch(),
     },
   }
 }

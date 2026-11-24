@@ -467,6 +467,24 @@ currently requires restarting the runner, which ends its shells. The token is
 removed from inherited PTY environment variables, but processes sharing the OS
 account are not isolated from the runner.
 
+The token is the owner's. The owner can give each device a credential of its own
+(`devices.mint`, docs/backend-api.md "Devices"), which grants the same shell access but is
+revoked alone (`devices.revoke`), ending that device's sessions at once, without rotating the
+token. The runner keeps only a SHA-256 hash of each device's 256-bit secret, and compares it
+in constant time after looking the device up by its public id. Only the owner's connections
+(the token's, or the desktop app's port) may add a device; a device may revoke only itself.
+A revoked credential's next handshake is told it was revoked, and only a handshake that
+proves that credential: a wrong secret learns nothing more than a wrong token does. Logs
+name a device by its id, never by its credential. Any connection may list the devices
+(names, ids, when each was last seen); an id is the public half of a credential.
+
+Devices are not a boundary between their holders. Every device has the runner account's
+shells, and from one it can read what that account can, such as the runner's own
+environment, which holds `NOVADECK_TOKEN`, and so become the owner. Revoking a device ends its
+credential and its sessions, not what it already did with them: if a device may have been
+compromised, revoke it, rotate `NOVADECK_TOKEN` (which restarts the runner), and check what
+the account holds.
+
 A runner served over a MessagePort (`servePort`) trusts whoever holds the port and
 skips the token. Hand such a port only to a renderer the host itself loaded, such
 as an Electron window with context isolation, and never forward it to web content.
@@ -491,7 +509,15 @@ the terminal's foreground, then the shell, and once the shell has exited resumes
 program's process group with SIGCONT, so a program the shell's exit left stopped by job
 control can still exit. This is not a process-tree kill guarantee; daemonized or
 hangup-ignoring descendants may survive. Use service-level process isolation and
-cleanup if that guarantee is required.
+cleanup if that guarantee is required. Where an agent ran, a close or a quit also ends what it
+left detached in the terminal: on Linux what its systemd scope holds, on macOS what started
+with the terminal's `NOVADECK_TERMINAL_ID` in its environment, in the app's own coalition
+(docs/backend-api.md, "Closing").
+To find those on macOS the relay reads the starting environment of each of the user's own
+processes, as `ps -E` can, and prints only that variable's value, never the rest. A process of
+the user's can name any terminal there, or none: it can have itself ended with another
+terminal, or escape its own, which it could do anyway, and the runner signals only the user's
+own processes, each right after a listing shows it to be the one found.
 Replay stays in memory. Unless turned off in Preferences (`settings.set`), the runner
 keeps each terminal's transcript, its serialized screen and scrollback capped at 256 KiB,
 in the SQLite metadata file so a restored terminal can show it again. It is saved about
@@ -501,11 +527,10 @@ key-like runs) is masked in a worker thread; a transcript that cannot be masked 
 saved, and the copy saved before stays. The masked text is then encrypted (AES-256-GCM,
 bound to its terminal) with a key the desktop app keeps in the system keychain: the
 Keychain on macOS, DPAPI on Windows, the Secret Service on Linux (GNOME Keyring, or KWallet
-where it offers the Secret Service). A standalone runner has no app to keep its key: it keeps
-none, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for it, which it makes on its first
-start (32 random bytes, owner-only) and reads on every later one. It refuses to start on a
-file there that it can't read, that isn't a 32-byte key, or that other accounts can read or
-change, and never overwrites one: losing or replacing that file leaves every transcript saved
+where it offers the Secret Service). A standalone runner keeps its key in `transcript.key` beside its database by default.
+`NOVADECK_TRANSCRIPT_KEY_FILE` selects an explicit file for it. It reads both existing
+32-byte binary keys and base64 keys. An explicitly named file must be private and valid, or
+the runner refuses to start. It never replaces an invalid key: losing or replacing that file leaves every transcript saved
 under it unreadable. That file sits on the same disk as the database, so it keeps transcripts
 only from a copy of the database that leaves without it, such as a backup of the database
 alone; anyone who can read both reads the transcripts. Where nothing protects the key (no

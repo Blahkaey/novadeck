@@ -1,8 +1,14 @@
-import type { AgentBox, AgentDetail, PromptReceipt, RequestDialog } from "@novadeck/protocol"
+import type {
+  AgentBox,
+  AgentDetail,
+  PromptReceipt,
+  RequestDialog,
+  StandingPermit,
+} from "@novadeck/protocol"
 
 import type { Activity } from "../harnesses/activity.js"
 import type { Binding } from "../harnesses/bindings.js"
-import { agentDetail } from "../harnesses/detail.js"
+import { agentDetail, type HeldCard } from "../harnesses/detail.js"
 import { savedSession } from "./binding/standing.js"
 import type { Record } from "./record.js"
 
@@ -56,8 +62,12 @@ export const conversationDetail = (
   answered: ReadonlySet<string>,
   prompts: readonly PromptReceipt[],
   box: AgentBox | null,
-): AgentDetail =>
-  agentDetail(
+  held: { readonly cards: readonly HeldCard[]; readonly permits: readonly StandingPermit[] } = {
+    cards: [],
+    permits: [],
+  },
+): AgentDetail => ({
+  ...agentDetail(
     record.summary.id,
     conversationOf(record)?.binding ?? null,
     record.bound?.activity ?? null,
@@ -66,4 +76,8 @@ export const conversationDetail = (
     answered,
     prompts,
     box,
-  )
+    held.cards,
+  ),
+  // The gate's standing permits, only where some stand: a detail is as it was without them.
+  ...(held.permits.length > 0 && { permits: [...held.permits] }),
+})

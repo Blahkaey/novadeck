@@ -7,8 +7,9 @@ import { DatabaseSync } from "node:sqlite"
 
 import { createScreen } from "@novadeck/emulator/headless"
 import {
+  compatibility,
+  maxPreferences,
   filesExcludeLimits,
-  protocolVersion,
   type contract,
   type ItemContent,
   type TerminalEvent,
@@ -61,7 +62,8 @@ const fixture = async (resources: Resources, options: ServerOptions = {}) => {
     resources.defer(disconnect)
     await once(socket, "open", { signal: AbortSignal.timeout(5_000) })
     const client = createWireClient<typeof contract>(socketChannel(socket))
-    if (authenticate) await client.wire.handshake({ protocolVersion, token })
+    if (authenticate)
+      await client.wire.handshake({ protocolVersion: compatibility.revision, token })
     return { client, socket, disconnect }
   }
 
@@ -251,13 +253,17 @@ describe("WebSocket authentication and protocol", () => {
     future.close()
     const app = await fixture(resources, { database: path })
     const { client } = await app.connect(false)
-    await expect(client.wire.handshake({ protocolVersion, token: "wrong" })).rejects.toMatchObject({
+    await expect(
+      client.wire.handshake({ protocolVersion: compatibility.revision, token: "wrong" }),
+    ).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     })
-    await expect(client.wire.handshake({ protocolVersion: 99, token })).rejects.toMatchObject({
-      code: "INCOMPATIBLE_PROTOCOL",
-    })
-    await expect(client.wire.handshake({ protocolVersion, token })).rejects.toMatchObject({
+    await expect(
+      client.wire.handshake({ protocolVersion: compatibility.oldestClient - 1, token }),
+    ).rejects.toMatchObject({ code: "INCOMPATIBLE_PROTOCOL" })
+    await expect(
+      client.wire.handshake({ protocolVersion: compatibility.revision, token }),
+    ).rejects.toMatchObject({
       code: "WORKSPACE_TOO_NEW",
     })
     await expect(client.projects.list()).rejects.toBeDefined()
@@ -325,6 +331,79 @@ describe("WebSocket authentication and protocol", () => {
   })
 })
 
+describe("devices with credentials of their own", () => {
+  it("lets two devices in beside the owner, and revoking one ends it alone, telling it why", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const owner = await app.connect()
+    const laptop = await owner.client.devices.mint({ name: "Laptop" })
+    const phone = await owner.client.devices.mint({ name: "Phone" })
+    const asDevice = async (credential: string) => {
+      const connected = await app.connect(false)
+      const proved = await connected.client.wire.handshake({
+        protocolVersion: compatibility.revision,
+        token: credential,
+      })
+      return { ...connected, proved }
+    }
+    const first = await asDevice(laptop.credential)
+    const second = await asDevice(phone.credential)
+    // Each is told which device it is; the owner's answer names none.
+    expect(first.proved).toMatchObject({ device: { id: laptop.device.id, name: "Laptop" } })
+    expect(second.proved).toMatchObject({ device: { id: phone.device.id, name: "Phone" } })
+    await expect(
+      (await app.connect(false)).client.wire.handshake({
+        protocolVersion: compatibility.revision,
+        token,
+      }),
+    ).resolves.not.toHaveProperty("device")
+    await expect(owner.client.devices.list()).resolves.toEqual([
+      expect.objectContaining({ id: laptop.device.id, connected: true }),
+      expect.objectContaining({ id: phone.device.id, connected: true }),
+    ])
+    // A device may not add one, and its connection goes on.
+    await expect(first.client.devices.mint({ name: "Tablet" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+    await expect(first.client.projects.list()).resolves.toEqual([])
+
+    const closed = once(first.socket, "close")
+    await owner.client.devices.revoke({ id: laptop.device.id })
+    await closed
+    // Its next handshake says it was revoked, which a client tells apart from a wrong token.
+    const again = await app.connect(false)
+    await expect(
+      again.client.wire.handshake({
+        protocolVersion: compatibility.revision,
+        token: laptop.credential,
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED", data: { reason: "revoked" } })
+    await expect(
+      (await app.connect(false)).client.wire.handshake({
+        protocolVersion: compatibility.revision,
+        token: `${laptop.credential.slice(0, -1)}${laptop.credential.endsWith("A") ? "B" : "A"}`,
+      }),
+    ).rejects.toSatisfy(
+      (error: { code?: string; data?: unknown }) =>
+        error.code === "UNAUTHORIZED" && error.data === undefined,
+    )
+    // The other device goes on.
+    await expect(second.client.projects.list()).resolves.toEqual([])
+    // A device may sign itself out: it is answered, then its connection ends.
+    const own = once(second.socket, "close")
+    await expect(second.client.devices.revoke({ id: phone.device.id })).resolves.toBeUndefined()
+    await own
+    // The owner goes on, and can let a device in again with a new credential.
+    const tablet = await owner.client.devices.mint({ name: "Tablet" })
+    const third = await asDevice(tablet.credential)
+    await expect(third.client.projects.list()).resolves.toEqual([])
+    await expect(owner.client.devices.list()).resolves.toEqual([
+      expect.objectContaining({ id: tablet.device.id, connected: true }),
+    ])
+  })
+})
+
 describe("workspace metadata API", () => {
   it("project and session creation, listing, renaming and restart persistence", async ({
     resources,
@@ -345,9 +424,185 @@ describe("workspace metadata API", () => {
       { ...project, name: "Renamed project" },
     ])
     await expect(connection.client.sessions.list({ projectId: project.id })).resolves.toEqual([
-      { ...session, name: "Renamed session", state: '{"panes":[]}' },
+      // The rename and the save each raised its revision.
+      { ...session, name: "Renamed session", state: '{"panes":[]}', revision: 2 },
     ])
     await expect(connection.client.terminals.list({ sessionId: session.id })).resolves.toEqual([])
+  })
+
+  it("serves a newer UI, dropping a field this runner doesn't know", async ({ resources }) => {
+    const app = await fixture(resources)
+    const { client } = await app.connect()
+    const { project } = await app.setup(client)
+    // As a UI of a later revision sends it, with a field this one never had.
+    const rename = { projectId: project.id, name: "From a newer UI", colour: "teal" }
+    await expect(client.projects.rename(rename as never)).resolves.toBeDefined()
+    await expect(client.projects.list()).resolves.toEqual([{ ...project, name: "From a newer UI" }])
+    // What it knows is still checked as strictly as ever.
+    await expect(
+      client.projects.rename({ projectId: project.id, name: "", colour: "teal" } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("shares a session's state between two clients, each seeing the other's change", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const a = await app.connect()
+    const b = await app.connect()
+    const { session } = await app.setup(a.client)
+    const changes = await b.client.sessions.watch()
+    const first = await changes.next()
+    expect(first.value).toMatchObject({ type: "revisions" })
+    const { revision } = await a.client.sessions.change({
+      sessionId: session.id,
+      writer: "a",
+      base: 0,
+      patch: { unset: [], set: [{ path: ["state", "order"], value: ["t1"] }] },
+    })
+    expect(revision).toBe(1)
+    expect((await changes.next()).value).toMatchObject({
+      type: "changed",
+      session: { id: session.id, revision: 1, state: '{"state":{"order":["t1"]}}' },
+      writer: "a",
+      base: 0,
+    })
+    // B's own change, made on what A wrote, keeps A's.
+    await b.client.sessions.change({
+      sessionId: session.id,
+      writer: "b",
+      base: 1,
+      patch: { unset: [], set: [{ path: ["state", "bars", "t1"], value: { open: true } }] },
+    })
+    await expect(a.client.sessions.list({ projectId: session.projectId })).resolves.toEqual([
+      expect.objectContaining({
+        revision: 2,
+        state: '{"state":{"order":["t1"],"bars":{"t1":{"open":true}}}}',
+      }),
+    ])
+    await changes.return?.(undefined)
+  })
+
+  it("tells every client of the projects and sessions another makes, arranges and removes", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const a = await app.connect()
+    const b = await app.connect()
+    const { project, session } = await app.setup(a.client)
+    const projects = await b.client.projects.watch()
+    const listed = async () => {
+      const { value } = await projects.next()
+      return (value as { projects: { id: string; pinned: boolean }[] }).projects.map(
+        ({ id, pinned }) => [id, pinned],
+      )
+    }
+    expect(await listed()).toEqual([[project.id, false]])
+    const sessions = await b.client.sessions.watch()
+    expect((await sessions.next()).value).toMatchObject({ type: "revisions" })
+    // The next change of each kind, past those it isn't; every kind it told, as a client of
+    // revision 4 reads them.
+    const told = new Set<string>()
+    const next = async (type: string) => {
+      for (;;) {
+        // eslint-disable-next-line no-await-in-loop -- Changes are read in order.
+        const { value } = await sessions.next()
+        told.add((value as { type: string }).type)
+        if ((value as { type: string }).type === type) return value
+      }
+    }
+
+    const other = await a.client.projects.create({
+      id: randomUUID(),
+      name: "Other",
+      cwd: app.directory,
+    })
+    expect(await listed()).toEqual([
+      [project.id, false],
+      [other.id, false],
+    ])
+    await a.client.projects.arrange({ order: [other.id, project.id], pinned: [other.id] })
+    expect(await listed()).toEqual([
+      [other.id, true],
+      [project.id, false],
+    ])
+
+    const second = await a.client.sessions.create({
+      id: randomUUID(),
+      projectId: project.id,
+      name: "Second",
+    })
+    expect(await next("changed")).toMatchObject({ session: { id: second.id } })
+    await a.client.sessions.arrange({ projectId: project.id, order: [session.id, second.id] })
+    expect((await projects.next()).value).toEqual({
+      type: "arranged",
+      projectId: project.id,
+      order: [session.id, second.id],
+    })
+
+    // A project removed takes its sessions with it, and each client hears of each.
+    await a.client.projects.remove({ projectId: project.id })
+    const gone = [await next("removed"), await next("removed")]
+    expect(gone.map((each) => (each as { sessionId: string }).sessionId).toSorted()).toEqual(
+      [session.id, second.id].toSorted(),
+    )
+    expect(await listed()).toEqual([[other.id, true]])
+    // The sessions' feed told only what revision 4 knows, the order on the projects' feed.
+    expect([...told].toSorted()).toEqual(["changed", "removed"])
+    await projects.return?.(undefined)
+    await sessions.return?.(undefined)
+  })
+
+  it("keeps the person's preferences, key by key, and tells every client of each change", async ({
+    resources,
+  }) => {
+    const app = await fixture(resources)
+    const a = await app.connect()
+    const b = await app.connect()
+    const changes = await b.client.preferences.watch()
+    expect((await changes.next()).value).toEqual({ values: {}, revision: 0, writer: null })
+    await expect(
+      a.client.preferences.set({ key: "appearance", value: '{"theme":"dusk"}', writer: "a" }),
+    ).resolves.toEqual({ revision: 1 })
+    expect((await changes.next()).value).toEqual({
+      values: { appearance: '{"theme":"dusk"}' },
+      revision: 1,
+      writer: "a",
+    })
+    // Each key on its own: B's change of another keeps A's.
+    await b.client.preferences.set({ key: "chat-view", value: "true", writer: "b" })
+    await a.client.preferences.set({ key: "appearance", value: null, writer: "a" })
+    await expect(a.client.preferences.get()).resolves.toEqual({
+      values: { "chat-view": "true" },
+      revision: 3,
+      writer: null,
+    })
+    // What a key or a value may be, and how many keys.
+    await expect(
+      a.client.preferences.set({ key: "Bad key", value: "1", writer: "a" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    for (let index = 1; index < maxPreferences; index += 1)
+      // eslint-disable-next-line no-await-in-loop -- One key after another, to the limit.
+      await a.client.preferences.set({ key: `key-${index}`, value: "1", writer: "a" })
+    await expect(
+      a.client.preferences.set({ key: "one-more", value: "1", writer: "a" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    // A key kept already still changes at the limit.
+    await expect(
+      a.client.preferences.set({ key: "chat-view", value: "false", writer: "a" }),
+    ).resolves.toMatchObject({ revision: expect.any(Number) })
+    await changes.return?.(undefined)
+  })
+
+  it("tells every client of a change to the runner's settings", async ({ resources }) => {
+    const app = await fixture(resources)
+    const a = await app.connect()
+    const b = await app.connect()
+    const settings = await b.client.settings.watch()
+    expect((await settings.next()).value).toMatchObject({ agentMode: "herd", agentModes: false })
+    await a.client.settings.set({ agentModes: true, agentMode: "solo" })
+    expect((await settings.next()).value).toMatchObject({ agentMode: "solo", agentModes: true })
+    await settings.return?.(undefined)
   })
 
   it("lists a project's folders, and refuses what is not one of them", async ({ resources }) => {
@@ -979,7 +1234,7 @@ describe("terminal attachment and recovery API", () => {
     resources.defer(() => socket.terminate())
     await once(socket, "open", { signal: AbortSignal.timeout(5_000) })
     const client = createWireClient<typeof contract>(socketChannel(socket))
-    await client.wire.handshake({ protocolVersion, token })
+    await client.wire.handshake({ protocolVersion: compatibility.revision, token })
     // Flush the request onto TCP, then drop the connection without a close frame.
     // The server may either reject the request or finish creation after release.
     const originalSend = socket.send.bind(socket)
@@ -1380,5 +1635,196 @@ describe("voice input API", () => {
     await expect(
       client.voice.record({ clipId: randomUUID(), offset: 0, data: "" }),
     ).rejects.toMatchObject({ code: "VOICE_UNAVAILABLE", data: { reason: "unavailable" } })
+  })
+})
+
+describe("control of a terminal between clients", () => {
+  type Control = { type: "control"; terminalId: string; holder: "you" | "other" | "none" }
+  const control = (terminalId: string, holder: Control["holder"]): Control => ({
+    type: "control",
+    terminalId,
+    holder,
+  })
+
+  /** A client's `terminals.controls` stream, read an item at a time. */
+  const following = async (resources: Resources, client: WireClient) => {
+    const controller = new AbortController()
+    resources.defer(async () => controller.abort())
+    const stream = await client.terminals.controls(undefined, { signal: controller.signal })
+    const next = async (): Promise<Control> => {
+      const result = await Promise.race([
+        stream.next(),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(() => reject(new Error("No control item in 10 s")), 10_000).unref(),
+        ),
+      ])
+      if (result.done) throw new Error("The controls ended")
+      return result.value as Control
+    }
+    return { next }
+  }
+
+  /** A terminal whose creator has gone, so that attaching as control takes it at once. */
+  const open = async (resources: Resources) => {
+    const app = await fixture(resources)
+    const creator = await app.connect()
+    const { project, session } = await app.setup(creator.client)
+    const terminal = await creator.client.terminals.create(shell(session.id))
+    await creator.disconnect()
+    return { app, project, terminal }
+  }
+
+  it("moves to a client that takes it, the earlier one observing with its writes refused", async ({
+    resources,
+  }) => {
+    const { app, terminal } = await open(resources)
+    const first = await app.connect()
+    const second = await app.connect()
+    const viewing = await reader(resources, first.client, terminal.id)
+    await viewing.untilText("PTY_READY")
+    const watching = await reader(resources, second.client, terminal.id, { mode: "observe" })
+    await watching.next()
+    const firstFeed = await following(resources, first.client)
+    const secondFeed = await following(resources, second.client)
+    expect(await firstFeed.next()).toEqual(control(terminal.id, "you"))
+    expect(await secondFeed.next()).toEqual(control(terminal.id, "other"))
+
+    await second.client.terminals.take({ terminalId: terminal.id })
+    expect(await firstFeed.next()).toEqual(control(terminal.id, "other"))
+    expect(await secondFeed.next()).toEqual(control(terminal.id, "you"))
+    await expect(
+      first.client.terminals.write({ terminalId: terminal.id, data: "denied" }),
+    ).rejects.toMatchObject({ code: "CONTROL_REQUIRED" })
+    await print(second.client, terminal.id, "TAKEN_", "OVER")
+    // The earlier controller still reads.
+    await viewing.untilText("TAKEN_OVER")
+  })
+
+  it("is refused for a controller that wrote lately, until it has been idle", async ({
+    resources,
+  }) => {
+    const { app, terminal } = await open(resources)
+    const first = await app.connect()
+    const second = await app.connect()
+    const viewing = await reader(resources, first.client, terminal.id)
+    await viewing.untilText("PTY_READY")
+    await reader(resources, second.client, terminal.id, { mode: "observe" }).then((each) =>
+      each.next(),
+    )
+    await (await following(resources, first.client)).next()
+    await (await following(resources, second.client)).next()
+    await print(first.client, terminal.id, "BUSY_", "TYPING")
+    await expect(
+      second.client.terminals.take({ terminalId: terminal.id, ifIdleMs: 60_000 }),
+    ).rejects.toMatchObject({ code: "CONTROL_BUSY" })
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    await second.client.terminals.take({ terminalId: terminal.id, ifIdleMs: 30 })
+    await print(second.client, terminal.id, "IDLE_", "TAKEN")
+  })
+
+  it("is refused for a controller that doesn't follow controls, and for a client not attached", async ({
+    resources,
+  }) => {
+    const { app, terminal } = await open(resources)
+    const old = await app.connect()
+    const newer = await app.connect()
+    const stranger = await app.connect()
+    const viewing = await reader(resources, old.client, terminal.id)
+    await viewing.untilText("PTY_READY")
+    await reader(resources, newer.client, terminal.id, { mode: "observe" }).then((each) =>
+      each.next(),
+    )
+    await (await following(resources, newer.client)).next()
+    await expect(newer.client.terminals.take({ terminalId: terminal.id })).rejects.toMatchObject({
+      code: "CONTROL_IN_USE",
+    })
+    await expect(stranger.client.terminals.take({ terminalId: terminal.id })).rejects.toMatchObject(
+      { code: "CONFLICT" },
+    )
+    await expect(newer.client.terminals.take({ terminalId: randomUUID() })).rejects.toMatchObject({
+      code: "TERMINAL_NOT_FOUND",
+    })
+    await print(old.client, terminal.id, "STILL_", "OLD")
+  })
+
+  it("tells a client who controls, as each attachment starts and as control moves", async ({
+    resources,
+  }) => {
+    const { app, terminal } = await open(resources)
+    const client = await app.connect()
+    const other = await app.connect()
+    const feed = await following(resources, client.client)
+    // Following before attaching: each attachment is told as it starts.
+    const watching = await reader(resources, client.client, terminal.id, { mode: "observe" })
+    await watching.next()
+    expect(await feed.next()).toEqual(control(terminal.id, "none"))
+    await other.client.terminals.attach({ terminalId: terminal.id }).then((stream) => stream.next())
+    expect(await feed.next()).toEqual(control(terminal.id, "other"))
+    // `other` follows too, so it could learn it lost control.
+    await (await following(resources, other.client)).next()
+    await client.client.terminals.take({ terminalId: terminal.id })
+    expect(await feed.next()).toEqual(control(terminal.id, "you"))
+  })
+
+  describe("let go of", () => {
+    /** `first` controls; `older` and `used` observe and follow, `used` being the one in use. */
+    const trio = async (resources: Resources) => {
+      const { app, project, terminal } = await open(resources)
+      const first = await app.connect()
+      const older = await app.connect()
+      const used = await app.connect()
+      const viewing = await reader(resources, first.client, terminal.id)
+      await viewing.untilText("PTY_READY")
+      const olderReader = await reader(resources, older.client, terminal.id, { mode: "observe" })
+      await olderReader.next()
+      await reader(resources, used.client, terminal.id, { mode: "observe" }).then((each) =>
+        each.next(),
+      )
+      const feeds = {
+        first: await following(resources, first.client),
+        older: await following(resources, older.client),
+        used: await following(resources, used.client),
+      }
+      await Promise.all(Object.values(feeds).map((feed) => feed.next()))
+      // The person uses `used`, which reported later than `older` by use, not by attaching.
+      await used.client.terminals.showing({ projectId: project.id })
+      await older.client.terminals.showing({ projectId: project.id })
+      await used.client.terminals.showing({ projectId: project.id })
+      await older.client.terminals.showing({ projectId: project.id })
+      await used.client.terminals.active({ terminalId: terminal.id })
+      return { terminal, first, older, used, viewing, feeds }
+    }
+
+    it("on detaching, goes to the most recently used following observer, which can type at once", async ({
+      resources,
+    }) => {
+      const { terminal, older, used, viewing, feeds } = await trio(resources)
+      await viewing.stream.return()
+      expect(await feeds.used.next()).toEqual(control(terminal.id, "you"))
+      expect(await feeds.older.next()).toEqual(control(terminal.id, "other"))
+      await print(used.client, terminal.id, "HANDED_", "DETACH")
+      await expect(
+        older.client.terminals.write({ terminalId: terminal.id, data: "denied" }),
+      ).rejects.toMatchObject({ code: "CONTROL_REQUIRED" })
+    })
+
+    it("is not changed by a client saying it uses no terminal, as a window losing focus does", async ({
+      resources,
+    }) => {
+      const { terminal, older, used, viewing, feeds } = await trio(resources)
+      await older.client.terminals.active({ terminalId: null })
+      await viewing.stream.return()
+      expect(await feeds.used.next()).toEqual(control(terminal.id, "you"))
+      expect(await feeds.older.next()).toEqual(control(terminal.id, "other"))
+      await print(used.client, terminal.id, "HANDED_", "BLUR")
+    })
+
+    it("on disconnecting, goes the same way", async ({ resources }) => {
+      const { terminal, first, used, feeds } = await trio(resources)
+      await first.disconnect()
+      expect(await feeds.used.next()).toEqual(control(terminal.id, "you"))
+      expect(await feeds.older.next()).toEqual(control(terminal.id, "other"))
+      await print(used.client, terminal.id, "HANDED_", "CLOSE")
+    })
   })
 })

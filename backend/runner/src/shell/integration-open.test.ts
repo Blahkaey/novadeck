@@ -249,7 +249,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
           // Too large once escaped where delivered: refused before anything starts.
           openAgent({ agent: "codex", message: "&".repeat(4_000) }),
         ])) as { ok: boolean; text?: string }[]
-        const line = /^\[Novadeck: automatic notice, agent messages waiting, [A-Za-z0-9]{6}\]$/
+        const line = /^<novadeck-doorbell from='' ring='[A-Za-z0-9]{6}'\/>$/
         expect(requests.map(({ command }) => command)).toEqual([
           expect.stringMatching(quoted("claude")),
           expect.stringMatching(quoted("codex")),
@@ -280,7 +280,11 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
           },
         ])
         // Each started with the line as one argument, which its harness submits.
-        const shown = await shell.until(manager, created[0]!, /claude args: \[Novadeck: [^\n]*\]/)
+        const shown = await shell.until(
+          manager,
+          created[0]!,
+          /claude args: <novadeck-doorbell [^\n]*\/>/,
+        )
         expect(shown.split("claude args: ")[1]?.split(" prompt=")[0]).toMatch(line)
         // The opener's peers say who opened it, with a task, before its agent starts.
         const [listed] = (await show(shell, manager, terminal.id, [
@@ -303,6 +307,106 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
           text: "Review a.ts, please.",
           state: "queued",
         })
+      } finally {
+        controller.abort()
+        await client
+      }
+    })
+  },
+)
+
+describe.skipIf(process.platform === "win32" || !existsSync(bash))(
+  "agents opening an agent with a task through a slow window",
+  () => {
+    it("keeps the task of a terminal made in time, though confirmed late, and says when none was", async ({
+      shell,
+    }) => {
+      const bin = showStandIn(shell.home)
+      fakeAgent(shell.home, "claude")
+      const manager = shell.manager({
+        env: {
+          HOME: shell.home,
+          PS1: "$ ",
+          PATH: `${bin}:${join(shell.home, "bin")}:${process.env.PATH}`,
+        },
+        install: (agent) =>
+          Promise.resolve({
+            env: {},
+            home: shell.home,
+            platform: process.platform,
+            plugin: join(shell.plugins, agent),
+          }),
+        openMs: 300,
+      })
+      const openAgent = (request: object) => ({ ...open(request), type: "open_agent" as "open" })
+      const terminal = await create(manager, shell)
+      const controller = new AbortController()
+      const created: string[] = []
+      const late: unknown[] = []
+      const queued: number[] = []
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+      // As a Windows window whose shell starts slowly: the first terminal it makes at once and
+      // confirms past the deadline; the second it makes only past the deadline.
+      const client = (async () => {
+        let index = 0
+        for await (const request of manager.requests("client", controller.signal)) {
+          const makesLate = index++ > 0
+          const id = randomUUID()
+          // eslint-disable-next-line no-await-in-loop -- Requests are opened in turn.
+          if (makesLate) await wait(600)
+          created.push(id)
+          // eslint-disable-next-line no-await-in-loop -- Requests are opened in turn.
+          await manager.create(
+            {
+              id,
+              sessionId: request.sessionId,
+              cwd: request.cwd,
+              cols: 100,
+              rows: 20,
+              ...(request.command && { command: request.command }),
+              requestId: request.requestId,
+            },
+            "client",
+          )
+          // Whether its task waits there before the window confirms it, as the agent's start
+          // prompt may ask for it by then.
+          queued.push(manager.messages(id).threads.length)
+          // eslint-disable-next-line no-await-in-loop -- Requests are opened in turn.
+          if (!makesLate) await wait(600)
+          // Its confirmation, after the runner stopped waiting for it, is no error.
+          try {
+            manager.answerRequest({ requestId: request.requestId, terminalId: id }, "client")
+          } catch (error) {
+            late.push(error)
+          }
+        }
+      })()
+      try {
+        const task = { agent: "claude", message: "Review a.ts, please." }
+        const [confirmedLate, madeLate] = (await show(shell, manager, terminal.id, [
+          openAgent(task),
+          openAgent(task),
+        ])) as { ok: boolean; text?: string; reason?: string }[]
+        // Made in time: opened, its task waiting for its agent, from the moment it was made.
+        expect(confirmedLate).toEqual({
+          ok: true,
+          text: expect.stringMatching(/ message m-\S+,? waits/),
+        })
+        expect(manager.messages(created[0]!).threads[0]?.messages[0]).toMatchObject({
+          to: { kind: "agent", handle: "fox", agent: "claude" },
+          text: "Review a.ts, please.",
+          state: "queued",
+        })
+        // Made too late: the agent hears its task wasn't sent, and none waits there.
+        expect(madeLate).toEqual({
+          ok: false,
+          reason: expect.stringContaining("Its task wasn't sent"),
+        })
+        await wait(700)
+        expect(created).toHaveLength(2)
+        expect(manager.messages(created[1]!).threads).toEqual([])
+        expect(late).toEqual([])
+        expect(queued).toEqual([1, 0])
       } finally {
         controller.abort()
         await client
@@ -338,6 +442,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
           { id: "flash-high", efforts: ["high"] },
           { id: "sonnet", efforts: [] },
         ],
+        opencode: [{ id: "opencode/big-pickle", efforts: [] }],
       } as const
       const manager = shell.manager({
         env: {
@@ -390,7 +495,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
           openAgent({ agent: "claude", effort: "low", ...task }),
           openAgent({ agent: "agy", model: "sonnet", effort: "low", ...task }),
         ])) as { ok: boolean; reason?: string }[]
-        const line = '"\\[Novadeck: automatic notice, agent messages waiting, [A-Za-z0-9]{6}\\]"'
+        const line = `"<novadeck-doorbell from='' ring='[A-Za-z0-9]{6}'/>"`
         expect(requests.map(({ command }) => command)).toEqual([
           expect.stringMatching(new RegExp(`^claude --model opus --effort max ${line}$`)),
           expect.stringMatching(
@@ -437,6 +542,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
         claude: [{ id: "opus", efforts: ["low", "max"] }],
         codex: [{ id: "gpt-a", efforts: ["low", "high"] }],
         agy: [{ id: "flash-high", efforts: ["high"] }],
+        opencode: [{ id: "anthropic/claude-sonnet-4-5", efforts: ["high", "max"] }],
       } as const
       const manager = shell.manager({
         env: {
@@ -644,6 +750,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(bash))(
               claude: [{ id: "opus", efforts: [] }],
               codex: [{ id: "gpt-a", efforts: [] }],
               agy: [],
+              opencode: [],
             }[name],
           ),
       })

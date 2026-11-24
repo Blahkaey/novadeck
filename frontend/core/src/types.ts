@@ -72,7 +72,7 @@ export type PreferencesValue = {
   // The theme and the scheme chosen for it; the theme is a plain id the app may not know.
   // See docs/theming.md.
   appearance: { readonly theme: string; readonly scheme: SchemePreference }
-  // Whether the desktop app notifies the person when an agent needs them (an Inbox row that
+  // Whether the desktop app notifies the person when an agent needs them (an Inbox entry that
   // waits on them) while Novadeck is in the background.
   notifyNeeds: boolean
   // Whether it notifies them when an agent finishes while Novadeck is in the background.
@@ -147,10 +147,13 @@ export type AgentStatus = {
   // Its `done` report still stands: nothing the person prompted or a message delivered to it
   // came after. Looking at the terminal does not end it, so its done mark stays until then.
   readonly reported?: true
+  // How many of the shipping gate's permits stand for it, where any does: the Inbox follows its
+  // detail, which lists them, only then.
+  readonly permits?: number
   // What holds it for the person before Novadeck can reach it: one of its own screens, as a
   // folder-trust screen (`startup`); its sign-in screen, or its prompt saying it isn't signed
   // in (`sign-in`); Novadeck's hooks not on for it, untrusted or off in the person's settings
-  // (`hooks`). No request stands behind it, so no Inbox row does either.
+  // (`hooks`). No request stands behind it, so no Inbox entry does either.
   readonly startup?: "startup" | "sign-in" | "hooks"
   // A command the person runs in the agent's shell mode (`!sleep 15`) that still runs: what
   // they typed and when they ran it. It busies the terminal but is no turn: `working` and
@@ -234,9 +237,10 @@ export type TerminalStatus =
   // A saved agent session with no process: the runner starts it again when someone needs it.
   // `reported`: its agent's `done` still stands. `endedAt`: when its agent's last turn ended,
   // where the runner kept it, so its tab can say how long ago.
+  // `newer`: an agent of a harness a newer Novadeck integrates, which this one never wakes.
   | {
       readonly state: "sleeping"
-      readonly agent: AgentName
+      readonly agent: AgentName | "newer"
       readonly reported?: true
       readonly endedAt?: number
     }

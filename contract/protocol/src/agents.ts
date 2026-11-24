@@ -1,18 +1,23 @@
 import { z } from "zod"
 
-import { requestDialog } from "./dialogs.js"
+import { requestDialogRead } from "./dialogs.js"
 import { directory, id } from "./fields.js"
 import { agentNames } from "./harnesses.js"
+import { openEnum } from "./open.js"
 import { singleLine } from "./text.js"
 
 // Agents whose sessions Novadeck identifies and can resume once connected: Claude Code,
 // Codex and Antigravity. An agent session id is what the agent itself names its
 // session: a UUID today, kept to a plain token so a shell can run it as it is.
 export const agentName = z.enum(agentNames)
+// An agent as a runner tells of it, which a UI reads tolerantly: one of a harness a newer
+// runner integrates and this UI doesn't is `newer`, a plain agent with no harness of its
+// own here. Inputs, and whatever the runner parses, keep `agentName`.
+export const agentNameRead = openEnum(agentNames, { since: 3, unknown: "placeholder" })
 export const agentSessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 
 // How long the start of an agent's last reply runs at most, in UTF-16 code units: enough
-// for one line of a desktop notice or an Inbox row, and never the whole reply.
+// for one line of a desktop notice or an Inbox entry, and never the whole reply.
 export const replyPreviewLength = 120
 
 // How long a failed turn's error runs at most, and how many files a turn names, each a path
@@ -39,6 +44,8 @@ export const agentLimits = {
   subject: 1024,
   command: 4096,
   path: 4096,
+  permits: 16,
+  quote: 300,
 } as const
 
 // Fields of an agent's last turn, shared by its summary and by a stored turn entry.
@@ -60,7 +67,7 @@ export const limitScope = z.string().min(1).max(telemetryLimits.scope)
 // wake the agent (`background`); idle otherwise; or unknown when they have not said. `attention`
 // counts the requests waiting on the person, and names the kind of the oldest one.
 export const agentActivity = z.strictObject({
-  state: z.enum(["working", "idle", "unknown"]),
+  state: openEnum(["working", "idle", "unknown"], { since: 3, unknown: { fallback: "unknown" } }),
   // What its ended turn left running that wakes it once done: subagents, which keep it
   // working, and other tasks such as commands, which don't, as one may run for ever,
   // counted; both zero where its harness says only that something runs. While its turn
@@ -123,8 +130,9 @@ export const agentActivity = z.strictObject({
   attention: z.strictObject({
     pending: z.number().int().nonnegative(),
     kind: z.enum(["permission", "question", "plan"]).nullable(),
-    // How many of them ask without waiting, as Codex's async questions: the agent works on,
-    // and takes prompts and messages; absent where none does.
+    // How many of them ask without waiting, as Codex's async questions and the shipping gate's
+    // open cards: the agent works on, or has ended its turn, and takes prompts and messages;
+    // absent where none does.
     detached: z.number().int().positive().optional(),
   }),
   // Whether it plans rather than acts, as its hooks last said.
@@ -156,7 +164,10 @@ export const agentActivity = z.strictObject({
   // reply. Null while a turn runs and before the first ends.
   lastTurn: z
     .strictObject({
-      outcome: z.enum(["completed", "failed", "interrupted", "unknown"]),
+      outcome: openEnum(["completed", "failed", "interrupted", "unknown"], {
+        since: 3,
+        unknown: { fallback: "unknown" },
+      }),
       reply: turnReply.nullable(),
       at: z.number(),
       // A failed turn's error as its harness said it; null otherwise or where it gave none.
@@ -280,9 +291,23 @@ export type AgentBox = z.infer<typeof agentBox>
 // `agents.prompt` in this session, oldest first. Without an agent bound, only `terminalId`,
 // and the receipts of prompts given an agent at its own prompt before its session binds.
 // Its plans are companion items (`companionItem`).
+// A permit of the shipping gate (Experimental) that stands for the terminal's agent: what the
+// person allowed, by their own words typed there (`quote`, as they wrote them) or by Allow on
+// the gate's card (`quote` null), drawn from what Novadeck resolved, never from an agent's
+// text. It stands until `until`, and once used (`usedAt`) only for a retry; the person takes
+// it back with `agents.takeBack`.
+export const standingPermit = z.strictObject({
+  id: z.string().min(1).max(64),
+  title: z.string().min(1).max(agentLimits.subject),
+  quote: z.string().max(agentLimits.quote).nullable(),
+  givenAt: z.number(),
+  until: z.number(),
+  usedAt: z.number().nullable(),
+})
+
 export const agentDetail = z.strictObject({
   terminalId: id,
-  agent: agentName.nullable(),
+  agent: agentNameRead.nullable(),
   sessionId: agentSessionId.nullable(),
   activity: agentActivity.nullable(),
   telemetry: agentTelemetry.nullable(),
@@ -305,7 +330,7 @@ export const agentDetail = z.strictObject({
         tool: z.string().max(agentLimits.name),
         subject: z.string().max(agentLimits.subject).nullable(),
         choices: z.array(z.string().max(agentLimits.name)).max(agentLimits.choices),
-        dialog: requestDialog.nullable(),
+        dialog: requestDialogRead.nullable(),
         // Whether Novadeck answered it, through `agents.answer`, and the agent has yet to
         // report it settled: nothing more is to be answered there meanwhile.
         answered: z.boolean(),
@@ -322,18 +347,28 @@ export const agentDetail = z.strictObject({
   prompts: z.array(promptReceipt).max(agentLimits.prompts).optional(),
   // Optional, as a runner from before it sends none; null while the box holds nothing to show.
   box: agentBox.nullable().optional(),
+  // The shipping gate's permits that stand for it, oldest first. Optional, as a runner from
+  // before standing permits sends none; this one sends them while the gate is on.
+  permits: z.array(standingPermit).max(agentLimits.permits).optional(),
 })
 
 // An agent Novadeck can connect: whether it is installed here, and whether Novadeck's
 // plugin, which reports its sessions so they can resume, is installed into it.
 export const agentIntegration = z.strictObject({
-  agent: agentName,
+  agent: agentNameRead,
   available: z.boolean(),
   connected: z.boolean(),
   // What keeps a connected agent's messaging from working whole, where something does:
   // `own-status-line`, Antigravity on Windows running the person's own status line, which
-  // keeps Novadeck's out, so it is never seen Ready at its first prompt.
-  limited: z.enum(["own-status-line"]).optional(),
+  // keeps Novadeck's out, so it is never seen Ready at its first prompt; `outdated`, an agent
+  // older than the release Novadeck's plugin works with (opencode's), which loads nothing of
+  // Novadeck's until it is updated; `unsupported`, a release newer than Novadeck knows
+  // (opencode 2), which loads nothing of Novadeck's either. Read tolerantly from revision 11: a
+  // reason a UI doesn't know is `newer`, never the agent's entry dropped from the list.
+  limited: openEnum(["own-status-line", "outdated", "unsupported"], {
+    since: 11,
+    unknown: "placeholder",
+  }).optional(),
   // The command that installs the agent here, as a terminal runs it at its first prompt, for
   // an agent that is not `available`: what the person sees before choosing to run it. Absent
   // from a runner from before it, and once the agent is installed.
@@ -451,4 +486,5 @@ export type AgentActivity = z.infer<typeof agentActivity>
 export type AgentTelemetry = z.infer<typeof agentTelemetry>
 export type AgentCoverage = z.infer<typeof agentCoverage>
 export type AgentDetail = z.infer<typeof agentDetail>
+export type StandingPermit = z.infer<typeof standingPermit>
 export type AgentIntegration = z.infer<typeof agentIntegration>

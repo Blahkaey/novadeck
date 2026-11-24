@@ -43,7 +43,8 @@
    `.chat-record` with data-kind="compaction" | "gap" for a line of the record no one said;
    a request's card (`.request-card`) and its hooks are @novadeck/requests' (requests.css);
    data-working or data-ended on the status; data-terminal on an error settled in the terminal; aria-disabled
-   on Stop, :disabled on Send; data-mode on the prompt, `.chat-reply` above it while it replies
+   on Stop, :disabled on Send; data-mode on the prompt, and data-dropping while files dragged
+   over the chat would join it, which `.chat-drop` says over it, `.chat-reply` above it while it replies
    to the agent's question or holds words whose question went, `.chat-box` with data-refused
    on what the agent's own input holds.
 
@@ -431,11 +432,12 @@
   content: none;
 }
 /* The agent's update (its thinking, as its terminal shows it) ends in a dim "· summary" tag, in the
-   text's own line where it ends in a paragraph; after a list or a code block it takes a line. */
-.chat-message[data-thinking] > .markdown {
+   text's own line where it ends in a paragraph; after a list or a code block it takes a line.
+   `.chat-said` holds both and is the block the measure caps: inline words alone would run the row. */
+.chat-message[data-thinking] > .chat-said > .markdown {
   display: inline;
 }
-.chat-message[data-thinking] > .markdown > p:last-child {
+.chat-message[data-thinking] > .chat-said > .markdown > p:last-child {
   display: inline;
 }
 .chat-summary-tag {
@@ -761,37 +763,90 @@
 .chat-subagent-summary[aria-expanded="true"] .chat-subagent-said {
   display: none;
 }
-/* One of Novadeck's own notices: a subagent's dim line with no name, its first words to the edge,
-   the handles in them keeping their hue, a step dimmer. Open, the line is the whole notice, each
-   `→` action on its own line, and a click on it closes it. */
+/* One of Novadeck's own notices: a quiet bell line, as the doorbell's own line is (`.chat-ring >
+   .chat-note`) but in the muted ink and the regular weight, Novadeck's mark in the gutter where a
+   prompt's mark sits, a dashed rule to the edge, and its time where it shows one. An event
+   notice's line is its family's, a standing one's its subject, and notices delivered together share
+   one line; opened, the notices themselves are under it, each `→` action on its line, each under
+   its kind where there are several. */
 .chat-notice {
+  position: relative;
   margin-top: calc(var(--_lh) * 0.4);
 }
 .chat-notice + .chat-notice {
   margin-top: calc(var(--_lh) * 0.1);
 }
+/* Novadeck's mark stands where a prompt's mark does: centred on that mark's middle and on the
+   first line, as tall as it, so it follows the density's mark size. */
+.chat-notice-mark {
+  position: absolute;
+  top: calc((var(--_lh) - var(--_mark-height)) / 2);
+  left: calc(-2ch + (var(--_mark-width) - var(--_mark-height)) / 2);
+  width: var(--_mark-height);
+  height: var(--_mark-height);
+  --nova-mark-fg: var(--_muted);
+  --nova-mark-core-fg: var(--_muted);
+}
+.chat-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  min-width: 0;
+}
+.chat-notice-key {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 1ch;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--_muted);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-notice-head > .chat-fact {
+  position: static;
+  font-size: inherit;
+}
 .chat-notice-said {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--_muted);
   text-overflow: ellipsis;
+}
+.chat-notice-rule {
+  flex: 1;
+  border-top: 1px dashed var(--color-line-strong);
 }
 .chat-notice-said .markdown-mention {
   opacity: 0.75;
 }
-.chat-notice-said[data-open] {
-  overflow: visible;
+.chat-notice-body {
+  margin: calc(var(--_lh) / 6) 0 0;
+  color: var(--_muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
 }
+.chat-notice-one > p {
+  margin: 0;
+}
+.chat-notice-one + .chat-notice-one {
+  margin-top: calc(var(--_lh) / 3);
+}
+/* A notice's kind heads its words where several are open together. */
+.chat-notice-kind {
+  color: var(--_ink);
+}
 @media (hover: hover) {
-  .chat-notice-key:hover .chat-notice-said {
+  .chat-notice-key:hover {
     color: var(--_ink);
   }
-}
-.chat-notice-key[aria-expanded="true"] {
-  overflow: visible;
 }
 .chat-tools-list {
   display: flex;
@@ -1644,6 +1699,21 @@ button.chat-hold-line:focus-visible::before {
    scroll anchoring and the held prompt's measurements remain immediate. */
 .chat-composer:focus-within {
   border-top-color: color-mix(in srgb, var(--_accent) 25%, var(--_line));
+}
+/* Files dragged over the chat: the prompt says a drop adds them to the message, in a dashed
+   outline over it, as a terminal says it takes them. */
+.chat-drop {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 2px dashed var(--_accent);
+  border-radius: var(--radius-control);
+  background-color: var(--_ground);
+  color: var(--_ink);
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {

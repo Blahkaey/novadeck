@@ -76,7 +76,7 @@
       }
     },
     {
-      "files": ["harnesses/agy/**"],
+      "files": ["harnesses/agy/**", "harnesses/opencode/**"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -444,5 +444,11 @@
       }
     }
   ],
-  "ignorePatterns": ["out", "release", "storybook-static", "coverage"]
+  "ignorePatterns": [
+    "out",
+    "release",
+    "storybook-static",
+    "coverage",
+    "backend/runner/assets/tour/seed"
+  ]
 }

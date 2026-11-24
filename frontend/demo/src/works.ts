@@ -372,6 +372,11 @@ export const closeRefusal =
 // at the root `Placed` names; one that has works changes its first.
 export type DemoWorksControl = {
   readonly gain: (at: Placed, lines?: number) => void
+  // The terminal's worktree on `branch`, just made (the tour's teammates open theirs so): it differs
+  // from nothing; none is made where the terminal has one.
+  readonly openBranch: (at: Placed, branch: string) => void
+  // The terminal's work changes exactly these files, as of `at`: what an agent's edit leaves.
+  readonly setFiles: (terminalId: string, files: readonly FilePlan[], at: number) => void
   // The work changes `count` more files.
   readonly spread: (at: Placed, count: number) => void
   readonly conflictWithMain: (at: Placed) => void
@@ -416,6 +421,8 @@ export type DemoWorksControl = {
   readonly setCi: (root: string, ci: NonNullable<PullRequest["ci"]>) => void
   // The terminal's worktree holds `count` uncommitted paths, whatever else it is.
   readonly setUncommitted: (at: Placed, count: number) => void
+  // The terminal's worktree belongs on the branch `home` (not main), or on main again.
+  readonly setHome: (at: Placed, home: string | undefined) => void
   // The terminal's worktree has `count` commits no remote holds.
   readonly setUnpushed: (at: Placed, count: number) => void
   // The terminal's worktree's origin was last fetched `minutes` ago.
@@ -498,13 +505,13 @@ export const createDemoWorks = (
   const ownedBy = (terminalId: string): Work | undefined =>
     state.getSnapshot().works.find((work) => work.terminalId === terminalId)
   // A worktree just made: it differs from nothing. It counts as made.
-  const make = (at: Placed, name = slug(at.terminalId)): Work => {
+  const make = (at: Placed, name = slug(at.terminalId), branch = `agent/${name}`): Work => {
     const fresh: Work = {
       root: at.root,
       terminalId: at.terminalId,
       projectId: at.projectId,
       working: false,
-      branch: `agent/${name}`,
+      branch,
       base: "main",
       firstSeenAt: now(),
       merged: false,
@@ -688,6 +695,20 @@ export const createDemoWorks = (
       const { root } = ensure(at)
       change(root, (work) => gained(work, lines))
     },
+    openBranch: (at, branch) => {
+      if (!ownedBy(at.terminalId)) make(at, slug(branch), branch)
+    },
+    setFiles: (terminalId, plans, at) => {
+      const own = ownedBy(terminalId)
+      if (!own) return
+      change(own.root, (work) => ({
+        ...summed(
+          work,
+          plans.map((plan) => fileOf(plan, at)),
+        ),
+        uncommitted: plans.length,
+      }))
+    },
     spread: (at, count) => {
       const { root } = ensure(at)
       change(root, (work) => spread(work, count))
@@ -768,6 +789,10 @@ export const createDemoWorks = (
     setUncommitted: (at, count) => {
       const { root } = ensure(at)
       change(root, (work) => ({ ...work, uncommitted: count }))
+    },
+    setHome: (at, home) => {
+      const { root } = ensure(at)
+      change(root, (work) => ({ ...work, home }))
     },
     setUnpushed: (at, count) => {
       const { root } = ensure(at)

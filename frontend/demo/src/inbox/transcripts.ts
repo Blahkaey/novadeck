@@ -17,8 +17,8 @@ import { demoTerminalId } from "../samples"
 // (scripts/packages) doesn't read the sample as this file's imports.
 const sampleImport = (names: string, from: string): string => `import ${names} from "${from}"`
 
-// What the Inbox demo's agents outside the storefront did before their row came, by
-// `projectId/slot`, so each row's sheet has the person's words and the steps since, as
+// What the Inbox demo's agents outside the storefront did before their entry came, by
+// `projectId/slot`, so each entry's sheet has the person's words and the steps since, as
 // each harness records them: Claude Code's Edit, Write and Bash with its `Exit code` on a
 // failure, Codex's exec_command with its `Process exited with code` header, and
 // Antigravity's edit_file and run_command, which says `The command exited with code`. The
@@ -69,7 +69,7 @@ const inboxLead = {
 } as const
 
 const leadDrafts: readonly DemoDraft[] = [
-  user("[Novadeck: automatic notice, agent messages waiting, Q7mT2c]"),
+  user("<novadeck-doorbell from='' ring='Q7mT2c'/>"),
   bash("toolu_i61", "pnpm bench ping-lag --runs 40"),
   got("toolu_i61", "warming up…\nping-lag: p50 12 ms, p95 31 ms\n40 runs"),
   use(

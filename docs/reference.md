@@ -145,7 +145,37 @@ down: the app's own processes, and anything a shell started in the few milliseco
 before its move. A startup command, as an agent opened in a terminal is, waits for the
 move, about a quarter of a second at most on a calm machine, then runs either way; what
 the person's own startup files start doesn't wait. Without a user bus (no systemd, a container, WSL without systemd),
-shells run in the app's scope as before. macOS and Windows have no scopes (see the priority below).
+shells run in the app's scope as before. macOS has no scopes, and Windows has a job object per
+terminal instead, which holds what the terminal starts but limits nothing (see the priority below);
+on macOS a terminal's processes are told instead by the terminal their environment names (below).
+
+A program started detached stays in the scope of the terminal it was started in, though it
+has left the shell's tree, so a close or a quit ends what an agent left there (see "Closing"
+in `docs/backend-api.md`): what started in the scope while an agent ran, and is not what the
+person started there before it or after it, nor its harness's shared service. An app opened
+with `xdg-open`, `gio open` or `BROWSER` gets a scope of its own through Novadeck's shims, so a
+browser window an agent opened for the person stays open. Without a user
+bus nothing changes, and such a program outlives its terminal as before. Once a terminal's
+program has exited, a scope it left empty is stopped: one whose program died as systemd moved
+it in otherwise stays active, with no process in it, for ever, as systemd collects a scope only
+once its cgroup empties (measured: 8 of 60 such moves; 272 empty scopes after 16 hours).
+
+On macOS a close or a quit ends what an agent left detached too. Each shell starts with
+`NOVADECK_TERMINAL_ID` naming its terminal, and a program started detached keeps that
+environment, so the relay finds it by it among the app's own processes. An app an agent opens
+(`open`, `osascript`) gets the terminal's environment too, but launchd starts it apart from the
+app, so it stays open, as does a launchd job. Not found, so it outlives its
+terminal as before: a detached Apple program (`caffeinate`, `tail -f`, `ssh -fN`, a `bash`
+loop), whose environment macOS hides from other programs, an app with restricted entitlements
+started by its binary, and a daemon that writes over its own environment (redis, postgres).
+
+On Windows a terminal's job object, held by the runner's relay, plays the scope's part: a
+program started there stays in it however it was started, so a close or a quit ends what an
+agent left there detached (`start /b`, `Start-Process`, a detached child) by the same rules.
+A startup command waits for the shell to be in its job, as on Linux. An app an agent opens is
+in the job too: a browser that was already running only takes the new tab, but one the agent
+starts from nothing ends with the terminal, as Windows has no shim for that as Linux's
+`xdg-open`.
 
 A terminal's scope also asks for `CPUWeight=10` (`terminalCpuWeight`), a tenth of the
 app's scope's default 100. Inside the desktop's `app.slice` every thread otherwise weighs
@@ -403,9 +433,8 @@ one across the rule below them pins or unpins it. While any are pinned, a bar un
 header shows them in that order, each as its number, its name and its mark, the same
 as its row in the list shows; the current one is underlined, and a click switches to it.
 Drag a pin along the bar to reorder the pins, or focus one and press Alt+Left or
-Alt+Right; drag one off the bar and let go to unpin it. Drag a project out of the
-switcher and it becomes a pin, which you drag into place on the bar as you would any pin;
-let it go off the bar, or press Esc, and nothing changes. The number is
+Alt+Right; a pin stays on the bar as you drag it, and unpins from its row's pin in the
+switcher. The number is
 its shortcut: `Ctrl+Shift+1` to `Ctrl+Shift+9` (`Cmd+1` to `Cmd+9` on macOS, in the
 desktop app, since a browser keeps those for its tabs) switches to that pin, from
 terminal input too. Shift keeps a bare `Ctrl+3` to `Ctrl+8` for the terminal, where they
@@ -1122,11 +1151,20 @@ Desktop, Documents or Downloads, so a program in the terminal may need macOS's
 permission to read it, where a copy needed none. The runner saves a copy of anything else (a screenshot, an image from a
 page, any file pasted in a browser) on its own machine, readable by its owner only, under a name of letters, digits and `.`, `_`, `-` or spaces, in an `uploads`
 folder beside its database, or a temporary folder without one; each upload removes
-those older than a week. Claude Code and Codex take a pasted
+those older than a week. Claude Code, Codex and Antigravity take a pasted
 image's path as the image. The desktop app may read the clipboard for this; in a
 browser, a paste with no text (an image, or an empty clipboard) may ask for permission.
 A paste that fails, as of a copy over 32 MB or with the clipboard unreadable, says why for a moment at the top of the
 terminal.
+
+Dropping files from a file manager on a terminal does what pasting them does: each one's
+path, in the order they came, the same way in Focus, Grid and Canvas. While they are over a
+terminal that would take them, that terminal alone says so; the drop goes into it and the
+keyboard follows, so you can type the rest after the paths. A terminal that takes no typing
+at the moment, as while reconnecting or once its shell ended, takes no drop either, and a drop
+anywhere else does nothing. A folder goes in by its own path in the desktop app; in a browser,
+where only files can be uploaded, it can't. In a chat, images dropped anywhere on it join your
+message as pasted ones do.
 
 The new-session shortcut creates and selects an empty session in the current project
 and opens its terminals in the sidebar.

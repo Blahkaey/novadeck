@@ -143,6 +143,8 @@ describe("taking what Claude Code has queued", () => {
 
   it("says an image in the box stands for more than its text", () => {
     expect(box.stands("[Image #1] look at this")).toBe(true)
+    // One the box wrapped after the words is the person's image all the same.
+    expect(box.stands("why some stretch farther? [Image\n  #1]")).toBe(true)
     expect(box.stands("look at this")).toBe(false)
   })
 
@@ -431,6 +433,19 @@ describe("Claude Code's images", () => {
 
   it("counts none in an empty box", () => {
     expect(box.images!.attached(screenOf(rule, "❯ ", rule, "  ? for shortcuts"))).toBe(0)
+  })
+
+  it("counts one the box wrapped after the words, its two halves on two rows", () => {
+    // Pasted after words that nearly fill a row, the placeholder breaks at its space
+    // (probed 2026-11-23, 2.1.330, 120 columns, words pasted first and then the path).
+    const screen = screenOf(
+      rule,
+      "❯ why some of messages stretch farther? [Image",
+      "  #1]",
+      rule,
+      "  ⏵⏵ auto mode on (shift+tab to cycle)",
+    )
+    expect(box.images!.attached(screen)).toBe(1)
   })
 })
 

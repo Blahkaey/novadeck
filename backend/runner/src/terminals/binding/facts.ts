@@ -11,6 +11,7 @@ import {
   escapeScreenMs,
   escapeVerdictMs,
   summary as activitySummary,
+  withCards,
   withLimit,
 } from "../../harnesses/activity.js"
 import { withVersion } from "../../harnesses/bindings.js"
@@ -60,6 +61,10 @@ export type BindingsHost = {
   readonly save: (record: Record) => void
   /** Tells the terminal's detail readers of a change. */
   readonly detailed: (record: Record) => void
+  /** How many of the shipping gate's cards are open in a terminal; none without the gate. */
+  readonly cards?: (terminalId: string) => number
+  /** How many of the shipping gate's permits stand in a terminal; none without the gate. */
+  readonly permits?: (terminalId: string) => number
   /** Follows the terminal's root session after a report's facts; true when its work changed. */
   readonly trackRoot: (
     record: Record,
@@ -198,6 +203,8 @@ export class Bindings {
    * (`restarted`).
    */
   private endSession(record: Record): void {
+    // What starts in the terminal's scope from now is the person's, not the agent's.
+    if (record.bound !== null) record.terminal.pty.agentEnded()
     record.bound = null
     record.resumeEnded = true
     this.unwatch(record)
@@ -704,7 +711,9 @@ export class Bindings {
         : signedOutEnded
           ? null
           : record.summary.startup
-    const activity = bound ? activitySummary(bound.activity) : null
+    const cards = this.host.cards?.(record.summary.id) ?? 0
+    const activity = bound ? withCards(activitySummary(bound.activity), cards) : null
+    const permits = this.host.permits?.(record.summary.id) ?? 0
     // Before the early return below: an Escape that settles changes nothing the summary shows.
     this.ends.sight(record, activity)
     // What the turn was doing is kept for a restart of Novadeck (`markTurn`), and when it ended
@@ -728,11 +737,33 @@ export class Bindings {
       summary.startup === startup &&
       JSON.stringify(summary.activity) === JSON.stringify(activity) &&
       JSON.stringify(summary.telemetry) === JSON.stringify(telemetry) &&
-      JSON.stringify(summary.reported) === JSON.stringify(reported)
+      JSON.stringify(summary.reported) === JSON.stringify(reported) &&
+      (summary.permits ?? 0) === permits
     )
       return
-    record.summary = { ...summary, agentRan, agent, ready, startup, activity, telemetry, reported }
+    const { permits: _was, ...rest } = summary
+    record.summary = {
+      ...rest,
+      agentRan,
+      agent,
+      ready,
+      startup,
+      activity,
+      telemetry,
+      reported,
+      ...(permits > 0 && { permits }),
+    }
     this.host.announce(record)
+  }
+
+  /**
+   * The shipping gate's cards or permits changed in the terminal: its detail lists them, and its
+   * summary counts each open card as a request waiting on the person, which is what a client
+   * follows to read the detail, list the card in the Inbox and mark the tab, and says how many
+   * permits stand, so a client follows the detail where some do.
+   */
+  publishGate(record: Record): void {
+    this.publishAgent(record, false)
   }
 
   /** Forgets every session `agent` reported in the terminals, as once it is disconnected. */

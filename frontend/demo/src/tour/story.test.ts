@@ -7,92 +7,134 @@ import { demoTurns } from "../agents/turns"
 import { plainDemo } from "../index"
 import { demoTourFolder, isDemoTour, type DemoTour } from "../tour"
 import { demoRun } from "../tour-runs"
+import { heroOf, modelOf, tourEntries } from "./content"
 import {
-  chosenTagline,
-  pickTagline,
-  taglineAsk,
-  taglineSubject,
-  taglines,
-  teamHarnesses,
+  builderName,
+  chosenHero,
+  chosenOption,
+  gameBuilt,
+  heroColourSubject,
+  heroColours,
+  modelled,
+  modellerName,
+  pickOption,
+  pickSheet,
+  serverName,
+  sheetAsk,
+  sheetSubject,
   teammateCommand,
   tourStoryMs,
-  welcomeCard,
 } from "./story"
 
 const key = { projectId: "p", workspaceSessionId: "s", terminalId: "t" }
 
 describe("the story's pieces", () => {
-  it("runs the designer on another connected harness, else on the lead's", () => {
-    expect(teamHarnesses("claude", ["claude", "codex"])).toEqual({
-      copywriter: "claude",
-      designer: "codex",
-    })
-    expect(teamHarnesses("codex", ["codex"])).toEqual({ copywriter: "codex", designer: "codex" })
+  it("starts a teammate on its harness and the lead's model", () => {
     expect(teammateCommand("claude")).toBe("claude --model haiku")
   })
 
-  it("asks as the runner's ask does: options A and B, each with its line", () => {
-    const terminal = { id: "t", name: "Copywriter", handle: "fox" } as TerminalMetadata
-    const row = taglineAsk(key, terminal, "claude", "Tour", 5)
-    expect(row).toMatchObject({
+  it("asks the sheet as the runner's ask does: two questions of three options each", () => {
+    const terminal = { id: "t", name: "Game lead", handle: "fox" } as TerminalMetadata
+    const entry = sheetAsk(key, terminal, "claude", "Tour", 5)
+    expect(entry).toMatchObject({
       kind: "ask",
       stopped: false,
       source: { terminalId: "t", handle: "fox", agent: "claude", projectName: "Tour" },
-      ask: { subject: taglineSubject, shape: { type: "options" } },
+      ask: { subject: sheetSubject, shape: { type: "questions" } },
     })
-    if (row.kind !== "ask" || row.ask.shape.type !== "options") throw new Error("not options")
-    expect(row.ask.shape.options.map(({ label, summary }) => [label, summary])).toEqual(
-      taglines.map(({ label, line }) => [label, line]),
-    )
-  })
-
-  it("takes the tagline of the option picked, the person's words, or the first", () => {
-    expect(chosenTagline(pickTagline(1)).line).toBe(taglines[1].line)
+    if (entry.kind !== "ask" || entry.ask.shape.type !== "questions") throw new Error("no sheet")
     expect(
-      chosenTagline({ kind: "ask", answer: { type: "reply", option: null, text: " Hello " } }),
-    ).toEqual({ label: "your words", line: "Hello" })
-    expect(chosenTagline(undefined)).toBe(taglines[0])
+      entry.ask.shape.questions.map(({ question, options }) => [
+        question,
+        options.map(({ label }) => label),
+      ]),
+    ).toEqual([
+      ["The world", ["Fantasy", "Sci-fi", "Modern"]],
+      ["The kind", ["RPG", "Shooter", "Strategy"]],
+    ])
   })
 
-  it("shows the card as an agent's welcome.svg image, asked to open, from the lead", () => {
-    const { item, content } = welcomeCard(key, "moth", "Fish & <chips>", 9)
-    expect(item).toMatchObject({
-      kind: "image",
-      name: "welcome.svg",
-      by: "agent",
-      openAsked: true,
-      holder: { terminalId: "t" },
-      from: { terminalId: "t", handle: "moth" },
+  it("takes the options picked, else the person's own words, else the first options", () => {
+    expect(chosenHero(pickSheet(1, 2))).toMatchObject({
+      world: "Sci-fi",
+      kind: "Strategy",
+      shape: "rocket",
+      title: "Sci-fi Strategy",
     })
-    expect(content).toMatchObject({ state: "ready", content: { kind: "image" } })
-    const src =
-      content.state === "ready" && content.content.kind === "image" ? content.content.src : ""
-    const svg = decodeURIComponent(src.replace("data:image/svg+xml,", ""))
-    expect(svg).toContain("Welcome, friend")
-    expect(svg).toContain("Fish &amp; &lt;chips&gt;")
+    expect(chosenHero(pickSheet(2, 0))).toMatchObject({ shape: "robot" })
+    expect(chosenHero(pickSheet("Pirates", "Racing"))).toMatchObject({
+      title: "Pirates Racing",
+      shape: "cat",
+    })
+    expect(chosenHero(pickSheet(7, ""))).toMatchObject({ world: "Fantasy", kind: "RPG" })
+    expect(chosenHero(undefined)).toMatchObject({ world: "Fantasy", kind: "RPG" })
+    expect(chosenOption(pickOption(1), heroColours)).toBe("Blue")
+    expect(chosenOption(pickOption("teal"), heroColours)).toBe("teal")
+    expect(chosenOption(undefined, heroColours)).toBe("Red")
+  })
+
+  it("makes a start model and a different sculpted one, each a small glTF the pane can draw", () => {
+    const parsed = (bytes: Uint8Array) => JSON.parse(new TextDecoder().decode(bytes))
+    const start = modelOf(undefined, "1")
+    const rocket = modelOf(heroOf("Sci-fi", "RPG"), "2")
+    for (const model of [
+      start,
+      rocket,
+      modelOf(heroOf("Modern", "RPG"), "2"),
+      modelOf(heroOf("Fantasy", "RPG"), "2"),
+    ]) {
+      expect(model.bytes.length).toBeLessThan(2500)
+      const gltf = parsed(model.bytes)
+      expect(gltf.asset.version).toBe("2.0")
+      expect(gltf.buffers[0].uri).toMatch(/^data:application\/octet-stream;base64,/)
+      expect(atob(gltf.buffers[0].uri.split(",")[1]).length).toBe(gltf.buffers[0].byteLength)
+      expect(gltf.nodes.length).toBeGreaterThanOrEqual(gltf.meshes.length)
+      expect(gltf.buffers[0].byteLength).toBe(288)
+    }
+    expect(parsed(start.bytes).nodes).toHaveLength(2)
+    expect(parsed(rocket.bytes).nodes.length).toBeGreaterThan(2)
+    expect(start.content).toMatchObject({ state: "ready", stamp: "1" })
+    expect(rocket.content).toMatchObject({ state: "ready", stamp: "2" })
+  })
+
+  it("lists the new seed", () => {
+    expect(tourEntries).toContain("src/main.js")
+    expect(tourEntries).toContain("models/placeholder.gltf")
   })
 })
 
+// The demo's workspace whose first project is the tour's, with the lead's terminal started there.
 const open = async (setup?: (tour: DemoTour) => void) => {
-  const backend = plainDemo("plain", undefined, undefined, demoTurns())
+  const backend = plainDemo("plain", undefined, undefined, demoTurns(), true)
   const tour = backend.tour
   if (!isDemoTour(tour)) throw new Error("no demo tour")
+  const seeded = workspaceFromSeed(backend.seed, { view: "grid", windowedView: "grid", now: 0 })
   const store = createWorkspaceStore(
-    workspaceFromSeed(backend.seed, { view: "grid", windowedView: "grid", now: 0 }),
+    {
+      ...seeded,
+      projects: seeded.projects.map((each, index) =>
+        index === 0 ? { ...each, directory: demoTourFolder } : each,
+      ),
+    },
     backend.commit,
   )
   backend.commit(store.getSnapshot(), [])
   backend.start!({ dispatch: (actions) => store.transact(actions as never), open: () => {} })
   setup?.(tour)
+  await tour.prepare("claude").catch(() => undefined)
   const project = store.getSnapshot().projects[0]!
   const target = { projectId: project.id, workspaceSessionId: project.history[0]!.id }
-  const terminal = backend.newTerminal({
-    target,
-    directory: demoTourFolder,
-    launch: { command: demoRun("claude").command },
-  })
-  store.transact([{ type: "terminal/add", target, terminal }])
-  await vi.dynamicImportSettled()
+  const add = async (command?: string) => {
+    const terminal = backend.newTerminal({
+      target,
+      directory: demoTourFolder,
+      ...(command && { launch: { command } }),
+    })
+    store.transact([{ type: "terminal/add", target, terminal }])
+    await vi.dynamicImportSettled()
+    return terminal.id
+  }
+  const lead = await add(demoRun("claude").command)
   const session = () =>
     store
       .getSnapshot()
@@ -102,76 +144,254 @@ const open = async (setup?: (tour: DemoTour) => void) => {
   const at = async (ms: number) => {
     await vi.advanceTimersByTimeAsync(ms)
   }
-  return { backend, tour, session, workspace, at, lead: terminal.id }
+  const terminals = () => session().state.roster.terminals
+  const items = () => session().state.items
+  const works = () => backend.works!.state.getSnapshot().works
+  const approvals = () => backend.approvals!.pending.getSnapshot()
+  // The person answers the lead's ask to run the game's server, which it makes as the sheet is
+  // answered.
+  const allow = async (approved = true) => {
+    // eslint-disable-next-line no-await-in-loop -- The clock moves on until the ask is there.
+    for (let waited = 0; approvals().length === 0 && waited < 5_000; waited += 100) await at(100)
+    backend.approvals!.answer(approvals()[0]!.requestId, approved)
+  }
+  return {
+    backend,
+    tour,
+    session,
+    workspace,
+    at,
+    lead,
+    project: project.id,
+    add,
+    terminals,
+    items,
+    works,
+    approvals,
+    allow,
+  }
 }
+
+type Demo = Awaited<ReturnType<typeof open>>
+
+const messagesOf = (backend: Demo["backend"]) => {
+  const state = backend.messages!.state.getSnapshot()
+  const distinct = new Map(
+    Object.values(state.terminals)
+      .flatMap((each) => each.threads.flatMap((thread) => thread.messages))
+      .map((message) => [message.id, message]),
+  )
+  return [...distinct.values()]
+}
+
+// Long enough for the lead to bind, work, describe itself and ask its sheet.
+const asking = 300 + 400 + 300 + 300 + 400
+
+// Long enough, from the person's answer to the lead's ask to run the server, for the lead to show
+// its page and open its team, and the team to name itself, work and report.
+const teamUp = 400 + tourStoryMs.hire + 300 + 300 + 300 * 4 + 400 * 3 + 600
+
+const sheetOf = (backend: Demo["backend"]) =>
+  backend.inbox!.state.getSnapshot().items.filter((entry) => entry.kind === "ask")
 
 describe("the story in the demo", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it("opens two named teammates, talks, asks, and shows the card once answered", async () => {
-    const { backend, tour, session, at, lead } = await open()
-    // The lead names itself; its turn stays open for the story.
-    await at(tourPhaseTotal())
-    const named = session().state.roster.terminals.filter((each) => each.ledBy === lead)
-    expect(named.map((each) => each.name)).toEqual(["Copywriter", "Designer"])
-    expect(named.every((each) => each.titleSource?.kind === "agent")).toBe(true)
-    const leader = session().state.roster.terminals.find((each) => each.id === lead)!
-    expect(leader.state === "running" && leader.agent?.lastTurn).toBeFalsy()
-
-    // The talk: three messages between agents, each with terminal ids.
-    await at(tourStoryMs.talk * 3 + 3000)
-    const copywriter = named[0]!
-    const state = backend.messages!.state.getSnapshot()
-    const messages = Object.values(state.terminals).flatMap((each) =>
-      each.threads.flatMap((thread) => thread.messages),
-    )
-    const distinct = new Map(messages.map((message) => [message.id, message]))
-    expect(distinct.size).toBe(3)
-    for (const message of distinct.values())
-      expect(message).toMatchObject({ from: { kind: "agent" }, to: { kind: "agent" } })
-
-    // The ask waits in the Inbox as long as the person takes.
-    await at(60_000)
-    const rows = backend.inbox!.state.getSnapshot().items.filter((row) => row.kind === "ask")
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ source: { terminalId: copywriter.id }, stopped: false })
-    expect(session().state.items.some((item) => item.kind === "image")).toBe(false)
-
-    tour.answerTagline(1)
-    await at(5000)
-    // The answered ask no longer waits: it stays settled, or goes.
-    expect(
-      backend.inbox!.state.getSnapshot().items.filter((row) => row.kind === "ask" && !row.settled),
-    ).toHaveLength(0)
-    const shown = session().state.items.find((item) => item.kind === "image")
-    expect(shown).toMatchObject({ by: "agent", openAsked: true, from: { terminalId: lead } })
-    const content = await new Promise<unknown>((resolve) => {
-      backend.companions!.follow(
-        { projectId: "p", workspaceSessionId: "s" },
-        shown!.id,
-        { reveal: undefined },
-        resolve,
-      )
+  it("asks its sheet from the lead's terminal, and waits for as long as the person takes", async () => {
+    const { backend, at, lead, terminals } = await open()
+    await at(asking)
+    const entries = sheetOf(backend)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      source: { terminalId: lead },
+      stopped: false,
+      ask: { subject: sheetSubject, shape: { type: "questions" } },
     })
-    expect(JSON.stringify(content)).toContain(encodeURIComponent(taglines[1].line))
-    await at(2000)
-    const done = session().state.roster.terminals.find((each) => each.id === lead)!
-    expect(done.state === "running" && done.agent?.lastTurn?.outcome).toBe("completed")
+    await at(60_000)
+    expect(terminals().filter((each) => each.ledBy === lead)).toEqual([])
+    expect(sheetOf(backend).filter((entry) => !entry.settled)).toHaveLength(1)
   })
 
-  it("waits for a nudge before opening its team, and stops when its process exits", async () => {
-    const { tour, session, at, lead } = await open((each) => each.goQuietTeam())
-    await at(tourPhaseTotal())
-    expect(session().state.roster.terminals.filter((each) => each.ledBy === lead)).toEqual([])
+  it("opens a modeller and a builder, which the lead leads, once the sheet and the server are answered", async () => {
+    const { backend, tour, at, allow, lead, project: id, terminals, items, works } = await open()
+    await at(asking)
+    tour.answerSheet({ world: 1, kind: 1 })
+    await allow()
+    await at(teamUp)
+    const mates = terminals().filter((each) => each.ledBy === lead)
+    expect(mates.map((each) => each.name).toSorted()).toEqual([builderName, modellerName])
+    for (const mate of mates) expect(mate.titleSource?.kind).toBe("agent")
+    const modeller = mates.find((each) => each.name === modellerName)!
+    const builder = mates.find((each) => each.name === builderName)!
+    expect(works().find((work) => work.terminalId === modeller.id)?.files).toEqual([
+      expect.objectContaining({ path: "models/hero.gltf", status: "added" }),
+    ])
+    expect(works().find((work) => work.terminalId === builder.id)?.files).toEqual([
+      expect.objectContaining({ path: "src/main.js" }),
+    ])
+    expect(items().find((item) => item.kind === "model")).toMatchObject({
+      holder: { terminalId: modeller.id },
+      name: "hero.gltf",
+    })
+    expect(items().find((item) => item.kind === "changes")).toMatchObject({
+      holder: { terminalId: builder.id },
+      by: "agent",
+      openAsked: true,
+    })
+    const said = messagesOf(backend).map(({ text }) => text)
+    expect(said).toEqual(expect.arrayContaining([modelled, gameBuilt]))
+    // Its writes are in the Files feed, under its handle.
+    const feed = backend.files!.state.getSnapshot()
+    const touched = Object.values(feed.projects).flatMap((project) =>
+      Object.entries(project.changes).filter(([path]) => path === "src/main.js"),
+    )
+    expect(touched[0]?.[1].touched).toHaveProperty(builder.handle!)
+    // The merged preview of src/main.js names the game for the picks.
+    const preview = await backend.works!.preview(id, "src/main.js")
+    expect(preview.works).toHaveLength(1)
+  })
+
+  it("takes the first options where the sheet is dismissed", async () => {
+    const { backend, at, allow, lead, terminals } = await open()
+    await at(asking)
+    backend.inbox!.dismiss?.(sheetOf(backend)[0]!.id)
+    await allow()
+    await at(teamUp)
+    expect(terminals().some((each) => each.ledBy === lead)).toBe(true)
+  })
+
+  it("asks to run the game's server first; allowed, it opens a terminal of its own, shows the page, then opens its team", async () => {
+    const { backend, tour, at, lead, terminals, items, approvals } = await open()
+    await at(asking)
+    tour.answerSheet()
+    // It opens nobody while the person has the approval to answer, however long they take.
+    await at(60_000)
+    expect(terminals().filter((each) => each.ledBy === lead)).toEqual([])
+    expect(approvals()).toHaveLength(1)
+    expect(approvals()[0]).toMatchObject({
+      from: lead,
+      terminalId: lead,
+      action: { type: "run", command: "node dev.mjs 5173", cwd: demoTourFolder },
+    })
+    expect(items().some((item) => item.kind === "page")).toBe(false)
+    backend.approvals!.answer(approvals()[0]!.requestId, true)
+    await at(1000)
+    expect(approvals()).toEqual([])
+    const server = terminals().find((each) => each.name === serverName)!
+    expect(server).toMatchObject({ openedBy: lead })
+    expect(server.ledBy).toBeUndefined()
+    expect(items().find((item) => item.kind === "page")).toMatchObject({
+      holder: { terminalId: lead },
+      url: "http://127.0.0.1:5173/",
+    })
+    expect(terminals().filter((each) => each.ledBy === lead)).toEqual([])
+    await at(teamUp)
+    expect(terminals().filter((each) => each.ledBy === lead)).toHaveLength(2)
+  })
+
+  it("goes on without a page where the person says no, and where there is none", async () => {
+    const declined = await open()
+    await declined.at(asking)
+    declined.tour.answerSheet()
+    await declined.allow(false)
+    await declined.at(teamUp)
+    expect(declined.items().some((item) => item.kind === "page")).toBe(false)
+    expect(declined.terminals().some((each) => each.name === serverName)).toBe(false)
+    // Its team all the same.
+    expect(declined.terminals().filter((each) => each.ledBy === declined.lead)).toHaveLength(2)
+  })
+
+  it("has no page to run where the computer has no Node or Python", async () => {
+    vi.useRealTimers()
+    const backend = plainDemo("plain", undefined, undefined, demoTurns())
+    const tour = backend.tour
+    if (!isDemoTour(tour)) throw new Error("no demo tour")
+    tour.follow(
+      {
+        getSnapshot: () => [{ agent: "claude", available: true, connected: true, busy: false }],
+        subscribe: () => () => {},
+      },
+      () => undefined,
+    )
+    tour.goNoPage()
+    await expect(tour.prepare("claude")).resolves.toMatchObject({ page: false })
+    // The lead's player takes the plan as it starts; the run after has its page again.
+    tour.take()
+    await expect(tour.prepare("claude")).resolves.toMatchObject({ page: true })
+  })
+
+  it("has the modeller ask its own question, and wait for the person's answer before it reports", async () => {
+    const { backend, tour, at, allow, lead, terminals } = await open((each) => each.goMateAsks())
+    await at(asking)
+    tour.answerSheet()
+    await allow()
+    await at(teamUp)
+    const modeller = terminals().find((each) => each.name === modellerName)!
+    const asks = () => sheetOf(backend).filter((entry) => !entry.settled)
+    expect(asks()).toHaveLength(1)
+    expect(asks()[0]).toMatchObject({
+      source: { terminalId: modeller.id },
+      ask: { subject: heroColourSubject, shape: { type: "options" } },
+    })
+    await at(60_000)
+    expect(messagesOf(backend).some(({ text }) => text.startsWith(modelled))).toBe(false)
+    tour.answerMate(1)
+    await at(3000)
+    expect(asks()).toHaveLength(0)
+    expect(messagesOf(backend).map(({ text }) => text)).toContain(`${modelled} Its colour is Blue.`)
+    void lead
+  })
+
+  it("keeps the modeller quiet until nudged, and stops with the agent", async () => {
+    const { tour, at, allow, lead, terminals } = await open((each) => each.goQuietModeller())
+    await at(asking)
+    tour.answerSheet()
+    await allow()
+    await at(teamUp)
+    const modeller = terminals().find((each) => each.ledBy === lead && each.name !== builderName)!
+    expect(modeller.name).not.toBe(modellerName)
     await tour.nudge!(lead)
-    await at(tourStoryMs.open * 2 + 10)
-    expect(session().state.roster.terminals.some((each) => each.ledBy === lead)).toBe(true)
+    await at(2000)
+    expect(terminals().find((each) => each.id === modeller.id)?.name).toBe(modellerName)
     tour.stop()
-    expect(session().state.roster.terminals.find((each) => each.id === lead)?.state).toBe("exited")
+    expect(terminals().find((each) => each.id === lead)?.state).toBe("exited")
+  })
+
+  it("waits for a nudge before opening its team", async () => {
+    const { tour, at, allow, lead, terminals } = await open((each) => each.goQuietTeam())
+    await at(teamUp)
+    expect(terminals().filter((each) => each.ledBy === lead)).toEqual([])
+    await tour.nudge!(lead)
+    await at(asking)
+    tour.answerSheet()
+    await allow()
+    await at(teamUp)
+    expect(terminals().some((each) => each.ledBy === lead)).toBe(true)
+  })
+
+  it("leaves the lead's program ended, its shell back, where it exits to its shell", async () => {
+    const { tour, at, lead, terminals } = await open()
+    await at(100)
+    tour.exitToShell()
+    expect(terminals().find((each) => each.id === lead)).toMatchObject({
+      state: "idle",
+      agentRan: true,
+    })
+  })
+
+  it("lists the tour's repo in its Files panel, and no other project's", async () => {
+    const { backend, project } = await open()
+    const root = await backend.files!.list(project, "")
+    expect(root.entries.map((entry) => entry.name)).toContain("src")
+    expect(root.entries.find((entry) => entry.name === "vendor")).toMatchObject({ ignored: true })
+  })
+
+  it("keeps the project, or fails to once, as the closing card says", async () => {
+    const { tour } = await open()
+    await expect(tour.keep!()).resolves.toBeUndefined()
+    tour.failKeep()
+    await expect(tour.keep!()).rejects.toThrow("can't be written")
+    await expect(tour.keep!()).resolves.toBeUndefined()
   })
 })
-
-// Long enough for the lead to bind, work, describe itself, and open and name both teammates.
-const tourPhaseTotal = () =>
-  300 + 400 + tourStoryMs.open * 2 + tourStoryMs.bind + tourStoryMs.work + 50

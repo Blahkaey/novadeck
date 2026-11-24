@@ -13,18 +13,14 @@
 @source "../../items/src";
 @source "../../chat/src";
 @source "../../requests/src";
+@source "../../tour/src";
 @source not "../../terminal-views/src/**/*.test.ts";
 
-/* The header's narrow look (WorkspaceHeader.tsx): below 701px, or where Windows' caption buttons
-   hold the header's end, below 840px. */
+/* The header's narrow look (WorkspaceHeader.tsx): the header 701px wide or less, its own
+   width (`@container/header`), as on macOS it heads the terminals' column alone. */
 @custom-variant narrow-header {
-  @media (max-width: 701px) {
+  @container header (max-width: 701px) {
     @slot;
-  }
-  @media (max-width: 840px) {
-    :root[data-window-controls="end"] & {
-      @slot;
-    }
   }
 }
 @source not "../../terminal-views/src/**/*.test.tsx";
@@ -40,6 +36,8 @@
 @source not "../../chat/src/**/*.test.tsx";
 @source not "../../requests/src/**/*.test.ts";
 @source not "../../requests/src/**/*.test.tsx";
+@source not "../../tour/src/**/*.test.ts";
+@source not "../../tour/src/**/*.test.tsx";
 @import "./theme/contract.css";
 @import "allotment/dist/style.css" layer(base);
 @import "./theme/base.css" layer(base);
@@ -130,7 +128,7 @@
 @import "./preferences/agent-mode-map.css" layer(components);
 @import "./preferences/welcome.css" layer(components);
 @import "./preferences/welcome-preview.css" layer(components);
-@import "./tour/tour.css" layer(components);
+@import "@novadeck/tour/tour.css" layer(components);
 @import "./search/search.css" layer(components);
 
 @import "./theme/coolant.css" layer(themes);

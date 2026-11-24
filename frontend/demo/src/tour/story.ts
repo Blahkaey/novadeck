@@ -1,61 +1,66 @@
 import type { AgentName } from "@novadeck/core/harnesses"
-import type { InboxAnswer, InboxRow } from "@novadeck/core/inbox"
-import { itemIdOf, type Item, type ItemContent } from "@novadeck/core/items"
+import type { InboxAnswer, InboxEntry } from "@novadeck/core/inbox"
 import type { BackendAction, TerminalKey } from "@novadeck/core/port"
 import type { TerminalMetadata } from "@novadeck/core/types"
 
 import type { DemoTurns } from "../agents/turns"
 import { demoTourFolder, type DemoTour, type TourStage } from "../tour"
 import { demoRun } from "../tour-runs"
+import { planFile, worktreeRoot } from "../works"
 import { terminalOf } from "../workspace"
+import {
+  branches,
+  builderChanges,
+  builderDiffs,
+  gameFile,
+  heroOf,
+  modelFile,
+  modelOf,
+  pageContent,
+  serverCommand,
+  type Hero,
+} from "./content"
 
-// The rest of the tour's story, as a runner would report it once the lead described itself: it
-// opens two teammates, who talk, one asks the person which tagline to use, and the lead shows
-// the card it wrote with the answer. Every step reaches the UI as the real thing does: terminals
-// the lead leads, messages between them, an Inbox ask, an item on the lead's bar.
+// The story of the tour, as a runner would report it once the lead described itself: the lead
+// asks the person what game to make, on one sheet of two questions; with the answers it asks to
+// run the game's server, and once the person has answered that, shows its page and opens a
+// modeller and a builder; the modeller shows the hero's model, the builder shows its changes to
+// the game, and the lead shows the page again.
+// Every step reaches the UI as the real thing does: terminals the lead leads, messages between
+// them, an Inbox ask, works that change files, items on the agents' bars, writes in the Files
+// panel.
 
-// How long each step takes: short and fixed, so specs run fast. The person's answer waits as long
-// as it takes.
-export const tourStoryMs = { open: 300, bind: 300, work: 300, talk: 300, show: 400 } as const
-
-export const copywriterName = "Copywriter"
-export const designerName = "Designer"
-
-export const taglineSubject = "Which tagline for the welcome card?"
-
-// The two taglines the copywriter offers, as the ask's options A and B.
-export const taglines = [
-  { label: "A", line: "Every agent, one calm workspace." },
-  { label: "B", line: "Your agents, finally on the same page." },
-] as const
-
-// What the teammates say to each other, in order, before the ask.
-export const tourTalk = {
-  designerToCopywriter:
-    "Look: background #f6f1e7; text #2d2a24; accent #0f766e; fonts Georgia for the heading, Arial for the rest. What line goes under the heading?",
-  copywriterToLead:
-    "I have two taglines for the welcome card. I'm asking the person which one to use.",
-  designerToLead:
-    "The card's look is set: background #f6f1e7, text #2d2a24, accent #0f766e, Georgia and Arial. It waits on the tagline.",
+// How long each step takes: short and fixed, so specs run fast. The person's answer, and their
+// yes to the command, wait as long as they take.
+export const tourStoryMs = {
+  open: 300,
+  bind: 300,
+  work: 300,
+  talk: 300,
+  show: 400,
+  // How long after its page shows the lead opens its team: the page step's line has its moment
+  // first (shown a second after the page, then held 5 s), as a real lead takes about as long to
+  // write its teammates' tasks.
+  hire: 6_000,
 } as const
 
-export const taglineMessage = (label: string, line: string): string =>
-  `The person picked ${label}: "${line}". Use it on the card.`
+export const modellerName = "Modeller"
+export const builderName = "Builder"
+export const serverName = "Game server"
+
+export const sheetSubject = "Which game shall we build?"
+export const worldOptions = ["Fantasy", "Sci-fi", "Modern"] as const
+export const kindOptions = ["RPG", "Shooter", "Strategy"] as const
+
+export const modelled = "Hero modelled."
+export const gameBuilt = "Game built."
+
+export const heroColourSubject = "What colour should the hero be?"
+export const heroColours = ["Red", "Blue", "Green"] as const
 
 const target = ({ projectId, workspaceSessionId }: TerminalKey) => ({
   projectId,
   workspaceSessionId,
-})
-
-// The harnesses the lead's two teammates run on: the copywriter on the lead's, the designer on
-// another connected agent where there is one, else on the lead's too, so the team is mixed
-// where the person has two agents.
-export const teamHarnesses = (
-  lead: AgentName,
-  connected: readonly AgentName[],
-): { readonly copywriter: AgentName; readonly designer: AgentName } => ({
-  copywriter: lead,
-  designer: connected.find((agent) => agent !== lead) ?? lead,
 })
 
 // The command a teammate's terminal runs, as `open_agent` starts an agent: its harness, on the
@@ -71,7 +76,27 @@ export const openedTeammate = (
 ): BackendAction => ({
   type: "terminal/add",
   target: target(key),
-  terminal: { ...terminal, ledBy: lead },
+  terminal: { ...terminal, ledBy: lead, openedBy: lead },
+  // As the runner opens an agent's terminal: beside the person's, not over it.
+  select: false,
+})
+
+// A terminal the lead opened with `open_terminal`: its own, led by no one, titled by the lead.
+export const openedShell = (
+  key: TerminalKey,
+  terminal: TerminalMetadata,
+  lead: string,
+  by: string,
+): BackendAction => ({
+  type: "terminal/add",
+  target: target(key),
+  terminal: {
+    ...terminal,
+    name: serverName,
+    titleSource: { kind: "agent", by },
+    openedBy: lead,
+  },
+  select: false,
 })
 
 // An agent's describe: its terminal takes the name, as the agent's own, by its handle.
@@ -83,127 +108,141 @@ export const namedAs = (key: TerminalKey, name: string, by: string): BackendActi
   titleSource: { kind: "agent", by },
 })
 
-// The copywriter's ask, as the runner's `ask` makes its row: options A and B, each with its
-// line, from the copywriter's terminal, the agent working on meanwhile.
-export const taglineAsk = (
+const sourceOf = (
+  key: TerminalKey,
+  terminal: TerminalMetadata,
+  harness: AgentName,
+  projectName: string,
+): InboxEntry["source"] => ({
+  projectId: key.projectId,
+  workspaceSessionId: key.workspaceSessionId,
+  terminalId: key.terminalId,
+  handle: terminal.handle ?? "",
+  agent: harness,
+  title: terminal.name,
+  projectName,
+})
+
+const options = (labels: readonly string[]) => labels.map((label) => ({ label, summary: null }))
+
+// The lead's sheet, as the runner's `ask` makes its entry for several questions: the world and
+// the kind of the game, three options each, from the lead's own terminal, the agent waiting.
+export const sheetAsk = (
   key: TerminalKey,
   terminal: TerminalMetadata,
   harness: AgentName,
   projectName: string,
   at: number,
-): InboxRow => ({
+): InboxEntry => ({
   id: `tour-ask-${key.terminalId}`,
   kind: "ask",
-  source: {
-    projectId: key.projectId,
-    workspaceSessionId: key.workspaceSessionId,
-    terminalId: key.terminalId,
-    handle: terminal.handle ?? "",
-    agent: harness,
-    title: terminal.name,
-    projectName,
-  },
+  source: sourceOf(key, terminal, harness, projectName),
   at,
   stopped: false,
   seen: false,
   ask: {
-    subject: taglineSubject,
-    body: "The lead asked for a welcome card. Which line should it carry under the headline?",
+    subject: sheetSubject,
+    body: "Pick a world and a kind of game, or type anything you like.",
+    details: null,
+    hardToUndo: null,
+    shape: {
+      type: "questions",
+      questions: [
+        {
+          header: "The world",
+          question: "The world",
+          options: options(worldOptions),
+          multiSelect: false,
+          recommend: null,
+        },
+        {
+          header: "The kind",
+          question: "The kind",
+          options: options(kindOptions),
+          multiSelect: false,
+          recommend: null,
+        },
+      ],
+    },
+  },
+})
+
+// A teammate's own question, as the runner's `ask` makes its entry for options: from its
+// terminal, the agent working on meanwhile.
+export const heroColourAsk = (
+  key: TerminalKey,
+  terminal: TerminalMetadata,
+  harness: AgentName,
+  projectName: string,
+  at: number,
+): InboxEntry => ({
+  id: `tour-ask-${key.terminalId}`,
+  kind: "ask",
+  source: sourceOf(key, terminal, harness, projectName),
+  at,
+  stopped: false,
+  seen: false,
+  ask: {
+    subject: heroColourSubject,
+    body: "I'll paint the hero's model in it. Pick one, or type anything you like.",
     details: null,
     hardToUndo: null,
     shape: {
       type: "options",
-      options: taglines.map(({ label, line }) => ({
-        label,
-        summary: line,
-        details: null,
-        code: null,
-      })),
+      options: heroColours.map((label) => ({ label, summary: null, details: null, code: null })),
       recommend: null,
     },
   },
 })
 
-// The answer picking option `option`, as the Inbox sends it.
-export const pickTagline = (option: number): InboxAnswer => ({
+// What the person gives a question: the option's index, or their own words.
+export type Given = number | string
+
+// The sheet's answer picking `world` and `kind`, as the Inbox sends it.
+export const pickSheet = (world: Given, kind: Given): InboxAnswer => ({
   kind: "ask",
-  answer: { type: "reply", option, text: "" },
+  answer: {
+    type: "questions",
+    answers: [world, kind].map((pick) =>
+      typeof pick === "number" ? { options: [pick], text: "" } : { options: [], text: pick },
+    ),
+  },
 })
 
-// The tagline an answer chose: its option's line, or the person's own words where they gave no
-// option. An ask that ended unanswered (dismissed, withdrawn) leaves it to the first.
-export const chosenTagline = (
+// The answer picking option `option` of an options ask, or giving the person's own words.
+export const pickOption = (answer: Given): InboxAnswer => ({
+  kind: "ask",
+  answer:
+    typeof answer === "number"
+      ? { type: "reply", option: answer, text: "" }
+      : { type: "reply", option: null, text: answer },
+})
+
+// The words an options answer gives: the option picked, else the person's own, else the first
+// option.
+export const chosenOption = (
   answer: InboxAnswer | undefined,
-): { readonly label: string; readonly line: string } => {
+  labels: readonly string[],
+): string => {
   const reply = answer?.kind === "ask" && answer.answer.type === "reply" ? answer.answer : undefined
-  const option = reply?.option === null || reply === undefined ? undefined : taglines[reply.option]
-  if (option) return option
-  const words = reply?.text.trim()
-  return words ? { label: "your words", line: words } : taglines[0]
+  const picked = reply?.option === null || reply === undefined ? undefined : labels[reply.option]
+  return picked ?? (reply?.text.trim() || labels[0]!)
 }
 
-const escaped = (text: string): string =>
-  text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-
-const paragraph = [
-  "Your agents work in terminals you can see side by side.",
-  "Ask one for something, and it brings in teammates,",
-  "asks you when it needs a decision, and shows you what it made.",
-]
-
-// The welcome card as an image: the designer's look (background, text and accent colours,
-// Georgia and Arial), a heading, the chosen tagline and a short paragraph, on an 800 by 450 canvas.
-export const cardSvg = (line: string): string =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">` +
-  `<rect width="800" height="450" rx="24" fill="#f6f1e7"/>` +
-  `<text x="400" y="140" text-anchor="middle" font-family="Georgia, serif" font-size="40" fill="#2d2a24">Welcome, friend</text>` +
-  `<text x="400" y="200" text-anchor="middle" font-family="Georgia, serif" font-size="22" font-style="italic" fill="#0f766e">${escaped(line)}</text>` +
-  paragraph
-    .map(
-      (text, index) =>
-        `<text x="400" y="${270 + index * 28}" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#2d2a24">${escaped(text)}</text>`,
+// The game a sheet's answer names: for each question the option picked or the person's own
+// words. An ask that ended unanswered (dismissed, withdrawn) leaves the first options.
+export const chosenHero = (answer: InboxAnswer | undefined): Hero => {
+  const given =
+    answer?.kind === "ask" && answer.answer.type === "questions" ? answer.answer.answers : []
+  const word = (at: number, labels: readonly string[]) => {
+    const one = given[at]
+    const own = one?.text.trim()
+    return (
+      (one?.options[0] !== undefined ? labels[one.options[0]] : undefined) ?? (own || labels[0]!)
     )
-    .join("") +
-  `</svg>`
-
-// What the lead shows: welcome.svg as an image on its bar, asked to open, from the lead's
-// terminal (as the runner's `show` of an image file makes, `by: "agent"`).
-export const welcomeCard = (
-  key: TerminalKey,
-  handle: string,
-  line: string,
-  now: number,
-): { readonly item: Item; readonly content: ItemContent } => ({
-  item: {
-    id: itemIdOf(`tour-card-${key.terminalId}`),
-    holder: { terminalId: key.terminalId },
-    kind: "image",
-    name: "welcome.svg",
-    detail: "welcome.svg",
-    path: "~/.novadeck/tour/welcome.svg",
-    url: null,
-    lines: null,
-    secret: false,
-    by: "agent",
-    from: { terminalId: key.terminalId, handle },
-    version: 1,
-    openAsked: true,
-    shownAt: now,
-    plan: null,
-  },
-  content: {
-    state: "ready",
-    stamp: "1",
-    content: {
-      kind: "image",
-      src: `data:image/svg+xml,${encodeURIComponent(cardSvg(line))}`,
-    },
-  },
-})
+  }
+  return heroOf(word(0, worldOptions), word(1, kindOptions))
+}
 
 type Story = {
   readonly key: TerminalKey
@@ -216,22 +255,26 @@ type Story = {
   readonly terminal: () => TerminalMetadata | undefined
   // The lead opens its team only once nudged again.
   readonly quietTeam: boolean
-  // Ends the lead's turn once the card is shown.
+  // The modeller does nothing, once it is there, until nudged.
+  readonly quietModeller: boolean
+  // The modeller asks the person a question of its own, and waits for it, before it reports.
+  readonly mateAsks: boolean
+  // There is no page: this computer has neither Node nor Python.
+  readonly noPage: boolean
+  // Ends the lead's turn once both teammates have reported.
   readonly finish: () => void
 }
 
 const handleOf = (found: TerminalMetadata | undefined, fallback: string) =>
   found?.handle ?? fallback
 
-type Teammate = {
+export type Teammate = {
   readonly key: TerminalKey
   readonly handle: string
   readonly harness: AgentName
 }
 
-// Plays the story after the lead described itself, answering a function that stops it: the
-// teammates open, bind, work and name themselves; they talk; the copywriter asks the person; and,
-// once answered, tells the lead, who shows its card and finishes.
+// Plays the story after the lead described itself, answering a function that stops it.
 export const playTourStory = ({
   key,
   harness,
@@ -241,6 +284,9 @@ export const playTourStory = ({
   stage,
   terminal,
   quietTeam,
+  quietModeller,
+  mateAsks,
+  noPage,
   finish,
 }: Story): (() => void) => {
   const timers = new Set<ReturnType<typeof setTimeout>>()
@@ -254,36 +300,52 @@ export const playTourStory = ({
     timers.add(timer)
   }
   const current = (at: TerminalKey) => terminalOf(stage.workspace(), at)
-  const team = teamHarnesses(harness, tour.connected())
-  const mates: Teammate[] = []
+  const sessionTarget = target(key)
   const lead = () => {
     const found = terminal()
     if (!found) over = true
     return found
   }
-  const sessionTarget = target(key)
 
-  // The lead opens one teammate: a terminal it leads, with a handle at once, which binds, works
-  // and names itself.
-  const open = (name: string, at: AgentName, named: () => void) => {
+  const say = (from: Teammate | "lead", text: string, then?: () => void) => {
     const found = lead()
     if (!found) return
-    const base = stage.newTerminal({
-      target: sessionTarget,
-      directory: demoTourFolder,
-      launch: { command: teammateCommand(at) },
+    const handle = (who: Teammate | "lead") =>
+      who === "lead" ? handleOf(found, harness) : who.handle
+    const sent = stage.messages?.send(sessionTarget, handle(from), handle("lead"), text, then, then)
+    // A refused send, or no messages here, goes on as if it landed.
+    if (!sent && then) later(tourStoryMs.talk, then)
+  }
+
+  // The game the person's sheet named, once they answered; and whether the team has built it.
+  let hero: Hero | undefined
+  let built = false
+  // Whether the lead showed its page, which it shows again once the game is built.
+  let paged = false
+  const showPage = () => {
+    paged = true
+    stage.page(key, built && hero ? pageContent(hero, 2) : pageContent(undefined, 1))
+  }
+
+  // Each teammate's report the lead heard: once both are in, the lead shows the built game and
+  // ends its turn.
+  const reported = new Set<string>()
+  const reports = (mate: Teammate) => {
+    reported.add(mate.key.terminalId)
+    if (reported.size < 2) return
+    built = true
+    later(tourStoryMs.show, () => {
+      if (paged) showPage()
+      finish()
     })
-    const mate: Teammate = {
-      key: { ...sessionTarget, terminalId: base.id },
-      handle: handleOf(base, name.toLowerCase()),
-      harness: at,
-    }
-    mates.push(mate)
-    dispatch([openedTeammate(mate.key, base, found.id)])
+  }
+
+  // A teammate binds, works and names itself, then goes on with `named`.
+  const settle = (mate: Teammate, name: string, named: () => void) => {
     stage.messages?.join(sessionTarget, { terminalId: mate.key.terminalId, handle: mate.handle })
     later(tourStoryMs.bind, () => {
       if (!current(mate.key)) return
-      turns.as(at).work(mate.key, current(mate.key))
+      turns.as(mate.harness).work(mate.key, current(mate.key))
       later(tourStoryMs.work, () => {
         if (!current(mate.key)) return
         dispatch([namedAs(mate.key, name, mate.handle)])
@@ -292,39 +354,74 @@ export const playTourStory = ({
     })
   }
 
-  const say = (from: Teammate | "lead", to: Teammate | "lead", text: string, then?: () => void) => {
-    const found = lead()
-    if (!found) return
-    const handle = (who: Teammate | "lead") =>
-      who === "lead" ? handleOf(found, harness) : who.handle
-    const sent = stage.messages?.send(sessionTarget, handle(from), handle(to), text, then, then)
-    // A refused send, or no messages here, goes on as if it landed.
-    if (!sent && then) later(tourStoryMs.talk, then)
-  }
-
-  const present = (line: string) => {
-    const found = lead()
-    if (!found) return
-    const card = welcomeCard(key, handleOf(found, harness), line, Date.now())
-    stage.hold(card.item.id, card.content)
-    dispatch([{ type: "item/upsert", target: sessionTarget, item: card.item }])
-    later(tourStoryMs.show, finish)
-  }
-
-  // Waits for the person's answer to the ask, as long as it takes, and goes on with the tagline
-  // it chose.
-  const asked = (copywriter: Teammate) => {
-    const found = lead()
-    const writer = current(copywriter.key)
-    if (!found || !writer) return
-    const project = stage.workspace()?.projects.find(({ id }) => id === key.projectId)
-    const row = taglineAsk(
-      copywriter.key,
-      writer,
-      copywriter.harness,
-      project?.name ?? "",
+  // The teammate opens its worktree (`open_worktree`) on `branch`.
+  const worktree = (mate: Teammate, branch: string) =>
+    stage.works?.openBranch(
+      {
+        projectId: key.projectId,
+        terminalId: mate.key.terminalId,
+        root: worktreeRoot("tour", branch),
+      },
+      branch,
+    )
+  // It writes `files` there: the work changes exactly these, and the Files panel shows each as
+  // the agent writes it, its cursor on the last.
+  const write = (
+    mate: Teammate,
+    files: readonly {
+      readonly path: string
+      readonly added: number
+      readonly removed: number
+      readonly status?: "added"
+    }[],
+  ) => {
+    stage.works?.setFiles(
+      mate.key.terminalId,
+      files.map(({ path, added, removed, status }) =>
+        planFile(path, added, removed, status ? { status } : {}),
+      ),
       Date.now(),
     )
+    for (const file of files) stage.files?.write(mate.handle, file.path, file.status ?? "modified")
+  }
+  // It tells the lead, and its turn ends.
+  const report = (mate: Teammate, text: string) => {
+    say(mate, text)
+    stage.files?.end(mate.handle)
+    turns.as(mate.harness).finish(mate.key, current(mate.key), "completed", {
+      after: tourStoryMs.talk,
+      reply: text,
+    })
+    later(tourStoryMs.talk, () => reports(mate))
+  }
+
+  // The lead opens a teammate: a terminal it leads, with a handle at once.
+  const hire = (fallback: string): Teammate | undefined => {
+    const found = lead()
+    if (!found) return undefined
+    const base = stage.newTerminal({
+      target: sessionTarget,
+      directory: demoTourFolder,
+      launch: { command: teammateCommand(harness) },
+    })
+    const mate: Teammate = {
+      key: { ...sessionTarget, terminalId: base.id },
+      handle: handleOf(base, fallback),
+      harness,
+    }
+    dispatch([openedTeammate(mate.key, base, found.id)])
+    return mate
+  }
+
+  // Puts `entry` in the Inbox, from `asker`'s terminal, and calls `answered` once the person
+  // has dealt with it, as long as that takes: answered, which takes the entry away, or
+  // dismissed or withdrawn, which settles it. `listen` hears an answer the debug panel or a spec
+  // gives, which answers the entry as the person would.
+  const asked = (
+    entry: InboxEntry,
+    listen: (on: (answer: InboxAnswer) => void) => () => void,
+    answered: (given: InboxAnswer | undefined) => void,
+  ) => {
     let seen = false
     let ended = false
     const end = () => {
@@ -334,49 +431,142 @@ export const playTourStory = ({
       stops.delete(stop)
       stopAnswer()
       stops.delete(stopAnswer)
-      const { label, line } = chosenTagline(stage.answeredWith(row.id))
-      later(tourStoryMs.talk, () => {
-        say(copywriter, "lead", taglineMessage(label, line), () => present(line))
-        turns.as(copywriter.harness).finish(copywriter.key, current(copywriter.key), "completed", {
-          after: tourStoryMs.talk,
-          reply: `Sent ${label} to the lead.`,
-        })
-      })
+      answered(stage.answeredWith(entry.id))
     }
     const check = () => {
       const state = stage.inbox?.state.getSnapshot()
-      const held = state?.items.find(({ id }) => id === row.id)
+      const held = state?.items.find(({ id }) => id === entry.id)
       if (held && !held.settled) {
         seen = true
         return
       }
-      // Answered, which takes the row away, or dismissed or withdrawn, which settles it.
       if (seen || held?.settled) end()
     }
     const stop = stage.inbox?.state.subscribe(check) ?? (() => {})
-    const stopAnswer = tour.tagline((option) => stage.answerRow(row.id, pickTagline(option)))
+    const stopAnswer = listen((answer) => stage.answerEntry(entry.id, answer))
     stops.add(stop)
     stops.add(stopAnswer)
     if (!stage.inbox) return later(tourStoryMs.talk, end)
-    stage.inbox.add(row)
+    stage.inbox.add(entry)
     check()
   }
 
-  const talk = () => {
-    const [copywriter, designer] = mates
-    if (!copywriter || !designer) return
-    say(designer, copywriter, tourTalk.designerToCopywriter)
-    later(tourStoryMs.talk, () => say(copywriter, "lead", tourTalk.copywriterToLead))
-    later(tourStoryMs.talk * 2, () => {
-      say(designer, "lead", tourTalk.designerToLead)
-      turns.as(designer.harness).finish(designer.key, current(designer.key), "completed", {
-        after: tourStoryMs.talk,
-        reply: "The card's look is ready.",
+  const projectName = () =>
+    stage.workspace()?.projects.find(({ id }) => id === key.projectId)?.name ?? ""
+
+  // The modeller writes its model in its worktree, shows it, and, where asked to, asks the
+  // person what colour the hero is and waits; then it tells the lead.
+  const model = (mate: Teammate, chosen: Hero) => {
+    const root = worktreeRoot("tour", branches.modeller)
+    write(mate, [{ path: modelFile, added: 38, removed: 0, status: "added" }])
+    later(tourStoryMs.show, () => {
+      const sculpted = modelOf(chosen, "1")
+      stage.show(mate.key, {
+        kind: "model",
+        name: "hero.gltf",
+        detail: "glTF, 2 kB",
+        path: `${root}/${modelFile}`,
+        url: null,
+        content: sculpted.content,
+        bytes: sculpted.bytes,
       })
+      const writer = current(mate.key)
+      if (!mateAsks || !writer) return report(mate, modelled)
+      asked(
+        heroColourAsk(mate.key, writer, mate.harness, projectName(), Date.now()),
+        (on) => tour.mate((given) => on(pickOption(given))),
+        (given) => report(mate, `${modelled} Its colour is ${chosenOption(given, heroColours)}.`),
+      )
     })
-    later(tourStoryMs.talk * 3, () => asked(copywriter))
   }
 
+  // The modeller binds, names itself, opens its worktree and models the hero.
+  const modeller = (mate: Teammate, chosen: Hero) =>
+    settle(mate, modellerName, () => {
+      worktree(mate, branches.modeller)
+      later(tourStoryMs.work, () => model(mate, chosen))
+    })
+
+  // The builder binds, names itself, opens its worktree, builds the game, shows its changes and
+  // reports.
+  const builder = (mate: Teammate, chosen: Hero) =>
+    settle(mate, builderName, () => {
+      worktree(mate, branches.builder)
+      later(tourStoryMs.work, () => {
+        write(mate, [{ path: gameFile, added: 3, removed: 3 }])
+        later(tourStoryMs.show, () => {
+          const root = worktreeRoot("tour", branches.builder)
+          stage.show(mate.key, {
+            kind: "changes",
+            name: "build-game",
+            detail: "1 file · +3 −3",
+            path: root,
+            url: null,
+            content: { state: "ready", stamp: "1", content: builderChanges(root) },
+            diffs: builderDiffs(chosen),
+          })
+          report(mate, gameBuilt)
+        })
+      })
+    })
+
+  // The lead asks to run the game's server in a new terminal, which waits on the person's yes,
+  // and opens nobody before they answer; allowed, a terminal of its own opens and the lead shows
+  // the game's page, then opens its team; declined, it opens its team at once.
+  const serve = (chosen: Hero) => {
+    const found = lead()
+    if (!found) return
+    void stage.approve(key, serverCommand, demoTourFolder).then((approved) => {
+      if (over || !lead()) return
+      if (!approved) return team(chosen)
+      const base = stage.newTerminal({
+        target: sessionTarget,
+        directory: demoTourFolder,
+        title: serverName,
+      })
+      dispatch([openedShell(key, base, found.id, handleOf(found, harness))])
+      later(tourStoryMs.show, showPage)
+      later(tourStoryMs.show + tourStoryMs.hire, () => team(chosen))
+    })
+  }
+
+  // The lead opens its team.
+  const team = (chosen: Hero) => {
+    const first = hire("modeller")
+    if (first && quietModeller) {
+      // Held at its prompt, no turn begun, until the tour nudges (the lead, which the tour
+      // can't tell from it, or the teammate itself).
+      const before = nudged(first.key.terminalId)
+      const wake = () => {
+        if (nudged(first.key.terminalId) <= before) return
+        stop()
+        stops.delete(stop)
+        modeller(first, chosen)
+      }
+      const stop = tour.nudged.subscribe(wake)
+      stops.add(stop)
+      turns.as(first.harness).rest(first.key, current(first.key))
+      stage.messages?.join(sessionTarget, {
+        terminalId: first.key.terminalId,
+        handle: first.handle,
+      })
+    } else if (first) modeller(first, chosen)
+    later(tourStoryMs.open, () => {
+      const second = hire("builder")
+      if (second) builder(second, chosen)
+      // Its steps so far done, the lead ends its turn: its team is at work, and each message
+      // that comes back wakes it. A lead at rest is what the tour's wait on it counts.
+      later(tourStoryMs.show, () =>
+        turns.as(harness).finish(key, terminal(), "completed", {
+          after: tourStoryMs.talk,
+          reply: "My team is at work.",
+        }),
+      )
+    })
+  }
+
+  // The lead asks the person what game to make, and waits as long as they take; then it asks to
+  // run the game's server, or, where there is none, opens its team for the game they named.
   const begin = () => {
     const found = lead()
     if (!found) return
@@ -384,21 +574,30 @@ export const playTourStory = ({
       terminalId: key.terminalId,
       handle: handleOf(found, harness),
     })
-    let named = 0
-    const onNamed = () => {
-      named += 1
-      if (named === 2) later(tourStoryMs.talk, talk)
-    }
-    later(tourStoryMs.open, () => open(copywriterName, team.copywriter, onNamed))
-    later(tourStoryMs.open * 2, () => open(designerName, team.designer, onNamed))
+    later(tourStoryMs.open, () => {
+      const entry = sheetAsk(key, found, harness, projectName(), Date.now())
+      asked(
+        entry,
+        (on) => tour.sheet(({ world, kind }) => on(pickSheet(world, kind))),
+        (given) => {
+          hero = chosenHero(given)
+          stage.chose(hero)
+          if (noPage) team(hero)
+          else serve(hero)
+        },
+      )
+    })
   }
 
-  // A lead told to wait opens its team only once nudged again after the point it's at now.
-  const nudges = () => tour.nudged.getSnapshot().filter((id) => id === key.terminalId).length
+  // Nudges the tour rang a terminal (or the lead, which stands for a teammate it can't name yet).
+  const nudged = (terminalId: string) =>
+    tour.nudged.getSnapshot().filter((id) => id === terminalId || id === key.terminalId).length
+
+  // A lead told to wait asks only once nudged again after the point it's at now.
   if (quietTeam) {
-    const before = nudges()
+    const before = nudged(key.terminalId)
     const wake = () => {
-      if (nudges() <= before) return
+      if (nudged(key.terminalId) <= before) return
       stop()
       stops.delete(stop)
       begin()

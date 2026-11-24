@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { directory, id, name } from "./fields.js"
+import { openUnion } from "./open.js"
 
 /**
  * The longest saved session state, in characters. Over WebSocket, the whole
@@ -91,9 +92,82 @@ export const workspaceSession = z.strictObject({
   // When the person last visited it, as last saved with `sessions.save`; null before. The
   // latest visit picks a project's current session, and the latest of all the project open.
   visitedAt: z.number().nullable(),
+  // Raised by every change to the session (its state, name or place), so the clients that
+  // share it can tell a newer one from what they hold. Absent from a runner from before it.
+  revision: z.number().int().nonnegative().optional(),
 })
 
+// A place in a session's state as JSON: its object keys, outermost first.
+const sessionPath = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((key) => key !== "__proto__", "Not a key a state holds"),
+  )
+  .min(1)
+  .max(8)
+
+/**
+ * A change to a session's state, as JSON the runner holds without reading what it means: each
+ * `unset` path taken out, then each `set` path given its value whole, any objects on the way
+ * there made. A client changes a state a record at a time (sessions/patch.ts in the runner
+ * adapter), so two clients' changes to different records both keep.
+ */
+export const sessionPatch = z.strictObject({
+  set: z.array(z.strictObject({ path: sessionPath, value: z.json() })).max(2048),
+  unset: z.array(sessionPath).max(2048),
+})
+
+/**
+ * What `sessions.watch` tells a client: first each session's revision, by id, to read again
+ * those it holds older; then each session as it changes (`writer`, `base`: who changed it
+ * and from which revision, where a `sessions.change` did; a session changed again before it
+ * was read comes once, as it is now), and each one gone, those of a project removed among
+ * them. A client from revision 5 drops a kind it doesn't know.
+ */
+export const sessionChange = openUnion(
+  "type",
+  [
+    z.strictObject({
+      type: z.literal("revisions"),
+      revisions: z.record(id, z.number().int().nonnegative()),
+    }),
+    z.strictObject({
+      type: z.literal("changed"),
+      session: workspaceSession,
+      writer: z.string().max(64).nullable(),
+      base: z.number().int().nonnegative().nullable(),
+    }),
+    z.strictObject({ type: z.literal("removed"), sessionId: id }),
+  ],
+  { since: 5, unknown: "drop" },
+)
+
+/**
+ * What `projects.watch` tells a client: the projects as `projects.list` gives them, in the
+ * person's order with each one's pin, first and again after each project is made, renamed,
+ * arranged or removed; and a project's sessions in their order, once arranged. A reader slower
+ * than the changes gets the latest of each only. A client drops a kind it doesn't know.
+ */
+export const projectsChange = openUnion(
+  "type",
+  [
+    z.strictObject({ type: z.literal("projects"), projects: z.array(project).max(10_000) }),
+    z.strictObject({
+      type: z.literal("arranged"),
+      projectId: id,
+      order: z.array(id).max(10_000),
+    }),
+  ],
+  { since: 5, unknown: "drop" },
+)
+
 export type Project = z.infer<typeof project>
+export type SessionPatch = z.infer<typeof sessionPatch>
+export type SessionChange = z.infer<typeof sessionChange>
+export type ProjectsChange = z.infer<typeof projectsChange>
 export type FolderListing = z.infer<typeof folderListing>
 export type FolderBrowse = z.infer<typeof folderBrowse>
 export type EntryChanged = z.infer<typeof entryChanged>

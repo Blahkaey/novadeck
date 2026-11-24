@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -18,7 +19,7 @@ import { describe, expect, it as base } from "../test.js"
 import { withOrigin } from "../testing/origin.js"
 import { WorkspaceStore } from "../workspaces/store.js"
 import { fetchTimeoutMs, MainFetcher } from "./fetching.js"
-import { finishRemoval, nestedRepositories } from "./repo.js"
+import { finishRemoval, inRepository, nestedRepositories, repositoryKnown } from "./repo.js"
 import { Worktrees, folderName } from "./worktrees.js"
 
 const git = (cwd: string, ...args: string[]) =>
@@ -1344,5 +1345,347 @@ describe("telling that a worktree was made", () => {
     stop()
     await open(f, "b")
     expect(made).toHaveLength(2)
+  })
+})
+
+// Commits a file on the checkout's own branch.
+const commitIn = (folder: string, file: string): string => {
+  writeFileSync(join(folder, file), `${file}\n`)
+  git(folder, "add", "-A")
+  git(folder, "commit", "--quiet", "-m", `add ${file}`)
+  return git(folder, "rev-parse", "HEAD")
+}
+
+const keyOf = (folder: string, branch: string, key: string): string => {
+  try {
+    return git(folder, "config", "--get", `branch.${branch}.${key}`)
+  } catch {
+    return ""
+  }
+}
+
+describe("a folder that is in no git repository", () => {
+  it("is refused by open and take with the fact, that its files are changed in place", async ({
+    fx: f,
+  }) => {
+    const plain = join(f.other, "notes")
+    mkdirSync(plain)
+    const opened = await f.worktrees.open({
+      projectId: f.project,
+      terminalId: "t1",
+      cwd: plain,
+      branch: "feat",
+    })
+    expect(opened).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("isn't in a git repository"),
+    })
+    expect(opened.ok ? "" : opened.reason).toContain("changed in place")
+    const taken = await f.worktrees.take({
+      projectId: f.project,
+      terminalId: "t1",
+      cwd: plain,
+      path: plain,
+    })
+    expect(taken).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("isn't in a git repository"),
+    })
+    expect(taken.ok ? "" : taken.reason).toContain("changed in place")
+  })
+
+  it("says git's own words, with no advice, for an error that is no missing repository", async ({
+    fx: f,
+  }) => {
+    const broken = join(f.other, "broken")
+    mkdirSync(broken)
+    writeFileSync(join(broken, ".git"), "gitdir: /nowhere/at/all\n")
+    const opened = await f.worktrees.open({
+      projectId: f.project,
+      terminalId: "t1",
+      cwd: broken,
+      branch: "feat",
+    })
+    expect(opened).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("git couldn't read"),
+    })
+    expect(opened.ok ? "" : opened.reason).not.toContain("changed in place")
+    const typo = await f.worktrees.open({
+      projectId: f.project,
+      terminalId: "t1",
+      cwd: f.repo,
+      repo: join(f.other, "no-such-folder"),
+      branch: "feat",
+    })
+    expect(typo.ok ? "" : typo.reason).not.toContain("changed in place")
+  })
+
+  it("is told apart from a repository's folder by its .git, in it or a parent", async ({
+    fx: f,
+  }) => {
+    const plain = join(f.other, "notes")
+    mkdirSync(join(plain, "deeper"), { recursive: true })
+    expect(await inRepository(plain)).toBe(false)
+    expect(await inRepository(f.repo)).toBe(true)
+    const lead = await open(f, "feat-x")
+    if (!lead.ok) throw new Error(lead.reason)
+    // A linked worktree has a .git file.
+    expect(await inRepository(lead.path)).toBe(true)
+    mkdirSync(join(f.repo, "sub"))
+    expect(await inRepository(join(f.repo, "sub"))).toBe(true)
+  })
+
+  it("follows a symlink into a repository, and can't tell for no folder, a missing one or a bare repository", async ({
+    fx: f,
+  }) => {
+    const link = join(f.other, "link")
+    // The target first, and a junction: Windows makes a file link of a folder that isn't there yet.
+    mkdirSync(join(f.repo, "sub-link-target"))
+    symlinkSync(join(f.repo, "sub-link-target"), link, "junction")
+    expect(await inRepository(link)).toBe(true)
+    expect(await inRepository("")).toBeUndefined()
+    expect(await inRepository(join(f.other, "missing"))).toBeUndefined()
+    const bare = join(f.other, "bare.git")
+    git(f.other, "init", "--quiet", "--bare", bare)
+    expect(await inRepository(bare)).toBeUndefined()
+    // An empty .git folder is none, as git goes on looking above it.
+    const empty = join(f.other, "empty")
+    mkdirSync(join(empty, ".git"), { recursive: true })
+    expect(await inRepository(empty)).toBe(false)
+  })
+
+  it("keeps an answer a few seconds, and a turn that waits on nothing gets only what is kept", async ({
+    fx: f,
+  }) => {
+    const folder = join(f.other, "kept-folder")
+    mkdirSync(folder)
+    // Not kept yet, and not waited for.
+    expect(await repositoryKnown(folder, false)).toBeUndefined()
+    expect(await repositoryKnown(folder, true)).toBe(false)
+    expect(await repositoryKnown(folder, false)).toBe(false)
+  })
+})
+
+describe("a worktree's home", () => {
+  it("is main for a worktree opened from main, said and never written", async ({ fx: f }) => {
+    const a = await open(f, "plain")
+    if (!a.ok) throw new Error(a.reason)
+    expect(a.home).toBe("main")
+    expect(keyOf(f.repo, "plain", "novadeckHome")).toBe("")
+    // What git now keeps of the branch: where it started, and that Novadeck made it.
+    expect(keyOf(f.repo, "plain", "novadeckBase")).toBe(a.base)
+    expect(keyOf(f.repo, "plain", "novadeckMade")).toBe("true")
+  })
+
+  it("is the branch `from` names, or `home`, here or as origin's", async ({ fx: f }) => {
+    git(f.repo, "branch", "JIRA-123")
+    const a = await open(f, "agent-1", { from: "JIRA-123" })
+    if (!a.ok) throw new Error(a.reason)
+    expect(a.home).toBe("JIRA-123")
+    expect(keyOf(f.repo, "agent-1", "novadeckHome")).toBe("JIRA-123")
+    const b = await open(f, "agent-2", { home: "JIRA-123" })
+    if (!b.ok) throw new Error(b.reason)
+    expect(b.home).toBe("JIRA-123")
+    // A commit is no branch: home stays main.
+    const c = await open(f, "agent-3", { from: git(f.repo, "rev-parse", "HEAD") })
+    if (!c.ok) throw new Error(c.reason)
+    expect(c.home).toBe("main")
+  })
+
+  it("is the branch the new branch starts from when from is left out, as in a lead's worktree", async ({
+    fx: f,
+  }) => {
+    const lead = await open(f, "feat-x")
+    if (!lead.ok) throw new Error(lead.reason)
+    // A teammate opened from inside the lead's worktree: it starts from feat-x's HEAD.
+    writeFileSync(join(lead.path, "lead.txt"), "lead\n")
+    git(lead.path, "add", "-A")
+    git(lead.path, "commit", "--quiet", "-m", "lead")
+    const mate = await f.worktrees.open({
+      projectId: f.project,
+      terminalId: "t2",
+      cwd: lead.path,
+      branch: "mate-1",
+    })
+    if (!mate.ok) throw new Error(mate.reason)
+    expect(mate.base).toBe(git(lead.path, "rev-parse", "HEAD"))
+    expect(mate.home).toBe("feat-x")
+    expect(keyOf(f.repo, "mate-1", "novadeckHome")).toBe("feat-x")
+    // Said by the open's own answer, and a home that can be changed later by its owner.
+    expect(
+      await f.worktrees.take({
+        projectId: f.project,
+        terminalId: "t2",
+        cwd: mate.path,
+        path: mate.path,
+        home: "main",
+      }),
+    ).toMatchObject({ ok: true, already: true, home: "main" })
+    expect(keyOf(f.repo, "mate-1", "novadeckHome")).toBe("")
+  })
+
+  it("is the checkout's branch when that is where it starts from, as from HEAD says too", async ({
+    fx: f,
+  }) => {
+    git(f.repo, "checkout", "--quiet", "-b", "person-feature")
+    for (const [name, extra] of [
+      ["left-out", {}],
+      ["from-head", { from: "HEAD" }],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- One open at a time, in one repository.
+      const opened = await open(f, name, extra)
+      if (!opened.ok) throw new Error(opened.reason)
+      expect(opened.home).toBe("person-feature")
+    }
+    // A commit spelled as a revision of it is no branch.
+    for (const from of ["@", "person-feature~0"]) {
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      const opened = await open(f, `from-${from.replaceAll(/\W/g, "")}`, { from })
+      if (!opened.ok) throw new Error(opened.reason)
+      expect(opened.home).toBe("main")
+    }
+  })
+
+  it("is main where the start has no branch: a detached HEAD, or main itself", async ({
+    fx: f,
+  }) => {
+    const plain = await open(f, "from-main")
+    if (!plain.ok) throw new Error(plain.reason)
+    expect(plain.home).toBe("main")
+    git(f.repo, "checkout", "--quiet", "--detach")
+    const opened = await open(f, "from-detached")
+    if (!opened.ok) throw new Error(opened.reason)
+    expect(opened.home).toBe("main")
+    expect(keyOf(f.repo, "from-detached", "novadeckHome")).toBe("")
+  })
+
+  it("is main for an existing branch checked out, and for a given tag", async ({ fx: f }) => {
+    git(f.repo, "branch", "existing")
+    git(f.repo, "tag", "v1")
+    git(f.repo, "checkout", "--quiet", "-b", "person-feature")
+    const existing = await open(f, "existing")
+    if (!existing.ok) throw new Error(existing.reason)
+    expect(existing.home).toBe("main")
+    const tagged = await open(f, "from-tag", { from: "v1" })
+    if (!tagged.ok) throw new Error(tagged.reason)
+    expect(tagged.home).toBe("main")
+  })
+
+  it("refuses its own branch, and a branch that isn't here or on origin", async ({ fx: f }) => {
+    expect(await open(f, "self", { home: "self" })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("another branch than its own"),
+    })
+    expect(await open(f, "lost", { home: "nowhere" })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("nowhere isn't a branch here or on origin"),
+    })
+    expect(f.store.worktree(join(f.root, f.project, "lost", "api"))).toBeUndefined()
+  })
+
+  it("forgets what a deleted branch of that name left in git config", async ({ fx: f }) => {
+    git(f.repo, "branch", "JIRA-123")
+    git(f.repo, "config", "branch.reused.novadeckHome", "JIRA-123")
+    const a = await open(f, "reused")
+    if (!a.ok) throw new Error(a.reason)
+    expect(a.home).toBe("main")
+    expect(keyOf(f.repo, "reused", "novadeckHome")).toBe("")
+  })
+
+  it("closes a worktree whose work landed on home, deleting the branch it made", async ({
+    fx: f,
+  }) => {
+    git(f.repo, "branch", "JIRA-123")
+    const a = await open(f, "agent", { from: "JIRA-123" })
+    if (!a.ok) throw new Error(a.reason)
+    commitIn(a.path, "fix.txt")
+    const row = f.store.worktree(a.path)!
+    // Not on home yet: what it holds is named by home.
+    expect(await f.worktrees.remove(row, false)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("1 commit JIRA-123 doesn't have"),
+    })
+    // Landed: home fast-forwarded to it, as a local landing does, with main left behind.
+    git(f.repo, "branch", "-f", "JIRA-123", "agent")
+    expect(await f.worktrees.remove(row, false)).toMatchObject({ ok: true, branchDeleted: true })
+    expect(git(f.repo, "branch", "--list", "agent")).toBe("")
+  })
+
+  it("closes one whose work reached main instead of home, as a retargeted stack does", async ({
+    fx: f,
+  }) => {
+    git(f.repo, "branch", "JIRA-123")
+    const a = await open(f, "child", { from: "JIRA-123" })
+    if (!a.ok) throw new Error(a.reason)
+    commitIn(a.path, "child.txt")
+    git(f.repo, "merge", "--quiet", "--squash", "child")
+    git(f.repo, "commit", "--quiet", "-m", "squash child")
+    expect(await f.worktrees.remove(f.store.worktree(a.path)!, false)).toMatchObject({
+      ok: true,
+    })
+  })
+
+  it("changes on take, for a worktree that is the caller's by it, and is said", async ({
+    fx: f,
+  }) => {
+    git(f.repo, "branch", "JIRA-123")
+    const a = await open(f, "agent")
+    if (!a.ok) throw new Error(a.reason)
+    expect(
+      await f.worktrees.take({
+        projectId: f.project,
+        terminalId: "t1",
+        cwd: f.repo,
+        path: a.path,
+        home: "JIRA-123",
+      }),
+    ).toMatchObject({ ok: true, already: true, home: "JIRA-123" })
+    expect(keyOf(f.repo, "agent", "novadeckHome")).toBe("JIRA-123")
+    // Back to main: the key goes, as main is measured by without one.
+    expect(
+      await f.worktrees.take({
+        projectId: f.project,
+        terminalId: "t1",
+        cwd: f.repo,
+        path: a.path,
+        home: "main",
+      }),
+    ).toMatchObject({ ok: true, home: "main" })
+    expect(keyOf(f.repo, "agent", "novadeckHome")).toBe("")
+  })
+
+  it("keeps what a script set on a worktree it made, when adopted", async ({ fx: f }) => {
+    git(f.repo, "branch", "JIRA-123")
+    const path = join(f.other, "scripted")
+    git(f.repo, "worktree", "add", "--quiet", "-b", "scripted", path)
+    git(f.repo, "config", "branch.scripted.novadeckHome", "JIRA-123")
+    expect(
+      await f.worktrees.take({ projectId: f.project, terminalId: "t1", cwd: f.repo, path }),
+    ).toMatchObject({ ok: true, home: "JIRA-123" })
+  })
+})
+
+describe("carrying rows into git config at the runner's start", () => {
+  it("writes the start and who made the branch, only while the row's branch is checked out", async ({
+    fx: f,
+  }) => {
+    const a = await open(f, "older")
+    const b = await open(f, "moved")
+    if (!a.ok || !b.ok) throw new Error("open")
+    // As a build before this one left them: no keys.
+    for (const branch of ["older", "moved"])
+      for (const key of ["novadeckBase", "novadeckMade"])
+        git(f.repo, "config", "--unset", `branch.${branch}.${key}`)
+    // An agent moved one worktree to another branch since: its row's branch name may be reused.
+    git(b.path, "checkout", "--quiet", "-b", "elsewhere")
+    await f.worktrees.reconcile()
+    expect(keyOf(f.repo, "older", "novadeckBase")).toBe(a.base)
+    expect(keyOf(f.repo, "older", "novadeckMade")).toBe("true")
+    expect(keyOf(f.repo, "moved", "novadeckBase")).toBe("")
+    expect(keyOf(f.repo, "elsewhere", "novadeckBase")).toBe("")
+    // Again: nothing more to carry.
+    await f.worktrees.reconcile()
+    expect(keyOf(f.repo, "older", "novadeckBase")).toBe(a.base)
   })
 })

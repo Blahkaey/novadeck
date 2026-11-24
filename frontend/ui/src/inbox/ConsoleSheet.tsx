@@ -3,17 +3,26 @@ import { PersonWords } from "@novadeck/chat/PersonWords"
 import { ToolCalls } from "@novadeck/chat/ToolCalls"
 import type { ChatAnswer, ChatRequest } from "@novadeck/core/conversation"
 import {
-  rowKey,
+  entryKey,
+  type AskQuestion,
   type HeldMessage,
   type InboxAnswer,
-  type InboxRow,
+  type InboxEntry,
   type Trouble,
 } from "@novadeck/core/inbox"
+import { askAnswerOf, askDialog } from "@novadeck/core/inbox/questions"
 import { unsaidWaits, waitsText } from "@novadeck/core/messages"
 import { Detail } from "@novadeck/requests/Detail"
 import type { DialogDraft } from "@novadeck/requests/drafts"
 import { answerWordsLimit, Menu, type MenuHandle, type MenuItem } from "@novadeck/requests/Menu"
-import { RequestCard, RequestFrame, type RequestPlace } from "@novadeck/requests/RequestCard"
+import { PermitFacts } from "@novadeck/requests/PermitFacts"
+import {
+  clickToDialog,
+  RequestCard,
+  RequestFrame,
+  type RequestPlace,
+} from "@novadeck/requests/RequestCard"
+import { RequestDialog } from "@novadeck/requests/RequestDialog"
 import { HandleChip } from "@novadeck/toolkit/HandleChip"
 import { Markdown } from "@novadeck/toolkit/Markdown"
 import { isElement } from "@novadeck/toolkit/realm"
@@ -26,7 +35,7 @@ import {
   resetLabel,
   type Menu as MenuModel,
   type MenuRow,
-  type OwnRow,
+  type OwnEntry,
 } from "./console-menu"
 import { rowOf } from "./inbox-dom"
 import { agentName, endedLine, limitWindow, subjectOf } from "./inbox-text"
@@ -37,21 +46,21 @@ import { Disclosure, Failure, Text } from "./sheet-parts"
 // The Console sheet: the person's last words to the agent and the few steps it took since, drawn
 // as the chat draws them; then a card, as the chat's: a request's is the chat's own card, and the
 // Inbox's own kinds (an agent's ask, a held message, trouble, an update) are drawn in its frame,
-// with its menu. Nothing here says what the head or the row says already.
+// with its menu. Nothing here says what the head or the entry says already.
 
-// What the sheet gets: its row, and what it knows around it.
+// What the sheet gets: its entry, and what it knows around it.
 export type SheetContentProps = {
-  readonly row: InboxRow
+  readonly entry: InboxEntry
   // The answer the person gave, once they have.
   readonly sent: Sent | undefined
   // Whether an answer is on its way, and why the last one didn't take.
   readonly answering: boolean
   readonly failed: string | undefined
-  // Answers the row, with the receipt that tells the person what it did.
+  // Answers the entry, with the receipt that tells the person what it did.
   readonly submit: (answer: InboxAnswer, note: string) => void
-  // Changes how the row is handled, without answering it: it stays.
+  // Changes how the entry is handled, without answering it: it stays.
   readonly change: (answer: InboxAnswer) => void
-  // Shows the row's terminal.
+  // Shows the entry's terminal.
   readonly reveal: () => void
 }
 
@@ -78,16 +87,16 @@ const askedClock = (askedAt: number): React.ReactNode => (
 // latest steps since, as the chat draws a run of them. It fills in late, and takes the room it
 // needs: `moved` hears each time it grows or changes, as the card under it moves.
 const Context = ({
-  row,
+  entry,
   moved,
 }: {
-  readonly row: InboxRow
+  readonly entry: InboxEntry
   readonly moved: () => void
 }): React.JSX.Element | null => {
-  const context = useAgentContext(row)
+  const context = useAgentContext(entry)
   const said = context?.said ?? null
   const entries = context?.entries ?? []
-  const shape = `${said?.text ?? ""}\n${entries.map((entry) => entry.id).join(",")}`
+  const shape = `${said?.text ?? ""}\n${entries.map((each) => each.id).join(",")}`
   const first = useRef(true)
   useLayoutEffect(() => {
     if (first.current) {
@@ -100,7 +109,7 @@ const Context = ({
   if (!said && entries.length === 0) return null
   return (
     <section className="chat-thread inbox-context" aria-label="Where it was">
-      {said && <PersonWords id={`said:${row.id}`} text={said.text} at={said.at} />}
+      {said && <PersonWords id={`said:${entry.id}`} text={said.text} at={said.at} />}
       {entries.length > 0 && <ToolCalls entries={entries} live={false} />}
     </section>
   )
@@ -109,8 +118,14 @@ const Context = ({
 // The plan in a box of its own, as the detail box draws what a request asks, its Markdown as the
 // chat draws Markdown: only the box scrolls. While its text is on its way the box says so; where
 // there is none, the dialog's own words stand in.
-const PlanBox = ({ row, fallback }: { readonly row: InboxRow; readonly fallback: string }) => {
-  const plan = usePlanText(row)
+const PlanBox = ({
+  entry,
+  fallback,
+}: {
+  readonly entry: InboxEntry
+  readonly fallback: string
+}) => {
+  const plan = usePlanText(entry)
   if (plan === undefined)
     return (
       <div className="request-detail request-plan" data-loading="">
@@ -137,7 +152,7 @@ const PlanBox = ({ row, fallback }: { readonly row: InboxRow; readonly fallback:
 }
 
 // A request's sheet: the chat's own card, answered here. The answer goes through the Inbox,
-// which moves on with its receipt; the card's draft is the Inbox's, so it stays with its row.
+// which moves on with its receipt; the card's draft is the Inbox's, so it stays with its entry.
 const RequestSheet = ({
   props,
   request,
@@ -149,12 +164,12 @@ const RequestSheet = ({
   readonly handle: React.Ref<MenuHandle>
   readonly arrived: boolean
 }): React.JSX.Element => {
-  const { row, answering, failed, sent, submit, reveal } = props
+  const { entry, answering, failed, sent, submit, reveal } = props
   const { drafts, setDraft } = useInboxContext()
   const refused = useRefused()
-  const diagnostics = useDiagnostics(row, request.id)
+  const diagnostics = useDiagnostics(entry, request.id)
   const planAnswered = usePlanAnswered()
-  const key = rowKey(row)
+  const key = entryKey(entry)
   // The card's answer settles once the Inbox has it: taken, or failed, which the sheet says.
   const waiting = useRef<(() => void) | null>(null)
   useEffect(() => {
@@ -165,8 +180,8 @@ const RequestSheet = ({
   const send = (answer: ChatAnswer): Promise<void> =>
     new Promise((resolve) => {
       waiting.current = resolve
-      if (request.kind === "plan") planAnswered(row)
-      submit({ kind: "request", answer }, requestReceipt(request, row.source.handle, answer))
+      if (request.kind === "plan") planAnswered(entry)
+      submit({ kind: "request", answer }, requestReceipt(request, entry.source.handle, answer))
       // Talking it over is done in the terminal.
       if (answer.type === "chat") reveal()
     })
@@ -175,10 +190,10 @@ const RequestSheet = ({
   return (
     <RequestCard
       request={request}
-      agent={agentName(row.source.agent)}
+      agent={agentName(entry.source.agent)}
       send={send}
       onAnswerInTerminal={reveal}
-      // Where focus goes after an answer is the Inbox's: on to the next row's sheet.
+      // Where focus goes after an answer is the Inbox's: on to the next entry's sheet.
       onSettled={() => {}}
       onSubmitted={() => {}}
       refused={refused}
@@ -191,26 +206,30 @@ const RequestSheet = ({
         value: drafts[key]?.request ?? {},
         onChange: (next: DialogDraft) => setDraft(key, { request: next }),
       }}
-      detail={plan ? <PlanBox row={row} fallback={dialog.detail ?? request.subject ?? ""} /> : null}
-      harness={row.source.agent}
+      detail={
+        plan ? <PlanBox entry={entry} fallback={dialog.detail ?? request.subject ?? ""} /> : null
+      }
+      harness={entry.source.agent}
     />
   )
 }
 
 // A card of the Inbox's own: the frame of a request's card, with its title line.
-const titleOf = (row: OwnRow): string => {
-  switch (row.kind) {
+const titleOf = (entry: OwnEntry): string => {
+  switch (entry.kind) {
     case "ask":
-      return row.ask.shape.type === "action" ? "Needs you to act" : "Has a question"
+      return entry.ask.shape.type === "action" ? "Needs you to act" : "Has a question"
     case "held":
       return "Holds a message"
     case "trouble":
-      if (row.trouble.type === "failed") return "Ended its turn on an error"
-      if (row.trouble.type === "limit") return "Hit its usage limit"
-      if (row.trouble.type === "stuck") return "Seems stuck"
+      if (entry.trouble.type === "failed") return "Ended its turn on an error"
+      if (entry.trouble.type === "limit") return "Hit its usage limit"
+      if (entry.trouble.type === "stuck") return "Seems stuck"
       return "Can't get your message"
     case "update":
       return "Has an update"
+    case "permit":
+      return "Allowed"
   }
 }
 
@@ -256,15 +275,15 @@ const evidenceText = (trouble: Extract<Trouble, { type: "stuck" }>): string =>
     .join("\n")
 
 const TroubleThing = ({
-  row,
+  entry,
   trouble,
   now,
 }: {
-  readonly row: OwnRow
+  readonly entry: OwnEntry
   readonly trouble: Trouble
   readonly now: number
 }): React.JSX.Element => {
-  const agent = agentName(row.source.agent)
+  const agent = agentName(entry.source.agent)
   switch (trouble.type) {
     case "failed":
       return trouble.error ? (
@@ -290,7 +309,7 @@ const TroubleThing = ({
           <p className="request-prose">
             <Text text={trouble.summary} />
           </p>
-          <Detail text={evidenceText(trouble)} label={`What @${row.source.handle} ran`} />
+          <Detail text={evidenceText(trouble)} label={`What @${entry.source.handle} ran`} />
         </>
       )
     case "waits":
@@ -302,13 +321,13 @@ const TroubleThing = ({
   }
 }
 
-// What the row is about, word for word.
-const Thing = ({ row, now }: { readonly row: OwnRow; readonly now: number }) => {
-  switch (row.kind) {
+// What the entry is about, word for word.
+const Thing = ({ entry, now }: { readonly entry: OwnEntry; readonly now: number }) => {
+  switch (entry.kind) {
     case "held":
-      return <Held held={row.held} />
+      return <Held held={entry.held} />
     case "ask": {
-      const { ask } = row
+      const { ask } = entry
       return (
         <>
           <p className="request-subject">
@@ -332,13 +351,21 @@ const Thing = ({ row, now }: { readonly row: OwnRow; readonly now: number }) => 
               copy
             />
           )}
+          {ask.shape.type === "newer" && (
+            <p className="request-note">
+              It asks in a way only a newer Novadeck can answer. Update Novadeck to answer it here;
+              it waits until then.
+            </p>
+          )}
         </>
       )
     }
     case "trouble":
-      return <TroubleThing row={row} trouble={row.trouble} now={now} />
+      return <TroubleThing entry={entry} trouble={entry.trouble} now={now} />
     case "update":
-      return <Prose text={row.update.body} />
+      return <Prose text={entry.update.body} />
+    case "permit":
+      return <PermitFacts permit={entry.permit} now={now} />
   }
 }
 
@@ -360,31 +387,31 @@ const askWordsLimit = 4096
 // The menu of a card of the Inbox's own.
 const OwnMenu = ({
   props,
-  row,
+  entry,
   model,
   handle,
   arrived,
 }: {
   readonly props: SheetContentProps
-  readonly row: OwnRow
+  readonly entry: OwnEntry
   readonly model: MenuModel
   readonly handle: React.Ref<MenuHandle>
   readonly arrived: boolean
 }): React.JSX.Element => {
   const { answering, submit, change, reveal } = props
   const { drafts, setDraft } = useInboxContext()
-  // An agent's ask keeps its words as a draft, on its row; other words are the sheet's.
+  // An agent's ask keeps its words as a draft, on its entry; other words are the sheet's.
   const [local, setLocal] = useState<Readonly<Record<number, string>>>({})
   const [pressed, setPressed] = useState<number | null>(null)
   const wordsOf = (at: number): string =>
-    row.kind === "ask" ? (drafts[rowKey(row)] ?? noDraft).text : (local[at] ?? "")
+    entry.kind === "ask" ? (drafts[entryKey(entry)] ?? noDraft).text : (local[at] ?? "")
   const setWords = (at: number, text: string): void =>
-    row.kind === "ask"
-      ? setDraft(rowKey(row), { text })
+    entry.kind === "ask"
+      ? setDraft(entryKey(entry), { text })
       : setLocal((record) => ({ ...record, [at]: text }))
-  // The rows that answer, the way to the terminal aside.
+  // The entries that answer, the way to the terminal aside.
   const answers = model.rows.filter((menuRow) => menuRow.type !== "reveal").length
-  const limit = row.kind === "ask" ? askWordsLimit : answerWordsLimit
+  const limit = entry.kind === "ask" ? askWordsLimit : answerWordsLimit
   const items = model.rows.map((menuRow, at): MenuItem => {
     switch (menuRow.type) {
       case "answer":
@@ -404,12 +431,12 @@ const OwnMenu = ({
           words: {
             value,
             onChange: (text) => setWords(at, text),
-            // The row is the field: its label says what to write, and names it.
+            // The entry is the field: its label says what to write, and names it.
             placeholder: menuRow.label,
             field: menuRow.label,
             required: menuRow.required,
             refused: value.trim() === "" ? null : menuRow.refused(value),
-            hint: row.kind === "ask" && answers > 1 ? "send your words instead" : "send",
+            hint: entry.kind === "ask" && answers > 1 ? "send your words instead" : "send",
             limit,
           },
         }
@@ -458,39 +485,106 @@ const OwnMenu = ({
   )
 }
 
+// An agent's ask of several questions, answered with the dialog a harness's own questions get:
+// a tab a question, and a page that sends the answers. What the person picked stays with the
+// entry until they send it, as a request's does.
+const QuestionsAsk = ({
+  props,
+  entry,
+  questions,
+  handle,
+  arrived,
+}: {
+  readonly props: SheetContentProps
+  readonly entry: Extract<OwnEntry, { kind: "ask" }>
+  readonly questions: readonly AskQuestion[]
+  readonly handle: React.Ref<MenuHandle>
+  readonly arrived: boolean
+}): React.JSX.Element => {
+  const { answering, submit } = props
+  const { drafts, setDraft } = useInboxContext()
+  const refused = useRefused()
+  const key = entryKey(entry)
+  const dialog = askDialog(entry.id, questions)
+  return (
+    <RequestDialog
+      dialog={dialog}
+      kind="question"
+      live={undefined}
+      replying={false}
+      onReply={undefined}
+      refused={refused}
+      sending={answering}
+      send={(answer) => {
+        const given = askAnswerOf(questions, answer)
+        if (given)
+          submit(
+            { kind: "ask", answer: given },
+            `${questions.length === 1 ? "Answer" : "Answers"} queued for @${entry.source.handle}.`,
+          )
+      }}
+      edited={() => {}}
+      draft={{
+        value: drafts[key]?.request ?? {},
+        onChange: (next: DialogDraft) => setDraft(key, { request: next }),
+      }}
+      arrived={arrived}
+      handle={handle}
+      place={place}
+      wordsLimit={askWordsLimit}
+    />
+  )
+}
+
 // A card of the Inbox's own kinds, in the frame of a request's. Resolved, it has no menu: it
 // says how it ended in its place.
 const OwnCard = ({
   props,
-  row,
+  entry,
   settled,
   handle,
   arrived,
 }: {
   readonly props: SheetContentProps
-  readonly row: OwnRow
+  readonly entry: OwnEntry
   readonly settled: string | null
   readonly handle: React.Ref<MenuHandle>
   readonly arrived: boolean
 }): React.JSX.Element => {
   const { now } = useInboxContext()
-  const title = titleOf(row)
-  const model = menuOf(row, now)
+  const title = titleOf(entry)
+  const model = menuOf(entry, now)
+  // An ask of several questions holds a request's own dialog, and takes the keyboard to it as a
+  // request's card does.
+  const questions = entry.kind === "ask" && entry.ask.shape.type === "questions" && !settled
   return (
     <RequestFrame
-      kind={row.kind}
-      label={`${title}: @${row.source.handle}`}
+      kind={entry.kind}
+      {...(questions && {
+        dialog: "questions",
+        onClick: (event: React.MouseEvent<HTMLElement>) =>
+          clickToDialog(event, typeof handle === "object" && handle ? handle.current : null),
+      })}
+      label={`${title}: @${entry.source.handle}`}
       title={title}
       busy={props.answering}
     >
-      <Thing row={row} now={now} />
+      <Thing entry={entry} now={now} />
       {settled ? (
         <p className="request-note" role="status">
           {settled}
         </p>
+      ) : entry.kind === "ask" && entry.ask.shape.type === "questions" ? (
+        <QuestionsAsk
+          props={props}
+          entry={entry}
+          questions={entry.ask.shape.questions}
+          handle={handle}
+          arrived={arrived}
+        />
       ) : (
         model.rows.length > 0 && (
-          <OwnMenu props={props} row={row} model={model} handle={handle} arrived={arrived} />
+          <OwnMenu props={props} entry={entry} model={model} handle={handle} arrived={arrived} />
         )
       )}
     </RequestFrame>
@@ -500,20 +594,20 @@ const OwnCard = ({
 // What a request's card says once it is over, opened again: what it asked and how it ended, in
 // its frame, with nothing to answer.
 const ResolvedRequest = ({
-  row,
+  entry,
   request,
   note,
 }: {
-  readonly row: InboxRow
+  readonly entry: InboxEntry
   readonly request: ChatRequest
   readonly note: string
 }): React.JSX.Element => {
   const { dialog } = request
   // What the person answered says "Answered"; anything else that ended it, "Resolved".
-  const title = !row.settled || row.settled.how === "answered" ? "Answered" : "Resolved"
+  const title = !entry.settled || entry.settled.how === "answered" ? "Answered" : "Resolved"
   return (
     <RequestFrame kind={request.kind} label={`${title}: ${request.tool}`} title={title}>
-      <p className="request-subject">{request.subject ?? subjectOf(row)}</p>
+      <p className="request-subject">{request.subject ?? subjectOf(entry)}</p>
       {dialog?.type === "choices" && dialog.detail && <Detail text={dialog.detail} label="Asked" />}
       {dialog?.type === "questions" &&
         dialog.questions.map((question) => (
@@ -533,15 +627,15 @@ const ResolvedRequest = ({
 const cardTopIn = (page: HTMLElement | null): number | undefined =>
   page?.querySelector(".request-card")?.getBoundingClientRect().top
 
-// One row's page under the head: its context, then its card.
+// One entry's page under the head: its context, then its card.
 export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
-  const { row, failed, sent } = props
+  const { entry, failed, sent } = props
   const { receipt, page } = useInboxContext()
-  // A resolved row, or an answered one opened again, says how it ended or what its answer did,
+  // A resolved entry, or an answered one opened again, says how it ended or what its answer did,
   // in place of its menu.
-  const settled = endedLine(row) ?? sent?.note ?? null
+  const settled = endedLine(entry) ?? sent?.note ?? null
   // Whether the Inbox moved on to it from another's answer.
-  const arrived = receipt !== null && receipt.from !== row.id
+  const arrived = receipt !== null && receipt.from !== entry.id
   const handle = useRef<MenuHandle | null>(null)
 
   // Until when a click on the card is held back: it moved as the context over it came in. The
@@ -575,14 +669,14 @@ export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
       const target = event.target
       const outside =
         isElement(target) &&
-        (rowOf(row.id, page)?.contains(target) || target.matches(".inbox-sheet-title"))
+        (rowOf(entry.id, page)?.contains(target) || target.matches(".inbox-sheet-title"))
       if (!outside) return
       if (handle.current?.key(event.key)) event.preventDefault()
     }
-    // In the document the Inbox is in, where its row and the sheet are.
+    // In the document the Inbox is in, where its entry and the sheet are.
     page.addEventListener("keydown", onKey)
     return () => page.removeEventListener("keydown", onKey)
-  }, [row.id, settled, page])
+  }, [entry.id, settled, page])
 
   return (
     <div
@@ -595,18 +689,18 @@ export const ConsoleSheet = (props: SheetContentProps): React.JSX.Element => {
         event.stopPropagation()
       }}
     >
-      {!row.settled && <Context row={row} moved={moved} />}
-      {row.kind === "request" ? (
+      {!entry.settled && <Context entry={entry} moved={moved} />}
+      {entry.kind === "request" ? (
         settled ? (
-          <ResolvedRequest row={row} request={row.request} note={settled} />
+          <ResolvedRequest entry={entry} request={entry.request} note={settled} />
         ) : (
-          <RequestSheet props={props} request={row.request} handle={handle} arrived={arrived} />
+          <RequestSheet props={props} request={entry.request} handle={handle} arrived={arrived} />
         )
       ) : (
         <OwnCard
           // Opening an update reads it, which is no answer to wait on: its follow-up stays on offer.
-          props={row.kind === "update" ? { ...props, answering: false } : props}
-          row={row}
+          props={entry.kind === "update" ? { ...props, answering: false } : props}
+          entry={entry}
           settled={settled}
           handle={handle}
           arrived={arrived}

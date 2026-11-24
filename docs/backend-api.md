@@ -89,6 +89,38 @@ an in-memory database when no path is supplied. `@novadeck/runner/http` stays fr
 of native terminal code, so the Electron main process can serve the status endpoint
 without it.
 
+### Running a standalone runner
+
+The CLI and the desktop app's runner share one lifecycle (`backend/runner/src/lifecycle.ts`);
+only where the transcript key comes from and the desktop's watch on its main process differ.
+
+- **Data folder.** Everything the runner keeps lives beside `NOVADECK_DATABASE`
+  (`~/.local/share/novadeck/` by default): `workspace.sqlite`, `shell/`, `uploads/`,
+  `dialogs/`, `voice/`, `murmur/` and `transcript.key`. Keep the folder on a volume that
+  outlives the container or host.
+- **Transcript key.** Saved transcripts are sealed with a 32-byte key kept as base64 in
+  `transcript.key` beside the database, or in the file `NOVADECK_TRANSCRIPT_KEY_FILE` names
+  (32 raw bytes or standard or URL-safe base64, padded or not).
+  The runner makes it at 0600 where it is missing. A file that holds no key, or can't be
+  read, is never replaced: transcripts are then not kept, and the log says why. A key file
+  other users can read is still used at the default path, with a warning. An explicitly named key file must be private and valid or startup fails. The key keeps transcripts out of the
+  database file alone and away from the machine's other users. It does not protect them from
+  root, the runner's own user, or a copy of the whole folder. To keep the key encrypted at
+  rest, make one (`openssl rand -base64 32`) and point the setting at a systemd credential
+  (`LoadCredentialEncrypted=transcript.key:…` with
+  `NOVADECK_TRANSCRIPT_KEY_FILE=%d/transcript.key`) or a Docker secret
+  (`/run/secrets/transcript.key`). A lost key loses the saved transcripts, nothing else.
+  The desktop app keeps its key behind the system's keychain instead.
+- **Stopping.** SIGTERM, SIGINT and SIGHUP (on Windows Ctrl+C, Ctrl+Break and the console
+  closing; Windows has no SIGTERM, and a forced end can't be caught) save every terminal's
+  restore state at once, then end the shells and exit, as quitting the desktop app does.
+  Terminals and agents come back on the next start. Ending takes at most 8 s, inside
+  Docker's default 10 s; a second signal a second or more after the first exits at once. Node ends on a hangup
+  even under `nohup`; run it under systemd, Docker or tmux to outlive a closed terminal.
+  Under systemd use `KillMode=mixed`, so only the runner hears the stop and its shells end
+  after it has saved, and keep `TimeoutStopSec` above 8 s. In Docker, run it with `--init` (or tini) and the
+  exec form, so `docker stop` reaches it and an init reaps what agents leave behind.
+
 For a VPS, terminate TLS at a trusted reverse proxy and forward WebSocket upgrades.
 Agents run beside the runner on the server, and their relays reach it over a private
 local socket, so a UI elsewhere needs nothing more than the WebSocket.
@@ -153,16 +185,10 @@ With a remote runner:
 - With `pagesProxy`, the companion pane's pages load through it, loopback addresses
   included, so `localhost:3000` is the runner's machine's. Without it they load from this
   machine. A link opened in the system's browser is always this machine's.
-- The standalone runner keeps no transcript key of its own, so it saves and shows no
-  terminal's earlier output, unless `NOVADECK_TRANSCRIPT_KEY_FILE` names a file for one: it
-  makes the key there on its first start, and refuses to start on a file there it can't use
-  (see [SECURITY.md](../SECURITY.md#terminal-runner)). With it, restored terminals show what
-  they last showed, and Preferences offers the switch that turns saving off.
 - The standalone runner caps running and kept terminals together at 32, where the desktop
   app's own runner has no cap. `NOVADECK_MAX_TERMINALS` sets another cap, a positive whole
   number, or `none` for no cap; any other value stops the start.
-- The app and the runner must be the same build: the protocol's version doesn't change
-  with every change to its calls.
+- Connect matching fork builds to use the fork’s file editing, panel and note operations. The handshake also checks the protocol revision.
 - The runner compresses what it sends, which the app's connection asks for: a terminal's
   screen, as an attachment's snapshot sends it, crosses in about a fifth of its bytes or
   less, and its output in a fraction of them, while a keystroke's echo and other messages
@@ -292,8 +318,8 @@ before the removal is done rejects it with `CLOSING` and keeps the session.
 ids, first to last, and `pinned` the ones pinned, at most nine, the first in `order` (one
 `order` doesn't name isn't pinned).
 Unknown ids are ignored, projects `order` leaves out follow in the order they were added
-(with no pin), and a project being removed is left out. Other clients see the change when
-they next list the projects.
+(with no pin), and a project being removed is left out. Other clients hear of it on
+`projects.watch()`.
 `projects.folder({ projectId, folder })` lists one folder of the project's directory,
 `folder` being its path from the project's root with `/` between names (`""` for the
 root). Entries come sorted, folders first, then by name ignoring case and a leading dot
@@ -378,6 +404,59 @@ report `null` until the first save. A state holds at most `maxClientStateLength`
 `CLOSING`, so shells ending on the way out cannot overwrite the last state; it
 saves nothing of its terminals either, after one last save while they still run.
 
+Several clients can show one session, and from revision 4 they share its state without
+losing each other's changes. Every write to a session (a save, a change, a rename, an
+arrangement) raises its `revision`, which sessions list (absent from a runner from before
+it). `sessions.change({ sessionId, writer, base, patch, visitedAt? })` changes the state in
+part: `patch` is `{ set: [{ path, value }], unset: [path] }`, a path being object keys into the
+state's JSON, which the runner applies to the state as it holds it then (taking each `unset`
+out, then putting each `set` value in whole, making objects on the way), without reading
+what it means; it answers `{ revision }`, and refuses with `CONFLICT` a state that isn't a
+JSON object, or one that would grow past `maxClientStateLength`. `writer` names the client,
+and `base` is the revision it made the patch on; the runner passes both on, and
+`visitedAt` is kept where given. `sessions.watch()` starts with `{ type: "revisions",
+revisions }`, every session's revision by id, and then reports each write as `{ type:
+"changed", session, writer, base }` (the session whole; `writer` and `base` are null for
+every write but a change, a creation included), latest only where a reader falls behind,
+and each removal as `{ type: "removed", sessionId }`, those of a removed project among them. A
+client re-lists a project whose session the snapshot says is newer than what it holds, and
+every project when the snapshot names a session it doesn't hold or leaves out one it knew,
+so nothing written between its listing and its watch is missed. `projects.watch()` gives
+the projects as `projects.list` does, `{ type: "projects", projects }`, first and again after
+each project is made, renamed, arranged or removed, and each project's sessions in their
+order once arranged, `{ type: "arranged", projectId, order }`; the latest of each only where a
+reader falls behind. The session order goes there because UIs of revision 4 read
+`sessions.watch` as it was then, knowing no other kind. Both changes are open unions from
+revision 5: a client drops a kind it doesn't know. The two session procedures are `since: 4`
+and `projects.watch` is `since: 5`: a client asks `runner.supports` first, and saves whole
+without a feed where the runner has none.
+
+The UI (`frontend/runner-adapter/src/sessions`) changes and merges a state a record at a
+time: a terminal's canvas geometry, its hidden mark, its Grid span or its companion bar,
+each whole, and anything else whole (the order, or a field a newer build added). It sends
+what changed since the state it last knew the runner held, and lays what it hasn't sent,
+or sent and hasn't seen back yet, over each change that arrives, so two clients that change
+different records both keep their change, two that change one keep the later whole, and a
+client's own change coming back changes nothing. What arrives is laid in as a load puts a
+saved state back together (`sharedState` in `@novadeck/core`), but only here: what names a
+terminal, window or item this client doesn't know yet is left out of what it shows, never
+taken out on the runner, and laid in once the client knows it. A client's own changes are
+what differs from the state as it last laid it in, loaded it or sent it; one that never had
+it takes what arrives whole. Another client's rename shows the same way, and isn't written
+back. Where the person looks, the view, the windowed view and the terminal in front, is
+each device's own: kept in the page's storage by session, read first on load (the shared
+state's, as builds before saved it, where a device has none), and sent only when the person
+changes it there, so one client's selection never moves another's.
+
+What another client does to the projects and sessions shows in each client live too, laid in
+as the person's own would be and never sent back (`sessions/projects-feed.ts` and
+`sharing.ts`): a session it made joins its project's list unopened, with the terminals
+already running in it; a project it made is read and joins the switcher; a session or project
+it removed goes, the open one handing over as the person's own removal would, with a toast
+saying what went and what shows now when it was the one on screen; and its renames and
+arrangements, of a project's sessions or of the projects and their pins, are taken as they
+come, unless the person's own arrangement is still on its way.
+
 `runner.terminals.watch()` follows every terminal on the runner, across sessions:
 
 ```ts
@@ -451,7 +530,7 @@ for a second (`processPollMs`), as a sample would tell elsewhere.
 latest `done` of the session bound in the terminal, read or not (from the report log, so
 not ended by the Inbox's day), unless the person's
 prompt or a message delivered to the agent came after it. It follows the Inbox and those
-inputs as they change, so a client's done mark needs no Inbox row, and looking at the
+inputs as they change, so a client's done mark needs no Inbox entry, and looking at the
 terminal never ends it. After a runner restart it is the resumed session's until a binding
 has ended; Codex and Antigravity bind only at their first prompt, so until then it comes
 from that saved session. The agents listing's "reported done" follows the same rule.
@@ -468,7 +547,7 @@ project can): it then draws the project's next, and the handle it left rests an 
 ids, so a move leaves its team's links as they are. `handles` (by terminal id) and `lead` (the
 id `left` gave) undo an earlier move: a handle is taken back where nothing in the project holds it
 and no other terminal freed it within the hour, and the terminal rejoins that lead if it is there, without asking. `terminals.watch` tells each moved terminal as a
-`changed` with its new `sessionId`; its Inbox rows and its companion bar's items go with it,
+`changed` with its new `sessionId`; its Inbox entries and its companion bar's items go with it,
 and each running agent hears of it as a notice, with any new handles and the lead it left (a
 sleeping agent isn't woken for it). A terminal that is closing, stopping to rest, being woken,
 whose agent has a terminal on its way (`open_agent`), whose lead's brief to it hasn't arrived
@@ -511,6 +590,11 @@ for await (const entries of runner.inbox.watch()) showInbox(entries)
 const entries = await runner.inbox.list()
 await runner.inbox.answer(askId, { type: "reply", option: null, text: "Use green" })
 await runner.inbox.answer(actionAskId, { type: "done" })
+// An ask of several questions, from revision 9: an answer per question, in its order.
+await runner.inbox.answerQuestions(questionsAskId, [
+  { options: [0], text: "" },
+  { options: [0, 2], text: "but no shooters" },
+])
 await runner.inbox.read(updateIds)
 await runner.inbox.clear()
 ```
@@ -649,7 +733,98 @@ const dispose = servePort(runner.sessions, port)
 
 The CLI (`pnpm --filter @novadeck/runner start`) and `startServer` from
 `@novadeck/runner/server` compose the WebSocket form with the HTTP status
-endpoint.
+endpoint. They check the owner's token and the runner's devices' own credentials
+(`verify: (token) => tokenCheck(owner)(token) || (runner.device(token) ?? false)`), as
+[Devices](#devices) says.
+
+### Devices
+
+A standalone runner tells its clients apart by the credential each proves in its
+handshake. `NOVADECK_TOKEN` is the **owner's**: every client that has it, and the desktop
+app's own MessagePort, is the owner, as before devices. A **device** has a credential of
+its own, which the owner gives it and can revoke without touching the token or any other
+device. A device's credential grants what the owner's does (its shells are the runner's
+user's); what tells them apart is who may add and revoke devices.
+
+- **Its credential** is `ndd_<id>_<secret>`: 16 random bytes of id and 32 of secret, each
+  in base64url (70 characters in all), given as the handshake's `token`, as the owner's is.
+  The runner keeps the id, the name and a SHA-256 hash of the id and secret, never the
+  secret: the secret is 256 random bits, so a leaked hash can't be guessed back however fast
+  each guess is, and neither a slow derivation nor a key kept beside the database would add
+  to that. It looks a device up by its id and compares hashes in constant time, hashing as
+  much for an id it doesn't have. The owner's token is checked first and always, as before.
+  A credential has no expiry and doesn't rotate by itself: revoke it and mint another. The
+  table keeps an `expires_at` for credentials that expire, as pairing may give; a device past
+  it is refused as `expired`.
+- **The handshake** takes the credential in `token` and answers, beside `epoch` and
+  `protocolVersion`, the `device` (`{ id, name }`) the connection proved itself as; none for
+  the owner. An older client ignores it.
+- **`devices.mint({ name })`** answers `{ device, credential }`, the credential once: the
+  runner can't show it again. The owner's only (`FORBIDDEN` to a device, which, unlike
+  `UNAUTHORIZED`, leaves its connection up); 64 devices at once, then `CONFLICT`.
+  **`devices.list()`**, to any connection, gives the devices not revoked, oldest first, each with `createdAt`,
+  `lastSeenAt` (its last handshake or session end) and whether it is `connected` now.
+  **`devices.revoke({ id })`**: the owner may revoke any device, a device only itself.
+  All three are new in revision 6 (`since: 6`).
+- **Revoking** ends the device's sessions at once: their calls are refused, and their sockets
+  close a moment later (`revokeGraceMs`), so a device that revoked itself is answered first. The client's reconnection is refused `UNAUTHORIZED` with `{ reason: "revoked" }`, as
+  is every later handshake that proves the revoked credential, since its row stays; one that
+  doesn't prove it is told nothing more than a wrong token is. The UI's splash then says the
+  device was signed out of the runner, and that its owner can let it in again, with a new
+  credential.
+- **What it doesn't contain:** a device has the runner account's shells, so one that turned
+  hostile could have read the owner's token from the runner's environment. Revoking ends its
+  credential, not what it did; rotate `NOVADECK_TOKEN` too if a device may be compromised
+  (SECURITY.md, "Terminal Runner").
+- **Logs** name a device by its id (`client.connected`, `client.closed`, `device.minted`,
+  `device.revoked`, `device.refused`), never by its credential; a refused credential is
+  logged only for an id the runner has.
+
+The first device gets its credential from the owner: a client with `NOVADECK_TOKEN` calls
+`devices.mint` (`runner.devices.mint(name)` in `@novadeck/runner-client`). Pairing, such as
+a code the owner approves in the app, is a way to hand that credential over, and needs no
+other change to the protocol. Agents' relays never use these credentials: they reach the
+runner over its local socket, each with its terminal's own token
+([Relay protocol](#relay-protocol)).
+
+### Preferences
+
+Some of what a person chooses is theirs on every device, and some is the device's own. The
+runner keeps the person's (`preferences.*`); each device keeps its own in its local storage, as
+before, and that copy is also where the app reads the person's first, so a start paints at once.
+
+- **The person's:** the theme and its light or dark choice (`system` follows each screen as it
+  always did), which views are on, Agent Chat, agents' avatars, the onboarding tour switch, the
+  order of the rail's panels and of the footer's subscriptions, and what they've seen once: the
+  Help and feedback chips' words, the phone page's zoom hint, the Agent Chat offer.
+- **The device's:** text size, font and ligatures, the app's scale, notifications, sounds and
+  their volume, the screen reader setting, the sidebar's width and whether it
+  is collapsed, the view and terminal in front in each session, folds, and what concerns this
+  install (update chips, a portable copy's card).
+- **Still the device's for now:** which agents' messages were read (`novadeck.messages-seen`),
+  which needs merging rather than the last change; and the projects' order, which the runner
+  keeps on its own (`projects.arrange`).
+
+Each preference is text (the UI's JSON) under a key (`[a-z][a-z0-9.-]*`, at most 64 characters),
+at most 64 keys and 16,384 characters each. The runner keeps it as written, under `person:<key>` in its
+settings, without reading it; the UI reads it as it reads a saved preference, so what an older or
+newer build wrote reads as its default where it can't be read. `set` keeps one key, or forgets
+it for `null`: the last change wins, key by key, so two devices changing different things never
+undo each other. `watch` yields every preference, then each change, with the revision every
+change raises and the `writer` (a client's own token) whose change it was, which that client
+skips; a reader slower than the changes gets each key once, as it is when it reads it.
+
+As a device first connects to a runner that keeps them, it takes each preference the runner has,
+and gives it each the person chose there that the runner lacks; a default is no choice, and is
+never given. So the first device after an update gives the person's preferences, the next takes
+them, and a new device that connects first resets nothing. A mark of something seen once is given
+only once seen, so seen anywhere is seen. A value a device takes from another, or from another of
+its windows, it shows but never sends back: one an older build can't read shows as its default
+there, and stays the newer build's on the runner. Another client's change of a key this device is
+changing meanwhile waits behind it, and a change the runner couldn't take, as while the link was
+down, is sent again once it answers and stands over what it says. Against a runner without
+`preferences.*` the app keeps them on the device, as before; an app from before them keeps its own
+and never asks.
 
 The WebSocket compresses what it sends (permessage-deflate) to a client that offers to, as
 browsers, Node's `WebSocket` and `ws`'s client do: each message of 1 KiB or more on its
@@ -708,9 +883,12 @@ wire's own error codes (`wireErrors`) beside the runner's. Applications use
 
 Every connection starts with the wire's handshake, `wire.handshake({ protocolVersion,
 token, clientId })`, which returns the runner's `epoch` (its lifetime: terminal cursors
-are valid only within one) and the protocol version. WebSocket connections
+are valid only within one), its own revision of the contract as `protocolVersion`
+(see [Versions](#versions)), and the `device` a device's credential proved
+([Devices](#devices)). WebSocket connections
 require the token in the handshake, never in a URL, and time out after ten seconds
-without it. MessagePort connections omit it. Each `terminals.attach` stream begins
+without it. A refused token is `UNAUTHORIZED`, whose data, when the runner says, is why
+(`{ reason: "revoked" }`). MessagePort connections omit it. Each `terminals.attach` stream begins
 with an unsequenced `attached` marker confirming the granted mode, followed by
 sequenced terminal events.
 
@@ -723,12 +901,161 @@ clients send terminal input, not executable configuration. `write` accepts contr
 characters, including Ctrl-C (`\u0003`). A successful write means accepted input,
 not command completion.
 
+### Versions
+
+A UI and a runner from different releases work together while each is inside the other's
+window, and are refused at the handshake once one isn't: never later, with a call that fails
+to decode or validate. Each build carries three numbers (`compatibility` in
+`contract/protocol/src/compatibility.ts`):
+
+- `revision`, the contract it speaks, which a change to the contract raises past both the newest
+  release's and its pull request's base's (a release may be cut after any merge);
+- `oldestClient`, the oldest UI a runner of this build serves;
+- `oldestRunner`, the oldest runner a UI of this build works with.
+
+The client sends its revision as the handshake's `protocolVersion`. The runner refuses a client
+below `oldestClient` with `INCOMPATIBLE_PROTOCOL`, whose data is the runner's window
+(`{ revision, oldestClient }`), and serves any newer one, which judges for itself: the client
+refuses a runner below its `oldestRunner`. A runner from before windows (revision 1) refuses
+every revision but its own, without data. So the client always knows which side is behind:
+`incompatibility(error)` from `@novadeck/wire` says `client` or `server`, and the app's boot
+screen says to update this app (or, in a browser, to reload the page, which loads the runner's
+newer one) or to update Novadeck where the runner runs. A runner replaced while connected is
+met at the next reconnection's handshake, which is fatal there when it's outside the window;
+inside it, the runner's new epoch says it was replaced, and a UI asks `runner.supports(path)`
+again. A UI from before windows, refused by a newer runner, can only say the runner is from a
+different Novadeck version: its words shipped with it.
+
+What each side tolerates:
+
+- **The runner drops input keys it doesn't know**, at the wire boundary only
+  (`dropUnknownKeys`, `@novadeck/wire/server`): it parses each input with the contract's
+  strict schema, and when the only issues are keys that no part of the schema names there (no
+  option of a union either), it removes them where zod found them and parses once more.
+  Undeclared data never reaches a handler, every declared field is checked as strictly as
+  before, and a key one of a union's options names is never dropped, which could switch the
+  option that reads the input. The contract's schemas stay strict, as the runner also parses
+  agents' tool arguments with them. Each dropped key is logged once per procedure
+  (`rpc.dropped`), once its input passed.
+- **The UI never validates what it reads**, so a newer runner's extra fields pass it by
+  unread. What can trip it is what its types say: a field gone or now optional, another type,
+  or a value of an enum or a union's variant it doesn't know. Where it parses an answer or an
+  error's data at all, it does so with `readTolerantly` (`@novadeck/wire`), which drops the
+  keys a newer runner added; never with a schema's own `safeParse`. A value or variant it
+  doesn't know, in a schema marked open, it reads as that schema says (see "Open schemas").
+- **Strict stays** for the runner's own outputs (checked against the contract, so
+  `contract.json` is what it sends), every declared field's values, unions told apart only by
+  their keys, and agents' tool arguments.
+
+How each kind of change ships:
+
+| Change                                                    | Older UI, newer runner | Newer UI, older runner | Ship it as                                                                                                                                                                 |
+| --------------------------------------------------------- | ---------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New optional input field                                  | fine                   | the runner drops it    | add it; it must be harmless to ignore, or it's a new procedure                                                                                                             |
+| New output field                                          | ignored                | missing                | `.optional()`, or raise `oldestRunner`                                                                                                                                     |
+| New procedure                                             | never called           | missing                | `.meta({ since: <revision> })`, and the UI asks `runner.supports(path)` first (a call to it rejects with `UNSUPPORTED` without asking the runner); or raise `oldestRunner` |
+| New value or variant in an output                         | unknown to it          | fine                   | add it to an open schema, once every UI in the window reads it so; or mark the schema open (as of the next revision) and raise `oldestClient`                              |
+| New value, or a looser bound, in an input                 | fine                   | refused                | for a new enum value or union variant, mark it since the revision (below); else gate it with a new procedure, or raise `oldestRunner`                                      |
+| Removed or renamed procedure or field, new required input | broken                 | —                      | raise `oldestClient`; better, stage it: add the new one, move the UI to it, and remove the old one once the window has passed it                                           |
+
+Raising an edge past the newest release's revision is how a change that can't be additive
+is declared: the handshake then refuses that release's peers, with the message above.
+
+A new value of an input enum, or a new variant of an input union, can name the revision it came
+in (`inputEnum(values, { since: { opencode: 7 } })`, `inputUnion(tag, options, { since: { <tag
+value>: 7 } })` in `contract/protocol/src/open.ts`; `x-since` in `contract.json`). The types stay
+the plain enum and union. The check then takes the value as additive and lists it as new, for UIs
+to ask for, without moving `oldestRunner`: a line such as `agents.open harness "opencode" since 7`,
+where `harness` is the `at` to pass. It fails an unmarked new value, a mark on a value the newest
+release already had, a released mark changed or dropped, a mark past the revision, and a mark
+naming a value the schema doesn't take. A UI asks `runner.supports(path, { at, value })` before it
+offers the value: `at` names the input's keys with `.` between them, `*` for a list's or tuple's
+items and a record's values and keys (`list.*.harness`), and `value` is the enum value or the
+variant's tag value. It answers no when any place `at` reaches marks the value newer than the
+runner, and for an `at` the input doesn't have. A call whose input holds such a value in any
+place of the input (keys, items, records, tuples, intersections, catchalls, nested unions)
+rejects with `UNSUPPORTED` without asking the runner. Don't mark values inside a plain union,
+only a discriminated one. An enum an output shares still needs `openEnum` for that side, and
+moves `oldestClient` as before.
+
+#### Open schemas
+
+An output's enum or discriminated union that grows often is marked open
+(`openEnum`, `openUnion` in `contract/protocol/src/open.ts`): `x-open: { since, unknown }`, in
+zod's meta and in `contract.json`. From revision `since`, UIs read a value or variant of it they
+don't know as `unknown` says, chosen by what losing it would cost:
+
+- `drop`, for what nobody waits on and nothing visible is lost: the list element or stream item
+  that holds it is left out (a part of a doorbell row); never a transcript's item, whose
+  numbering the chat keeps as the runner's.
+- `{ fallback }`, the catch-all the enum already has: a state reads `unknown`, a tool run's
+  kind `other`, a folder entry's kind `other`.
+- `placeholder`, for what someone waits on or sees: the value reads `newer`, or the variant
+  `{ <tag>: "newer" }`, which only the reader writes. The element keeps its place and says it
+  needs a newer Novadeck, and is never answered from here: an approval offers only "Not now",
+  a request and an Inbox ask offer no answer, an Inbox entry of an unknown kind is never marked
+  read, a companion item keeps its tab, a transcript item of a role, kind or note it doesn't
+  know stays as a quiet row with its text, an approval put aside with "Not now" comes back at
+  the terminal that asked, and an agent of a harness this build doesn't know is a plain agent
+  that is never woken here.
+
+`newer` widens the output's TS type, so every switch over it handles it. Inputs, and whatever
+the runner parses (agents' tool arguments, its adapters' reads, its own stored entries), keep
+the closed schema: `agentName` beside `agentNameRead`, `requestDialog` beside
+`requestDialogRead`, `inboxContent` beside the open entry; a test checks no input holds
+`newer`. The runner types its own records as `Sent<T>`, without the placeholders.
+
+The client reads through the open parts at the edge (`answerReaders`, given to the wire's client
+as `outputs`): each procedure's reader is made once from its output schema, and a procedure
+with none, as `terminals.attach`, is read as it comes, at no cost. The watch streams' own change
+types stay closed: a new change type carries new meaning, and a client that drops it would hold
+a wrong state until the next reset.
+
+The check lets a new value or variant into an open schema when the mark's `since` is at most
+`oldestClient`, so every UI in the window reads it tolerantly; a released mark only stays as it
+was, and a new one names a revision after the release's.
+
+`contract/protocol/contract.json` holds the contract as this build has it: the window, and
+each procedure's input and output (or stream items) as JSON Schema, with each error's data. The
+protocol's `snapshot.test.ts` keeps it current (`pnpm --filter @novadeck/protocol test -u`
+writes it again), and a pull request shows a contract change as a change to it.
+`node scripts/compatibility/main.ts` compares it with the newest release's, and with each older
+release's still in the window, one per revision (Quality's Contract job, and the release
+workflow before it publishes): what passes against one release needn't against an older one,
+as an optional field gone and back with another type passes each step. Quality's job also
+judges it against the pull request's base (`--peer`) as against the newest release: a merged
+contract change no release holds yet still ships with the next, so a change that fits the
+releases but leaves the base's peers behind fails there, not at the release. It fails when the
+contract changed and `revision` didn't rise past the newest release's, when a change leaves
+the UIs or runners of a release in the window behind and that side's edge didn't move past
+its revision, or when an edge falls back. It
+compares as each side reads: an input as the runner validates it, with its bounds; an answer
+as the UI reads it, by its fields, types and values only. It knows the keywords zod writes and
+reports anything else as a break; refinements (`.refine`) are beyond JSON Schema, so it can't
+see them change.
+
 ## Stream and lifetime rules
 
 - Creation grants the creating connection control. Only that connection can
   write or resize. Another connection can attach with `mode: "observe"`.
   There is one attachment per terminal per connection. Cancelling a controlling
   attachment or disconnecting releases control, but leaves the shell running.
+  A client attached to a terminal can `take` it: its attachment controls from then
+  on, and the one that controlled stays attached as an observer, its `write` and `resize`
+  refused with `CONTROL_REQUIRED`. With `ifIdleMs` the take succeeds only where the
+  controller hasn't written for that long (`write` by the controller counts; the
+  runner's own typing, such as a prompt or keys an agent is sent, does not), else
+  `CONTROL_BUSY`. A client follows `terminals.controls` to learn who controls each
+  terminal it is attached to (`you`, `other` or `none`), once as each attachment starts and
+  again at every change: a take, a hand-over, a release, a restart. A controller that
+  doesn't follow it couldn't learn it lost control, so `take` refuses it with
+  `CONTROL_IN_USE`, as an older client that never follows gets today. When a
+  controller lets go of a running terminal, by ending its attachment or closing its
+  connection, the runner hands control to one of the terminal's observers that follow
+  `controls`: the one whose client the person used last (a `showing` report after the
+  first, or `active`), else the one that attached last. A client that fails
+  `SLOW_CONSUMER` hands nothing over, as it attaches again at once. The client handed
+  control resizes the terminal itself.
 - Events carry `terminalId` and an increasing `sequence`. Initial attachment emits
   a serialized screen snapshot with dimensions and `exit`, null while the shell
   runs. Output, resize, and exit events follow in order. A snapshot replaces the old
@@ -816,11 +1143,98 @@ not command completion.
   terminal (`Harness.apart`) is left running with all under it, though the agent started it:
   Claude Code's background service, which ← at its prompt starts and the person's other
   sessions share, keeps the conversation going in the background, which Claude Code ends
-  itself (`harnesses/claude/src/daemon.ts`). Otherwise it is not a process-tree kill
-  guarantee: daemonized jobs and descendants that ignore hangup may continue, as with
-  an ordinary terminal emulator, and so may a daemon an agent left in a group of its
-  own. Use an OS service/cgroup or a future supervisor if all descendant cleanup is
-  required.
+  itself (`harnesses/claude/src/daemon.ts`).
+- On Linux with the user's systemd, a close or a shutdown also ends what an agent left in
+  the terminal's scope (`libraries/terminal/src/pty/leftovers.ts`): a program started
+  detached (`(cmd &)`, `nohup`, `setsid`, `disown`, a daemon that forked twice) leaves the
+  shell's tree, so the walk above can't reach it, but it stays in the scope of the terminal
+  it was started in. The runner tells the pty when an agent binds and when its session ends
+  (`agentStarted`, `agentEnded`), and every tree of the scope whose root started in such a
+  run is the agent's, with all under it: what has left the shell's tree gets SIGTERM as the
+  hangup goes out, and what is left once the shell has exited, as a `nohup` the shell held,
+  gets it then; SIGKILL follows half a second on, or by the shutdown's own bound, to what had
+  SIGTERM, each by pid only right after a listing shows that pid to be the process found. A
+  run's start is the agent's own process's, which is its shell's where it took the shell's
+  place (`exec claude`), and its end when its session ends, in the clock /proc counts starts
+  by, which runs on through suspend. Spared, with all
+  under each: what the person started there before the agent or after its session ended,
+  what `Harness.apart` names (Claude Code's background service sits in the scope of the
+  terminal that started it, and is read from the terminal's latest sessions even with no
+  agent bound), and anything that has left the scope, as a program started with
+  `systemd-run --user` or by D-Bus activation. A terminal whose shell exited by itself ends them as
+  it closes or as the runner shuts down, and a restarted one ends its earlier runs' too. A
+  plain terminal, where no agent ran, keeps today's behaviour. A shared build daemon an
+  agent started (Gradle's, Bazel's server, sccache, a turbo or nx daemon) is one of them: a
+  build in another terminal using it at that moment fails once, and the next starts a new
+  one; an ssh `ControlMaster` an agent's `git fetch` started with `ControlPersist` ends too,
+  and with it the person's ssh sessions in other terminals that share it. An app the agent opens for the person is not: `xdg-open` and `gio open` start it in
+  the caller's cgroup (measured with GLib 2.90 on GNOME), so a browser whose first window an
+  agent opened would close with that terminal, tabs and all, and Novadeck's shims for them
+  (`open/xdg-open`, `open/gio`, and `BROWSER`, below) start it in a scope of its own instead.
+  An app an agent starts any other way stays in the terminal's scope and ends with it: by its
+  own binary (`code`, `firefox`), through a launcher without a shim, as npm's `open` package
+  with its own bundled `xdg-open` (`vite --open`), or through the person's own `BROWSER`.
+  Hibernation keeps an agent with such a program awake (`detached`),
+  and the update's restart check counts it as work a restart would end.
+- On macOS a close or a shutdown ends what an agent left the same way, with the terminal's
+  scope read another way (`TaggedScopes`, `libraries/terminal/src/pty/tagged.ts`): macOS has
+  no cgroup, but every shell starts with `NOVADECK_TERMINAL_ID` naming its terminal, and a
+  process keeps the environment it started with through `setsid`, `nohup` and a double fork
+  and passes it on, so the terminal's members are the user's processes that started with its
+  id, in the app's own resource coalition, which a process keeps however it detached, as the
+  relay lists them (`novadeck-relay tagged`, under "Relay protocol"). Runs and
+  starts are in the wall clock, to the microsecond, as the relay reads a process's start;
+  `ps` gives only its second. An Apple shell (macOS's bash and zsh) is never a member,
+  so the shell's tree while it runs is told by the listing's parents, and so is the root of a
+  tree whose members run under another Apple program, as a `bash` loop or `make` the person
+  started before the agent, whose own start decides. Spared as on Linux, and what launchd
+  started, in a coalition of its own: an app the agent opens, with `open`, `osascript` or any
+  LaunchServices call, which passes the app the caller's environment, the terminal's id in it
+  (measured 2026-11-23), so no shim is needed as on Linux; and a launchd job (`launchctl`,
+  `brew services`); and what started without the id, as with `env -i`. Not seen, so it outlives the terminal as before: what macOS keeps the
+  environment of from other processes, every Apple program (a detached `caffeinate`, `tail
+  -f`, `ssh -fN`, or a `bash` loop, though a non-Apple program it runs is seen) and apps with
+  restricted entitlements (Chrome started by its binary); and a daemon that wrote over its
+  own environment, as redis's and postgres's `setproctitle` do. Where the person's Codex sets
+  its commands' environment (`shell_environment_policy`), whose `inherit = "core"` would drop
+  the id, Novadeck's codex shim sets it again (`shell_environment_policy.set`); an
+  `include_only` of theirs that leaves it out still drops it. An Apple `ssh` is never seen, so
+  an ssh `ControlMaster` an agent started stays, unlike on Linux.
+- On Windows the same is done with a job object per terminal in place of the scope
+  (`libraries/terminal/src/pty/jobs.ts`, `backend/relay/src/jobs.rs`). Windows keeps a
+  process's recorded parent once that parent has ended, and the tree read above walks only
+  from the shell, so a program started through a launcher that exits (`start /b`,
+  `Start-Process`, a detached child of a short-lived process) leaves it; but a process
+  stays in the job it was started in. The runner's own relay holds each terminal's job
+  (`novadeck-relay jobs`, below) for as long as the runner runs, and the shell goes into it
+  as soon as node-pty names its pid, which it does as it creates the shell, a moment after
+  `spawn` returns: what the shell starts before then stays out, so its startup command
+  waits for the file the runner makes once that has settled (`scopeFile`; cmd through
+  `novadeck-relay held`). The agent's runs, what counts as one of its trees and what is
+  spared are as on Linux, with starts in Windows' creation times (milliseconds since the
+  Unix epoch, read against the wall clock) and a parent counted only where it started no
+  later than its child, as a later process may hold an ended parent's pid. What is found is
+  ended at once, by pid and start, as Windows has no signal to ask first. A job only holds:
+  it is made without `KILL_ON_JOB_CLOSE`, so the relay's exit ends nothing, and a terminal's
+  job is let go once it closes, leaving what was spared running. It allows no breakaway: Git
+  Bash's runtime starts every program with `CREATE_BREAKAWAY_FROM_JOB` where its job allows
+  it, so everything Claude Code's Bash tool runs would leave the job; a program that asks to
+  break away without looking first is refused, and doesn't start in a Novadeck terminal. One
+  started by a service, as through WMI or the Task Scheduler, is never in it: Claude Code
+  starts its background service through WMI, so it is never one of a Windows terminal's
+  leftovers. An app an agent opens is started by its caller, inside the job, however it opens
+  it (`start`, `Start-Process`, npm's `open`, `BROWSER`; measured on Windows 10 21H2), and
+  Windows has no shim for that as Linux's `xdg-open`: where a browser is running, it only
+  hands the URL to it and exits, and the tab is the running browser's, but a browser an agent
+  starts from nothing ends with its terminal, tabs and all. `explorer.exe <file>` hands it to
+  the running explorer, outside. Under Antigravity, what a command started ends about a
+  second after the command does, detached or not, so nothing of it is left for a close;
+  under Codex it mostly ends with the agent itself when it dies, its sandbox off too, though
+  not always (measured); under Claude Code and opencode it runs on until the terminal closes.
+- Otherwise, on Linux without the user's systemd, it is not a
+  process-tree kill guarantee: daemonized jobs and descendants that ignore hangup may
+  continue, as with an ordinary terminal emulator, and so may a daemon an agent left in a
+  group of its own.
 
 ## Shell integration and restoring terminals
 
@@ -848,11 +1262,26 @@ changed. Only connecting an agent (below) installs anything elsewhere:
   front after the user's startup files.
 - `bin/agy` (`agy.cmd`), which shells get first on `PATH` while Antigravity is connected: it passes
   the person's allow rules with Novadeck's own tools added, which the relay (`novadeck-relay allow`)
-  writes to `allow/<terminal id>.json`, a folder the runner empties as it starts.
+  writes to `allow/<terminal id>.json`, a folder the runner empties as it starts, and the folder of
+  agents' worktrees only where it sorts after the folder agy starts in (on Windows as
+  `novadeck-relay after <folder> <cwd>` answers, by its exit code; see harness-adapters.md, "Shims
+  and the worktrees folder").
+- On Linux, `open/xdg-open` and `open/gio`, each written only where its program is on the
+  runner's `PATH`, in a folder that shells get first on `PATH` whenever the terminal has a
+  scope of its own (`NOVADECK_OPEN` names it), with `BROWSER` naming the `xdg-open` one where
+  the person names no browser of their own and an `xdg-open` is there. Each runs the next
+  program of its name on `PATH`, `gio` only for `open` and `launch`, through `systemd-run
+  --user --scope --collect`, so what it opens gets a scope of its own and outlives the
+  terminal, which ends what an agent left in its own (see "Closing" above). Its words, output
+  and exit status are the program's. Where the user's systemd doesn't answer, as inside
+  Codex's sandbox, the program runs as it would without the shim. Startup files that set
+  `PATH` whole, dropping the folder, leave the shims out.
 - On Windows, where cmd's AutoRun prints: `agy-cmd/cmd.exe`, Novadeck's `cmd.exe` pass-through
   (`novadeck-cmd.exe`, built with the relay and checked byte for byte against the shipped one),
   which `agy.cmd` puts first on `PATH` for Antigravity alone, so its `cmd /c` hooks run the real cmd
-  with `/d` and the AutoRun's output stays out of their answers. See
+  with `/d` and the AutoRun's output stays out of their answers; and with it
+  `agy-hooks/.agents/hooks.json`, Antigravity's PreToolUse hook, which its global plugin leaves out
+  there and `agy.cmd` adds to sessions in Novadeck's terminals as a workspace (`--add-dir`). See
   [agent messaging](agent-messaging.md).
 - `hook` (`hook.cmd`), a launcher that starts Novadeck's relay (`novadeck-relay`, a
   small native program copied in beside it; see `backend/relay`), so the hook needs
@@ -977,6 +1406,28 @@ or taskkill for:
   recorded parent.
 - `novadeck-relay end <pid>:<startedAt>...` ends each of those processes still running
   that started then, and no other given its pid since.
+- `novadeck-relay jobs` runs as long as the runner keeps its input open and holds the
+  terminals' job objects, answering a JSON line, `{"n":<n>,...}`, for each line asked,
+  `<n> <ask>`: `hold <terminal> <pid>[:<startedAt>]` puts that process in a new job for the
+  terminal (`held`), `members <terminal>` lists the job's processes as `tree` does
+  (`processes`, null for none; only processes the job holds, each checked on the handle its
+  start is read from, so a pid reused since is never one), `release <terminal>` lets the job
+  go, and `end <pid>:<startedAt>...` ends processes as `end` does. Its exit ends nothing. The
+  runner starts it with itself and ends its input as it closes, after the terminals; a
+  terminal whose hold it doesn't answer in time gets no job, and the rest go on.
+- `novadeck-relay held <file>` waits up to about a quarter of a second for `file`, then
+  removes it: a cmd terminal's startup command runs after it, so it starts inside its job.
+
+On macOS the runner runs it to list each terminal's processes (see "Closing"):
+
+- `novadeck-relay tagged <variable>` prints, a JSON line per process of the user's that
+  started with `<variable>` in its environment, `{"pid","startedUs","value"}`: its start in
+  microseconds since the epoch, and the variable's value there. It reads each process's
+  `KERN_PROCARGS2` (never its arguments for the variable) and leaves out one whose start
+  changed while it read, and one outside the relay's own resource coalition, the app's, as
+  what launchd started. macOS keeps the environment of a restricted program (every Apple one,
+  and apps with restricted entitlements) from other processes, so those are never listed.
+  It fails where its own coalition can't be read, and the runner then ends nothing.
 
 `works.watch` reports a work per tracked worktree, keyed by its root (`{ root, terminalId | null,
 projectId, working, branch, base, firstSeenAt, merged, added, removed, files, conflicts, … }`; `removed`
@@ -1762,6 +2213,16 @@ one from an earlier runner.
   dialog is not raw, or the terminal is gone. The client's
   `agents.saveDialog(terminalId, request)` is that call.
 
+- `agents.takeBack({ terminalId, permit })` (since revision 10) is the person's Take back on a
+  permit of the shipping gate that stands for the terminal's agent: `permit` is an id from
+  `agents.detail`'s `permits`, whose entries say what it covers (`title`), the person's own
+  matched words (`quote`, null where they allowed it on the gate's card), when it was given and
+  until when it stands (`givenAt`, `until`) and when it was first used (`usedAt`). It ends at
+  once with every target it covered, the agent is told in a Novadeck notice, and the call
+  resolves with `{ ended }`, false where none stood by that id. `permits` is absent while the
+  gate is off and where none stand. Errors: `NOT_FOUND`, the terminal isn't open. A UI asks
+  `runner.supports("agents.takeBack")` first.
+
 - `agents.interrupt({ terminalId, setAside? })` presses Escape in the terminal's agent, which stops
   its turn in every harness, after up to 5 s where Claude Code's queued messages are still
   in their prompt hooks (the turn ends without a normal Stop: its activity is
@@ -2240,11 +2701,11 @@ one from an earlier runner.
   the plans its bar mirrored of the earlier one go; moved ones stay.
 
 - `settings.get()` and
-  `settings.set({ transcripts?, welcomed?, inboxOrder?, inboxSnoozed?, inboxHistory?, hibernateAfterMinutes?, worktrees?, agentModes?, agentMode? })`
+  `settings.set({ transcripts?, welcomed?, inboxOrder?, inboxSnoozed?, inboxHistory?, hibernateAfterMinutes?, worktrees?, agentModes?, agentMode?, shippingGate? })`
   read and change whether transcripts are kept (unless turned off; turning them off forgets
   every saved transcript), whether the person has seen the first-run choice of agents, the
-  Inbox rows that ask in the order the person dragged them into, and the rows they snoozed
-  (each `<row id>@<when it began>`, at most 200 of each, and 200 characters), the Inbox's rows
+  Inbox entries that ask in the order the person dragged them into, and the entries they snoozed
+  (each `<entry id>@<when it began>`, at most 200 of each, and 200 characters), the Inbox's entries
   that ended and the runner can't tell of itself (a dialog answered, a held message released, a
   usage limit over) as the app made them resolved, and those it still had open, each a JSON
   string with its long texts cut, the latest ten resolved and at most fifty open, about 64 KB
@@ -2255,58 +2716,164 @@ one from an earlier runner.
   open git worktrees through Novadeck's tools (off until the person turns it on, in
   Preferences' Experimental tab), whether Solo and Swarm may be picked (`agentModes`, off until
   the person turns it on in the same tab; while off, agents work as a Herd whatever `agentMode`
-  holds, and the saved pick returns with the switch), and how agents work with each other,
+  holds, and the saved pick returns with the switch), whether the shipping gate is on
+  (`shippingGate`, off until the person turns it on in the same tab; see "The shipping gate" in
+  agent-messaging.md), and how agents work with each other,
   `"herd"` until the person picks `"solo"` or `"swarm"` (see "Herd, Solo and Swarm" in agent-messaging.md). `get` also
   reports `transcriptsAvailable`: false once it is known there is no key to seal
   transcripts with, true when there is one and while it is still awaited (it waits about a
-  second for it).
+  second for it). `settings.watch()` (revision 7) yields the settings as `get` reports them,
+  then again each time any client changes them, so every device the person uses follows: the
+  app shows each switch, the Inbox's order and its snoozes as another device left them, but a
+  change of its own still under way stands until the runner answers it.
+
+- `preferences.get()`, `preferences.set({ key, value, writer })` and `preferences.watch()`
+  (revision 7; see [Preferences](#preferences)) keep the person's own preferences, which follow
+  them from device to device.
 
 - `tour.prepare({ agent })` readies a run of Novadeck's tour with the person's own agent
-  (`backend/runner/src/tour/`). It removes every project open at the tour's folder,
-  `~/.novadeck/tour`, closing their terminals, so nothing runs there; empties the folder and
-  writes only a neutral sandbox note there (`AGENTS.md`, which Codex and Antigravity read, and
-  `CLAUDE.md`, which imports it: no role, no steps, since the agents the lead opens start in the
-  same folder and would follow a script they loaded) and a project `.claude/settings.json`
-  (`defaultMode: acceptEdits`, so Claude Code teammates, given no launch flags, take edits
-  unasked and a plan mode in the person's own settings doesn't hold them), beside a
-  `.novadeck-tour` marker; and answers `{ directory, command, brief, model?, removed }`.
+  (`backend/runner/src/tour/`). The tour's project is a blank start for a browser game the
+  person chooses and can keep: plain JavaScript modules with no build step (`index.html`, the
+  game in `src/` from `src/main.js`, `src/models.js` to load a model by name, falling back to the
+  placeholder until it exists), three.js and Phaser to draw with, and every character, enemy and
+  unit a glTF model in `models/` built of four ready shapes in `models/shapes.bin`
+  (`models/README.md` says how; the page shows `models/placeholder.gltf` turning until the game
+  replaces it). Its files are the seed in `backend/runner/assets/tour/seed/`
+  (real files; `make-shapes.mjs` beside it regenerates `shapes.bin` and is never written; a
+  `__pycache__/` folder, `*.pyc`, `.DS_Store` and `Thumbs.db` in it are skipped), and
+  the two libraries are written beside them as files under `vendor/` (`phaser.min.js` with its
+  license, and three's `three.module.js`, `three.core.js`, `GLTFLoader.js`,
+  `BufferGeometryUtils.js`, `SkeletonUtils.js` with its license). The seed's `.gitignore` keeps
+  `vendor/` out of the sandbox's git, so worktrees don't carry it and agents' searches skip it
+  (the project's note tells agents never to read it). The runner reads the files in one place
+  (`seedFiles`, `tour/seed.ts`): from the repository (`assets/tour/seed` and the packages'
+  folders in `node_modules`) in development, tests and a standalone runner, and from the folders
+  `RunnerOptions.tour` names (`TourAssets`: `seed`, `phaser`, `three`) where given. The packaged
+  desktop app ships them as `extraResources` (`tour/seed`, and each library's few files in its
+  package layout under `tour/phaser` and `tour/three`), the main process names them
+  (`tourAssets()` in `apps/desktop/src/main/resources.ts`: the resources folder when packaged,
+  the repository otherwise) and passes them to the runner utility process as one JSON argument
+  (`--novadeck-tour=`). Files that can't be read are a `CONFLICT` in words for the person
+  ("Novadeck's tour project files couldn't be read here ... Reinstall Novadeck"), asked before
+  anything is removed.
+  The folder is the first of `~/.novadeck/tour`, `tour-2`, `tour-3`, ... up to `tour-99` that is
+  missing, empty or holds the `.novadeck-tour` marker (so a run wipes it); one the person kept
+  (files and no marker, see `tour.keep`) is passed over, never refused. It is `CONFLICT` only
+  where `tour` itself is no folder, or all ninety-nine are taken. "The tour's folder" everywhere
+  (`isTours`, `openPolicy`, the worktrees exception, the page's own check) means one of those
+  names with its marker in it, checked with one synchronous look, by the path as given or by real
+  paths, with Windows' and macOS' case folding.
+  The folder is a tiny git repository with one commit on `main` by "Novadeck tour"
+  (`tour@novadeck.invalid`, given per command: the person's git config is never touched, nor
+  their signing or hooks, nor their global ignore file: the seed is added with
+  `core.excludesFile` emptied, so only the seed's own `.gitignore` (which keeps `vendor/` out)
+  decides what is committed). The seed's `.gitattributes` (`* text=auto eol=lf`) keeps a
+  worktree's files byte for byte the ones committed on Windows too, where git would otherwise
+  check text out with CRLF: the seed's dev server shows a worktree's copy of a file where it
+  differs from the folder's, so converted line endings would make every worktree's every file
+  count as changed. What is committed is the project as the person keeps it:
+  `AGENTS.md` is the project's note and `CLAUDE.md` imports it. The tour's own files are laid
+  over it after the commit, where git doesn't see them (`laySandbox`): the sandbox note (no role,
+  no steps, since every tour agent starts in the same folder and would follow a script it loaded;
+  with the run's harness's shell rule) in the working `AGENTS.md`, marked `skip-worktree`, so the
+  status stays clean and every worktree made from the commit carries the project's note; and a
+  project `.claude/settings.json` (`defaultMode: acceptEdits`, so a Claude Code agent started
+  there with no flags takes edits unasked and a plan mode in the person's own settings doesn't
+  hold it), uncommitted. The marker and that file are kept out by `.git/info/exclude`. Without git
+  it is a `CONFLICT` ("The tour needs git..."), asked before anything is removed. It removes every
+  project open at the chosen folder, closing their terminals, so nothing runs there; empties the
+  folder and writes the seed and libraries; it also makes the folder agents' worktrees live in (`~/.novadeck/
+  worktrees`), before any agent starts, as the harness shims pass it on only where it exists;
+  and answers `{ directory, command, brief, model?, removed, page }`.
+  `page` is whether the lead will run the game's dev server (`tour/serving.ts`): the first of
+  `node`, `python3`, `python` that answers `--version` (5 s at most) as Node or Python 3, looked
+  for on the PATH of the person's environment as their terminals have it (the login shell's, what
+  `agents.environment()` gives, which a desktop app started from Finder has but its own process
+  doesn't), since the server command runs in a terminal of theirs (a
+  Windows Store alias stub doesn't count) runs the seed's `dev.mjs` or `dev.py` on a free port
+  of 127.0.0.1 (bound to port 0, read, closed); with none, `page` is false and the lead's script
+  has no serving steps.
   `command` starts the agent there on its cheapest model (Claude Code's `haiku`, Codex's newest
-  `*-luna` or else the last it lists, Antigravity's `gemini-3.8-flash-low`, each at its lowest
-  effort), taking edits in the folder without asking for this launch only
+  `*-luna` or else the last it lists, Antigravity's `gemini-3.8-flash-low`, opencode's own free
+  `opencode/*-free`, each at its lowest effort; opencode with none of its free models listed is
+  `MODELS_UNLISTED`), taking edits in the folder without asking for this launch only
   (`--permission-mode acceptEdits`, Codex's `--sandbox workspace-write --ask-for-approval
-  on-request`, `--mode accept-edits`), with no prompt on it, and nothing written to the agent's
+  on-request`, `--mode accept-edits`, opencode's `--agent build`), with no prompt on it, and nothing written to the agent's
   own settings. `brief` is always `doorbell`: the lead's script reaches it by `tour.brief`.
-  The script is composed for each run: it calls the person by the first word of their global
-  git name (`git config --global user.name`, read by the runner with a short timeout, never
-  over a network), else their OS account's first name capitalized, else "you", and the name
-  goes on from there: into the script, the teammates' briefs (which Novadeck keeps and shows in
-  Messages), the card, and each agent's model provider through the person's own account. It has
-  the lead open two teammates with `open_agent`, a copywriter on the lead's own agent and a
-  designer on the first other connected agent whose cheapest model is listed (else the lead's),
-  each on that agent's cheapest model at its lowest effort, as above; teammates get no write
-  flags, and only the lead writes the card, `welcome.svg` (an SVG image the side pane shows as
-  an image). A terminal in the folder that has a lead is a teammate, and its `open_agent` is
-  refused (`Tour.openPolicy`, through the Terminals option `openPolicy`), so a teammate that
-  follows the script anyway can't nest a team. `removed` names the projects it removed. A
-  folder there that is no folder, or that holds files without the marker, is the person's and
-  is never emptied: `CONFLICT`, refused before any project is removed, as are an agent Novadeck isn't connected to and a second run
-  while one is being readied. An agent whose cheapest model can't be told is `MODELS_UNLISTED`:
-  Codex lists its models (its `models_cache.json`) only once it has started signed in. Neither
-  changes anything. The client then opens the folder as a project and starts `command` in a
-  terminal of it (`terminals.create`).
+  The script is composed for each run, and never names the person: it calls them "you", and
+  tells every agent never to use their name, even one it knows. It has the lead describe itself
+  and ask the person which game to build: one `ask` of two questions, "The world" (Fantasy,
+  Sci-fi, Modern) and "The kind" (RPG, Shooter, Strategy), own words allowed (dismissed, it takes
+  Fantasy and RPG). With the answer, where `page` is true, it first asks to `open_terminal` the
+  dev server's command (`node dev.mjs <port>`, say, which the person approves in the app's usual
+  dialog) and ends its turn, opening no one while the approval is on screen; told the outcome, it
+  `show`s the page where they approved it. Then (with the answer, where `page` is false) it
+  names the game's three models (the player, an enemy, one more) and, in that one turn (a
+  sentence in between ends a cheap model's turn), opens two teammates with `open_agent` on the lead's own harness and its cheapest model, at its lowest
+  effort as above, each with its task as the message, the picks and the names written in for the
+  task's `[[world]]`, `[[kind]]`, `[[one]]`, `[[two]]` and `[[three]]` (the Modeller makes the
+  three models in a worktree on `models`, shows the first as soon as it exists, asks the person
+  one thing about their look, then makes the other two; the Builder writes the game in `src/` in
+  a worktree on `game`, loading the models by name, shows its changes, asks the person one thing
+  it should get next and makes that change; each tells the lead when done). No agent runs git. The texts are tuned
+  on Codex (its `*-luna`, low effort) alone; the other harnesses run them untuned. What each
+  agent is told of the shell follows its harness (`shellRule`, in the lead's script, both tasks
+  and the folder's note): Claude Code, Antigravity and opencode, which read and write files with
+  tools of their own, run no shell command; Codex, which reads files only through its shell, uses it to read
+  files and for nothing else (probed 2026-11-22, 0.171.0: told to run none, its agents couldn't
+  read the files they were to change). A
+  teammate the lead opens in the folder starts with the same write flags as the lead, for that
+  launch only (`OpenPolicy.flags`, through the Terminals option `openPolicy`, so `open_agent`'s
+  command line carries them right after the model). Only the run's lead opens agents in the
+  tour's folder: every other terminal there, a teammate or any other, has its `open_agent`
+  refused (`Tour.openPolicy`), so an agent that follows a script anyway can't nest a team.
+  `removed` names the projects it removed. A second run while one is being readied is a
+  `CONFLICT`, as is an agent Novadeck isn't connected to. An agent whose cheapest model can't be
+  told is `MODELS_UNLISTED`: Codex lists its models (its `models_cache.json`) only once it has
+  started signed in. Neither changes anything. The client then opens the folder as a project and
+  starts `command` in a terminal of it (`terminals.create`).
+  Agent worktrees work for every terminal in the tour's folder whatever the person's "Agent
+  worktrees" setting (never changed by the tour): the MCP server lists the worktree tools and
+  the calls go through (`WorktreesWiring.enabled(terminalId)`), the folder counts as ready for
+  the agent's process once it exists, and each worktree's changes are shown on its owner's bar.
 - `tour.brief({ terminalId })` rings the lead's script (composed of the run last readied) to the
   agent in the terminal, as Novadeck's notice, for every harness: the doorbell delivers it once
-  the agent's prompt shows and its MCP tools are listed. Its delivery's note frames it as the
-  agent's task (the one notice that is), and its text keeps its quotes and angle brackets
-  (escaped as every message's is), whole: it is under the 8 KB a delivery prints. A terminal
-  whose agent hasn't shown yet, or that isn't in the tour's folder, is a `CONFLICT`, as is a
-  runner that has readied no run; the client asks once it has bound.
+  the agent's prompt shows and its MCP tools are listed. It records the terminal as the run's
+  lead. Its delivery's note frames it as the agent's task (the one notice that is), and its text keeps its quotes and angle brackets (escaped as every message's is),
+  whole: it is under the 8 KB a delivery prints. A terminal whose agent hasn't shown yet, or
+  that isn't in the tour's folder, is a `CONFLICT`, as is a runner that has readied no run; the
+  client asks once it has bound.
+- `tour.artist({ terminalId })` is always a `CONFLICT` ("The tour has no artist."): the story
+  has no artist any more, and the procedure stays for a client that still asks.
+- `tour.keep()` is the person keeping the project. The client calls it by itself when the tour's
+  story ends (the closing card shows), so a finished tour is never wiped by the next one, and
+  again if the person presses the card's button: it is idempotent. For the run's folder it first
+  brings the team's work home (`bringHome`, `tour/repo.ts`), with no agent running git: each
+  other worktree's files that it changed since it parted from the folder (as the dev server
+  counts them: differing from that commit, or untracked and not ignored) are laid over the
+  folder, the newest copy of each where several changed one (the folder's own among them where
+  it changed it too), as the dev server picks what to serve; a file a worktree removed stays.
+  Where that changes anything, it is committed on `main` as "The team's game" by "Novadeck tour"
+  (as the first commit is, while the tour's files are still kept out of it), and each worktree
+  is then moved to that commit (`reset --hard`), so it holds nothing main doesn't and its work
+  reads as merged in the Worktrees panel. So the folder holds the game the page last showed, and
+  "Keep building" starts from it. Then it writes the project's note back to `AGENTS.md` and clears its `skip-worktree` bit (`releaseSandbox`),
+  takes the tour's two lines out of `.git/info/exclude` (so a `.claude/settings.json` the person
+  adds later isn't ignored), removes the tour's `.claude/settings.json` (and `.claude` if then
+  empty) and, last, the marker (`keepTourFolder`; the marker going last means a failure midway can
+  be repeated). After it `git status` in the folder is clean and `git ls-files` has no `.claude/`.
+  It rings the lead that the tour is over, best effort and only when the run's lead is known, and
+  forgets the run; no tour rule applies to the folder and a later run takes the next name. A
+  folder without the marker is not the tour's and is left alone, so a repeat does nothing. With no
+  run in memory (the runner restarted since) it keeps every folder among `tour` to `tour-99` that
+  holds the marker and is open as a project (by its cwd, with `inTour`'s real-path and case
+  handling), and with none it resolves doing nothing. It never fails for want of a run.
 - `tour.nudge({ terminalId })` rings the agent in one of the tour's terminals a fixed line, as
   Novadeck's notice, to carry on from the step it is on: the UI's tour driver sends it where a
   step has waited on the agent past its patience. Refused as `tour.brief` is.
 
 Typed errors include `UNAUTHORIZED`, `INCOMPATIBLE_PROTOCOL`, `CONFLICT`,
-`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan, or the project window's file, can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change or copy a project's file, or a copy met a socket, pipe or device or a link it can't make, or a move across filesystems left something where it was; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`,
+`INVALID_DIRECTORY`, `INVALID_FILE`, `PLAN_UNWRITABLE` (a plan, or the project window's file, can never be saved; its data says why), `WRITE_REFUSED` (the system refused to change or copy a project's file, or a copy met a socket, pipe or device or a link it can't make, or a move across filesystems left something where it was; the message says why), `NOT_FOUND`, `TERMINAL_NOT_FOUND`, `CONTROL_REQUIRED`, `CONTROL_IN_USE`, `CONTROL_BUSY`,
 `INVALID_CURSOR`, `UPLOAD_TOO_LARGE`, `RESOURCE_LIMIT` (too many calls in flight; retry later),
 `TERMINAL_LIMIT` (the runner's terminal cap is reached), and `SLOW_CONSUMER`. A
 `CONFLICT` about typing into an agent's terminal (`agents.prompt`, `agents.answer`,

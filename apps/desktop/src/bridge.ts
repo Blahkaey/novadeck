@@ -4,6 +4,11 @@ export const apiUrlArgumentPrefix = "--novadeck-api-url="
 export const databaseArgumentPrefix = "--novadeck-database="
 /** The relay agents start for Novadeck's MCP server and hooks, as the app ships it. */
 export const relayArgumentPrefix = "--novadeck-relay="
+/**
+ * Where the tour's seed project and libraries are, as the app ships or finds them: JSON, the
+ * folders `seed`, `phaser` and `three` (the runner's `TourAssets`).
+ */
+export const tourArgumentPrefix = "--novadeck-tour="
 /** The manifest of the voice engine voice input installs: a file shipped with the app. */
 export const voiceEngineArgumentPrefix = "--novadeck-voice-engine="
 /** Where the voice engine's archive comes from: an https address ending in "/", or a folder. */
@@ -293,3 +298,40 @@ export const mainBeatMs = 1_000
 
 /** Messages from the runner's utility process to the main process: it is ready to serve. */
 export type RunnerReport = { readonly type: "ready" }
+
+/**
+ * Main-to-renderer report of what the app's other windows show, `{ elsewhere, voice }`, sent on
+ * each change; see main/window/project-windows.ts. A page that starts listening asks for the
+ * current one on `projectWindowsRequestChannel`.
+ */
+export const projectWindowsChannel = "novadeck:project-windows"
+
+/** Renderer-to-main request to be told, on `projectWindowsChannel`, of the current state. */
+export const projectWindowsRequestChannel = "novadeck:project-windows-request"
+
+/** Renderer-to-main report of the project the window shows now: its id, or null for none. */
+export const projectWindowShowChannel = "novadeck:project-window-show"
+
+/** Renderer-to-main request to open a project in a window of its own: the project's id. */
+export const projectWindowOpenChannel = "novadeck:project-window-open"
+
+/** Renderer-to-main request to hand a place in a project, `{ projectId, terminalId?, rowId? }`, to its window. */
+export const projectWindowHandOffChannel = "novadeck:project-window-hand-off"
+
+/** Main-to-renderer order to go to a place in a project, `{ projectId, terminalId?, rowId? }`. */
+export const projectWindowNavigateChannel = "novadeck:project-window-navigate"
+
+/**
+ * Given to the page's preload in a window that is not the app's first: the value is `1`;
+ * absent in the first window.
+ */
+export const extraWindowArgumentPrefix = "--novadeck-extra-window="
+
+/**
+ * Renderer-to-main request for the keys of the windows the app keeps for the next launch or has
+ * open, answered with their UUIDs (see `DesktopBridge.windowKeys`).
+ */
+export const windowKeysChannel = "novadeck:window-keys"
+
+/** Given to the page's preload: the window's key, a UUID (see `DesktopApp.windowKey`). */
+export const windowKeyArgumentPrefix = "--novadeck-window-key="

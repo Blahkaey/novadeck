@@ -176,6 +176,23 @@ export type Deck = {
   readonly seen: ReturnType<typeof wire>["seen"]
   /** The runner's tour, as `tour.prepare` and `tour.brief` answer. */
   readonly tour: ReturnType<typeof wire>["tour"]
+  /** The windows the runner knows, as the router reports them (`showing`, `active`). */
+  readonly clients: ReturnType<typeof wire>["clients"]
+  /** The id the deck's window controls its terminals by. */
+  readonly owner: string
+  /** The project's works, as `works.preview` reads them. */
+  readonly works: ReturnType<typeof wire>["works"]
+  /** The git worktrees agents opened, as the runner keeps them. */
+  readonly worktrees: ReturnType<typeof wire>["worktrees"]
+  /**
+   * Opens a shell in the project and session of `beside`, as the person's New terminal does,
+   * plain or, with `command`, running it at its first prompt.
+   */
+  readonly openBeside: (
+    beside: Pick<DeckTerminal, "id">,
+    cwd?: string,
+    command?: string,
+  ) => Promise<DeckTerminal>
   /** The person's notes on each project, as the runner wired now keeps them. */
   readonly notes: ReturnType<typeof wire>["notes"]
   /**
@@ -612,10 +629,14 @@ type Runner = {
   readonly items: ReturnType<typeof wire>["items"]
   readonly uploads: ReturnType<typeof wire>["uploads"]
   readonly tour: ReturnType<typeof wire>["tour"]
+  readonly works: ReturnType<typeof wire>["works"]
+  readonly worktrees: ReturnType<typeof wire>["worktrees"]
   readonly notes: ReturnType<typeof wire>["notes"]
   readonly seen: ReturnType<typeof wire>["seen"]
   /** The terminals a window uses, which run at the app's priority; see `inUse`. */
   readonly activity: ReturnType<typeof wire>["activity"]
+  /** Which project each window shows and which was used last, as `terminals.showing` and `active` tell it. */
+  readonly clients: ReturnType<typeof wire>["clients"]
   /** Aborts as the runner closes, ending every watch of it. */
   readonly closing: AbortController
 }
@@ -685,35 +706,48 @@ const now = async <T>(stream: (signal: AbortSignal) => AsyncGenerator<T>): Promi
 export const createDeck = async (options: DeckOptions): Promise<Deck> => {
   const shellFolder = join(options.data, "shell")
   const start = async (): Promise<Runner> => {
-    const { store, shellFiles, agents, terminals, items, uploads, tour, notes, seen, activity } =
-      wire({
-        database: join(options.data, "workspace.sqlite"),
-        uploads: join(options.data, "uploads"),
-        shell: shellFolder,
-        // The sandbox's own, never the developer's, which the shims would pass to every agent.
-        worktreesRoot: worktreesRoot(options.env.HOME!),
-        ...(options.transcriptKey && { transcriptKey: options.transcriptKey }),
-        // Plugin commands run with the sandbox's environment as it is: a login shell's
-        // startup files, even the system's own in /etc/profile, could put another PATH
-        // before the pinned harnesses.
-        agents: { env: options.env, home: options.env.HOME!, login: false },
-        // bash, or on Windows cmd, whose integration reports its prompts as bash's does.
-        terminals: {
-          shell:
-            options.shell ??
-            (process.platform === "win32" ? (options.env.ComSpec ?? "cmd.exe") : "/bin/bash"),
-          baseEnv: options.env,
-          freshPath: options.freshPath ?? false,
-          // The list's order, not each session's shuffle, so scenarios know the handles given.
-          handleOrder: () => options.handles?.words ?? handleWords,
-          ...(options.handles && { handleCooldown: options.handles.cooldownMs }),
-          // Seconds, not the setting's minutes, once a scenario turns stopping idle agents on
-          // (`hibernated`); off until then, so no other scenario's agent is stopped mid-test.
-          hibernation: { windowMs: 5_000, sweepMs: 1_000 },
-          // No window reports what it looks at here: a held dialog is scrolled in after a moment.
-          answers: { graceMs: 300 },
-        },
-      })
+    const {
+      store,
+      shellFiles,
+      agents,
+      terminals,
+      items,
+      uploads,
+      tour,
+      notes,
+      works,
+      worktrees,
+      seen,
+      activity,
+      clients,
+    } = wire({
+      database: join(options.data, "workspace.sqlite"),
+      uploads: join(options.data, "uploads"),
+      shell: shellFolder,
+      // The sandbox's own, never the developer's, which the shims would pass to every agent.
+      worktreesRoot: worktreesRoot(options.env.HOME!),
+      ...(options.transcriptKey && { transcriptKey: options.transcriptKey }),
+      // Plugin commands run with the sandbox's environment as it is: a login shell's
+      // startup files, even the system's own in /etc/profile, could put another PATH
+      // before the pinned harnesses.
+      agents: { env: options.env, home: options.env.HOME!, login: false },
+      // bash, or on Windows cmd, whose integration reports its prompts as bash's does.
+      terminals: {
+        shell:
+          options.shell ??
+          (process.platform === "win32" ? (options.env.ComSpec ?? "cmd.exe") : "/bin/bash"),
+        baseEnv: options.env,
+        freshPath: options.freshPath ?? false,
+        // The list's order, not each session's shuffle, so scenarios know the handles given.
+        handleOrder: () => options.handles?.words ?? handleWords,
+        ...(options.handles && { handleCooldown: options.handles.cooldownMs }),
+        // Seconds, not the setting's minutes, once a scenario turns stopping idle agents on
+        // (`hibernated`); off until then, so no other scenario's agent is stopped mid-test.
+        hibernation: { windowMs: 5_000, sweepMs: 1_000 },
+        // No window reports what it looks at here: a held dialog is scrolled in after a moment.
+        answers: { graceMs: 300 },
+      },
+    })
     // The runner carries on without its shell files; a test can't, as no agent would report.
     if ((await shellFiles) === undefined) {
       await terminals.shutdown()
@@ -727,9 +761,12 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
       items,
       uploads,
       tour,
+      works,
+      worktrees,
       notes,
       seen,
       activity,
+      clients,
       closing: new AbortController(),
     }
   }
@@ -1061,6 +1098,9 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
     get terminals() {
       return runner.terminals
     },
+    get clients() {
+      return runner.clients
+    },
     get seen() {
       return runner.seen
     },
@@ -1076,6 +1116,22 @@ export const createDeck = async (options: DeckOptions): Promise<Deck> => {
     },
     get notes() {
       return runner.notes
+    },
+    owner,
+    get works() {
+      return runner.works
+    },
+    get worktrees() {
+      return runner.worktrees
+    },
+    openBeside: async ({ id }, cwd, command) => {
+      const { sessionId, cwd: at } = runner.terminals.get(id)
+      return openInUse(runner, {
+        id: randomUUID(),
+        sessionId,
+        cwd: cwd ?? at,
+        ...(command !== undefined && { command }),
+      })
     },
     openAt: async (cwd, command) => {
       const made = await runner.store.createProject({ id: randomUUID(), name: "Tour", cwd })

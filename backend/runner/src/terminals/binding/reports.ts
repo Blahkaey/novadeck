@@ -15,12 +15,15 @@ import { leaseMargin, type Answer } from "../../messaging/hook-answers.js"
 import type { Inbox } from "../../messaging/inbox.js"
 import { byteLength, maxDeliveryBytes, type Held } from "../../messaging/messages.js"
 import type { Messaging } from "../../messaging/messaging.js"
-import type { Person } from "../../messaging/withdrawals.js"
+import type { Person, Submission } from "../../messaging/withdrawals.js"
+import type { GateCall } from "../../shell/hook.js"
 import type { HookAnswer } from "../../shell/reports.js"
+import type { Shipping } from "../../shipping/service.js"
 import { sameToken } from "../callers.js"
 import { promptIn } from "../commands.js"
 import type { Companion } from "../companion.js"
 import type { Murmur } from "../descriptions.js"
+import { agentProcess } from "../ending.js"
 import { failed } from "../failures.js"
 import { tellInterrupted } from "../interrupted.js"
 import {
@@ -80,15 +83,29 @@ export type ReportsHost = {
   readonly trees: () => ProcessTrees
   /** The platform harnesses run their hooks on. */
   readonly platform: () => NodeJS.Platform
+  /** The shipping gate, where the runner offers it. */
+  readonly shipping: () => Shipping | undefined
   /** The agent worktrees wiring, read live at each turn's start; none where there are none. */
   readonly worktrees: () =>
     | {
-        enabled: () => boolean
-        ready: (startedAt: number | undefined, relists: boolean) => boolean
+        enabled: (terminalId?: string) => boolean
+        ready: (startedAt: number | undefined, relists: boolean, terminalId?: string) => boolean
+        /**
+         * Whether a folder is in a git repository (`repositoryKnown`): a few stats, no git, kept
+         * a few seconds; undefined where it can't be told. With `wait` false it never waits.
+         */
+        readonly inRepository?: (folder: string, wait: boolean) => Promise<boolean | undefined>
         readonly service: { readonly root: string }
       }
     | undefined
 }
+
+// The tools whose PreToolUse Codex's plugin registers for the person's questions.
+const questionTools: ReadonlySet<string> = new Set([
+  "request_user_input",
+  "request_permissions",
+  "request_user_input_async",
+])
 
 /**
  * The hooks' reports and asks of each terminal's agents, taken in the order they came: what
@@ -130,12 +147,45 @@ export class Reports {
   }
 
   /** A Stop or prompt-time hook's ask: its report, then what it prints (see `Messaging.ask`). */
-  queueAsk(report: Report, deadline: number): Promise<HookAnswer> {
+  async queueAsk(report: Report, deadline: number, gate?: GateCall): Promise<HookAnswer> {
     const silent = {
       leaseId: null,
       stdout: silentFor(harnesses[report.agent].messaging, report.event),
     }
+    // A shell command the shipping gate reads, answered first: where it has an opinion that
+    // is the hook's answer, and the report below is skipped.
+    if (gate) {
+      const record = this.host.records().get(report.terminalId)
+      const shipping = this.host.shipping()
+      if (record && !record.terminal.exiting && sameToken(record.token, report.token) && shipping) {
+        // Raced against the hook's own deadline: an answer that comes later is no answer.
+        const given = await shipping.answer(report.terminalId, report.agent, gate, deadline)
+        if (given !== undefined) {
+          // opencode's plugin reports every shell call, and a permitted one is answered with a
+          // lease that spends its permit: the call is still reported, as when it had no answer.
+          if (report.agent === "opencode" && report.event === "PreToolUse" && given.leaseId)
+            this.queueReport(report)
+          return given
+        }
+      }
+      // An event that is only the gate's has no ask of its own: it reports as any hook does.
+      if (!askOf(report.agent, report.event)) {
+        this.queueReport(report)
+        return silent
+      }
+    }
     return this.queue(report.terminalId, () => this.report(report, deadline), silent)
+  }
+
+  /**
+   * A shell tool's PreToolUse once the shipping gate is off: a session started while it was on
+   * still sends it, and nothing else registers it (Codex's registered ones are the three
+   * questions), so it reports nothing, as it never did before the gate.
+   */
+  private ignored(report: Report): boolean {
+    if (report.event !== "PreToolUse" || this.host.shipping()?.enabled()) return false
+    if (report.agent === "claude") return true
+    return report.agent === "codex" && !questionTools.has(String(report.payload.tool_name))
   }
 
   /**
@@ -149,8 +199,21 @@ export class Reports {
       leaseId: null,
       stdout: silentFor(harnesses[report.agent].messaging, report.event),
     }
+    if (this.ignored(report)) return silent
     const record = this.host.records().get(report.terminalId)
     if (!record || record.terminal.exiting || !sameToken(record.token, report.token)) return silent
+    // Antigravity's mode, as its status line says it, so the shipping gate stays silent where it
+    // runs every command unasked (and follows a Shift+Tab switch). Only the bound process's own:
+    // a nested `agy -p` in the terminal names a mode of its own. Silence only ever leaves a
+    // command to Antigravity's own dialog, never past it.
+    if (
+      report.agent === "agy" &&
+      report.event === "StatusLine" &&
+      (record.bound === null ||
+        record.bound === undefined ||
+        record.bound.binding.instance === report.instance)
+    )
+      this.host.shipping()?.statusLine(report.terminalId, report.payload, report.instance)
     // The bound session's transcript, where this report names it and nothing did before.
     const named = harnesses[report.agent].transcriptOf?.(report)
     if (named && record.bound?.binding.agent === report.agent)
@@ -246,6 +309,21 @@ export class Reports {
     // could take the prompt as theirs (pinned by the integration test "applies a draft
     // typed while asked before the prompt that clears the request").
     for (const event of events) {
+      // The harness's prompt went to a screen of no session (opencode's `/new`): the session
+      // it had bound ends, and the next one binds with its first prompt.
+      if (event.type === "session-left") {
+        if (this.host.bindings().endBinding(record, event.sessionId)) {
+          changed = true
+          // Its prompt shows, with no session bound: messages wait for the next one.
+          this.host.shown().showPrompt(record, {
+            type: "prompt-shown",
+            agent: event.agent,
+            instance: event.instance,
+            startedAt: event.startedAt,
+          })
+        }
+        continue
+      }
       if (event.type !== "session-observed") {
         this.host.bindings().applyFact(record, event)
         continue
@@ -292,6 +370,8 @@ export class Reports {
                 telemetry: null,
               }
       if (next.binding !== null) {
+        // What it starts in the terminal's scope from now is its own, to end with the terminal.
+        record.terminal.pty.agentStarted(agentProcess(record))
         // A woken agent came up: the wake worked (see `Record.woken`).
         record.woken = undefined
         // After a suspended agent, a binding is that agent back from `fg`, or another the
@@ -350,7 +430,11 @@ export class Reports {
     // The person's own prompt starting a root turn takes the session's open asks out of the
     // Inbox, as delivery judges the prompt theirs, but only once a hook acknowledges having
     // printed the notice of it (see `Withdrawals.withdrawn`).
+    let submission: Submission | undefined
     const person: Person = {
+      submitted: (turn) => {
+        submission = turn
+      },
       counts: ({ prompt }) => !this.byCommand(record, prompt),
       withdrawable: (before) => this.host.inbox().withdrawable(record.summary.id, before),
       withdraw: (asks) => this.host.inbox().withdrawReplied(record.summary.id, asks),
@@ -366,6 +450,7 @@ export class Reports {
     }
     if (deadline === undefined) {
       this.host.messaging().observe(report.terminalId, told, person)
+      this.quoted(record, told, submission)
       this.host.bindings().escaped(record)
       this.judgeFirst(record)
       return silent
@@ -378,6 +463,7 @@ export class Reports {
       person,
       payload: report.payload,
     })
+    this.quoted(record, told, submission)
     if (stopAsk) {
       this.continued(record, told, answer)
       this.host.bindings().publishAgent(record, moved)
@@ -410,6 +496,50 @@ export class Reports {
       startedAt: Date.now(),
       version,
     })
+  }
+
+  /**
+   * The person's own root prompt goes into the shipping gate's ring of what they typed (see
+   * `Quotes`), whether it starts a turn or comes into one Novadeck continued: only what delivery
+   * judges their own submission, never a doorbell or a delivery, nor the command-line prompt an
+   * agent was opened with, nor an Inbox button's fixed line. `submission` says when the person
+   * submitted it and whether it answered one of the agent's open asks, so the gate takes it whole
+   * (see `Quotes.said`).
+   */
+  quoted(record: Record, events: readonly HarnessEvent[], submission?: Submission): void {
+    const shipping = this.host.shipping()
+    if (!shipping?.enabled()) return
+    const start = events.find(
+      (event): event is Extract<HarnessEvent, { type: "turn-started" }> =>
+        event.type === "turn-started" && event.cause === "prompt" && rootedIn(record.root, event),
+    )
+    if (!start) return
+    // The prompt this report brought, whether it started a turn or came into one Novadeck
+    // continued, where the turn's own first prompt is still the one it started with.
+    const text = this.host.messaging().personSaid(record.summary.id)
+    if (text === undefined || this.byCommand(record, text)) return
+    // An Inbox button's fixed line is an option label, never the person's words.
+    if (submission?.fixed) return
+    shipping.quotes.record(
+      record.summary.id,
+      start.sessionId,
+      text,
+      submission?.answers() ?? false,
+      submission?.submittedAt,
+      start.startedAt,
+    )
+  }
+
+  /**
+   * The person's own words answering an ask in the Inbox join the ring too, taken from the
+   * runner's record of the answer: it reaches the agent as a doorbell, which `quoted` never
+   * takes. It is a reply to an ask by its nature.
+   */
+  quotedReply(terminalId: string, text: string): void {
+    const shipping = this.host.shipping()
+    const sessionId = this.host.records().get(terminalId)?.bound?.binding.sessionId
+    if (shipping?.enabled() && sessionId !== undefined && text !== "")
+      shipping.quotes.record(terminalId, sessionId, text, true)
   }
 
   /** A Stop Novadeck continued, lapsed as delivery took it, ends the agent's turn too. */
@@ -518,12 +648,21 @@ export class Reports {
     // An agent whose process started before the worktrees folder was there, or (where its
     // harness keeps the tool list) before the setting went on, can't use them until it
     // restarts; one whose start the relay couldn't read is taken to be such.
+    const enabled = wiring?.enabled(record.summary.id) ?? false
+    // The terminal's folder as its reports last said it (a harness that doesn't report a moved
+    // folder keeps the one it started in); a turn that delivers something never waits on it.
+    const inRepository =
+      record.root && enabled
+        ? await wiring?.inRepository?.(record.summary.cwd, leaseId === null)
+        : undefined
     const worktrees = record.root
       ? worktreesDue(
-          wiring?.enabled() ?? false,
+          enabled,
           toldOf(record.agents, record.root).worktrees,
           lasting,
-          wiring?.ready(report.processStart, messaging.toolsAtTurnStart) ?? false,
+          wiring?.ready(report.processStart, messaging.toolsAtTurnStart, record.summary.id) ??
+            false,
+          inRepository,
         )
       : null
     const taken = atTurnStart(record.nudges, {

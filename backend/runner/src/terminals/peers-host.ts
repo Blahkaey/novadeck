@@ -1,8 +1,14 @@
 import { existsSync } from "node:fs"
 import { basename, isAbsolute, relative } from "node:path"
 
-import type { CompanionItem, PullRequest, TerminalMessages } from "@novadeck/protocol"
+import type {
+  CompanionItem,
+  PullRequest,
+  TerminalMessages,
+  TerminalRings,
+} from "@novadeck/protocol"
 
+import { keysOfBranch } from "../checkouts/home.js"
 import { planTitle } from "../companions/content.js"
 import { secrets } from "../companions/secrets.js"
 import { DomainError } from "../errors.js"
@@ -168,6 +174,8 @@ export type PeersOptions = {
    * project and session (`HostWatch.listing`); undefined when the host is quiet.
    */
   readonly hostLoad?: (callerId: string, peers: readonly PeerRecord[]) => string | undefined
+  /** The shipping gate's cards open in a terminal, oldest first; none without the gate. */
+  readonly cards?: (terminalId: string) => readonly { readonly askedAt: number }[]
 }
 
 /**
@@ -178,16 +186,31 @@ export type PeersOptions = {
 const shareable = (kind: Waiting["kind"], subject: string | null): string | null =>
   kind === "permission" ? null : subject
 
-/** The oldest request an agent waits on the person for, with how many wait after it. */
-export const waitingOf = (activity: Pick<Activity, "pending"> | null): Waiting | null => {
+/**
+ * The oldest request an agent waits on the person for, with how many wait after it: its
+ * harness's, then the cards the shipping gate holds open for it (`request_permit`'s).
+ */
+export const waitingOf = (
+  activity: Pick<Activity, "pending"> | null,
+  cards: readonly { readonly askedAt: number }[] = [],
+): Waiting | null => {
   const [oldest, ...rest] = activity?.pending ?? []
-  return oldest
+  if (oldest)
+    return {
+      kind: oldest.kind,
+      tool: oldest.toolName,
+      subject: shareable(oldest.kind, oldest.subject),
+      more: rest.length + cards.length,
+      since: oldest.askedAt,
+    }
+  const [card] = cards
+  return card
     ? {
-        kind: oldest.kind,
-        tool: oldest.toolName,
-        subject: shareable(oldest.kind, oldest.subject),
-        more: rest.length,
-        since: oldest.askedAt,
+        kind: "permission",
+        tool: "request_permit",
+        subject: null,
+        more: cards.length - 1,
+        since: card.askedAt,
       }
     : null
 }
@@ -390,6 +413,13 @@ export class TerminalPeers {
     return this.options.messaging.list(terminalId, terminal.summary.handle)
   }
 
+  /** What a terminal's rings and deliveries say after sequence `since`. */
+  rings(terminalId: string, since: number): TerminalRings {
+    if (this.options.stopping()) throw new DomainError("CLOSING")
+    if (!this.options.terminal(terminalId)) throw new DomainError("TERMINAL_NOT_FOUND")
+    return this.options.messaging.rings(terminalId, since)
+  }
+
   /** Pauses messaging across the whole runner, or resumes it. */
   pause(paused: boolean): void {
     if (this.options.stopping()) throw new DomainError("CLOSING")
@@ -439,7 +469,7 @@ export class TerminalPeers {
             // A sleeper has no process to tell: its summary keeps when its last turn ended.
             since:
               activity?.lastTurn?.at ?? terminal.activity?.turnAt ?? terminal.summary.lastTurnAt,
-            waiting: waitingOf(terminal.activity),
+            waiting: waitingOf(terminal.activity, this.options.cards?.(terminal.summary.id)),
             waitsOn: activity?.waiting ? waitsOnNote(activity.waiting, Date.now()) : null,
             startup: terminal.summary.startup?.screen ?? null,
             happenings,
@@ -496,7 +526,18 @@ export class TerminalPeers {
         .map(async ({ path, branch, pullRequest, commonDir, base }) => {
           const gone = !existsSync(path)
           const state = gone ? null : await this.states.of(path)
-          return { path, branch, gone, state, commonDir, base, ...(pullRequest && { pullRequest }) }
+          // Only a home that isn't the repository's main is a key, and is said.
+          const home = gone ? undefined : (await keysOfBranch(path, branch)).home
+          return {
+            path,
+            branch,
+            gone,
+            state,
+            commonDir,
+            base,
+            ...(home !== undefined && { home }),
+            ...(pullRequest && { pullRequest }),
+          }
         }),
     )
   }

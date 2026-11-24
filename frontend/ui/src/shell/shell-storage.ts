@@ -1,3 +1,4 @@
+import { registerPerson, storedPerson } from "@novadeck/core/person"
 import type { RailPanel, WindowedView } from "@novadeck/core/types"
 
 import { keptBoundsOf, ownWindowDefault, type OwnWindowBounds } from "./own-window-bounds"
@@ -20,27 +21,26 @@ export const readWindowedView = (): WindowedView => {
   }
 }
 
-// The order the person left the footer's subscriptions in, by program.
-const subscriptionOrderStorageKey = "novadeck.subscription-order"
-export const readSubscriptionOrder = (): readonly string[] => {
+const storedNames = (text: string | undefined): string[] => {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(subscriptionOrderStorageKey) ?? "[]")
+    const stored: unknown = JSON.parse(text ?? "[]")
     return Array.isArray(stored) ? stored.filter((each) => typeof each === "string") : []
   } catch {
     return []
   }
 }
 
-// The order the person left the rail's panels in.
-const sidebarOrderStorageKey = "novadeck.sidebar-order"
-export const readSidebarOrder = (): readonly RailPanel[] => {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(sidebarOrderStorageKey) ?? "[]")
-    return railOrder(Array.isArray(stored) ? stored.filter((each) => typeof each === "string") : [])
-  } catch {
-    return railOrder([])
-  }
-}
+// The order the person left the footer's subscriptions in, by program: theirs on every
+// device (core's person.ts).
+export const subscriptionOrder = storedPerson("subscription-order", "novadeck.subscription-order")
+registerPerson(subscriptionOrder)
+export const readSubscriptionOrder = (): readonly string[] => storedNames(subscriptionOrder.read())
+
+// The order the person left the rail's panels in: theirs on every device.
+export const sidebarOrder = storedPerson("sidebar-order", "novadeck.sidebar-order")
+registerPerson(sidebarOrder)
+export const readSidebarOrder = (): readonly RailPanel[] =>
+  railOrder(storedNames(sidebarOrder.read()))
 
 // The release whose footer update chip the person folded to its icon, by closing its card
 // or opening its page. Any other release brings the word back.
@@ -69,21 +69,11 @@ export const writeWindowedView = (view: WindowedView): void => {
   }
 }
 
-export const writeSubscriptionOrder = (order: readonly string[]): void => {
-  try {
-    localStorage.setItem(subscriptionOrderStorageKey, JSON.stringify(order))
-  } catch {
-    /* The order holds for this session when storage is unavailable. */
-  }
-}
+export const writeSubscriptionOrder = (order: readonly string[]): void =>
+  subscriptionOrder.save(JSON.stringify(order))
 
-export const writeSidebarOrder = (order: readonly RailPanel[]): void => {
-  try {
-    localStorage.setItem(sidebarOrderStorageKey, JSON.stringify(order))
-  } catch {
-    /* The order holds for this session when storage is unavailable. */
-  }
-}
+export const writeSidebarOrder = (order: readonly RailPanel[]): void =>
+  sidebarOrder.save(JSON.stringify(order))
 
 export const writeFoldedChip = (subject: string): void => {
   try {

@@ -12,7 +12,7 @@ import {
 import { windowProfile } from "./processes/profiles"
 
 const leaveBar = (ask: LeaveAsk): React.JSX.Element => {
-  const { icon: Icon } = windowProfile({ kind: "file", name: ask.name })
+  const { icon: Icon } = windowProfile({ kind: "file", name: ask.name, path: ask.path })
   return (
     <SubjectBar>
       <SubjectSide>

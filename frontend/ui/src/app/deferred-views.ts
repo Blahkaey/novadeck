@@ -1,4 +1,4 @@
-import { createElement, lazy, useState, type ComponentType } from "react"
+import { createElement, lazy, useEffect, useState, type ComponentType } from "react"
 
 // A view whose code loads on first use or ahead of it. Once loaded it renders straight
 // away, so a view transition captures the view and not a loading line; before that its
@@ -36,4 +36,47 @@ export const Preferences = lazy(() =>
 )
 export const TerminalSearch = lazy(() =>
   import("../search/TerminalSearch").then((module) => ({ default: module.TerminalSearch })),
+)
+
+// The tour's stage and closing card, with their print look and its font, which only a run of the
+// tour draws. A chunk that fails to load is said to the log, and stands in with `failed`: the
+// stage ends the run, which would go on unseen and with no way to end it, and the closing card
+// puts itself away.
+const tourPart = <P extends object>(
+  load: () => Promise<ComponentType<P>>,
+  failed: ComponentType<P>,
+) =>
+  lazy(() =>
+    load().then(
+      (component) => ({ default: component }),
+      (error: unknown) => {
+        window.reportError(error)
+        return { default: failed }
+      },
+    ),
+  )
+
+// Calls `act` once, as its component mounts.
+const useOnce = (act: () => void): void => {
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- Once, whatever `act` is by then.
+  useEffect(act, [])
+}
+
+const EndsTheRun = ({ onEnd }: { readonly onEnd: () => void }): null => {
+  useOnce(onEnd)
+  return null
+}
+
+const PutsItselfAway = ({ onClose }: { readonly onClose: () => void }): null => {
+  useOnce(onClose)
+  return null
+}
+
+export const TourStage = tourPart(
+  () => import("@novadeck/tour/Stage").then((module) => module.TourStage),
+  EndsTheRun,
+)
+export const TourClosingCard = tourPart(
+  () => import("@novadeck/tour/ClosingCard").then((module) => module.TourClosingCard),
+  PutsItselfAway,
 )

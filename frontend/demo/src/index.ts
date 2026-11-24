@@ -6,7 +6,7 @@ import {
   noTelemetry,
 } from "@novadeck/core/agents/telemetry"
 import type { Conversations } from "@novadeck/core/conversation"
-import { withSnoozes, type InboxRow } from "@novadeck/core/inbox"
+import { withSnoozes, type InboxEntry } from "@novadeck/core/inbox"
 import { emptyCompanions, itemIdOf, type Item } from "@novadeck/core/items"
 import type {
   AgentConnection,
@@ -37,7 +37,7 @@ import { createDemoForges } from "./forges"
 import { demoHandle } from "./handles"
 import { withHistory } from "./history"
 import { createDemoInbox, isDemoInbox } from "./inbox"
-import { demoInboxRows, demoEntries, demoPlanStates } from "./inbox/fixtures"
+import { demoInboxEntries, demoEntries, demoPlanStates } from "./inbox/fixtures"
 import { inboxLeadMessages, inboxTranscripts, withInboxLead } from "./inbox/transcripts"
 import { checkoutMessages, createDemoMessages, isDemoMessages } from "./messages"
 import { withMoves } from "./moves"
@@ -108,6 +108,7 @@ export const demoBackend = (
   const hibernateAfter = createStore<number | null>(60)
   // Agents work as a herd unless the person chooses Solo, as in the app.
   const agentModes = createStore(false)
+  const shippingGate = createStore(false)
   const agentMode = createStore<AgentMode>("herd")
   // Agent worktrees start on, so the demo shows the Worktrees panel they bring; a stable update
   // channel (the debug demo's page starts on one) turns them off as the app does.
@@ -179,6 +180,10 @@ export const demoBackend = (
     },
     hibernation: { after: hibernateAfter, set: (minutes) => hibernateAfter.update(() => minutes) },
     agentModes: { enabled: agentModes, set: (enabled) => agentModes.update(() => enabled) },
+    shippingGate: {
+      enabled: shippingGate,
+      set: (enabled) => shippingGate.update(() => enabled),
+    },
     agentMode: { mode: agentMode, set: (mode) => agentMode.update(() => mode) },
     worktrees: { enabled: worktrees, set: (enabled) => worktrees.update(() => enabled) },
     agents: {
@@ -405,19 +410,19 @@ export const withConversations = (
 }
 
 // A backend with the demo's Inbox (see `createDemoInbox`): what its agents wait on, from the
-// conversations and messages `backend` has, which `withConversations` gave it, and `rows`
+// conversations and messages `backend` has, which `withConversations` gave it, and `entries`
 // over them, the demo's own. Answering one of those for an agent that waits takes the agent
 // past it, to wait for the person's next words. Its messages keep a record of what the
 // person answered, where they are the demo's.
 export const withInbox = (
   backend: Backend,
   turns: DemoTurns,
-  rows: readonly InboxRow[] = [],
+  entries: readonly InboxEntry[] = [],
 ): Backend => {
   const { conversations, messages } = backend
   if (!conversations) throw new Error("withInbox wraps a backend withConversations made")
   const record = isDemoMessages(messages) ? messages.record : undefined
-  const inbox = createDemoInbox(Date.now(), rows, record, {
+  const inbox = createDemoInbox(Date.now(), entries, record, {
     conversations,
     messages,
     resume: (key, terminal) => turns.resume(key, terminal, { waits: true }),
@@ -538,14 +543,15 @@ export const withPlanShows = (backend: Backend): Backend => {
       const stop = backend.start?.(sink)
       const shown = new Set<string>()
       const look = (): void => {
-        for (const row of inbox.state.getSnapshot().items) {
-          if (row.kind !== "request" || row.request.kind !== "plan" || shown.has(row.id)) continue
-          shown.add(row.id)
+        for (const entry of inbox.state.getSnapshot().items) {
+          if (entry.kind !== "request" || entry.request.kind !== "plan" || shown.has(entry.id))
+            continue
+          shown.add(entry.id)
           // Its plan is never shown: the box waits, then the dialog's words stand in.
-          if (row.id === demoPlanStates.missing) continue
-          const { projectId, workspaceSessionId, terminalId, handle } = row.source
-          const role = row.request.subagent ? "subagent" : "root"
-          const loading = row.id === demoPlanStates.loading
+          if (entry.id === demoPlanStates.missing) continue
+          const { projectId, workspaceSessionId, terminalId, handle } = entry.source
+          const role = entry.request.subagent ? "subagent" : "root"
+          const loading = entry.id === demoPlanStates.loading
           const plan = (latest ? itemsOf(latest) : seedItems(backend.seed)).find(
             (item) =>
               !loading &&
@@ -558,14 +564,14 @@ export const withPlanShows = (backend: Backend): Backend => {
               type: "item/upsert",
               target: { projectId, workspaceSessionId },
               item: plan
-                ? { ...plan, version: plan.version + 1, shownAt: row.at }
-                : demoPlanItem(terminalId, handle, role, row.at, loading ? loadingSuffix : ""),
+                ? { ...plan, version: plan.version + 1, shownAt: entry.at }
+                : demoPlanItem(terminalId, handle, role, entry.at, loading ? loadingSuffix : ""),
             },
           ])
         }
       }
       look()
-      // A row can reach the Inbox inside a workspace commit (an agent's status, heard by the
+      // An entry can reach the Inbox inside a workspace commit (an agent's status, heard by the
       // conversation the Inbox follows), where no transaction may start: its plan shows once
       // the commit is done.
       let stopped = false
@@ -642,7 +648,7 @@ const withFinishes = (backend: Backend, turns: DemoTurns): Backend => ({
 })
 
 // The demos with no showcase: the plain one, the agents', the agents' with
-// messages between them, the agents' with every kind of Inbox row, the plain one with its
+// messages between them, the agents' with every kind of Inbox entry, the plain one with its
 // first-run welcome dialog open, and Chirp's, Babcia's and Launch's, one-offs for videos (see
 // `videos/chirp.ts`, `videos/babcia.ts` and `videos/launch.ts`). Each has
 // the Inbox its agents make; the Inbox demo shows the hardcoded rows of every kind over theirs.
@@ -663,6 +669,8 @@ export const plainDemo = (
   terminals?: DemoTerminalSetup,
   turnMs?: number,
   turns: DemoTurns = demoTurns(turnMs),
+  // The tour's project lists its files (see `withTourAgent`).
+  tourFiles = false,
 ): Backend => {
   const backend = plainBackend(variant, terminals, turns)
   // The cues of Babcia and Launch are kept by the backend their own wrapper returns: their
@@ -670,7 +678,7 @@ export const plainDemo = (
   // The videos' one-offs have no tour.
   return variant === "babcia" || variant === "launch"
     ? backend
-    : withTourAgent(withFeedback(backend, turns), turns)
+    : withTourAgent(withFeedback(backend, turns), turns, tourFiles)
 }
 
 const plainBackend = (
@@ -798,7 +806,7 @@ const plainBackend = (
               messages: createDemoMessages([inboxLeadMessages(now)]),
             },
             turns,
-            demoInboxRows(now),
+            demoInboxEntries(now),
           ),
         ),
         turns,
@@ -832,6 +840,9 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
             : "plain",
           terminals,
           turnMs > 0 ? turnMs : undefined,
+          undefined,
+          // The tour is offered with Experimental on, and plays its Files step there.
+          params.get("channel") === "experimental",
         ),
       ),
     ),
@@ -840,9 +851,13 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
   // `&tourStart=unlisted` as Codex not signed in yet does. Its agent is played as a runner
   // would report one: `&tourScreen=startup|sign-in|hooks` holds it at that screen until it's
   // answered (`&tourScreenMs=<n>` answers after n ms), `&tourAgent=quiet` has it never describe
-  // itself until nudged, `&tourAgent=permission` has it ask the person's permission first, and `&tourPatienceMs=<n>` is how long the UI waits before nudging. The
-  // lead then opens its team and plays the story on: `&tourStory=off` stops it after it names
-  // itself, and `&tourTeam=quiet` has it open its team only once nudged again.
+  // itself until nudged, `&tourAgent=permission` has it ask the person's permission first, and
+  // `&tourPatienceMs=<n>` is how long the UI waits before nudging. The lead then asks the sheet and opens its team
+  // and plays the story on: `&tourStory=off` stops it after it names itself, `&tourTeam=quiet`
+  // has it ask and open its team only once nudged again, `&tourModeller=quiet` keeps the
+  // modeller idle until nudged, `&tourMate=asks` has it ask a question of its own,
+  // `&tourAgent=shell` has the lead's program end, its shell back, `&tourPage=none` is a computer with neither Node nor
+  // Python (no server, no page), and `&tourKeep=fails` makes the first Keep building fail.
   if (isDemoTour(backend.tour)) {
     const screen = params.get("tourScreen")
     if (tourScreens.includes(screen as TourScreen)) backend.tour.holdAt(screen as TourScreen)
@@ -856,6 +871,11 @@ export const createDemoBackend = (terminals?: DemoTerminalSetup): Backend => {
       ...(positive("tourScreenMs") !== undefined && { screenMs: positive("tourScreenMs")! }),
     })
     if (params.get("tourTeam") === "quiet") backend.tour.goQuietTeam()
+    if (params.get("tourModeller") === "quiet") backend.tour.goQuietModeller()
+    if (params.get("tourMate") === "asks") backend.tour.goMateAsks()
+    if (params.get("tourAgent") === "shell") backend.tour.goShell()
+    if (params.get("tourPage") === "none") backend.tour.goNoPage()
+    if (params.get("tourKeep") === "fails") backend.tour.failKeep()
     if (params.get("tourStart") === "fails") backend.tour.failNext()
     if (params.get("tourStart") === "unlisted") backend.tour.failNext("unlisted")
   }

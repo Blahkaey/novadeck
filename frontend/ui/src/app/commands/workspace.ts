@@ -1,10 +1,11 @@
 import { resetAnswering } from "@novadeck/chat/state"
 import { descendantsOf } from "@novadeck/core/derivations"
+import type { ProjectWindowTarget } from "@novadeck/core/desktop/project-windows"
 import type { AgentName } from "@novadeck/core/harnesses"
 import type { ClosedTerminal } from "@novadeck/core/history"
-import type { TerminalRequest, TourRun } from "@novadeck/core/port"
+import type { RemovedElsewhere, TerminalRequest, TourRun } from "@novadeck/core/port"
 import { hasTile, isPanel, isWindow, tileOf } from "@novadeck/core/roster"
-import { activeProject, type WorkspaceAction } from "@novadeck/core/state"
+import { activeProject, activeSession, type WorkspaceAction } from "@novadeck/core/state"
 import { closeReasons } from "@novadeck/core/terminals/closing"
 import type {
   PreferencesValue,
@@ -19,7 +20,6 @@ import type {
 
 import {
   moveProject as arrangeMove,
-  pinAt,
   stepProject as arrangeStep,
   togglePin,
   type ProjectArrangement,
@@ -48,6 +48,11 @@ import { createEditCommands, type EditCommands } from "./file-edits"
 import { createFileCommands, type FileCommands } from "./files"
 import { createLayoutCommands, type LayoutCommands } from "./layout"
 import { createMoveCommands, type MoveCommands } from "./moves"
+import {
+  arrivalWaitMs,
+  createProjectWindowCommands,
+  type ProjectWindowCommands,
+} from "./project-windows"
 import { createRecentCommands, type RecentCommands } from "./recent"
 import { createRenameCommands, type RenameCommands } from "./rename"
 import { folderProject, newWorkspaceSession } from "./sessions"
@@ -67,7 +72,8 @@ export type WorkspaceCommands = ShellCommands &
   ChatCommands &
   RenameCommands &
   RecentCommands &
-  LayoutCommands & {
+  LayoutCommands &
+  ProjectWindowCommands & {
     readonly switchSession: (id: string) => void
     readonly startFresh: () => void
     // Renames a session of the open project; a blank name keeps the old one.
@@ -76,7 +82,15 @@ export type WorkspaceCommands = ShellCommands &
     readonly moveSession: (id: string, index: number) => void
     // Deletes a session of the open project and closes its terminals; the last one stays.
     readonly removeSession: (id: string) => void
+    // What another client removed. Where it was the session or project on screen, the person
+    // moves on as their own removal would take them, and is told what went and where they are.
+    readonly removedElsewhere: (actions: readonly RemovedElsewhere[]) => void
+    // Shows a project: the person's pick. Even one another window shows is shown here, and
+    // that window stays as it is.
     readonly switchProject: (next: Project) => void
+    // Goes where another window sent this one: the project, and its terminal when it names one,
+    // as they are now, with no hand-off back, which only the person's own action makes.
+    readonly showProjectHere: (target: ProjectWindowTarget) => Promise<void>
     // Asks the backend for a folder and opens it as a new project; no-op without one.
     readonly openFolder: () => Promise<void>
     // Removes a project and closes its terminals; the last project stays.
@@ -91,10 +105,6 @@ export type WorkspaceCommands = ShellCommands &
     readonly stepProject: (id: string, by: -1 | 1) => void
     // Pins a project, or unpins it if pinned; no more than the limit can be pinned.
     readonly toggleProjectPin: (id: string) => void
-    // Pins a project at this place among the pinned ones, or moves it there if pinned.
-    readonly pinProjectAt: (id: string, index: number) => void
-    // Puts back an arrangement read before, as a canceled drag does.
-    readonly restoreProjectArrangement: (arrangement: ProjectArrangement) => void
     // Selects a terminal and brings it into view, optionally fitting Canvas around it.
     readonly select: (id: string, fit?: boolean) => void
     readonly setSelected: (terminal: string) => void
@@ -125,11 +135,17 @@ export type WorkspaceCommands = ShellCommands &
     // Adds the terminal an agent asked for beside its own, in that terminal's session,
     // and answers the request; it comes into view only when the request asks.
     readonly openRequested: (request: TerminalRequest) => void
-    // Brings a terminal into view wherever it is, as a click on an Inbox row or a desktop
+    // Brings a terminal into view wherever it is, as a click on an Inbox entry or a desktop
     // notification about it asks: its project and session to the front, the terminal
     // selected, and on Canvas the camera flown in to it. A panel given turns the sidebar to
-    // it in the same step.
+    // it in the same step. Where the app opens project windows, a terminal of a project another window
+    // shows goes to that window, which comes forward; this window stays as it is.
     readonly reveal: (terminalId: string, panel?: SidebarPanel) => void
+    // Brings a terminal of the session on screen into view for a guided look (the tour): selected,
+    // with the sidebar left as it is, and on Canvas the camera moved only where its window isn't
+    // on screen at a size to read, out to every window first and then in to it, so the person
+    // sees where it goes. A terminal elsewhere is revealed as `reveal` does.
+    readonly travel: (terminalId: string) => void
     // Brings a closed terminal back from History as a new terminal in the session on
     // screen, selected; its row leaves the list when the backend says it is restored.
     readonly restoreClosed: (row: ClosedTerminal) => void
@@ -192,6 +208,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
   const { murmur } = ctx
   const { go, navigateWorkspace } = navigation
   const { set, pulse } = shellEdits(ctx)
+  const windows = createProjectWindowCommands(ctx)
   const shell = createShellCommands(ctx)
   const rename = createRenameCommands(ctx)
   const recent = createRecentCommands(ctx)
@@ -279,7 +296,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     else workspace.transact([{ type: "item/close", target, itemId: window.itemId }])
   }
 
-  const switchProject = (next: Project): void => {
+  const switchHere = (next: Project): void => {
     if (next.id === workspace.getSnapshot().activeProjectId) return
     navigateWorkspace([
       {
@@ -289,6 +306,23 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
         enabledViews: preferences().enabledViews,
       },
     ])
+  }
+
+  // Counts the moves to a project, so the latest wins over one whose reading is still under way.
+  let latestMove = 0
+  // The person's pick: this window shows the project, even when another window shows it too,
+  // and that window stays as it is.
+  const switchProject = (next: Project): void => {
+    if (next.id === workspace.getSnapshot().activeProjectId) return
+    const pick = ++latestMove
+    // Once another window has shown a project, a project is read from the runner as it is shown:
+    // that window may have changed it since this one loaded it, and the latest pick wins however
+    // long its reading took.
+    if (!ctx.syncProject || !windows.windowsShared()) return switchHere(next)
+    void (async () => {
+      await windows.readProject(next.id)
+      if (pick === latestMove) switchHere(next)
+    })()
   }
 
   // Rows being restored, by the terminal made for each, from the click until the runner says
@@ -317,7 +351,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
   history?.state.subscribe(settleRestoring)
   workspace.subscribe(settleRestoring)
 
-  const reveal = (terminalId: string, panel?: SidebarPanel): void => {
+  const revealHere = (terminalId: string, panel?: SidebarPanel): void => {
     const snapshot = workspace.getSnapshot()
     const found = holding(snapshot, terminalId)
     if (!found) return
@@ -352,8 +386,58 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     set("sidebar", false)
   }
 
+  // Anything about a project goes to the window that shows it.
+  const reveal = (terminalId: string, panel?: SidebarPanel): void => {
+    const found = holding(workspace.getSnapshot(), terminalId)
+    if (found && windows.shownElsewhere(found.project.id)) {
+      windows.handOffTerminal(terminalId)
+      return
+    }
+    revealHere(terminalId, panel)
+  }
+
+  const travel = (terminalId: string): void => {
+    const snapshot = workspace.getSnapshot()
+    const found = holding(snapshot, terminalId)
+    if (
+      !found ||
+      !sameTarget(
+        { projectId: found.project.id, workspaceSessionId: found.session.id },
+        currentTarget(snapshot),
+      )
+    )
+      return reveal(terminalId)
+    recent.setSwitcher(null)
+    go({ terminal: terminalId, dialog: null })
+    pulse("travel")
+  }
+
+  // Where another window sent this one. The project is read from the runner first, as it may
+  // have changed there, or be one this window never heard of.
+  const showProjectHere = async ({ projectId, terminalId }: ProjectWindowTarget): Promise<void> => {
+    const move = ++latestMove
+    if (ctx.syncProject) await windows.readProject(projectId)
+    if (move !== latestMove) return
+    const snapshot = workspace.getSnapshot()
+    const project = snapshot.projects.find((each) => each.id === projectId)
+    if (!project) return
+    if (terminalId === undefined) return switchHere(project)
+    if (holding(snapshot, terminalId)) return revealHere(terminalId)
+    // A terminal this window hasn't heard of yet, as one an agent just opened: the project
+    // first, and the terminal once the runner has told of it.
+    switchHere(project)
+    const stop = workspace.subscribe(() => {
+      if (!holding(workspace.getSnapshot(), terminalId)) return
+      stop()
+      cancel()
+      revealHere(terminalId)
+    })
+    const cancel = effects.after(arrivalWaitMs, stop)
+  }
+
   const self: WorkspaceCommands = {
     ...shell,
+    ...windows,
     ...rename,
     ...recent,
     ...createLayoutCommands(ctx),
@@ -362,7 +446,6 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
     ...edits,
     ...createMoveCommands(ctx, {
       peek: shell.peek,
-      showTerminals: shell.showTerminals,
       // Bound once the commands are made: going to a moved terminal is revealing it.
       revealTerminal: (terminalId, projectId) => self.revealTerminal(terminalId, projectId),
     }),
@@ -426,6 +509,36 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
         if (goes) remove()
       })
     },
+    removedElsewhere: (actions) => {
+      const before = workspace.getSnapshot()
+      const project = activeProject(before)
+      const session = activeSession(before)
+      const { enabledViews } = preferences()
+      const removals = actions.map((action) => ({ ...action, enabledViews }))
+      const shown = actions.find((action) =>
+        action.type === "project/gone"
+          ? action.projectId === project?.id
+          : action.workspaceSessionId === session?.id,
+      )
+      if (!shown) return void workspace.transact(removals)
+      // The address follows, as after the person's own removal, in place of the one that went.
+      navigateWorkspace(removals, {}, true)
+      const after = workspace.getSnapshot()
+      const [gone, now] =
+        shown.type === "project/gone"
+          ? [project?.name, activeProject(after)]
+          : [session?.name, activeSession(after)]
+      // The last one stays: nothing moved.
+      if (!now || now.id === (shown.type === "project/gone" ? project?.id : session?.id)) return
+      ui.update((state) => ({
+        ...state,
+        told: {
+          id: effects.newId(),
+          said: `“${gone}” was removed elsewhere.`,
+          subject: `Showing “${now.name}”.`,
+        },
+      }))
+    },
     startFresh: () => {
       const snapshot = workspace.getSnapshot()
       const project = activeProject(snapshot)!
@@ -451,6 +564,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       effects.afterFrame(effects.focusTerminalsCreate)
     },
     switchProject,
+    showProjectHere,
     openFolder: async () => {
       // A picker that fails leaves the workspace as it was; it has nothing to show.
       const directory = await pickDirectory?.().catch((error: unknown) => {
@@ -522,9 +636,6 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       arrange((projects, current) => arrangeMove(projects, current, id, index)),
     stepProject: (id, by) => arrange((projects, current) => arrangeStep(projects, current, id, by)),
     toggleProjectPin: (id) => arrange((projects, current) => togglePin(projects, current, id)),
-    pinProjectAt: (id, index) =>
-      arrange((projects, current) => pinAt(projects, current, id, index)),
-    restoreProjectArrangement: (arrangement) => arrange(() => arrangement),
     acceptChatOffer: () => self.updatePreferences({ ...preferences(), chatView: true }),
     declineChatOffer: () => answerChatOffer(ui),
     holdChatOffer: () => holdChatOffer(ui),
@@ -659,7 +770,10 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
         select: request.focus,
       }
       const here = sameTarget(target, currentTarget(snapshot))
-      if (!request.focus) workspace.transact([add])
+      // A terminal asked to be shown in a project another window shows: it joins its session
+      // here, and that window is told to go to it.
+      const away = request.focus && windows.shownElsewhere(project.id)
+      if (!request.focus || away) workspace.transact([away ? { ...add, select: false } : add])
       else {
         // Into view: in its session, which comes to the front if it was not already.
         const { enabledViews } = preferences()
@@ -682,9 +796,11 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
         pulse()
         set("sidebar", false)
       }
-      if (here || request.focus)
+      if (here || (request.focus && !away))
         markCreated({ context: `${project.id}/${session.id}`, id: terminal.id })
       request.answer({ terminalId: terminal.id })
+      // An agent's doing: the window goes there, and none comes forward.
+      if (away) windows.handOffTerminal(terminal.id, undefined, true)
     },
     restoreClosed: (row) => {
       if (restoring.has(row.id)) return
@@ -737,6 +853,7 @@ export const createWorkspaceCommands = (ctx: CommandContext): WorkspaceCommands 
       go({ dialog: "preferences", section: "general" })
     },
     reveal,
+    travel,
     close: (terminalId) => {
       const snapshot = workspace.getSnapshot()
       // A panel's window closes into the sidebar.

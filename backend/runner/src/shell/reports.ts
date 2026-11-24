@@ -6,9 +6,10 @@ import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 
 import type { Report } from "@novadeck/harness-core/report"
+import type { AgentName } from "@novadeck/protocol"
 
 import { logs } from "../log.js"
-import { relayHook } from "./hook.js"
+import { relayHook, type GateCall } from "./hook.js"
 import { object, type Fields } from "./json.js"
 import { mcpAnswer, type McpCall } from "./mcp.js"
 
@@ -61,6 +62,7 @@ const callTypes = [
   "leave",
   "handLead",
   "worktrees",
+  "permit",
   "mode",
   "openWorktree",
   "takeWorktree",
@@ -96,6 +98,7 @@ export const unansweredCalls = {
   leave: { ok: false, reason: "Novadeck couldn't leave the team." },
   handLead: { ok: false, reason: "Novadeck couldn't hand your team over." },
   worktrees: { ok: false, reason: "Novadeck couldn't tell whether worktrees are on." },
+  permit: { ok: false, reason: "Novadeck couldn't declare it." },
   mode: { ok: false, reason: "Novadeck couldn't tell how agents work together." },
   openWorktree: { ok: false, reason: "Novadeck couldn't open the worktree." },
   takeWorktree: { ok: false, reason: "Novadeck couldn't take the worktree." },
@@ -296,11 +299,14 @@ export type ReportsOptions = {
   readonly readMs?: number
   /**
    * How long a call waits for its answer before it gets its type's `unansweredCalls`, in
-   * milliseconds:
-   * by default 8 s, as opening a terminal waits for Novadeck's window, and within the
-   * 10 s Novadeck's MCP server waits.
+   * milliseconds: by default 8 s.
    */
   readonly answerMs?: number
+  /**
+   * The same for opening a terminal, which waits for Novadeck's window to make it, slow to
+   * start a shell on some Windows machines: by default `openCallMs`.
+   */
+  readonly openMs?: number
   /**
    * The same for a look, which waits for the client to picture the page, a fresh load
    * included: by default 24 s, past the runner's 20 s wait for the client.
@@ -312,8 +318,13 @@ export type ReportsOptions = {
 export type ReportHandlers = {
   /** A hook's report; its relay hears `unheard` back. */
   readonly report: (report: Report) => void
-  /** A hook's ask, answered by `deadline` or as `unheard`. */
-  readonly ask: (report: Report, deadline: number) => Promise<HookAnswer>
+  /**
+   * A hook's ask, answered by `deadline` or as `unheard`; `gate` is the shell command the
+   * shipping gate answers, which the hook was sent for it alone or beside an ask of its own.
+   */
+  readonly ask: (report: Report, deadline: number, gate?: GateCall) => Promise<HookAnswer>
+  /** Whether the shipping gate answers `agent`'s `event`: only while it is on. */
+  readonly gating?: (agent: AgentName, event: string) => boolean
   /** A hook's acknowledgement of a lease, which gets no answer. */
   readonly ack: (ack: Ack) => void
   /** A tool call, answered within `answerMs` or as unanswered. */
@@ -346,11 +357,26 @@ export type Reports = {
  * else is ended without an answer. None is checked against the terminal's own token
  * here; the handlers do.
  */
+/**
+ * How long an open call (`open_terminal`, `open_agent`) waits for its answer by default, as a
+ * look does: the runner answers it within that, past the window's deadline (see
+ * `OpenRequests.request`). Claude Code's MCP tool timeout is counted in hours, Codex's
+ * `tool_timeout_sec` defaults to 60 s, and Antigravity and opencode take a 24 s look.
+ */
+export const openCallMs = 24_000
+
 export const listenForReports = async (
   handlers: ReportHandlers,
   options: ReportsOptions = {},
 ): Promise<Reports> => {
-  const { platform = process.platform, readMs = 2_000, answerMs = 8_000, lookMs = 24_000 } = options
+  const {
+    platform = process.platform,
+    readMs = 2_000,
+    answerMs = 8_000,
+    lookMs = 24_000,
+    openMs = openCallMs,
+  } = options
+  const callMs = { look: lookMs, open: openMs } as Partial<Record<Call["type"], number>>
   const directory =
     platform === "win32" ? undefined : await mkdtemp(join(tmpdir(), "novadeck-reports-"))
   const endpoint =
@@ -361,7 +387,7 @@ export const listenForReports = async (
   const relayCall =
     (from: { terminalId: string; token: string }): McpCall =>
     (type, request) =>
-      within(handlers.call({ type, ...from, request }), type === "look" ? lookMs : answerMs, {
+      within(handlers.call({ type, ...from, request }), callMs[type] ?? answerMs, {
         ...unansweredCalls[type],
         unexplained: true,
       })
@@ -400,7 +426,7 @@ export const listenForReports = async (
       if (text.length > maxBytes) return socket.destroy()
       if (from) take(from)
     })
-    const hook = from && relayHook(value)
+    const hook = from && relayHook(value, undefined, handlers.gating)
     let answer = unheard
     // A hook that heard its ask late or not at all says so once, in the runner's log: the
     // lease of an answer nobody printed is never acknowledged, and only this line tells.
@@ -428,7 +454,7 @@ export const listenForReports = async (
         const cutoff = Date.now() + Math.max(0, ms)
         // Set once the wait is over: an answer after it is the late one the line is for.
         let over = false
-        const raced = handlers.ask(report, hook.deadline).then((late) => {
+        const raced = handlers.ask(report, hook.deadline, hook.gate).then((late) => {
           if (over) lost({ lateMs: Date.now() - cutoff, leased: late.leaseId !== null })
           return late
         })

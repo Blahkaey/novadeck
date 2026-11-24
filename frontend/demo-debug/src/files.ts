@@ -190,7 +190,7 @@ export const filesGroups = (
             },
             {
               label: "Agent creates a file in a folder",
-              hint: "Open Files with src/api folded: the folder pulses and shows Crow's chip, and payments.ts is added inside",
+              hint: "Open Files with src/api closed: the folder opens by itself (unless you closed it yourself), shows Crow's chip, and payments.ts appears inside, added",
               run: () => files.write(fallback, demoPaths.payments),
             },
           ],

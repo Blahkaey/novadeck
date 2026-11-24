@@ -103,6 +103,18 @@ describe("demo approvals", () => {
     expect(controls.approvals.pending.getSnapshot()).toEqual([])
   })
 
+  it("tells whoever asked to run a command whether the person allowed it, declined, or it was taken back", () => {
+    const { controls } = setup()
+    const heard: boolean[] = []
+    controls.askToRun(key("a"), "node dev.mjs 5173", "~/.novadeck/tour", (yes) => heard.push(yes))
+    controls.askToRun(key("a"), "node dev.mjs 5173", "~/.novadeck/tour", (yes) => heard.push(yes))
+    controls.askToRun(key("a"), "node dev.mjs 5173", "~/.novadeck/tour", (yes) => heard.push(yes))
+    controls.approvals.answer("approval-1", true)
+    controls.approvals.answer("approval-2", false)
+    controls.withdraw()
+    expect(heard).toEqual([true, false, false])
+  })
+
   it("asks to take the selected terminal's worktree, and changes nothing in the demo", () => {
     const { controls, dispatched, run } = setup()
     run("Ask to take selected's worktree")
@@ -171,6 +183,17 @@ describe("demo approvals", () => {
         ledBy: "a",
       },
     ])
+  })
+
+  it("asks for something only a newer Novadeck knows, which a yes or no leaves as it is", () => {
+    const { controls, dispatched, run } = setup()
+    run("Ask for something newer")
+    expect(controls.approvals.pending.getSnapshot()).toMatchObject([
+      { from: "b", terminalId: "a", action: { type: "newer" } },
+    ])
+    controls.approvals.answer("approval-1", true)
+    expect(controls.approvals.pending.getSnapshot()).toEqual([])
+    expect(dispatched).toEqual([])
   })
 
   it("ends a lead when the person releases the terminal", () => {

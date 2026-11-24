@@ -1,7 +1,8 @@
 import { z } from "zod"
 
-import { agentName } from "./agents.js"
+import { agentNameRead } from "./agents.js"
 import { id } from "./fields.js"
+import { openEnum, openUnion } from "./open.js"
 import { handle } from "./terminals.js"
 
 const messageId = z.string().regex(/^m-[a-z0-9]{1,32}$/)
@@ -20,16 +21,11 @@ const messageState = z.enum(["queued", "leased", "delivered", "held", "gone"])
 // (`working`), a turn that ended normally with the prompt known empty (`settled`), the
 // doorbell waking it (`ringing`), the person busy at the prompt (`drafting`), or a turn
 // that ended without a normal stop (`unknown`).
-const deliveryState = z.enum([
-  "unbound",
-  "fresh",
-  "ready",
-  "working",
-  "settled",
-  "ringing",
-  "drafting",
-  "unknown",
-])
+// A state a UI doesn't know reads as `unknown`.
+const deliveryState = openEnum(
+  ["unbound", "fresh", "ready", "working", "settled", "ringing", "drafting", "unknown"],
+  { since: 3, unknown: { fallback: "unknown" } },
+)
 
 // Who a message is from or for: a terminal's agent, by the terminal's id (`terminalId`; its
 // `handle` is how the party reads, and may be another terminal's later), or the person, whose Inbox answers reach agents as messages and whose Inbox history shows the
@@ -41,12 +37,12 @@ const messageParty = z.discriminatedUnion("kind", [
     kind: z.literal("agent"),
     terminalId: id,
     handle,
-    agent: agentName.nullable(),
+    agent: agentNameRead.nullable(),
   }),
   personParty,
 ])
 const messageRecipient = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("agent"), terminalId: id, handle, agent: agentName }),
+  z.strictObject({ kind: z.literal("agent"), terminalId: id, handle, agent: agentNameRead }),
   personParty,
 ])
 
@@ -100,8 +96,78 @@ const deliveredNotice = z.strictObject({
   deliveredAt: z.number(),
 })
 
+// The most characters of a message a ring's part holds, and the most parts of a ring.
+export const ringTextMost = 240
+export const ringPartsMost = 8
+
+// How many rings and deliveries a terminal's listing keeps: the rows of a ring or block that may
+// still be in the terminal's scrollback (1000 lines), the oldest dropped first.
+export const listedRingsMost = 100
+export const listedDeliveriesMost = 40
+export const listedDeliveryIdsMost = 64
+
 // How many delivered notices a listing holds, the latest ones, as it holds a thread's last messages.
 export const listedNoticesMost = 200
+
+// What a ring says, for the terminal view to draw over the doorbell line the harness shows: one part
+// per message of the ring, in delivery order, its words cut to `ringTextMost` characters (the view
+// shows the first words of one row). An agent's message has its sender's handle; a notice is Novadeck's
+// own, as sent, header and all (`@novadeck/protocol/notices` reads it); `person` is an Inbox reply.
+// `id` is the message's, which finds a turn-end delivery block (it holds no nonce).
+// A part of a kind a UI doesn't know is left out of the row.
+const ringPart = openUnion(
+  "kind",
+  [
+    z.strictObject({
+      kind: z.literal("agent"),
+      handle,
+      text: z.string().max(ringTextMost),
+      id: messageId.optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("notice"),
+      text: z.string().max(ringTextMost),
+      id: messageId.optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("person"),
+      text: z.string().max(ringTextMost),
+      id: messageId.optional(),
+    }),
+  ],
+  { since: 3, unknown: "drop" },
+)
+
+// A ring the doorbell typed into the terminal, by its nonce, and when. Only the rings the runner
+// typed are drawn, matched by the nonce in the row. `seq` counts a terminal's rings and deliveries
+// together, so a reader asks for what came after the last it has (`messages.rings`); `more` is how
+// many messages the ring held beyond the parts kept.
+const ringContent = z.strictObject({
+  seq: z.number().int().positive(),
+  nonce: z.string().regex(/^[A-Za-z0-9]{1,32}$/),
+  at: z.number(),
+  parts: z.array(ringPart).max(ringPartsMost),
+  more: z.number().int().positive().optional(),
+})
+
+// The messages one hook delivered whose block the harness may print in the terminal (Claude Code's
+// "Stop hook says:", Codex's "Blocked by hook"), found there by the message ids in it.
+// `ids` are all its messages' ids (the block is matched by its set), `parts` the first few as a ring's.
+const deliveryContent = z.strictObject({
+  seq: z.number().int().positive(),
+  at: z.number(),
+  ids: z.array(messageId).max(listedDeliveryIdsMost),
+  parts: z.array(ringPart).max(ringPartsMost),
+  more: z.number().int().positive().optional(),
+})
+
+// What `messages.rings` answers: the rings and deliveries of a terminal after the sequence the
+// caller has, oldest first, and the latest sequence.
+export const terminalRings = z.strictObject({
+  seq: z.number().int().nonnegative(),
+  rings: z.array(ringContent).max(listedRingsMost),
+  deliveries: z.array(deliveryContent).max(listedDeliveriesMost),
+})
 
 // Why the doorbell can't ring an idle agent whose messages wait, as it saw: its activity
 // saying a turn runs (`working`), a prompt the harness shows queued (`queued`), its box in
@@ -138,6 +204,9 @@ export const terminalMessages = z.strictObject({
   paused: z.boolean(),
   threads: z.array(messageThread).max(1000),
   notices: z.array(deliveredNotice).max(listedNoticesMost),
+  // The sequence of the latest ring or delivery the runner keeps for it (`messages.rings` gives their
+  // content after the last the caller has): absent while it has none.
+  ringSeq: z.number().int().positive().optional(),
 })
 
 export type MessageState = z.infer<typeof messageState>
@@ -146,4 +215,8 @@ export type MessageParty = z.infer<typeof messageParty>
 export type MessageRecipient = z.infer<typeof messageRecipient>
 export type MessageThread = z.infer<typeof messageThread>
 export type DeliveredNotice = z.infer<typeof deliveredNotice>
+export type RingPart = z.infer<typeof ringPart>
+export type RingContent = z.infer<typeof ringContent>
+export type DeliveryContent = z.infer<typeof deliveryContent>
+export type TerminalRings = z.infer<typeof terminalRings>
 export type TerminalMessages = z.infer<typeof terminalMessages>

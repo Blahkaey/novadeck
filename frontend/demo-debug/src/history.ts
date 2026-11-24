@@ -30,6 +30,11 @@ export const historyGroups = (history: Backend["history"]): readonly DemoActionG
               },
             },
             {
+              label: "Closed agent of a newer Novadeck",
+              hint: 'Open History: a Gift cards row, newest, says Not connected and "Its agent needs a newer Novadeck to restore", and can\'t be restored',
+              run: () => history.addNewer(Date.now()),
+            },
+            {
               label: "Next History removal fails",
               hint: "Remove a row in the History panel, or clear it: the rows stay, and a line above the list says they couldn't be removed",
               run: () => history.failNextRemoval(),

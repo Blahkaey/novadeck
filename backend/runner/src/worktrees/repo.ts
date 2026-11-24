@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
 import { git, type Run } from "../checkouts/git.js"
+import { currentBranch, targetOf } from "../checkouts/home.js"
 import {
   commonDir,
   landedIn,
@@ -55,6 +56,93 @@ export type Repository = {
 export const homeOf = (common: string): string =>
   basename(common) === ".git" ? dirname(common) : common
 
+/** Whether a path is there; false for any error. */
+const present = (path: string): Promise<boolean> =>
+  stat(path).then(
+    () => true,
+    () => false,
+  )
+
+/**
+ * Whether a folder is in a git checkout, found by its `.git` in it or a parent (a folder with a
+ * `HEAD`, or the file a linked worktree has), with no git run; the folder's real path is walked,
+ * so a symlink into a repository reads as one. Undefined where it can't be told: no folder, one
+ * that isn't there, or a bare repository (git has a repository there but no worktree to make).
+ * An empty `.git` folder is none, as git itself goes on looking above it.
+ */
+export const inRepository = async (folder: string): Promise<boolean | undefined> => {
+  if (folder === "") return undefined
+  const start = await realpath(folder).catch(() => undefined)
+  if (start === undefined) return undefined
+  for (let at = start; ; at = dirname(at)) {
+    const dot = join(at, ".git")
+    // eslint-disable-next-line no-await-in-loop -- A level is looked at only if the one below had no repository.
+    const info = await stat(dot).catch(() => undefined)
+    // eslint-disable-next-line no-await-in-loop -- As above.
+    if (info?.isFile() || (info?.isDirectory() && (await present(join(dot, "HEAD"))))) return true
+    if (
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      (await present(join(at, "HEAD"))) &&
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      (await present(join(at, "objects"))) &&
+      // eslint-disable-next-line no-await-in-loop -- As above.
+      (await present(join(at, "refs")))
+    )
+      return undefined
+    if (dirname(at) === at) return false
+  }
+}
+
+/** How long a folder's answer is kept, and how long a turn's start waits for one. */
+const repositoryKeptMs = 10_000
+const repositoryWaitMs = 250
+const kept = new Map<string, { readonly at: number; readonly value: boolean | undefined }>()
+const keptFolders = 256
+
+/**
+ * `inRepository`, kept for a few seconds per folder and given a short wait: undefined where it
+ * isn't known. With `wait` false (a turn that delivers something, which never waits on this) a
+ * folder not kept is looked at in the background and answers undefined now.
+ */
+export const repositoryKnown = async (
+  folder: string,
+  wait: boolean,
+  now = Date.now(),
+): Promise<boolean | undefined> => {
+  const known = kept.get(folder)
+  if (known && now - known.at < repositoryKeptMs) return known.value
+  const looked = inRepository(folder).then(
+    (value) => {
+      if (kept.size >= keptFolders) kept.delete(kept.keys().next().value!)
+      kept.set(folder, { at: Date.now(), value })
+      return value
+    },
+    () => undefined,
+  )
+  if (!wait) return known?.value
+  return Promise.race([
+    looked,
+    new Promise<undefined>((done) => setTimeout(done, repositoryWaitMs, undefined).unref()),
+  ])
+}
+
+/** The commit HEAD is at and the branch it is on (none when detached), read in one git call. */
+export const headOf = async (
+  folder: string,
+): Promise<{ readonly commit: string; readonly branch?: string } | undefined> => {
+  const run = await git(folder, ["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"], patient)
+  if (!run.ok) return undefined
+  const [commit, ref] = run.out.trim().split("\n")
+  if (!commit) return undefined
+  return ref?.startsWith("refs/heads/")
+    ? { commit, branch: ref.slice("refs/heads/".length) }
+    : { commit }
+}
+
+/** What a folder git says is in no repository is told, by `open_worktree` and `take_worktree`. */
+const gitless = (folder: string): string =>
+  `${folder} isn't in a git repository, so there's no worktree to make of it: files there are changed in place.`
+
 /**
  * The repository a folder is in, or why it is in none. A folder inside any checkout of it
  * (the main one or a linked worktree) names the same repository.
@@ -65,10 +153,22 @@ export const repositoryAt = async (
   | { readonly ok: true; readonly repository: Repository }
   | { readonly ok: false; readonly reason: string }
 > => {
-  const top = line(await git(folder, ["rev-parse", "--show-toplevel"], small))
+  const toplevel = await git(folder, ["rev-parse", "--show-toplevel"], small)
+  const top = line(toplevel)
   const common = await commonDir(folder)
-  if (top === undefined || common === undefined)
-    return { ok: false, reason: `${folder} isn't in a git repository.` }
+  if (top === undefined || common === undefined) {
+    // In place only where git says there is no repository; any other failure is git's own words.
+    if (
+      !toplevel.ok &&
+      toplevel.kind === "exit" &&
+      /not a git repository \(or any of the parent directories\)/i.test(toplevel.said)
+    )
+      return { ok: false, reason: gitless(folder) }
+    return {
+      ok: false,
+      reason: `git couldn't read ${folder} as a repository: ${toplevel.ok ? "it printed no top folder" : said(toplevel)}.`,
+    }
+  }
   const home = homeOf(common)
   return {
     ok: true,
@@ -140,10 +240,17 @@ export const addWorktree = (
     { ...small, ms: addMs },
   )
 
-/** What a worktree holds that the main branch doesn't. */
+/** What a worktree holds that its home doesn't. */
 export type Standing = {
-  /** The main branch it is measured against; undefined where the repository has none. */
+  /**
+   * What it is measured against: home (see `targetOf`), else the repository's main; undefined
+   * where there is neither.
+   */
   readonly main: Main | undefined
+  /** Every branch whose holding its work makes the work home: home, home's remote one, main. */
+  readonly holders: readonly Main[]
+  /** Home's name, where it isn't the repository's main (see `targetOf`). */
+  readonly home?: string
   /**
    * Whether git could say what the worktree holds. Where it couldn't (a timeout, output too
    * long, any error), nothing else here is known, and a worktree is never removed on it.
@@ -153,11 +260,12 @@ export type Standing = {
   readonly why: string
   /** How many paths are changed or untracked (an untracked folder counts once). */
   readonly dirty: number
-  /** Commits on HEAD that the main branch doesn't have; null where that can't be told. */
+  /** Commits on HEAD that home doesn't have; null where that can't be told. */
   readonly ahead: number | null
   /**
-   * Whether the main branch holds all of HEAD: HEAD is its ancestor, or merging HEAD into it
-   * changes nothing (a squash or rebase merge). Then there is nothing beyond it to lose.
+   * Whether a holder (home, home's remote one or the repository's main) holds all of HEAD: HEAD
+   * is its ancestor, or merging HEAD into it changes nothing (a squash or rebase merge). Then
+   * there is nothing beyond it to lose.
    */
   readonly inMain: boolean
 }
@@ -171,10 +279,15 @@ export const standingOf = async (path: string): Promise<Standing> => {
     cap: 16 * 1024 * 1024,
     ms: statusMs,
   })
-  const main = await mainBranch(path)
+  const target = await targetOf(path, (await currentBranch(path)) ?? null)
+  const main = target?.main
+  const holders = target?.holders ?? []
+  const home = target?.home === undefined ? {} : { home: target.home }
   if (!status.ok)
     return {
       main,
+      holders,
+      ...home,
       readable: false,
       why: status.kind === "big" ? "its status is too long to read" : said(status),
       dirty: 0,
@@ -182,12 +295,14 @@ export const standingOf = async (path: string): Promise<Standing> => {
       inMain: false,
     }
   const dirty = status.out.split("\0").filter((each) => each !== "").length
-  if (!main) return { main, readable: true, why: "", dirty, ahead: null, inMain: false }
+  if (!main)
+    return { main, holders, ...home, readable: true, why: "", dirty, ahead: null, inMain: false }
   const count = line(await git(path, ["rev-list", "--count", `${main.commit}..HEAD`], small))
   const ahead = count === undefined ? null : Number(count)
-  // Commits main lacks by hash may still be in it by content: squash- and rebase-merged.
-  const inMain = ahead === 0 || (ahead !== null && (await mergedInto(path, "HEAD", main)))
-  return { main, readable: true, why: "", dirty, ahead, inMain }
+  // Commits home lacks by hash may still be in it by content (squash- and rebase-merged), or in
+  // another holder.
+  const inMain = ahead === 0 || (ahead !== null && (await heldByAny(path, "HEAD", holders)))
+  return { main, holders, ...home, readable: true, why: "", dirty, ahead, inMain }
 }
 
 /**
@@ -273,6 +388,18 @@ export const heldByMain = async (folder: string, ref: string, main: Main): Promi
   line(await git(folder, ["rev-list", "--count", `${main.commit}..${ref}`], small)) === "0" ||
   (await mergedInto(folder, ref, main))
 
+/** Whether one of `holders` holds all of `ref`, as `heldByMain` tells it. */
+export const heldByAny = async (
+  folder: string,
+  ref: string,
+  holders: readonly Main[],
+): Promise<boolean> => {
+  for (const holder of holders)
+    // eslint-disable-next-line no-await-in-loop -- Few holders, the first that holds it.
+    if (await heldByMain(folder, ref, holder)) return true
+  return false
+}
+
 /** The commit a worktree adopted from elsewhere started from: where it left the main branch. */
 export const startOf = async (path: string): Promise<string> => {
   const main = await mainBranch(path)
@@ -351,13 +478,14 @@ export const keepWork = async (path: string, branch: string): Promise<string | u
 
 /**
  * Keeps HEAD when only it reaches some commits: a detached HEAD, or a rebase stopped midway,
- * leaves commits that neither the branch nor the main branch holds. Its ref, undefined when
- * the branch or the main branch holds all of HEAD, and null where git couldn't tell.
+ * leaves commits that neither the branch nor a holder (home, home's remote one, the main branch)
+ * holds. Its ref, undefined when the branch or a holder holds all of HEAD, and null where git
+ * couldn't tell.
  */
 export const keepStrayHead = async (
   path: string,
   branch: string,
-  main: Main | undefined,
+  holders: readonly Main[],
 ): Promise<string | undefined | null> => {
   const head = await commitAt(path, "HEAD")
   if (head === undefined) return null
@@ -369,9 +497,14 @@ export const keepStrayHead = async (
     return run.kind === "exit" && run.status === 1 ? false : null
   }
   const inBranch = await held(tip)
-  const inMain = await held(main?.commit)
-  if (inBranch === null || inMain === null) return null
-  if (inBranch || inMain) return undefined
+  if (inBranch === null) return null
+  if (inBranch) return undefined
+  for (const holder of holders) {
+    // eslint-disable-next-line no-await-in-loop -- Few holders, the first that holds it.
+    const inHolder = await held(holder.commit)
+    if (inHolder === null) return null
+    if (inHolder) return undefined
+  }
   return (await keepCommit(path, branch, "head", head)) ?? null
 }
 

@@ -3,15 +3,17 @@ import { unwatchFile, watchFile } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { errors, protocolVersion } from "@novadeck/protocol"
+import { compatibility, errors } from "@novadeck/protocol"
+import { relayPath } from "@novadeck/relay"
 import { TerminalError } from "@novadeck/terminal"
-import { terminalPriorities, userScopes } from "@novadeck/terminal/pty"
-import { createSessions, type Sessions } from "@novadeck/wire/server"
+import { taggedScopes, terminalPriorities, userScopes, windowsJobs } from "@novadeck/terminal/pty"
+import { createSessions, type Sessions, type Verdict } from "@novadeck/wire/server"
 import { ORPCError } from "@orpc/server"
 
 import { Snapshots } from "./checkouts/snapshots.js"
 import { CompanionItems } from "./companions/items.js"
 import { secrets } from "./companions/secrets.js"
+import { Devices } from "./devices/devices.js"
 import { DomainError } from "./errors.js"
 import { repositoriesOf } from "./forges/repositories.js"
 import { Forges } from "./forges/service.js"
@@ -20,12 +22,14 @@ import { logs } from "./log.js"
 import { Murmur } from "./murmur/service.js"
 import { apiError, createRouter } from "./router.js"
 import { codexConfig, installShellFiles } from "./shell/install.js"
+import { Shipping } from "./shipping/service.js"
 import { ActiveTerminals } from "./terminals/active.js"
+import { ClientWindows } from "./terminals/client-windows.js"
 import { Terminals, type TerminalOptions } from "./terminals/index.js"
 import { createTranscriptSealer, transcriptsAvailable } from "./terminals/sealing.js"
 import { SeenTerminals } from "./terminals/seen.js"
 import { Uploads } from "./terminals/uploads.js"
-import { readAccount, readGitName } from "./tour/name.js"
+import type { TourAssets } from "./tour/seed.js"
 import { Tour } from "./tour/tour.js"
 import { Voice } from "./voice/service.js"
 import { Works } from "./works/works.js"
@@ -41,6 +45,7 @@ import {
 } from "./workspaces/store.js"
 import { keepWorktreeChanges } from "./worktrees/changes-shown.js"
 import { MainCheckouts } from "./worktrees/main-checkout.js"
+import { repositoryKnown } from "./worktrees/repo.js"
 import { RootFolder } from "./worktrees/root-folder.js"
 import { Worktrees } from "./worktrees/worktrees.js"
 
@@ -51,7 +56,8 @@ export type RunnerOptions = {
   database?: string
   /**
    * The 32-byte key saved transcripts are encrypted with, or null where none can be kept
-   * safe, as the desktop app's main process unwraps it from the system's keychain. Without
+   * safe, as the desktop app's main process unwraps it from the system's keychain and a
+   * standalone runner reads its key file (`loadTranscriptKeyFile`). Without
    * one no transcript is saved or shown again.
    */
   transcriptKey?: Promise<Uint8Array | null>
@@ -84,6 +90,11 @@ export type RunnerOptions = {
    * the one `@novadeck/relay` built by default. The desktop app passes the one it ships.
    */
   relay?: string
+  /**
+   * Where the tour's seed project and the libraries it runs on are (`TourAssets`); the repository's
+   * own files and `node_modules` by default. The desktop app passes the ones it ships.
+   */
+  tour?: TourAssets
   /**
    * Voice input's speech engine: `engine` is the path to its manifest (`engine.json`),
    * `source` where its archive is, an https URL ending in `/` or a folder, and `directory`
@@ -122,6 +133,12 @@ export type Runner = {
    * that ends releases its attachments and terminal control; its shells keep running.
    */
   readonly sessions: Sessions
+  /**
+   * What a handshake's token proves of one of the runner's devices (`Devices.verify`), or
+   * `undefined` for a token that isn't a device's credential, for a transport to check
+   * beside the owner's token.
+   */
+  device(token: string | undefined): Verdict | undefined
   /** The largest initial snapshot, which transports allow for in their send buffers. */
   readonly snapshotBytes: number
   /** Saves every terminal's restore state now, as when the system is shutting down. */
@@ -186,7 +203,10 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
       ? Promise.resolve(undefined)
       : installShellFiles(options.shell, {
           ...(options.relay !== undefined && { relay: options.relay }),
-          ...(options.worktreesRoot !== undefined && { worktrees: options.worktreesRoot }),
+          ...(options.worktreesRoot !== undefined && {
+            worktrees: options.worktreesRoot,
+          }),
+          gate: store.settings.runner().shippingGate,
           // Whether Codex is connected is known only once these are written (see below).
           pwsh: "kept",
           fresh: true,
@@ -207,7 +227,10 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     const write = async () => {
       await installShellFiles(shell, {
         ...(options.relay !== undefined && { relay: options.relay }),
-        ...(options.worktreesRoot !== undefined && { worktrees: options.worktreesRoot }),
+        ...(options.worktreesRoot !== undefined && {
+          worktrees: options.worktreesRoot,
+        }),
+        gate: store.settings.runner().shippingGate,
         pwsh: process.platform === "win32" && (await agents.connected("codex")),
       })
     }
@@ -217,7 +240,10 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   }
   // The runner's own calls of the relay use the build's, never the copy for agents.
   const relay = options.relay === undefined ? {} : { relay: options.relay }
-  const agents = createHarnesses(() => shellFiles, { ...relay, ...options.agents })
+  const agents = createHarnesses(() => shellFiles, {
+    ...relay,
+    ...options.agents,
+  })
   started.push(agents)
   // Codex's commands on Windows capture once it is found connected, or connected later.
   const setAgent = agents.set
@@ -246,7 +272,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   // A connected agent that keeps its own copy of the plugin gets the files just written,
   // where they differ from that copy (see `Harness.installed`).
   void shellFiles
-    .then((written) => (written ? agents.refresh() : []))
+    .then((written) => (written ? agents.refresh(store.settings.runner().shippingGate) : []))
     .catch((error: unknown) =>
       log.error("harnesses.refresh-failed", "Novadeck could not refresh its plugins", {
         err: error,
@@ -260,11 +286,16 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   // the object folders live beside the memory, which names trees in them.
   const snapshots = new Snapshots({
     held: () => secrets(agents.environment()),
-    ...(memory !== undefined && { home: join(dirname(memory), "works-objects") }),
+    ...(memory !== undefined && {
+      home: join(dirname(memory), "works-objects"),
+    }),
   })
   // What agents show and the person attaches beside terminals, kept in the store; it
   // asks the terminals where each one is.
+  // Which project each client shows, which agents' requests to a client go by.
+  const clients = new ClientWindows((sessionId) => store.session(sessionId).projectId)
   const items = new CompanionItems({
+    clients,
     records: store,
     terminal: (terminalId) => terminals.place(terminalId),
     harnessBookkeeping: () => agents.bookkeeping(),
@@ -299,7 +330,9 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     },
   })
   const voice = new Voice(store.settings, {
-    ...(options.softwareGraphics !== undefined && { softwareGraphics: options.softwareGraphics }),
+    ...(options.softwareGraphics !== undefined && {
+      softwareGraphics: options.softwareGraphics,
+    }),
     engine: options.voice?.engine,
     source: options.voice?.source,
     directory:
@@ -333,15 +366,25 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
       (options.database === undefined
         ? join(tmpdir(), `novadeck-murmur-${randomUUID()}`)
         : join(dirname(options.database), "murmur")),
-    ...(options.softwareGraphics !== undefined && { softwareGraphics: options.softwareGraphics }),
+    ...(options.softwareGraphics !== undefined && {
+      softwareGraphics: options.softwareGraphics,
+    }),
     // Voice input has priority over the GPU.
     voice: voice.activity,
   })
   murmur.start()
   started.push(murmur)
   // On Linux each shell runs in a systemd scope of its own, so one killed for memory
-  // takes down its terminal, not the app.
-  const scopes = userScopes()
+  // takes down its terminal, not the app. On Windows each runs in a job object of its own,
+  // kept by the runner's own relay. On macOS a terminal's processes are those that started
+  // with it named in their environment, as every shell starts (`launching.ts`), read through
+  // the relay. On all three, what an agent left there ends with the terminal.
+  const jobs = windowsJobs(async () => options.relay ?? relayPath)
+  if (jobs) started.push({ close: async () => jobs.close() })
+  const scopes =
+    userScopes() ??
+    jobs ??
+    taggedScopes(() => Promise.resolve(options.relay ?? relayPath), "NOVADECK_TERMINAL_ID")
   // On macOS and Windows each shell and what it starts run below the window's priority.
   const priority = terminalPriorities()
   // The terminal the person uses in each window keeps the normal share of both.
@@ -384,22 +427,40 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
         hooksFolder: join(dirname(options.database), "no-hooks"),
       }),
   })
+  // The person's setting, except that the tour's terminals have worktrees whatever it says.
+  const worktreesOn = (terminalId?: string): boolean =>
+    store.settings.runner().worktrees || (terminalId !== undefined && tour.isTours(terminalId))
   const rootFolder = new RootFolder({
     enabled: () => store.settings.runner().worktrees,
     ...(options.worktreesRoot !== undefined && { path: options.worktreesRoot }),
   })
   rootFolder.ensure()
+  // The shipping gate (Experimental): read live, so the switch counts at once.
+  const shipping = new Shipping({
+    enabled: () => store.settings.runner().shippingGate,
+    owned: {
+      ofTerminal: (id) => worktrees.ownedRows(id),
+      all: () => worktrees.all(),
+    },
+    notify: (terminalId, text) =>
+      shippingTerminals().messaging.notice(terminalId, text, { always: true }),
+  })
+  // The terminals below are made with the gate, which asks them only once it is answering.
+  const shippingTerminals = (): Terminals => terminals
   // The person's notes on each project, kept in the store, which agents add to as they ask.
   const notes = new Notes(store)
   const terminals = new Terminals({
+    shipping,
     records: store,
     closed: store,
     projects: () => store.projects().map(({ id }) => id),
     notes,
     worktrees: {
       service: worktrees,
-      enabled: () => store.settings.runner().worktrees,
-      ready: (startedAt, relists) => rootFolder.ready(startedAt, relists),
+      enabled: (terminalId) => worktreesOn(terminalId),
+      ready: (startedAt, relists, terminalId) =>
+        rootFolder.ready(startedAt, relists, terminalId !== undefined && tour.isTours(terminalId)),
+      inRepository: repositoryKnown,
       // Read only by MCP calls, which come once the forges below are made.
       pullRequest: (commonDir, branch) => forges.pullRequest(commonDir, branch),
     },
@@ -423,11 +484,16 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     messages: store,
     inbox: store,
     projectOf: (sessionId) => store.session(sessionId).projectId,
+    clients,
     items,
     // Without an engine nothing is described, so terminals have nothing to wait for.
     ...(options.murmur?.engine !== undefined && { describer: murmur }),
     ...((scopes || priority) && {
-      pty: { ...(scopes && { scopes }), ...(priority && { priority }), activity },
+      pty: {
+        ...(scopes && { scopes }),
+        ...(priority && { priority }),
+        activity,
+      },
     }),
     ...options.terminals,
     // Whatever a test says of the answers, the dialogs still see which terminals are in sight.
@@ -440,16 +506,22 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   const projects = new Projects(store, terminals, items, worktrees)
   // In the person's home, where the agents are looked for too.
   const tour = new Tour({
+    ...(options.tour !== undefined && { assets: options.tour }),
     ...(options.agents?.home !== undefined && { home: options.agents.home }),
+    // Where the game's server command is looked for: the person's terminal's PATH.
+    environment: () => agents.environment(),
     connected: (agent) => agents.connected(agent),
     models: (agent) => agents.models(agent),
     // Every project, those being removed too, whose removal the tour waits for.
-    projects: { list: () => store.projects(), remove: (id) => projects.remove(id) },
+    projects: {
+      list: () => store.projects(),
+      remove: (id) => projects.remove(id),
+    },
     notice: (terminalId, text) => terminals.messaging.notice(terminalId, text, { always: true }),
     cwdOf: (terminalId) => terminals.get(terminalId).cwd,
     leadOf: (terminalId) => terminals.messaging.leadOf(terminalId)?.terminalId,
-    gitName: () => readGitName(options.agents?.home),
-    account: readAccount,
+    handleOf: (terminalId) => terminals.get(terminalId).handle,
+    worktreesFolder: () => rootFolder.make(),
   })
   // Not awaited: the runner starts at once, and a failure only leaves rows for the next start.
   void worktrees
@@ -481,7 +553,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
   keepWorktreeChanges({
     onMade: (listener) => worktrees.onMade(listener),
     onChanged: (listener) => worktrees.onChanged(listener),
-    enabled: () => store.settings.runner().worktrees,
+    enabled: (terminalId) => worktreesOn(terminalId),
     owner: (root) => worktrees.all().find((row) => row.path === root)?.terminalId,
     place: (terminalId) => terminals.place(terminalId),
     show: (place, root) => items.showChangesUnlessShown(place, root),
@@ -510,7 +582,10 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
       const place = terminals.place(terminalId)
       if (!place) throw new DomainError("TERMINAL_NOT_FOUND")
       // The person asked, so it opens, as an agent's show does when told the person asked.
-      const shown = await items.show(place, { changes: { path: root }, open: true })
+      const shown = await items.show(place, {
+        changes: { path: root },
+        open: true,
+      })
       if (!shown.ok) throw new DomainError("NOT_FOUND", shown.reason)
       return shown.id
     },
@@ -542,6 +617,7 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     rewriteShellFiles,
     agents,
     terminals,
+    shipping,
     notes,
     items,
     projects,
@@ -553,10 +629,12 @@ const assemble = (store: WorkspaceStore, options: RunnerOptions, started: Starte
     uploads,
     voice,
     murmur,
+    jobs,
     sealer,
     rootFolder,
     tour,
     activity,
+    clients,
     seen,
   }
 }
@@ -569,12 +647,17 @@ const refusingRunner = (): Runner => ({
   // A client that proves itself is told why, and nothing else is served. The runner stays
   // up, so a client that retries is told again instead of finding a process that crashed.
   sessions: createSessions({
-    protocolVersion,
+    revision: compatibility.revision,
+    oldestClient: compatibility.oldestClient,
     router: {},
     admit: () => {
-      throw new ORPCError("WORKSPACE_TOO_NEW", { status: errors.WORKSPACE_TOO_NEW.status })
+      throw new ORPCError("WORKSPACE_TOO_NEW", {
+        status: errors.WORKSPACE_TOO_NEW.status,
+      })
     },
   }),
+  // Its devices are in the workspace it can't open: only the owner is told why.
+  device: () => undefined,
   snapshotBytes: 0,
   persist: () => {},
   close: () => Promise.resolve(),
@@ -620,7 +703,10 @@ const logFailure = (path: readonly string[], error: unknown): void => {
 const startRunner = (options: RunnerOptions): Runner => {
   const {
     store,
+    shellFiles,
+    rewriteShellFiles,
     terminals,
+    shipping,
     items,
     agents,
     projects,
@@ -632,11 +718,13 @@ const startRunner = (options: RunnerOptions): Runner => {
     uploads,
     voice,
     murmur,
+    jobs,
     sealer,
     rootFolder,
     tour,
     notes,
     activity,
+    clients,
     seen,
   } = wire(options)
   const fileImports = new FileImports((projectId) => {
@@ -644,48 +732,86 @@ const startRunner = (options: RunnerOptions): Runner => {
     return store.project(projectId).cwd
   })
   let closing: Promise<void> | undefined
-  return {
-    sessions: createSessions({
-      protocolVersion,
-      router: createRouter({
-        store,
-        terminals,
-        feedback: terminals.feedback,
-        history: terminals.history,
-        works,
-        notes,
-        checkouts,
-        forges,
-        projects,
-        items,
-        agents,
-        uploads,
-        fileImports,
-        voice,
-        murmur,
-        transcriptsAvailable: () => transcriptsAvailable(sealer),
-        closing: () => closing !== undefined,
-        settingsSaved: () => rootFolder.ensure(),
-        tour,
-        activity,
-        seen,
-      }),
-      error: apiError,
-      failed: logFailure,
-      admit: (session) =>
-        log.info("client.connected", "A client connected.", { data: { session: session.id } }),
-      // Whatever a client held through a session it lost or replaced: its shells keep running.
-      closed: (session) => {
-        log.info("client.closed", "A client's session ended.", { data: { session: session.id } })
-        activity.release(session.id)
-        seen.release(session.id)
-        terminals.release(session.id)
-        works.release(session.id)
-        voice.release(session.id)
-        murmur.release(session.id)
-        void fileImports.release(session.id).catch(() => {})
+  const devices = new Devices(store.devices)
+  const sessions = createSessions({
+    revision: compatibility.revision,
+    oldestClient: compatibility.oldestClient,
+    router: createRouter({
+      store,
+      terminals,
+      feedback: terminals.feedback,
+      history: terminals.history,
+      works,
+      notes,
+      checkouts,
+      forges,
+      projects,
+      items,
+      agents,
+      uploads,
+      fileImports,
+      voice,
+      murmur,
+      transcriptsAvailable: () => transcriptsAvailable(sealer),
+      closing: () => closing !== undefined,
+      settingsSaved: () => rootFolder.ensure(),
+      // The shipping gate's switch: Claude's per-launch settings and Codex's plugin carry its
+      // hooks, so they are written again, and a Codex copy that differs is installed again.
+      shipping,
+      shippingSwitched: () => {
+        // Switched off, its open cards and permits end, and the terminals' summaries say so.
+        shipping.switched()
+        void shellFiles
+          .then(() => rewriteShellFiles())
+          .then(() => agents.refresh(true))
+          .catch((error: unknown) =>
+            log.error("shipping.rewrite-failed", "Novadeck could not write the gate's hooks", {
+              err: error,
+            }),
+          )
       },
+      tour,
+      activity,
+      clients,
+      seen,
+      devices,
     }),
+    error: apiError,
+    failed: logFailure,
+    // Each line names the device a session proved itself as, by its id: null for the owner.
+    admit: (session) =>
+      log.info("client.connected", "A client connected.", {
+        data: { session: session.id, device: session.device?.id ?? null },
+      }),
+    // Whatever a client held through a session it lost or replaced: its shells keep running.
+    closed: (session) => {
+      log.info("client.closed", "A client's session ended.", {
+        data: { session: session.id, device: session.device?.id ?? null },
+      })
+      activity.release(session.id)
+      clients.release(session.id)
+      seen.release(session.id)
+      terminals.release(session.id)
+      works.release(session.id)
+      voice.release(session.id)
+      murmur.release(session.id)
+      void fileImports.release(session.id).catch(() => {})
+      // Last, and never failing the rest: a store that can't write (a full disk) only misses
+      // when the device was last seen.
+      if (!closing)
+        try {
+          devices.ended(session)
+        } catch (error) {
+          log.warn("device.unseen", "Novadeck could not note when a device was last seen.", {
+            err: error,
+          })
+        }
+    },
+  })
+  devices.serve(sessions)
+  return {
+    sessions,
+    device: (token) => devices.verify(token),
     snapshotBytes: options.terminals?.snapshotBytes ?? 32 * 1024 * 1024,
     persist: () => {
       if (!closing) terminals.persist()
@@ -697,6 +823,8 @@ const startRunner = (options: RunnerOptions): Runner => {
         try {
           await terminals.shutdown()
         } finally {
+          // After the terminals, whose leftovers it lists and ends as they close.
+          jobs?.close()
           await forges.close()
           await works.close()
           notes.close()

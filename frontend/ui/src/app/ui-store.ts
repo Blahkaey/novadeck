@@ -4,6 +4,7 @@ import {
   readPortableCardRaised,
   writePortableCardRaised,
 } from "@novadeck/core/desktop/portable-card-raised"
+import { aloneInWindows, type ProjectWindowsState } from "@novadeck/core/desktop/project-windows"
 import type { SandboxState } from "@novadeck/core/desktop/sandbox"
 import type { UpdateOffer, WhatsNew } from "@novadeck/core/desktop/update"
 import type { AgentName } from "@novadeck/core/harnesses"
@@ -44,6 +45,14 @@ import {
 
 // Presentation state the workspace model does not own. One store per App; it
 // starts over on reload apart from the slices persisted below.
+// What Novadeck tells the person of something done elsewhere: `said` what happened, and
+// `subject` where that leaves them.
+export type ToldNotice = {
+  readonly id: string
+  readonly said: string
+  readonly subject: string
+}
+
 export type UiState = {
   // The route the app renders, mirrored from the URL, which stays authoritative.
   readonly location: UiLocation
@@ -73,6 +82,9 @@ export type UiState = {
   readonly leaving: LeaveAsk | null
   // The last move, for its toast; never persisted.
   readonly moved: MoveNotice | null
+  // What Novadeck last told the person of something done elsewhere, as the session or project
+  // they were on being removed in another window, for its toast; never persisted.
+  readonly told: ToldNotice | null
   // The panels of the rail in a window of their own, in the order they opened: this run's, in
   // every session, and never persisted, as a window can't open again without the person's click
   // (shell/own-windows.ts holds the windows themselves).
@@ -93,8 +105,9 @@ export type UiState = {
   // The person chose "Not now" for this crash loop; it asks again only after the next one.
   readonly crashLoopDismissed: boolean
   // Which addon's offer (voice input or murmur) came up in this run of the app: each run
-  // offers at most one unasked; never persisted.
-  readonly addonOffer: "voice" | "murmur" | null
+  // offers at most one unasked ("none": a window that is not the app's first leaves it to
+  // the first); never persisted.
+  readonly addonOffer: "voice" | "murmur" | "none" | null
   // The terminal Murmur's offer chip sits on, by session context and id: the first whose
   // agent finished a turn, until the offer is answered; never persisted.
   readonly nameOffer: { readonly context: string; readonly id: string } | null
@@ -125,7 +138,16 @@ export type UiState = {
   readonly portable: PortableState | null
   // Whether the page has the person's focus: its window focused and showing.
   readonly pageFocused: boolean
-  // How many new Inbox rows that need the person the bell has rung for in this run
+  // What the desktop app says of its other windows: the projects they show, and whether this
+  // is the window the person used last, the only one that rings (`watchProjectWindows`);
+  // never persisted.
+  readonly windows: ProjectWindowsState
+  // Whether another window has shown a project since this page loaded, or this window is not the
+  // app's first: from then on a project is read from the runner as it is shown, as another window
+  // may have made or removed its sessions. A window that was always alone has the live copy
+  // (`watchProjectWindows`); never persisted.
+  readonly windowsShared: boolean
+  // How many new Inbox entries that need the person the bell has rung for in this run
   // (`watchBellRings`): its dot rings with each; never persisted.
   readonly bellRings: number
   // How many times a terminal of the open project landed in History in this run
@@ -195,6 +217,7 @@ export const initialUi = ({
   chatOfferAnswered = false,
   projectArrangement = noArrangement,
   foldedTeams = noFoldedTeams,
+  extraWindow = false,
 }: {
   location: UiLocation
   preferences: PreferencesValue
@@ -202,6 +225,8 @@ export const initialUi = ({
   chatOfferAnswered?: boolean
   projectArrangement?: ProjectArrangement
   foldedTeams?: FoldedTeams
+  // A window that is not the app's first: the one-time offers are left to the first.
+  extraWindow?: boolean
 }): UiState => ({
   location,
   preferences,
@@ -216,6 +241,7 @@ export const initialUi = ({
   moveAsk: null,
   leaving: null,
   moved: null,
+  told: null,
   ownWindows: [],
   ownWindowFocused: null,
   offScreenPanels: [],
@@ -223,18 +249,20 @@ export const initialUi = ({
   agentFocus: null,
   filesExcludeFocus: false,
   crashLoopDismissed: false,
-  addonOffer: null,
+  addonOffer: extraWindow ? "none" : null,
   nameOffer: null,
   crashLoop: 0,
   update: null,
   portableCardOpen: false,
   whatsNew: null,
   chatOfferAnswered,
-  chatOfferHeld: false,
+  chatOfferHeld: extraWindow,
   sandbox: null,
   sandboxOpen: false,
   portable: null,
   pageFocused: true,
+  windows: aloneInWindows,
+  windowsShared: extraWindow,
   bellRings: 0,
   historyDrops: 0,
   lastDrop: null,
@@ -328,24 +356,51 @@ const importing = new WeakSet<UiStore>()
 // backend answers is sent as it is, in order; opening a client sends nothing. An arrangement
 // an earlier client left in storage is sent once first (the store was seeded from it) and
 // forgotten once the backend has it or any arrangement since; a failed send leaves it for
-// the next load.
+// the next load. How another client arranged the projects (`arranged`) is taken as it comes,
+// and never sent back, unless the person's own is still on its way, which comes back after.
 export const keepProjectArrangement = (
   ui: UiStore,
   arrange: NonNullable<Backend["arrange"]>,
+  arranged?: Backend["arranged"],
 ): (() => void) => {
+  let sending = 0
+  const send = (arrangement: ProjectArrangement): void => {
+    sending += 1
+    arrange(arrangement)
+      .then(forgetStoredProjectArrangement, () => {})
+      .finally(() => (sending -= 1))
+  }
   const stored = importing.has(ui) ? undefined : readStoredProjectArrangement()
   if (stored) {
     importing.add(ui)
-    arrange(stored).then(forgetStoredProjectArrangement, () => {})
+    send(stored)
   }
   let sent = ui.getSnapshot().projectArrangement
-  return ui.subscribe(() => {
+  const stop = ui.subscribe(() => {
     const next = ui.getSnapshot().projectArrangement
     if (next === sent) return
     sent = next
-    arrange(next).then(forgetStoredProjectArrangement, () => {})
+    send(next)
   })
+  const stopArranged = arranged?.((there) => {
+    if (sending > 0 || readStoredProjectArrangement() !== undefined) return
+    const here = ui.getSnapshot().projectArrangement
+    if (sameArrangement(here, there)) return
+    const taken: ProjectArrangement = { order: [...there.order], pinned: [...there.pinned] }
+    sent = taken
+    ui.update((state) => ({ ...state, projectArrangement: taken }))
+  })
+  return () => {
+    stop()
+    stopArranged?.()
+  }
 }
+
+const sameArrangement = (
+  a: { readonly order: readonly string[]; readonly pinned: readonly string[] },
+  b: { readonly order: readonly string[]; readonly pinned: readonly string[] },
+): boolean =>
+  a.order.join("\n") === b.order.join("\n") && a.pinned.join("\n") === b.pinned.join("\n")
 
 // Closes the switcher once a dialog opens or the session changes under it, and lets go of
 // the rows of terminals that close while it shows, so none it offers is gone.
@@ -452,6 +507,12 @@ export const switchOffAgentModes = (agentModes: Backend["agentModes"]): void => 
   if (agentModes?.enabled.getSnapshot()) agentModes.set(false)
 }
 
+// Turns the shipping gate off where it is on, as the Experimental switch going off does: the
+// runner then stops gating and leaves what the harnesses do as it was.
+export const switchOffShippingGate = (shippingGate: Backend["shippingGate"]): void => {
+  if (shippingGate?.enabled.getSnapshot()) shippingGate.set(false)
+}
+
 // Switches every forge integration off where it is on, as the Experimental switch going off does,
 // for the same reason.
 // A forge being switched (on, as far as anyone knows) goes off too: its switch lands after.
@@ -461,15 +522,20 @@ export const switchOffForges = (forges: Backend["forges"]): void => {
 }
 
 // The Experimental features a backend keeps as settings, which all go off with the switch.
-export type ExperimentalFeatures = Pick<Backend, "worktrees" | "forges" | "agentModes">
+export type ExperimentalFeatures = Pick<
+  Backend,
+  "worktrees" | "forges" | "agentModes" | "shippingGate"
+>
 
 export const switchOffExperimental = ({
   worktrees,
   forges,
   agentModes,
+  shippingGate,
 }: ExperimentalFeatures): void => {
   switchOffWorktrees(worktrees)
   switchOffAgentModes(agentModes)
+  switchOffShippingGate(shippingGate)
   switchOffForges(forges)
 }
 

@@ -1,11 +1,19 @@
+import { rm, writeFile } from "node:fs/promises"
 import { constants as system } from "node:os"
 
 import { spawn as nodePtySpawn } from "node-pty"
 
 import { listedApart, type ApartProcess } from "./apart.js"
 import { boosting, type Activity } from "./boost.js"
-import { agentProcesses, endFollowed, type Listing } from "./descendants.js"
+import {
+  agentProcesses,
+  endFollowed,
+  processKey,
+  type Followed,
+  type Listing,
+} from "./descendants.js"
 import { terminalForeground } from "./foreground.js"
+import { endLeftovers, leftovers, listedScope, readScope, runClock, runStart } from "./leftovers.js"
 import type { Priority } from "./priority.js"
 import type { ExitCause, Scopes } from "./scopes.js"
 import { anyRunning, relayMs, taskkillTree, type Member } from "./trees.js"
@@ -17,7 +25,11 @@ export type Disposable = { dispose(): void }
  * How a pty's program ended: its exit code, or the signal that ended it (null on Windows),
  * and why, where its platform says.
  */
-export type PtyExit = { code: number | null; signal: string | null; cause?: ExitCause }
+export type PtyExit = {
+  code: number | null
+  signal: string | null
+  cause?: ExitCause
+}
 
 /** node-pty's `IPty`, as far as a `Pty` uses it: what a test's stand-in plays. */
 export type NativePty = {
@@ -48,7 +60,8 @@ export type NativeSpawn = (
 
 /**
  * How ptys start: node-pty's `spawn` unless a test plays one, the platform their ending
- * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux,
+ * follows, where each program is kept apart from the app's, as `userScopes()` gives on Linux
+ * and `taggedScopes()` tells on macOS,
  * and how far its priority yields to the app's, as `terminalPriorities()` gives on macOS and
  * Windows. `trees` reads a Windows shell's programs, which may have started before its
  * priority could be lowered.
@@ -83,6 +96,17 @@ export type ProcessTrees = {
 export type EndBudget = {
   run(usual: number): number
   graceEnds(began: number): number
+  /** When all ending must be done by, as a quit's own bound; none outside a quit. */
+  by?(): number
+}
+
+/**
+ * What ending what agents left in a terminal's scope reads (see `Pty.endLeft`): the processes,
+ * and what the agents' harnesses run apart from the terminal, which is left with all under it.
+ */
+export type LeftOptions = {
+  readonly listing: Listing
+  readonly apart?: readonly ApartProcess[]
 }
 
 export type EndOptions = {
@@ -109,6 +133,12 @@ export type EndOptions = {
         readonly apart?: readonly ApartProcess[]
       }
     | undefined
+  /**
+   * On Linux and macOS, where an agent ran in the terminal (`Pty.agentStarted`), what it left in the
+   * terminal's scope is ended too (see `Pty.endLeft`): as the hangup goes out, what has left the
+   * shell's tree, and once the shell and what the follow waits on have ended, what is left.
+   */
+  readonly left?: LeftOptions | undefined
 }
 
 export type Pty = {
@@ -129,6 +159,29 @@ export type Pty = {
   resume(): void
   /** Ends its program and what `EndOptions` say it started: the whole kill sequence. */
   end(options: EndOptions): Promise<void>
+  /**
+   * An agent runs in it now, by its pid where known: what starts in the terminal's scope from
+   * then until `agentEnded` is the agent's, to end with the terminal (`endLeft`). On Linux and
+   * macOS with a scope; elsewhere it records nothing. Told again while the run is open, it adds
+   * nothing.
+   */
+  agentStarted(agent: number | undefined): void
+  /** The agent's session there has ended: what starts from now is no agent's. */
+  agentEnded(): void
+  /** Whether an agent has run in it, so `endLeft` may find something. */
+  readonly agentRan: boolean
+  /**
+   * What agents left in the terminal's scope (see `leftovers`): what they started there,
+   * detached or not, that no longer lies under the running shell. Undefined where the scope
+   * or the processes can't be read.
+   */
+  leftovers(left: LeftOptions): Promise<readonly Followed[] | undefined>
+  /**
+   * Ends what agents left in the terminal's scope, as a close does once its shell has exited:
+   * SIGTERM, then SIGKILL half a second on, or by `by()` (see `endLeftovers`). Nothing where no
+   * agent ran there, or on Windows.
+   */
+  endLeft(left: LeftOptions, by?: () => number): Promise<void>
 }
 
 /** A signal number's name, such as `SIGKILL`; Windows has no signals. */
@@ -223,7 +276,7 @@ const endTreeNow = async (pid: number, trees: ProcessTrees): Promise<void> => {
 // by itself: the tree read before the close, and what its members started since, as an
 // agent's hook run as it closes, or left running as they ended, read again from each by
 // its start.
-const endLeft = async (
+const endTreeLeft = async (
   tree: readonly Member[],
   trees: ProcessTrees,
   budget: EndBudget,
@@ -254,6 +307,18 @@ const endLeft = async (
     )
 }
 
+/**
+ * How long a Windows shell's pid is waited for, to put it in its job: node-pty names it as it
+ * creates the shell, once its console's output pipe connects, or 5 s on if that never does.
+ */
+const pidWaitMs = 6_000
+
+/**
+ * How long a Windows shell's `scopeFile` stays, once made, for a shell that gave up waiting
+ * for it: long past any shell's wait, so it is only ever one no shell will read.
+ */
+const scopeFileMs = 30_000
+
 const usualBudget = (treeGraceMs: number): EndBudget => ({
   run: (usual) => usual,
   graceEnds: (began) => began + treeGraceMs,
@@ -274,6 +339,11 @@ export const spawnPty = (
     env: NodeJS.ProcessEnv
     cols: number
     rows: number
+    /**
+     * On Windows, a file made once the shell's job has settled, whether it got there or not,
+     * which its startup command waits for (`ShellLaunch.scopeFile`).
+     */
+    scopeFile?: string | undefined
   } & PtyOptions,
 ): Pty => {
   const platform = options.platform ?? process.platform
@@ -291,7 +361,11 @@ export const spawnPty = (
     // everything on the console at once.
     useConptyDll: platform === "win32",
   })
-  const scope = child.pid > 0 ? options.scopes?.contain(child.pid) : undefined
+  // Its scope, asked for as it starts; a Windows shell's job once node-pty names its pid (below).
+  let scope =
+    child.pid > 0 && platform !== "win32"
+      ? options.scopes?.contain(child.pid, options.env)
+      : undefined
   const boost = boosting({
     scope,
     priority: options.priority,
@@ -338,6 +412,41 @@ export const spawnPty = (
   let ending = false
   // node-pty's exit came, its fd closed, while the report may wait for its cause.
   let gone = false
+  // On Windows node-pty names the shell's pid only once it has created it, a moment after
+  // `spawn` returns: the shell goes into its job then (see `windowsJobs`). What it started
+  // before it got there stays out, so its startup command waits for `scopeFile`, made once
+  // that has settled either way. The shell takes the file once it sees it; one it gave up on
+  // first goes `scopeFileMs` on, so none is left behind.
+  if (platform === "win32" && options.scopes) {
+    const scopes = options.scopes
+    const settled = (held: Promise<boolean>) => {
+      const file = options.scopeFile
+      if (file === undefined) return
+      void held
+        .then(() => writeFile(file, ""))
+        .then(() => {
+          setTimeout(() => void rm(file, { force: true }).catch(() => {}), scopeFileMs).unref()
+        })
+        .catch(() => {})
+    }
+    const contain = () => {
+      if (child.pid > 0 && !gone) {
+        scope = scopes.contain(child.pid)
+        settled(scope.held ?? Promise.resolve(true))
+      } else settled(Promise.resolve(false))
+    }
+    if (child.pid > 0) contain()
+    else {
+      const began = Date.now()
+      const watch = setInterval(() => {
+        if (child.pid > 0 || gone || Date.now() - began > pidWaitMs) {
+          clearInterval(watch)
+          contain()
+        }
+      }, 1)
+      watch.unref?.()
+    }
+  }
   const exitListeners = new Set<(exit: PtyExit) => void>()
   // Told at once whether its terminal is in use, and on each change until it exits.
   const stopActivity =
@@ -354,6 +463,17 @@ export const spawnPty = (
   const exit = new Promise<void>((resolve) => {
     resolveExit = resolve
   })
+  // Agents' runs in the terminal, kept where its scope can say what they left (Linux, macOS,
+  // Windows), in the clock its platform lists processes' starts in. `agent` is the agent whose
+  // own start `since` has been read as, once.
+  const runs: { since: number; until?: number; agent?: number }[] = []
+  const tracksRuns = () =>
+    (platform === "linux" || platform === "darwin" || platform === "win32") && scope !== undefined
+  const clock = runClock(platform)
+  const closeRun = (): void => {
+    const run = runs.at(-1)
+    if (run && run.until === undefined) run.until = Math.max(run.since, clock.now() ?? run.since)
+  }
   // Before any listener, so a terminal has drawn by the time its first output is handled.
   child.onData(() => {
     drawn = true
@@ -362,7 +482,12 @@ export const spawnPty = (
   // terminal whose input failed.
   child.onExit(({ exitCode, signal }) => {
     gone = true
-    const ended = { code: signal ? null : (exitCode ?? null), signal: signalName(signal, platform) }
+    // A scope its program was moved into as it died stays empty, and active, for ever.
+    void scope?.exited()
+    const ended = {
+      code: signal ? null : (exitCode ?? null),
+      signal: signalName(signal, platform),
+    }
     // Why it ended is looked up only where nothing here ended it.
     const cause = ending ? undefined : scope?.cause(ended.signal)
     if (!cause) return report(ended)
@@ -371,6 +496,38 @@ export const spawnPty = (
   exitListeners.add(() => resolveExit?.())
   // An exit taken as one, where the program's own may never be reported.
   const takenAsEnded = () => report({ code: null, signal: null })
+
+  // What agents left in the scope now; `skip` leaves out what a follow still waits on.
+  const findLeft =
+    (left: LeftOptions, skip?: ReadonlySet<string>) =>
+    async (): Promise<readonly Followed[] | undefined> => {
+      const held = scope
+      if (!held || runs.length === 0) return undefined
+      const read = held.listed
+        ? await listedScope(held.listed.bind(held))
+        : await readScope(left.listing, () => held.members())
+      if (!read) return undefined
+      return leftovers({
+        rows: read.rows,
+        members: read.members,
+        runs,
+        // The running shell's tree is the hangup's and the follow's, not this.
+        shell: gone ? undefined : pty.pid,
+        apart: listedApart(read.rows, left.apart ?? [], platform),
+        ...(skip && { skip }),
+        clock,
+        // macOS's scope leaves out every Apple program it holds.
+        partial: platform === "darwin",
+      })
+    }
+  // Ends what agents left there, as a close does, after which nothing reads the scope again.
+  const endLeft = async (left: LeftOptions, by?: () => number): Promise<void> => {
+    try {
+      if (runs.length > 0) await endLeftovers(findLeft(left), by, scope?.end?.bind(scope))
+    } finally {
+      scope?.done?.()
+    }
+  }
 
   const pty: Pty = {
     get pid() {
@@ -404,10 +561,23 @@ export const spawnPty = (
     resume: () => {
       if (!gone) child.resume()
     },
-    end: async ({ graceMs, treeGraceMs, trees, budget = usualBudget(treeGraceMs), follow }) => {
+    end: async ({
+      graceMs,
+      treeGraceMs,
+      trees,
+      budget = usualBudget(treeGraceMs),
+      follow,
+      left,
+    }) => {
       ending = true
+      const by = () => budget.by?.() ?? Number.POSITIVE_INFINITY
       // Gone, its exit waiting for its cause: no signal for its pid, which may be another's.
-      if (gone) return exit
+      if (gone) {
+        await exit
+        if (left) await endLeft(left, by)
+        scope?.done?.()
+        return
+      }
       const began = Date.now()
       // The second signal bounds ending even for programs that ignore SIGHUP.
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -481,15 +651,62 @@ export const spawnPty = (
           exit.then(() => {
             if (group !== undefined) resumeGroupRepeatedly(group)
           }),
-          tree && endLeft(tree, trees, budget),
+          tree && endTreeLeft(tree, trees, budget),
           following &&
             followed &&
             endFollowed(followed, () => budget.graceEnds(began), following.listing),
+          // What an agent left outside the shell's tree has no hangup coming, nor anything to
+          // wait for: ended at once, but for what the follow gives its grace.
+          left &&
+            runs.length > 0 &&
+            endLeftovers(
+              findLeft(left, new Set((followed ?? []).map(processKey))),
+              by,
+              scope?.end?.bind(scope),
+            ),
         ])
+        // What is left once the shell has gone: what was under it, as a `nohup` of the
+        // agent's, and what started meanwhile, as a hook's as the agent ended.
+        if (left) await endLeft(left, by)
       } finally {
         if (timer) clearTimeout(timer)
+        // Closed: nothing reads its scope again.
+        scope?.done?.()
       }
     },
+    agentStarted: (agent) => {
+      if (!tracksRuns()) return
+      let run = runs.at(-1)
+      if (!run || run.until !== undefined) {
+        const now = clock.now()
+        if (now === undefined) return
+        run = { since: now }
+        runs.push(run)
+      }
+      // From the agent's own start where the listing shows it, as it may have started its
+      // helpers before it bound; the time it bound stands only where it can't be read. macOS's
+      // scope gives that start to the microsecond, the listing to the second; a Windows job
+      // lists its own, which no listing sees.
+      const held = scope
+      const listing = held?.listed ? () => held.listed!() : options.listing
+      if (agent === undefined || !listing || run.agent === agent) return
+      const open = run
+      void (async () => {
+        const members = platform === "darwin" ? await held?.members() : undefined
+        const rows = await listing()
+        const start = rows && runStart(rows, agent, clock, members)
+        if (start === undefined || open.until !== undefined) return
+        open.since = start
+        // Read once a run: an agent's harness may tell of its session at every turn.
+        open.agent = agent
+      })().catch(() => {})
+    },
+    agentEnded: closeRun,
+    get agentRan() {
+      return runs.length > 0
+    },
+    leftovers: (left) => (runs.length === 0 ? Promise.resolve([]) : findLeft(left)()),
+    endLeft,
   }
   return pty
 }

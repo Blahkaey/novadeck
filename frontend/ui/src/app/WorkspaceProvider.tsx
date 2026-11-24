@@ -1,5 +1,6 @@
 import { createChat, watchChat } from "@novadeck/chat/state"
 import { readChatOfferAnswered } from "@novadeck/core/agents/chat-offer"
+import { syncPerson } from "@novadeck/core/person"
 import type { CreateBackend } from "@novadeck/core/port"
 import { workspaceFromSeed } from "@novadeck/core/seed"
 import { createWorkspaceStore } from "@novadeck/core/store"
@@ -31,6 +32,8 @@ import { landInbox, noLanding } from "./inbox-landing"
 import { noticeBoard, watchBellRings, watchInboxPings } from "./inbox-pings"
 import { nameFinished, watchFinishes } from "./murmur-offer"
 import { watchPageFocus } from "./page-focus"
+import { followPersonPreferences, quietly } from "./person-preferences"
+import { watchProjectWindows, watchWindowTitle } from "./project-windows"
 import { pullRequestsOf } from "./pull-requests"
 import {
   availablePanels,
@@ -108,6 +111,7 @@ const createServices = (
         (backend.arrange && readStoredProjectArrangement()) ||
         listedArrangement(backend.seed.projects),
       foldedTeams: readFoldedTeams(),
+      extraWindow: backend.projectWindows?.extra === true,
     }),
   )
   const chat = createChat()
@@ -130,6 +134,8 @@ const createServices = (
     conversations: backend.conversations,
     companions: backend.companions,
     history: backend.history,
+    windows: backend.projectWindows,
+    syncProject: backend.syncProject,
     itemStore,
     canvas,
     effects: domEffects,
@@ -169,7 +175,13 @@ export const WorkspaceProvider = ({
     createServices(createBackend, location, navigationType),
   )
   useEffect(
-    () => connectBackend(services.backend, services.workspace, services.commands.openRequested),
+    () =>
+      connectBackend(
+        services.backend,
+        services.workspace,
+        services.commands.openRequested,
+        services.commands.removedElsewhere,
+      ),
     [services],
   )
   useEffect(() => services.itemStore?.connect(), [services])
@@ -179,18 +191,35 @@ export const WorkspaceProvider = ({
     return itemStore && backend.messages ? followMessages(workspace, backend.messages) : undefined
   }, [services])
   useEffect(() => persistUi(services.ui, services.workspace), [services])
+  // The settings that follow the person, kept on the runner for every device they use.
+  useEffect(
+    () =>
+      followPersonPreferences(services.ui, (next) =>
+        // Another device's choice isn't an answer to this one's Agent Chat offer.
+        services.commands.updatePreferences(next, { answersOffer: false }),
+      ),
+    [services],
+  )
+  useEffect(() => {
+    const { preferences } = services.backend
+    return preferences ? syncPerson(preferences) : undefined
+  }, [services])
   useEffect(() => watchAppearance(services.ui, window, services.backend.showAppearance), [services])
   useEffect(() => watchScale(services.ui, services.backend.showScale), [services])
   useEffect(
-    () => followSavedPreferences(services.ui, window, services.commands.updatePreferences),
+    () =>
+      followSavedPreferences(services.ui, window, (next) =>
+        // Another window's change, which that window sends the runner itself.
+        quietly(() => services.commands.updatePreferences(next)),
+      ),
     [services],
   )
   useEffect(() => watchPresentation(services.workspace, services.ui), [services])
   useEffect(() => trackRecent(services.workspace, services.ui), [services])
   useEffect(() => watchSwitcher(services.workspace, services.ui), [services])
   useEffect(() => {
-    const { arrange } = services.backend
-    return arrange ? keepProjectArrangement(services.ui, arrange) : undefined
+    const { arrange, arranged } = services.backend
+    return arrange ? keepProjectArrangement(services.ui, arrange, arranged) : undefined
   }, [services])
   useEffect(() => watchCrashLoop(services.backend.crashLoop?.crashes, services.ui), [services])
   useEffect(() => watchUpdates(services.backend.updates, services.ui), [services])
@@ -203,7 +232,14 @@ export const WorkspaceProvider = ({
       ),
     [services],
   )
-  useEffect(() => watchWhatsNew(services.backend.whatsNew, services.ui), [services])
+  // What is new is told once, in the app's first window.
+  useEffect(
+    () =>
+      services.backend.projectWindows?.extra
+        ? undefined
+        : watchWhatsNew(services.backend.whatsNew, services.ui),
+    [services],
+  )
   useEffect(() => watchSandbox(services.backend.sandbox, services.ui), [services])
   useEffect(() => watchPortable(services.backend.portable, services.ui), [services])
   useEffect(() => watchClosing(services.workspace, services.ui), [services])
@@ -217,6 +253,14 @@ export const WorkspaceProvider = ({
   }, [services])
   useEffect(() => watchChat(services.chat, services.workspace), [services])
   useEffect(() => watchPageFocus(services.ui, window, services.backend.windowFocus), [services])
+  useEffect(
+    () => watchProjectWindows(services.backend, services.workspace, services.ui),
+    [services],
+  )
+  useEffect(
+    () => watchWindowTitle(window, services.backend.projectWindows, services.workspace),
+    [services],
+  )
   useEffect(
     () => watchWindowControls(services.ui, window, services.backend.windowControls),
     [services],

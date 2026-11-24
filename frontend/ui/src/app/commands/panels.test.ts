@@ -417,7 +417,7 @@ describe("the Terminals panel in a window", () => {
 
     it("keeps a pick of where a terminal goes there", () => {
       const app = savedWithTerminalsOut()
-      app.commands.pickSession("01", "menu")
+      app.commands.pickSession("01")
       expect(terminalsView(app)).toBe("sessions")
       expect(app.ui.getSnapshot().moving).toMatchObject({ terminalId: "01" })
     })
@@ -496,7 +496,7 @@ describe("the Terminals panel in a window", () => {
       })
       app.commands.detachPanel("terminals")
       app.commands.select("01")
-      app.commands.pickSession("01", "menu")
+      app.commands.pickSession("01")
       return app
     }
 

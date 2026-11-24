@@ -3,6 +3,7 @@ import type { Voice } from "./addons/voice"
 import type { TelemetryReader } from "./agents/telemetry"
 import type { Conversations } from "./conversation"
 import type { PortableState } from "./desktop/portable"
+import type { ProjectWindows } from "./desktop/project-windows"
 import type { SandboxState } from "./desktop/sandbox"
 import type { UninstallPlan, UninstallResult } from "./desktop/uninstall"
 import type { UpdateChannel, UpdateOffer, WhatsNew } from "./desktop/update"
@@ -15,7 +16,7 @@ import type { Inbox } from "./inbox"
 import type { Companions } from "./items"
 import type { Messages } from "./messages"
 import type { Notes } from "./notes"
-import type { WorkspaceSeed } from "./seed"
+import type { ProjectSeed, WorkspaceSeed } from "./seed"
 import type { NoticeSound } from "./sounds"
 import type { WorkspaceAction } from "./state"
 import type { Store } from "./store"
@@ -95,6 +96,15 @@ export type TerminalMount = {
   readonly focus: () => boolean
   // A fresh shell in an exited or failed terminal.
   readonly restart: () => void
+  // Takes control of a terminal another client controls, as the strip's button asks. Absent
+  // where a backend has no observing.
+  readonly take?: () => void
+  // Whether files dropped on the terminal would go in now, as pasted ones would. Absent where a
+  // backend takes no files.
+  readonly takesFiles?: () => boolean
+  // Takes the files of a drop on the terminal as a paste of them, during the drop, and focuses
+  // it. Nothing where it doesn't take files now.
+  readonly dropFiles?: (data: DataTransfer) => void
   // Called while the element is still in the document, so focus carries to the next mount.
   // Safe twice; leaves the element's content where it is.
   readonly dispose: () => void
@@ -114,6 +124,10 @@ export type ViewState = {
   // A short word for the person: why the last paste failed, for a few seconds after it
   // did, or that a copy reached the clipboard, for a moment.
   readonly notice: string | null
+  // Set while another client controls the terminal and this one only observes it: the screen is
+  // drawn at the terminal's size and a key may take control (`TerminalMount.take`). `busy` says
+  // a take was refused because the controller is typing. Absent or null: this client controls.
+  readonly control?: "observing" | "busy" | null
 }
 // The terminal font from Preferences: the size in CSS pixels, and the family the person chose,
 // which goes in front of the theme's own chain; none is the theme's font.
@@ -125,6 +139,9 @@ export type TerminalFont = { readonly size: number; readonly family?: string }
 export type ThemeSource = {
   readonly tokens: (element: Element, names: readonly string[]) => Partial<Record<string, string>>
   readonly onChange: (listener: () => void) => () => void
+  // The hue (1 to 8) the page draws an agent's handle in, as the Messages pane does, for what a
+  // terminal draws of its agents' messages; handles read alike without it.
+  readonly hueOf?: (handle: string) => number
 }
 
 // How a backend draws terminals: it mounts them into elements the UI gives it.
@@ -155,7 +172,23 @@ export type BackendAction = Extract<
       | "item/remove"
       | "window/upsert"
       | "window/remove"
+      // Another client's change to a session they share, and to the projects and sessions.
+      | "session/shared"
+      | "session/arrived"
+      | "session/gone"
+      | "project/gone"
+      | "sessions/arranged"
+      | "project/renamed"
+      // A project another client made, read from the runner.
+      | "project/sync"
   }
+>
+
+// What another client removed, which the page lays in itself: it moves the person on, and
+// tells them, when it was what they were on.
+export type RemovedElsewhere = Extract<
+  BackendAction,
+  { type: "session/gone" } | { type: "project/gone" }
 >
 
 // An agent in terminal `from` asked for a new terminal beside it: in `directory`, running
@@ -186,6 +219,9 @@ export type ApprovalAction =
   | { readonly type: "join"; readonly message?: string | undefined }
   | { readonly type: "leave" }
   | { readonly type: "hand" }
+  // An action a newer Novadeck's runner asks about that this one doesn't know: the person is
+  // told it needs a newer Novadeck to answer, and nothing is answered from here.
+  | { readonly type: "newer" }
 
 // An agent in terminal `from` asked for `action` on `terminalId`, so the app asks the person
 // first. It waits, with no time limit, until the person answers or the backend takes it
@@ -241,12 +277,14 @@ export type TerminalMoveUndo = {
 // once the agent shows in its terminal, which the UI asks for with `Tour.brief` (`doorbell`).
 // `model` is the one the agent starts on, where one was picked. `removed` are the projects that
 // were open at the folder, which the backend removed, terminals and all, before emptying it.
+// `page` is whether the lead will run the game's dev server and show its page.
 export type TourRun = {
   readonly directory: string
   readonly command: string
   readonly brief: "launch" | "doorbell"
   readonly model?: string | undefined
   readonly removed: readonly string[]
+  readonly page: boolean
 }
 
 // Why a run of the tour can't start where the agent has to start first, as Codex does before
@@ -270,6 +308,12 @@ export type Tour = {
   // Optional. Rings the tour's agent in the terminal a nudge to carry on with its brief, as
   // Novadeck's notice, where it has gone quiet; for the tour's own terminals only.
   readonly nudge?: (terminalId: string) => Promise<void>
+  // Optional. Rings the artist's brief to the agent in the terminal the UI opened in the tour's
+  // project, an agent on no team, once it shows there. A backend without it has no artist.
+  readonly artist?: (terminalId: string) => Promise<void>
+  // Optional. The person keeps the tour's project: it stops being the tour's, so nothing of the
+  // tour's rules applies to it and no later run touches it, and the lead is told.
+  readonly keep?: () => Promise<void>
   // Optional. How long the tour waits on its agent at a step before nudging it, in ms; the UI's
   // own wait when absent. The demo shortens it for specs.
   readonly patienceMs?: number
@@ -317,6 +361,9 @@ export type BackendFields = {
   // Optional. How the link to the far side is doing, for the footer. Updates may begin
   // only once `start` runs.
   readonly connection?: Store<BackendConnectionState>
+  // Optional. The person's own settings, which the far side keeps for every device they use
+  // (person.ts). Without it they stay on this device.
+  readonly preferences?: PersonPreferences
   // Optional. Where the far side can keep crashing: the backend then stops restarting
   // terminals until the person asks it to try again.
   readonly crashLoop?: {
@@ -352,6 +399,13 @@ export type BackendFields = {
   // Optional. Whether Solo and Swarm may be picked, an Experimental switch the runner keeps:
   // while off, agents work as a Herd whatever the pick. Absent where the backend has none.
   readonly agentModes?: {
+    readonly enabled: Store<boolean>
+    readonly set: (enabled: boolean) => void
+  }
+  // Optional. Whether the shipping gate is on, an Experimental switch the runner keeps: while
+  // on, Claude Code's and Codex's commands that ship work need a permit. Absent where the
+  // backend has none.
+  readonly shippingGate?: {
     readonly enabled: Store<boolean>
     readonly set: (enabled: boolean) => void
   }
@@ -416,11 +470,20 @@ export type BackendFields = {
   // Optional. The Inbox: what the agents in every project wait on the person for, one
   // row per agent terminal, answered in place, behind the bell. The runner's and the
   // demo's build it from the app's workspace (`bind`) and their own facts (see core's
-  // `inbox/rows`). Absent where the backend has none: the Inbox then lists nothing.
+  // `inbox/entries`). Absent where the backend has none: the Inbox then lists nothing.
   readonly inbox?: Inbox
+  // Optional. Hears how the projects are arranged as another client arranges them (their ids
+  // in order, and the pinned ones), and again as this one's own comes back; returns the stop.
+  // Absent where the backend can't tell.
+  readonly arranged?: (
+    listener: (arrangement: {
+      readonly order: readonly string[]
+      readonly pinned: readonly string[]
+    }) => void,
+  ) => () => void
   // Optional. Keeps how the person arranged the switcher: the projects' ids in their order,
   // and the pinned ones. The seed carries it back at the next load (`ProjectSeed.pinned`,
-  // and the seed's order); no other client hears of it meanwhile. Resolves once kept, and
+  // and the seed's order), and other clients hear of it (`arranged`). Resolves once kept, and
   // rejects if it couldn't be. Absent where the backend keeps none: the arrangement then
   // lasts the session.
   readonly arrange?: (arrangement: {
@@ -468,6 +531,15 @@ export type BackendFields = {
   // without pressing Enter, as dictation does. Says whether it typed: false when the
   // terminal has gone or has no screen to take the text. Absent where terminals take no input.
   readonly typeInto?: (key: TerminalKey, text: string) => boolean
+  // Optional, with `terminalControl`. Whether this window only observes the terminal, another
+  // client controlling it, which the backend knows synchronously. Absent: it never does.
+  readonly observing?: (key: TerminalKey) => boolean
+  // Optional. Takes control of an observed terminal, refused with the controller's reason (it
+  // wrote within `ifIdleMs`) by rejecting; resolves at once where this window controls it.
+  readonly takeControl?: (
+    key: TerminalKey,
+    options?: { readonly ifIdleMs?: number },
+  ) => Promise<void>
   // Optional. Hands a terminal's name back to the backend, which names it on its own
   // again: the name the person gave it goes, and the backend reports the one it takes
   // with `terminal/update`. Absent where names are only the person's.
@@ -489,9 +561,25 @@ export type BackendFields = {
   // Optional. Tells the backend which terminal the person is using in this window (its id),
   // or none (null): the one they look at while the window has their focus. A backend that runs
   // the terminals' programs gives it the CPU share of the app's own, and the others' programs
-  // yield it. Told again, with no change, only where the link to the runner came back. Absent
-  // where terminals run no programs on this machine, as in the demo.
-  readonly activeTerminal?: (terminalId: string | null) => void
+  // yield it. Told again, with no change, where the link to the runner came back, and where
+  // `again` is set, as when the window gains focus or the person types: the runner takes it as
+  // the window being used. Absent where terminals run no programs on this machine, as in the
+  // demo.
+  readonly activeTerminal?: (terminalId: string | null, again?: boolean) => void
+  // Optional. Tells the backend which project this window shows (null for none), so what an
+  // agent asks of the person reaches the window that shows the project of the terminal that
+  // asked. Told again, with no change, only where the link to the runner came back. Called only
+  // where the app opens project windows. Absent where terminals run no programs, as in the demo.
+  // `others` says another window exists, which may take over the project this one leaves: its
+  // screens are let go of at once then, else kept for when this window shows it again.
+  readonly showingProject?: (projectId: string | null, others?: boolean) => void
+  // Optional. Reads a project from the runner again: its sessions, terminals and layouts as
+  // the runner holds them now, for a window that takes the project on from another window, or
+  // shows one it never heard of. What another window changes in a session this one holds
+  // arrives live anyway (sessions/sharing.ts in the runner adapter).
+  // Undefined for a project the runner no longer has. The page puts it in place with
+  // `project/sync`, which adds a project it didn't know.
+  readonly syncProject?: (projectId: string) => Promise<ProjectSeed | undefined>
   // Optional. Asks the person for a folder to open as a project; null when cancelled.
   // Absent where the backend cannot offer one.
   readonly pickDirectory?: () => Promise<string | null>
@@ -529,6 +617,10 @@ export type BackendFields = {
   // in the companion pane, or in one of the page's panel windows. Absent where nothing
   // surrounds the page, as in a browser.
   readonly windowFocus?: (listener: (focused: boolean) => void) => () => void
+  // Optional. The desktop app's project windows: this page is one window of several, each
+  // showing one project. Absent where nothing can open another window, as in a browser, the
+  // demo and the try page.
+  readonly projectWindows?: ProjectWindows
   // Optional. The window's own controls where they sit over the page's top, its header standing
   // in for a title bar, at its `side`: macOS's close, minimise and zoom buttons at the start,
   // Windows' caption buttons at the end, which run from the page's top and can't hide: `place`
@@ -683,10 +775,23 @@ export type AgentConnection = {
   // Why the last change did not work, for the person.
   readonly error?: string
   // What keeps its messaging from working whole while connected, as the runner says.
-  readonly limited?: "own-status-line" | undefined
+  readonly limited?: "own-status-line" | "outdated" | "unsupported" | undefined
   // While it is not `available`: the command that installs it where the backend runs, as a
   // terminal would run it for the person.
   readonly installer?: string | undefined
+}
+
+// The person's own settings as the far side keeps them: text by key, the last change winning
+// key by key.
+export type PersonPreferences = {
+  // Changes this device made, as person.ts saves them; null forgets one.
+  readonly set: (key: string, value: string | null) => void
+  // Every setting the far side keeps, at once if it has said, else once it does (`first`);
+  // then each another client changed, as they arrive, a forgotten one as null. Returns what
+  // stops it.
+  readonly subscribe: (
+    listener: (values: Readonly<Record<string, string | null>>, first: boolean) => void,
+  ) => () => void
 }
 
 // "unavailable" means the backend gave up reconnecting.
@@ -701,6 +806,10 @@ export type BackendConnection = {
   readonly createBackend: CreateBackend
   // Ends the link once the app unmounts. Safe to call more than once.
   readonly close: () => void
+  // Optional. Tells `listener`, once, that the link ended for good after it connected, for a
+  // reason the person must act on, as this device being signed out of the runner; the gate
+  // then boots again, and the splash says why. Returns what stops listening.
+  readonly ended?: (listener: (failure: ConnectFailure) => void) => () => void
 }
 
 // Connects before the app first renders. Rejects with an Error carrying a
@@ -714,13 +823,20 @@ export type ConnectBackend = (
 
 // Why connecting failed, sorted by what the person can do about it: a transient failure
 // retries on its own, a different version or a workspace a newer Novadeck used can only
-// quit, and the rest wait for Retry. `message` is for people; `code` and `detail` are for a
-// bug report.
+// quit, or reload a page that is older than its runner, and the rest wait for Retry.
+// `message` is for people; `code` and `detail` are for a bug report.
 export type ConnectFailure = {
   readonly kind: "transient" | "incompatible" | "outdated" | "unauthorized" | "unknown"
   readonly message: string
   readonly code: string
   readonly detail: string
+  // For an app and a runner outside each other's window: which of them to update.
+  readonly update?: "app" | "runner"
+  // Reloading the page mends it: a page older than its runner loads the newer one.
+  readonly reload?: boolean
+  // An unauthorized device was signed out of the runner (its credential revoked), rather
+  // than never let in.
+  readonly revoked?: boolean
 }
 
 // The restored session's terminals being attached: `done` once they all are, have

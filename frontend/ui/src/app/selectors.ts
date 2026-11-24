@@ -1,4 +1,5 @@
 import { descendantsOf, leadChain } from "@novadeck/core/derivations"
+import type { ProjectWindows } from "@novadeck/core/desktop/project-windows"
 import type { Item } from "@novadeck/core/items"
 import { hasPanel, panelTile, tilesOf } from "@novadeck/core/roster"
 import { activeProject, activeSession } from "@novadeck/core/state"
@@ -255,3 +256,10 @@ export const foldsOf = (
     hidden: descendantsOf(workspace, lead).filter((id) => !kept.has(id)),
   }))
 }
+
+// Whether another window shows the project, in a desktop app that opens project windows.
+export const shownElsewhere = (
+  state: Pick<UiState, "windows">,
+  windows: ProjectWindows | undefined,
+  projectId: string,
+): boolean => windows !== undefined && state.windows.elsewhere.includes(projectId)

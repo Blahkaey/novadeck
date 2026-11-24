@@ -63,10 +63,13 @@ const titles: Readonly<Record<ChatRequest["kind"], string>> = {
 
 // Whether the card already shows the request's subject, in its dialog. A question tool's subject
 // is its first question, which the dialog's own page shows, and over the other pages it would
-// name the wrong one. Once answered the dialog goes, and the subject says what was asked.
+// name the wrong one. A choice's dialog says it as its detail, or as its title, as the shipping
+// gate's card asks its question. Once answered the dialog goes, and the subject says what was
+// asked.
 const saysSubject = ({ dialog, answered, subject }: ChatRequest): boolean =>
   !answered &&
-  (dialog?.type === "questions" || (dialog?.type === "choices" && dialog.detail === subject))
+  (dialog?.type === "questions" ||
+    (dialog?.type === "choices" && (dialog.detail === subject || dialog.title === subject)))
 
 // What keeps the focus a click gives it: a control, or a field.
 const controls =
@@ -80,6 +83,26 @@ const share = <T,>(ref: Ref<T> | undefined, value: T | null): void => {
 
 const reason = (failure: unknown): string =>
   failure instanceof Error && failure.message ? failure.message : "That answer didn't go through."
+
+// A mouse's click anywhere on a card (`event.currentTarget`) but a control or a field brings the
+// keyboard to its dialog's row the person is on, so the keys answer it from there; a selection
+// stays to copy, and what the click focused in the card keeps it, as a box that scrolls by its
+// keys. A tap never does, which would raise a phone's keyboard for a field. A host's own card
+// that holds a dialog does the same.
+export const clickToDialog = (
+  event: React.MouseEvent<HTMLElement>,
+  dialog: MenuHandle | null,
+): void => {
+  const { target, nativeEvent, currentTarget } = event
+  if (event.detail > 1 || !isElement(target) || target.closest(controls)) return
+  const by = "pointerType" in nativeEvent ? nativeEvent.pointerType : ""
+  if (by === "touch" || by === "pen") return
+  const page = currentTarget.ownerDocument
+  if (page.getSelection()?.isCollapsed === false) return
+  const active = page.activeElement
+  if (active && active !== page.body && currentTarget.contains(active)) return
+  dialog?.focus(false)
+}
 
 // A request that waits on the person: what it asks, and the controls of its dialog where the
 // backend read it. The way to the agent's terminal shows only where the card has no other: an
@@ -180,22 +203,8 @@ export const RequestCard = ({
     },
     [menu],
   )
-  // A mouse's click anywhere on the card but a control or a field brings the keyboard to the
-  // dialog's row the person is on, so the keys answer it from there; a selection stays to copy,
-  // and what the click focused in the card keeps it, as a box that scrolls by its keys. A tap
-  // never does, which would raise a phone's keyboard for a field.
-  const toDialog = (event: React.MouseEvent<HTMLElement>): void => {
-    const { target, nativeEvent } = event
-    if (event.detail > 1 || !isElement(target) || target.closest(controls)) return
-    const by = "pointerType" in nativeEvent ? nativeEvent.pointerType : ""
-    if (by === "touch" || by === "pen") return
-    // The window the card is drawn in: the page's, or an Inbox's window of its own.
-    const page = target.ownerDocument
-    if (page.getSelection()?.isCollapsed === false) return
-    const active = page.activeElement
-    if (active && active !== page.body && card.current?.contains(active)) return
-    dialogHandle.current?.focus(false)
-  }
+  const toDialog = (event: React.MouseEvent<HTMLElement>): void =>
+    clickToDialog(event, dialogHandle.current)
   const status = useRef<HTMLParagraphElement>(null)
   useEffect(() => {
     if (!request.answered) return
@@ -245,7 +254,10 @@ export const RequestCard = ({
   }
   const { dialog } = request
   const onlyTheTerminal =
-    request.answered || dialog === null || (dialog.type === "raw" && !live?.keys)
+    request.answered ||
+    dialog === null ||
+    dialog.type === "newer" ||
+    (dialog.type === "raw" && !live?.keys)
   return (
     <RequestFrame
       ref={frame}

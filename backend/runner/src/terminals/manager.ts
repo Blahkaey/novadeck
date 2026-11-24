@@ -1,7 +1,7 @@
 import { transcript as transcriptOf } from "@novadeck/emulator/headless"
 import type { Install, Model } from "@novadeck/harness-core/harness"
 import { hookShellSlackMs } from "@novadeck/harness-core/hook-command"
-import { defaultAgentMode, type AskAnswer, type InboxEntry } from "@novadeck/protocol"
+import { defaultAgentMode, type InboxEntry } from "@novadeck/protocol"
 import type {
   AgentDetail,
   SliceChange,
@@ -13,6 +13,7 @@ import type {
   TerminalChange,
   TerminalEvent,
   TerminalMessages,
+  TerminalRings,
   TerminalMove,
   TerminalMoved,
   TerminalRequest,
@@ -34,11 +35,13 @@ import { DomainError } from "../errors.js"
 import { blocking } from "../harnesses/activity.js"
 import { deliveredKeys, harnesses } from "../harnesses/registry.js"
 import { Feedback } from "../messaging/feedback.js"
-import { Inbox } from "../messaging/inbox.js"
+import { Inbox, type AskAnswer } from "../messaging/inbox.js"
 import { Messaging } from "../messaging/messaging.js"
 import type { AgentsAnswer, SendAnswer, TeamAnswer } from "../messaging/sending.js"
 import { stripInherited } from "../shell/inherited.js"
 import { type Ack, type Call } from "../shell/reports.js"
+import { answeredCard } from "../shipping/held.js"
+import type { Shipping } from "../shipping/service.js"
 import type { HintFacts } from "../voice/hint.js"
 import { ownedWorktrees, worktreeHost, type WorktreesWiring } from "../worktrees/calls.js"
 import { Approvals } from "./approvals.js"
@@ -48,10 +51,12 @@ import { Shown } from "./binding/shown.js"
 import { savedSession } from "./binding/standing.js"
 import { callerOf } from "./callers.js"
 import { Calls } from "./calls.js"
+import type { ClientWindows } from "./client-windows.js"
 import { type CloseAnswer } from "./closes.js"
 import { coalesced } from "./coalesce.js"
 import { expectedAgent } from "./commands.js"
 import { Companion, type Checkout } from "./companion.js"
+import { Controls } from "./controls.js"
 import { conversationDetail } from "./conversation.js"
 import { Murmur } from "./descriptions.js"
 import { agentWorking } from "./doorbell-host.js"
@@ -140,10 +145,16 @@ export class Terminals {
     () => this.trees,
   )
   private readonly pendingOwners = new PendingOwners()
+  /** Who controls each terminal, and how control moves between clients. */
+  readonly controls = new Controls({
+    terminals: () => [...this.records].map(([id, { terminal }]) => [id, terminal] as const),
+    terminal: (id) => this.record(id).terminal,
+    clients: () => this.options.clients,
+  })
   /** Agents' requests for a new terminal, on their way to the client. */
-  private readonly opens = new OpenRequests()
+  private readonly opens = new OpenRequests(() => this.options.clients)
   /** Agents' requests to close a terminal, on their way to the client that asks the person. */
-  private readonly confirms = new Approvals()
+  private readonly confirms = new Approvals(() => this.options.clients)
   /** Samples running terminals' foreground processes. */
   private readonly sampler: Sampler<Record>
   /** The host's CPU and memory and who uses them, for agents' listings and strain notices. */
@@ -220,6 +231,7 @@ export class Terminals {
       | "redactor"
       | "sealer"
       | "transcriptKeyMs"
+      | "clients"
       | "projectFolder"
       | "messages"
       | "inbox"
@@ -237,15 +249,18 @@ export class Terminals {
       | "pty"
       | "hibernateAfterMinutes"
       | "agentMode"
+      | "shipping"
       | "hibernation"
     >
   > & {
     env: NodeJS.ProcessEnv
     shellArgs: readonly string[] | undefined
     records: TerminalRecords | undefined
+    clients: ClientWindows | undefined
     projectFolder: ((sessionId: string) => string | undefined) | undefined
     projectOf: ((sessionId: string) => string | undefined) | undefined
     worktrees: WorktreesWiring | undefined
+    shipping: Shipping | undefined
     shims: () => Promise<readonly AgentName[]>
     connected: (agent: AgentName) => Promise<boolean>
     install: (agent: AgentName) => Promise<Install | undefined>
@@ -310,9 +325,11 @@ export class Terminals {
       connected: options.connected ?? (() => Promise.resolve(true)),
       saveMs: positive(options.saveMs, 5000),
       transcriptChars: positive(options.transcriptChars, 256 * 1024),
+      clients: options.clients,
       projectFolder: options.projectFolder,
       projectOf: options.projectOf,
       worktrees: options.worktrees,
+      shipping: options.shipping,
       openMs: positive(options.openMs, 6_000),
       install: options.install ?? (() => Promise.resolve(undefined)),
       models: options.models ?? (() => Promise.resolve([])),
@@ -349,7 +366,8 @@ export class Terminals {
       scopes: this.pty.scopes,
       handlers: {
         report: (report) => this.reporting.queueReport(report),
-        ask: (report, deadline) => this.reporting.queueAsk(report, deadline),
+        ask: (report, deadline, gate) => this.reporting.queueAsk(report, deadline, gate),
+        gating: (agent, event) => options.shipping?.gating(agent, event) ?? false,
         ack: (ack) => this.acknowledge(ack),
         call: (call) => this.calls.call(call),
         tools: (from, session, listed) => {
@@ -412,6 +430,7 @@ export class Terminals {
           this.typing.dialogs.answered(record.summary.id),
           this.typing.receipts.view(record.summary.id),
           this.typing.boxes.view(record.summary.id),
+          this.options.shipping?.held(record.summary.id),
         ),
       detailOpened: (terminalId) => this.typing.boxes.changed(terminalId),
       messages: (terminalId) => this.messages(terminalId),
@@ -423,6 +442,8 @@ export class Terminals {
           this.messaging.shownAgent(terminalId),
         ),
     })
+    // An action card opened, answered or withdrawn changes what the terminal's agent asks.
+    this.options.shipping?.attach(this.records, (record) => this.bindings.publishGate(record))
     this.names = new Names<Record>(options, this.saves, this.streams, {
       stopping: () => this.stopping,
       records: () => this.records.values(),
@@ -459,6 +480,8 @@ export class Terminals {
       announce: (record) => this.announce(record),
       save: (record) => this.saves.save(record, false),
       detailed: (record) => this.streams.detailed(record),
+      cards: (id) => this.options.shipping?.cardsOf(id).length ?? 0,
+      permits: (id) => this.options.shipping?.held(id).permits.length ?? 0,
       trackRoot: (record, events, statusLine) =>
         this.reporting.trackRoot(record, events, statusLine),
       rebound: (record) => this.reporting.rebound(record),
@@ -493,6 +516,7 @@ export class Terminals {
       trees: () => this.trees,
       platform: () => this.options.platform,
       worktrees: () => this.options.worktrees,
+      shipping: () => this.options.shipping,
     })
     this.companion = new Companion(this.options.items, {
       records: () => this.records,
@@ -513,6 +537,7 @@ export class Terminals {
       },
       held: (id, root, held) => this.reporting.held(id, root, held),
       ...(options.agentMode && { mode: options.agentMode }),
+      gated: (agent) => this.options.shipping?.covers(agent) ?? false,
       onWake: (id) => this.sleepers.ask(id),
     })
     this.inbox = new Inbox(
@@ -583,6 +608,7 @@ export class Terminals {
         opens: () => this.opens,
         sleepers: () => this.sleepers,
         detailWatched: (id) => this.streams.detailWatched(id),
+        cards: (id) => this.options.shipping?.cardsOf(id).length ?? 0,
         trees: () => this.trees,
         boxHolds: (record) => this.typing.boxHolds(record.summary.id),
         save: (record) => this.saves.saveNow(record),
@@ -629,6 +655,7 @@ export class Terminals {
     this.typing = new Typing(
       {
         platform: this.options.platform,
+        env: this.options.env,
         doorbell: options.doorbell,
         prompts: options.prompts,
         interrupts: {
@@ -654,6 +681,7 @@ export class Terminals {
           void this.reporting.queue(terminalId, () => Promise.resolve(work()), undefined),
         alive,
         messaging: () => this.messaging,
+        shipping: () => this.options.shipping,
       },
     )
     // The pause shows in every terminal's listing; anything else only in the terminal's.
@@ -686,6 +714,7 @@ export class Terminals {
       former: (sessionId, handle, before) =>
         this.history.lastHolder(this.projectOf(sessionId), handle, before),
       hostLoad: this.load.listing,
+      cards: (id) => this.options.shipping?.cardsOf(id) ?? [],
     })
     this.murmur = options.describer
       ? new Murmur(
@@ -708,6 +737,7 @@ export class Terminals {
       messaging: () => this.messaging,
       inbox: () => this.inbox,
       feedback: () => this.feedback,
+      shipping: () => this.options.shipping,
       peers: () => this.peers,
       opens: () => this.opens,
       approvals: () => this.confirms,
@@ -877,6 +907,7 @@ export class Terminals {
       const terminal = startedIn(started, () =>
         place.open(spec, pending.released ? undefined : ownerId),
       )
+      this.controls.watch(input.id, terminal)
       // Claimed once its shell runs, so a shell that didn't start holds no session.
       const claim = resume ? resume.key : asked
       if (claim && started.resumes) {
@@ -973,6 +1004,7 @@ export class Terminals {
       this.saves.save(record, false)
       this.saves.start()
       plan?.started(record, started.resumes, opened !== null, shown)
+      if (opener) this.opens.created(input.requestId, record.summary.id)
       return summaryOf(record)
     } catch (error) {
       // A wake that failed before any shell stays asleep, its messages gone.
@@ -980,6 +1012,7 @@ export class Terminals {
         this.sleepers.failedStart(input.id, error instanceof Error ? error.message : "start failed")
       throw error
     } finally {
+      if (opener) this.opens.created(input.requestId, null)
       place.done()
       created()
       this.pendingOwners.complete(ownerId, pending)
@@ -1047,6 +1080,7 @@ export class Terminals {
   write(input: { terminalId: string; data: string }, ownerId: string): void {
     const record = this.control(input.terminalId, ownerId)
     this.running(record)
+    this.controls.wrote(record.terminal, ownerId)
     // A woken shell has yet to read its resume command: keys would take its place.
     if (this.sleepers.holdsKeys(record)) return
     // While the doorbell's test paste, or an answer's keys, are on screen, the person's
@@ -1092,8 +1126,19 @@ export class Terminals {
    * person would with its keys (see `Answers`). No message of the person's, nor a doorbell
    * ring, comes between the answer and the words that follow it.
    */
-  answer(input: { terminalId: string; request: string; answer: RequestAnswer }): Promise<void> {
-    return this.typing.answer(input.terminalId, input.request, input.answer)
+  answer(
+    input: { terminalId: string; request: string; answer: RequestAnswer },
+    client?: string,
+  ): Promise<void> {
+    const { terminalId, request, answer } = input
+    const held = answeredCard(
+      this.options.shipping,
+      this.records.get(terminalId),
+      request,
+      answer,
+      client,
+    )
+    return held ?? this.typing.answer(terminalId, request, answer)
   }
 
   /**
@@ -1416,6 +1461,7 @@ export class Terminals {
     this.sleepers.forget(terminalId)
     this.inbox.reconcile(terminalId)
     this.typing.forget(terminalId)
+    this.options.shipping?.closed(terminalId)
     this.bindings.forgetCaptures(terminalId)
     this.murmur?.gone(terminalId)
     if (claims) {
@@ -1511,10 +1557,12 @@ export class Terminals {
               throw new DomainError("TERMINAL_NOT_FOUND")
           },
         },
-      ))
+      )) {
+        if (event.type === "attached") this.controls.attached(terminalId, record.terminal, ownerId)
         yield event.type === "attached"
           ? { type: "attached", terminalId, mode: event.mode }
           : { ...event, terminalId }
+      }
     } finally {
       record.attachedAt = Date.now()
       this.pendingOwners.complete(ownerId, pending)
@@ -1570,6 +1618,7 @@ export class Terminals {
   /** A hook printed what a lease delivered. */
   private acknowledge(ack: Ack): void {
     this.peers.acknowledge(ack)
+    this.options.shipping?.acknowledged(ack.terminalId, ack.leaseId)
   }
 
   inboxEntries(): InboxEntry[] {
@@ -1579,7 +1628,8 @@ export class Terminals {
     return this.inbox.watch(signal)
   }
   answerAsk(id: string, answer: AskAnswer): void {
-    this.inbox.answer(id, answer)
+    const { terminalId, text } = this.inbox.answer(id, answer)
+    this.reporting.quotedReply(terminalId, text)
   }
   readTells(ids: readonly string[]): void {
     this.inbox.read(ids)
@@ -1594,6 +1644,11 @@ export class Terminals {
   /** A terminal's threads and messages with their states. */
   messages(terminalId: string): TerminalMessages {
     return this.inbox.history(terminalId, this.peers.messages(terminalId))
+  }
+
+  /** What a terminal's rings and deliveries say after sequence `since`. */
+  rings(terminalId: string, since: number): TerminalRings {
+    return this.peers.rings(terminalId, since)
   }
 
   /**
@@ -1707,6 +1762,7 @@ export class Terminals {
   }
 
   release(ownerId: string): void {
+    this.controls.release(ownerId) // first: the client that let go is no one's successor
     this.pendingOwners.release(ownerId)
     this.host.release(ownerId)
     this.streams.release(ownerId)
@@ -1722,6 +1778,7 @@ export class Terminals {
     // what they print on the way out cannot replace it. Transcripts get a short pass (`Saves.finish`).
     const last = this.saves.shutdown()
     this.stopping = true
+    this.controls.finish()
     this.sleepers.stop()
     this.hibernation.stop()
     this.queueNotices.stop()

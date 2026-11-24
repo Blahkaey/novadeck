@@ -29,7 +29,8 @@ import type { KeyKind } from "@novadeck/tui-input"
  */
 export type Delivery = Counts &
   (
-    | { readonly state: "unbound" | "fresh" }
+    | { readonly state: "unbound" }
+    | { readonly state: "fresh"; readonly unboundEnter?: number }
     | {
         readonly state: "drafting"
         /** When the last turn completed, if only its uncertain box prevents Settled. */
@@ -198,6 +199,22 @@ export const firing = (
   firedAt === undefined
     ? { at, windowMs: submitWindowMs + slackMs }
     : { at: firedAt + firedClockMs, windowMs: submitWindowMs + firedClockMs }
+
+/**
+ * Whether a root prompt is the person's own submission, as `transition` judges it: their bare
+ * Enter shortly before its hook fired, or the prompt they queued during the turn that just
+ * ended; never mid-ring, nor a turn the harness, a call or the doorbell started. It is judged
+ * so whether it starts a turn or comes into one Novadeck continued.
+ */
+export const personSubmits = (
+  delivery: Delivery,
+  event: Extract<DeliveryEvent, { type: "prompt" }>,
+  slackMs: number,
+): boolean => {
+  if (event.by !== "prompt" || delivery.state === "ringing") return false
+  const fired = firing({ at: event.startedAt, firedAt: event.firedAt }, slackMs)
+  return pendingEnter(delivery, fired.at, fired.windowMs) !== undefined || delivery.box.queued
+}
 
 /**
  * What changes a terminal's delivery:
@@ -452,9 +469,8 @@ const atPrompt = (
  * A new session announced past its own prompt: Fresh, no turn yet. One that binds as the
  * person's bare Enter at the agent's own box submitted its first prompt (Codex's thread and
  * Antigravity's conversation begin with it) keeps that Enter, so the prompt it starts is
- * judged theirs as in a session bound before it. Only from Drafting, the box they typed in
- * and submitted: an Enter in the shell, before the agent's box showed, started the program,
- * not a prompt, and a session bound while a turn runs started with no Enter of theirs.
+ * judged theirs as in a session bound before it. An Enter before the agent’s prompt showed can also have started
+ * its shell command. Keep its time so a note requires stronger evidence of a person’s turn.
  */
 const bornOfEnter = (
   delivery: Delivery,
@@ -462,10 +478,17 @@ const bornOfEnter = (
   slackMs: number,
 ): Delivery => {
   const next: Delivery = { ...arrived(delivery), state: "fresh" }
-  if (delivery.state !== "drafting" || next.box.typedSinceEnter) return next
+  if ((delivery.state !== "drafting" && delivery.state !== "unbound") || !next.box.empty)
+    return next
   const fired = firing(event, slackMs)
   const entered = pendingEnter(delivery, fired.at, fired.windowMs)
-  return entered === undefined ? next : { ...next, box: { ...next.box, enteredAt: entered } }
+  return entered === undefined
+    ? next
+    : {
+        ...next,
+        box: { ...next.box, enteredAt: entered },
+        ...(delivery.state === "unbound" && { unboundEnter: entered }),
+      }
 }
 
 /**
@@ -616,10 +639,7 @@ export const transition = (delivery: Delivery, event: DeliveryEvent, slackMs = 0
       // never theirs. Any doubt leaves a draft. Mid-ring the box holds the doorbell's line
       // too: no prompt empties it but its own.
       const fired = firing({ at: event.startedAt, firedAt: event.firedAt }, slackMs)
-      const person =
-        event.by === "prompt" &&
-        delivery.state !== "ringing" &&
-        (pendingEnter(delivery, fired.at, fired.windowMs) !== undefined || box.queued)
+      const person = personSubmits(delivery, event, slackMs)
       // Its hook can arrive after the next prompt's Enter. That later submission
       // belongs to another turn, queued while this one was already running.
       const later = event.by === "prompt" && box.enteredAt !== null && box.enteredAt > fired.at

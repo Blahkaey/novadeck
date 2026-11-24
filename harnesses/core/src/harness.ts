@@ -134,6 +134,13 @@ export type Harness = {
   readonly connect: (install: Install) => readonly Command[]
   readonly disconnect: readonly Command[]
   /**
+   * For a harness Novadeck connects with no command of its own, as opencode, whose plugin
+   * its shim loads per launch and which keeps no list of plugins Novadeck may write to: a
+   * file of Novadeck's own, in its plugin directory, that connecting writes and
+   * disconnecting removes, before and after its (empty) commands. `connected` reads it.
+   */
+  readonly marker?: (install: Install) => string
+  /**
    * The shell it runs its hook commands in on `platform` (see `hook-command.ts`), or the
    * command for `event`, as Claude Code's status line, where that runs in another.
    */
@@ -161,6 +168,12 @@ export type Harness = {
   readonly installed?: {
     readonly directory: (install: Install) => string
     readonly files: readonly string[]
+    /**
+     * Compared only while the shipping gate is on, or just after it was switched, which
+     * is when its hooks differ from the copy: with the gate off and never on, nothing
+     * is compared, as before.
+     */
+    readonly gated?: boolean
   }
   /**
    * What keeps its messaging from working whole once connected, where something does, as
@@ -653,11 +666,25 @@ export type Machine = {
    */
   readonly cmdShimDir?: string
   /**
+   * Set beside `cmdShimDir`: a folder of Novadeck's own (a path cmd reads unquoted) holding the
+   * hooks a global plugin can't register where cmd prints, as Antigravity's PreToolUse, which
+   * its shim adds to the session (`--add-dir`), so they run in Novadeck's terminals alone.
+   */
+  readonly hooksFolder?: string
+  /**
    * Where agents' worktrees live (`~/.novadeck/worktrees`). A shim gives it to its harness
    * while the folder exists, as `--add-dir` or, for Claude Code, in the settings it passes, so
    * the harness may write there under the person's own permission mode.
    */
   readonly worktreesRoot?: string
+  /**
+   * Whether the Experimental shipping gate is on: Claude Code's per-launch settings then
+   * register its PreToolUse hook for shell commands, and Codex's plugin widens its PreToolUse
+   * matcher to them, Antigravity's shim passes its rules, and opencode's plugin waits for the
+   * runner's answer to a shell command. Absent when it is off, and every file is written as it
+   * always was.
+   */
+  readonly shippingGate?: boolean
   /**
    * The folders the person's own Codex config lets a session write besides its own
    * (`sandbox_workspace_write.writable_roots`, read from it, never written), which Codex's shim

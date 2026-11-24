@@ -95,13 +95,15 @@ export type ChatItem = {
   readonly thinking?: true | undefined
   // On a `note` item, what its harness recorded between turns: the mode it says it's in, each
   // time it says so, a plan approved, or a compaction, whose summary is the item's text; or a
-  // gap, a part of the record the backend can't read, the line as written its text, if any.
+  // gap, a part of the record the backend can't read, the line as written its text, if any;
+  // or a part a newer Novadeck's runner tells of that this one doesn't know, its text, if any.
   readonly note?:
     | { readonly type: "mode"; readonly mode: string }
     | { readonly type: "plan-approved" }
     | { readonly type: "compaction" }
     | { readonly type: "gap" }
     | { readonly type: "notice" }
+    | { readonly type: "newer" }
     | undefined
   // On a user item, the images the prompt carried, in the order of their `[Image #N]`
   // placeholders in its words; absent where it had none or its record doesn't hold them.
@@ -177,6 +179,9 @@ export type ChatDialog =
       readonly text: string
       readonly reason: "unrecognized" | "unsupported" | "failed"
     }
+  // A dialog a newer Novadeck's runner shows that this one doesn't know: answered in the
+  // terminal, or in a newer Novadeck, never here.
+  | { readonly type: "newer" }
 
 // The person's answer to a dialog: an option by id, with their words where it takes them;
 // an answer per question, by ids, with the options picked and/or their own words; or a
@@ -225,6 +230,19 @@ export type ChatRequest = {
   // Whether it asks without waiting, as Codex's async questions: the agent works on and
   // takes prompts, and the request may outlast its turn.
   readonly detached?: true
+}
+
+// A permit of the shipping gate that stands for the terminal's agent: what the person allowed
+// (`title`), by their own words as they typed them (`quote`) or by Allow on the gate's card
+// (`quote` null), when it was given and until when it stands (epoch milliseconds, the runner's
+// clock), and when it was first used (`usedAt`), after which it stands only for a retry.
+export type ChatPermit = {
+  readonly id: string
+  readonly title: string
+  readonly quote: string | null
+  readonly givenAt: number
+  readonly until: number
+  readonly usedAt: number | null
 }
 
 // Whether a request is a question of the agent's own in a dialog the chat reads, not yet
@@ -336,6 +354,9 @@ export type Conversation = {
   readonly screen: ChatSlice | null
   readonly items: readonly ChatItem[]
   readonly requests: readonly ChatRequest[]
+  // The shipping gate's permits that stand for the agent, oldest first; none where the runner
+  // sends none.
+  readonly permits: readonly ChatPermit[]
   readonly prompts: readonly ChatPrompt[]
   readonly slice: ChatSlice | null
   readonly box: ChatBox | null
@@ -374,6 +395,7 @@ export const noConversation: Conversation = {
   screen: null,
   items: [],
   requests: [],
+  permits: [],
   prompts: [],
   slice: null,
   box: null,
@@ -477,6 +499,10 @@ export type Conversations = {
   // file the person can attach to a bug report, on their own action, resolving with its path
   // on the runner's machine. Rejects with why not. Absent where a backend can't.
   readonly saveDialog?: (key: TerminalKey, request: string) => Promise<string>
+  // Optional. Takes back a permit of the shipping gate that stands for the terminal's agent
+  // (`Conversation.permits`), as the person asked: it ends at once. Rejects with why not, also
+  // where the permit no longer stood. Absent where the backend can't, and the chat shows no way.
+  readonly takeBack?: (key: TerminalKey, permit: string) => Promise<void>
   // Whether `send`, or an answer's words that go on as a prompt, would be refused for the
   // text's shape, so the chat warns before it sends. Text that is nothing but white space
   // isn't refused here, though `send` refuses it: the chat sends no empty message, and an

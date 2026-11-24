@@ -5,5 +5,15 @@ export {
   type MessagePortLike,
   type WebSocketLike,
 } from "./channel.js"
-export { hasCode, normalize, WireError, wireErrors, type WireErrorCode } from "./errors.js"
+export {
+  hasCode,
+  incompatibility,
+  normalize,
+  refusalOf,
+  WireError,
+  wireErrors,
+  type Incompatibility,
+  type WireErrorCode,
+} from "./errors.js"
 export { wireContract, type WireContract } from "./handshake.js"
+export { readTolerantly } from "./read.js"

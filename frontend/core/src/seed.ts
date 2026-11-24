@@ -1,6 +1,6 @@
-import { isOnBar, type Item } from "./items"
-import { arrive, emptyBar, messagesKey, settle, type Bar, type BarKey } from "./items/companion-bar"
+import type { Item } from "./items"
 import { removeFromLayout } from "./layout/workspace-layout"
+import { savedIds, withItems } from "./restore"
 import { addWindow, panelTile } from "./roster"
 import {
   createTerminalState,
@@ -18,6 +18,7 @@ import type {
   ViewMode,
   WindowedView,
   Workspace,
+  WorkspaceProject,
   WorkspaceSession,
   WorkspaceState,
 } from "./types"
@@ -73,6 +74,8 @@ export type SessionSeed = {
 export type ProjectSeed = Project & {
   readonly sessions: readonly SessionSeed[]
   readonly pinned?: boolean
+  // The session the project opens, over the one visited last, when it names one of its sessions.
+  readonly openSessionId?: string
 }
 export type WorkspaceSeed = {
   readonly projects: readonly ProjectSeed[]
@@ -98,39 +101,8 @@ const withWindows = (
 // The session's items, and each terminal's bar: as saved, less what's gone, with what the
 // save didn't know after, oldest first. An item whose terminal or window isn't known is
 // kept, on no bar, until it is.
-const withItems = (
-  state: WorkspaceState,
-  held: readonly Item[],
-  saved: WorkspaceState["bars"],
-): WorkspaceState => {
-  const bars = Object.fromEntries(
-    state.roster.terminals.flatMap((terminal): [string, Bar][] => {
-      const own = held
-        .filter((item) => isOnBar(item, terminal.id))
-        .toSorted((a, b) => a.shownAt - b.shownAt)
-      const ids = new Set<BarKey>(own.map((item) => item.id))
-      const kept = settle(
-        saved[terminal.id] ?? emptyBar,
-        (key) => key === messagesKey || ids.has(key),
-      )
-      const bar = own.reduce((next, item) => arrive(next, item.id), kept)
-      return bar === emptyBar ? [] : [[terminal.id, bar]]
-    }),
-  )
-  return { ...state, items: held, bars }
-}
-
-// Every terminal a saved view kept something of, in any view.
-const savedIds = (layout: WorkspaceState["layout"], order: readonly string[]): Set<string> =>
-  new Set([
-    ...order,
-    ...Object.keys(layout.canvas.geometry),
-    ...Object.keys(layout.hidden),
-    ...Object.keys(layout.spans),
-  ])
-
 const restoredState = (
-  { order, panels: names, bars = {}, ...restored }: RestoredView,
+  { order, panels: names = [], bars = {}, ...restored }: RestoredView,
   terminals: readonly TerminalMetadata[],
   windows: readonly CompanionWindowMeta[],
   items: readonly Item[],
@@ -168,12 +140,12 @@ type SeedDefaults = {
 
 // Builds the starting workspace through the same reducer path as new sessions.
 // The seed's active project (else the first) is active, and each project opens the
-// session visited last (else its first listed), keeping the listed order.
+// session its seed names, else the one visited last (else its first listed), keeping the listed order.
 // Throws WorkspaceSeedError for a seed without projects or a project without sessions.
 export const workspaceFromSeed = (seed: WorkspaceSeed, defaults: SeedDefaults): Workspace => {
   validate(seed)
   const projects = seed.projects.map(
-    ({ sessions: _sessions, pinned: _pinned, ...project }) => project,
+    ({ sessions: _sessions, pinned: _pinned, openSessionId: _open, ...project }) => project,
   )
   const active = projects.find((project) => project.id === seed.activeProjectId) ?? projects[0]!
   const seeded = seed.projects.reduce(
@@ -216,6 +188,7 @@ export const workspaceFromSeed = (seed: WorkspaceSeed, defaults: SeedDefaults): 
       ),
     ),
   )
+  const opened = new Map(seed.projects.map((project) => [project.id, project.openSessionId]))
   return {
     ...seeded,
     projects: seeded.projects.map((project) => {
@@ -230,7 +203,17 @@ export const workspaceFromSeed = (seed: WorkspaceSeed, defaults: SeedDefaults): 
             : best,
         undefined,
       )
-      return { ...project, history, activeSessionId: last?.id ?? project.activeSessionId }
+      const open = history.find((session) => session.id === opened.get(project.id))
+      return {
+        ...project,
+        history,
+        activeSessionId: open?.id ?? last?.id ?? project.activeSessionId,
+      }
     }),
   }
 }
+
+// One project of a seed, built as the workspace builds each of its own: for a project the
+// backend read again (`project/sync`). Throws for a project without a session.
+export const projectFromSeed = (project: ProjectSeed, defaults: SeedDefaults): WorkspaceProject =>
+  workspaceFromSeed({ projects: [project], activeProjectId: project.id }, defaults).projects[0]!

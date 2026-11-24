@@ -3,7 +3,7 @@
    moment, as when a paste fails), and the bar that says how the shell ended.
 
    Hooks: data-terminal-ending="warning" | "danger" on `.terminal-ending`; aria-disabled
-   on `.terminal-restart`. Parts: `.terminal-lock`, `.terminal-notice`,
+   on `.terminal-restart`. Parts: `.terminal-lock`, `.terminal-drop`, `.terminal-notice`,
    `.terminal-ending`, `.terminal-ending-reason`, `.terminal-restart` (with its `kbd`).
 
    Tokens, each optional (its fallback in brackets):
@@ -13,7 +13,9 @@
    --terminal-ending-bg (shell), --terminal-ending-fg (ink), --terminal-ending-border-color
    (line), --terminal-ending-reason-fg (muted): the ending bar.
    --terminal-restart-hover-bg (soft), --terminal-restart-disabled-opacity (0.5): its
-   Restart button. Its key is a `kbd` on paper, muted. */
+   Restart button. Its key is a `kbd` on paper, muted.
+   --terminal-drop-bg (canvas at 40%), --terminal-drop-border-color (strong): over the surface
+   while files dragged over it would go in, `.terminal-drop`. */
 
 /* The end-of-session bar's padding, which views override. */
 :where(.terminal-ending) {
@@ -32,6 +34,16 @@
   .terminal-lock {
     opacity: 0;
   }
+}
+/* Files over the surface that it takes: a dashed outline inside its edge, the output faint. */
+.terminal-drop {
+  background-color: var(
+    --terminal-drop-bg,
+    color-mix(in srgb, var(--color-canvas) 40%, transparent)
+  );
+  outline: 2px dashed var(--terminal-drop-border-color, var(--color-strong));
+  outline-offset: -6px;
+  border-radius: inherit;
 }
 .terminal-notice {
   border: var(--border-width) solid var(--terminal-notice-border-color, var(--color-line));
@@ -75,6 +87,29 @@
 .terminal-restart kbd {
   --_bg: var(--color-paper);
   --_fg: var(--color-muted);
+}
+
+/* The strip over a terminal this window only observes: in the flow above the output. */
+.terminal-control {
+  border-bottom: var(--border-width) solid var(--terminal-ending-border-color, var(--color-line));
+  background-color: var(--terminal-ending-bg, var(--color-shell));
+  color: var(--terminal-ending-reason-fg, var(--color-muted));
+}
+.terminal-control[data-terminal-control="busy"] {
+  color: var(--terminal-ending-fg, var(--color-ink));
+}
+.terminal-take {
+  --_bg: transparent;
+  border-radius: var(--radius-control);
+  background-color: var(--_bg);
+  color: var(--terminal-ending-fg, var(--color-ink));
+}
+.terminal-take:hover {
+  --_bg: var(--terminal-restart-hover-bg, var(--color-soft));
+}
+.terminal-take:focus-visible {
+  outline: 2px solid var(--focus-ring-color, var(--color-strong));
+  outline-offset: 1px;
 }
 
 /* Canvas scales its resize grip (28px, at the node's bottom-right corner) with

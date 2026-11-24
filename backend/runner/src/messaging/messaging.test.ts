@@ -792,6 +792,33 @@ describe("delivery through hooks", () => {
     expect(prompt("B", codex).leaseId).toEqual(expect.any(String))
   })
 
+  it("starts opencode's next turn with a Stop's messages, and rings nothing more in the turn it started", () => {
+    const { messaging, send, prompt, stop, follow } = create()
+    const opencode = binding("opencode", "ses_oc", "5")
+    follow("B", opencode)
+    prompt("B", opencode)
+    sent(send("A", "fox", "hello"))
+    const answer = stop("B", opencode)
+    expect(answer.leaseId).toEqual(expect.any(String))
+    expect(JSON.parse(answer.stdout!)).toEqual({ deliver: expect.stringContaining("hello") })
+    messaging.acknowledge("B", answer.leaseId!)
+    // The turn that delivery started ends with nothing new: it rings nothing more.
+    prompt("B", opencode, "harness")
+    expect(stop("B", opencode)).toEqual({ leaseId: null, stdout: "{}\n" })
+  })
+
+  it("gives opencode's messages at its Stop over a draft, as every harness's, its turn starting through its API", () => {
+    const { messaging, send, prompt, stop, follow } = create()
+    const opencode = binding("opencode", "ses_oc", "5")
+    follow("B", opencode)
+    prompt("B", opencode)
+    messaging.keys("B", ["content"], false)
+    sent(send("A", "fox", "hello"))
+    // The plugin prompts the session through its API, which types nothing in the box: the
+    // draft stays as it was (the e2e scenarios "gives the reply at the Stop over a draft").
+    expect(stop("B", opencode).leaseId).toEqual(expect.any(String))
+  })
+
   it("still continues a Stop after an answer to a request during the turn", () => {
     const { messaging, send, prompt, stop, codex } = create()
     prompt("B", codex)
@@ -2277,6 +2304,18 @@ describe("the person's prompt", () => {
     expect(messaging.personPrompt("missing")).toBeUndefined()
   })
 
+  it("is the first prompt typed into a new Codex session, which that prompt binds", () => {
+    const { messaging, ask, clock: time } = create()
+    const first = binding("codex", "s-first", "7")
+    messaging.register("C", here, "elk", null)
+    messaging.keys("C", ["content"], false)
+    messaging.keys("C", ["enter"], false)
+    time.now += 50
+    ask("C", first, "UserPromptSubmit", [said(first, "push it to main")])
+    expect(messaging.personPrompt("C")).toBe("push it to main")
+    expect(messaging.personTurn("C")).toBeUndefined()
+  })
+
   it("is their turn's until another agent's message reaches it, at its prompt or its Stop", () => {
     const { messaging, ask, stop, send, codex } = create()
     const submit = (text: string) => {
@@ -2528,6 +2567,90 @@ describe("ringing", () => {
     setup.clock.now += 6_000
     return setup
   }
+
+  it("names the senders of the messages waiting, once each in delivery order, Novadeck's notices as novadeck", () => {
+    const { messaging, prompt, stop, send, codex } = create()
+    prompt("B", codex)
+    stop("B", codex)
+    expect(messaging.senders("B")).toEqual([])
+    expect(messaging.notice("B", "Novadeck: automatic notice, not from the user: go on")).toBe(true)
+    expect(messaging.senders("B")).toEqual(["novadeck"])
+    sent(send("A", "fox", "first"))
+    sent(send("A", "fox", "second"))
+    expect(messaging.senders("B")).toEqual(["novadeck", "moth"])
+    // Nothing waits for A, and none for a terminal that isn't there.
+    expect(messaging.senders("A")).toEqual([])
+    expect(messaging.senders("nowhere")).toEqual([])
+  })
+
+  it("tells the terminal's view what a ring says by its nonce, after the sequence it has", () => {
+    const { messaging, prompt, stop, send, codex } = create()
+    prompt("B", codex)
+    stop("B", codex)
+    expect(messaging.list("B", "fox").ringSeq).toBeUndefined()
+    expect(messaging.rings("B", 0)).toEqual({ seq: 0, rings: [], deliveries: [] })
+    expect(messaging.notice("B", "Novadeck · Worktrees\none is merged\n→ trash it")).toBe(true)
+    sent(send("A", "fox", `first words of the message${" and more".repeat(60)}`))
+    messaging.noteRing("B", "n7Q2xk", false)
+    // The listing says only how far the sequence is, not the content.
+    expect(messaging.list("B", "fox")).toMatchObject({ ringSeq: 1 })
+    expect(messaging.list("B", "fox")).not.toHaveProperty("rings")
+    const { seq, rings, deliveries } = messaging.rings("B", 0)
+    expect(seq).toBe(1)
+    expect(deliveries).toEqual([])
+    expect(rings).toHaveLength(1)
+    expect(rings[0]).toMatchObject({ seq: 1, nonce: "n7Q2xk" })
+    const [notice, message] = rings[0]!.parts
+    expect(notice).toMatchObject({ kind: "notice" })
+    expect(notice!.text).toContain("one is merged")
+    expect(message).toMatchObject({ kind: "agent", handle: "moth" })
+    // Cut for the row, with an ellipsis.
+    expect(message!.text.startsWith("first words of the message")).toBe(true)
+    expect(message!.text.length).toBeLessThanOrEqual(240)
+    expect(message!.text.endsWith("…")).toBe(true)
+    // A later ring adds to the earlier ones, and a reader asks for what it has not.
+    messaging.noteRing("B", "n9", false)
+    expect(messaging.rings("B", 0).rings.map((ring) => ring.nonce)).toEqual(["n7Q2xk", "n9"])
+    expect(messaging.rings("B", 1).rings.map((ring) => ring.nonce)).toEqual(["n9"])
+    expect(messaging.rings("B", 2).rings).toEqual([])
+    messaging.unregister("B", true)
+    expect(messaging.list("B", "fox").ringSeq).toBeUndefined()
+  })
+
+  it("keeps a delivery's messages by their ids, as the hook is given them to print", () => {
+    const { messaging, prompt, stop, send, codex } = create()
+    prompt("B", codex)
+    stop("B", codex)
+    const first = sent(send("A", "fox", "please review a.ts"))
+    prompt("B", codex)
+    const { deliveries } = messaging.rings("B", 0)
+    expect(deliveries).toHaveLength(1)
+    expect(deliveries[0]!.ids).toEqual([first.id])
+    expect(deliveries[0]!.parts).toEqual([
+      { kind: "agent", handle: "moth", text: "please review a.ts", id: first.id },
+    ])
+  })
+
+  it("says a task's start prompt as the task, from the agent that opened it", () => {
+    const { messaging, prompt, stop, codex } = create()
+    prompt("B", codex)
+    stop("B", codex)
+    messaging.noteStart("B", "st4rt1", "moth", "Fix the parser tests")
+    expect(messaging.rings("B", 0).rings).toMatchObject([
+      { nonce: "st4rt1", parts: [{ kind: "agent", handle: "moth", text: "Fix the parser tests" }] },
+    ])
+  })
+
+  it("keeps only the latest rings of a terminal, the most its scrollback may hold", () => {
+    const { messaging, prompt, stop, codex } = create()
+    prompt("B", codex)
+    stop("B", codex)
+    for (let at = 0; at < 120; at += 1) messaging.noteRing("B", `n${at}`, false)
+    const { rings } = messaging.rings("B", 0)
+    expect(rings).toHaveLength(100)
+    expect(rings[0]!.nonce).toBe("n20")
+    expect(rings.at(-1)!.nonce).toBe("n119")
+  })
 
   it("is allowed once per Settled period, with messages waiting for the root session", () => {
     const { messaging, prompt, stop, send, codex, clock: time } = create()
@@ -3535,13 +3658,15 @@ describe("the person's prompt, told to the asks", () => {
     const withdraw = vi.fn<Person["withdraw"]>()
     const prompted = vi.fn<Person["prompted"]>()
     const dismissed = vi.fn<Person["dismissed"]>(() => undefined)
+    const submitted = vi.fn<NonNullable<Person["submitted"]>>()
     return {
       counts,
       withdrawable,
       withdraw,
       prompted,
       dismissed,
-      person: { counts, withdrawable, withdraw, prompted, dismissed } satisfies Person,
+      submitted,
+      person: { counts, withdrawable, withdraw, prompted, dismissed, submitted } satisfies Person,
     }
   }
   type Run = ReturnType<typeof create> & {
@@ -3624,6 +3749,26 @@ describe("the person's prompt, told to the asks", () => {
       expect(told.withdraw).toHaveBeenCalledTimes(1)
       nextHook(run, told)
       expect(told.withdrawable).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(harnessesTold)(
+    "tells whether $name's prompt answered an open ask, for the shipping gate's reply mark",
+    async ({ agent }) => {
+      const run = setup(agent)
+      run.messaging.keys(run.terminal, ["enter"], false)
+      const answers = who()
+      await start(run, "prompt", answers.person)
+      // The question is handed over, and asked only when the caller wants it.
+      const asked = answers.withdrawable.mock.calls.length
+      expect(answers.submitted.mock.lastCall?.[0]).toMatchObject({ fixed: false })
+      expect(answers.submitted.mock.lastCall?.[0]?.answers()).toBe(true)
+      expect(answers.withdrawable).toHaveBeenCalledTimes(asked + 1)
+      const other = setup(agent)
+      other.messaging.keys(other.terminal, ["enter"], false)
+      const none = who()
+      await start(other, "prompt", { ...none.person, withdrawable: () => undefined })
+      expect(none.submitted.mock.lastCall?.[0]?.answers()).toBe(false)
     },
   )
 
@@ -3883,6 +4028,9 @@ describe("the person's prompt, told to the asks", () => {
       run.messaging.automatic(run.terminal, "let's talk it over")
       expect((await start(run, "prompt", told.person)).stdout).not.toContain(notice)
       expect(told.withdrawable).not.toHaveBeenCalled()
+      // The gate is told it was a fixed line, which is never the person's words, nor a reply.
+      expect(told.submitted.mock.lastCall?.[0]).toMatchObject({ fixed: true })
+      expect(told.submitted.mock.lastCall?.[0]?.answers()).toBe(false)
       run.stop(run.terminal, run.bound)
       // The mark was spent by that turn: the same words, typed now, are the person's.
       run.messaging.keys(run.terminal, ["enter"], false)
@@ -6428,7 +6576,7 @@ describe("the person's reply at a turn's end", () => {
       expect(messaging.delivery(terminal)?.state).toBe("settled")
       expect(messaging.ringable(terminal)).toBe(true)
       expect(messaging.replyLine(terminal)?.("n1")).toBe(
-        '[Novadeck Inbox reply, n1] Re your ask "Merge it?": I picked "Merge". [n1]',
+        '<novadeck-reply>Re your ask "Merge it?": I picked "Merge".</novadeck-reply><end ring="n1"/>',
       )
       const delivered = rung("n1")
       expect(delivered.leaseId).toEqual(expect.any(String))
@@ -6490,7 +6638,7 @@ describe("the person's reply at a turn's end", () => {
       time.now += 1_000
       reply("Also tag it")
       expect(messaging.replyLine(terminal)?.("n2")).toBe(
-        '[Novadeck Inbox reply, n2] Re your ask "Merge it?": Also tag it [n2]',
+        '<novadeck-reply>Re your ask "Merge it?": Also tag it</novadeck-reply><end ring="n2"/>',
       )
     },
   )
@@ -6929,5 +7077,94 @@ describe("a prompt queued behind a running turn", () => {
     const { send, prompt, claude } = create()
     sent(send("B", "moth", "The news."))
     expect(prompt("A", claude).stdout).toContain("The news.")
+  })
+})
+
+describe("the person's words the shipping gate takes", () => {
+  // A root prompt whose hook names its words, as each harness's decoder tells them.
+  const typed = (bound: Binding, prompt: string): ActivityEvent => ({
+    type: "turn-started",
+    ...fact(bound),
+    startedAt: asHeard,
+    cause: "prompt",
+    prompt,
+  })
+  const promptHook = (bound: Binding) =>
+    bound.agent === "agy" ? "PreInvocation" : "UserPromptSubmit"
+  const submit = (
+    setup: ReturnType<typeof create>,
+    terminalId: string,
+    bound: Binding,
+    words: string,
+  ) => {
+    setup.messaging.keys(terminalId, ["content", "enter"], false)
+    setup.clock.now += 50
+    setup.ask(terminalId, bound, promptHook(bound), [typed(bound, words)])
+  }
+
+  for (const agent of ["claude", "codex"] as const)
+    it(`takes ${agent}'s prompt typed into a turn Novadeck continued, not the turn's first`, () => {
+      const setup = create()
+      const { messaging, send, stop } = setup
+      const [id, bound, peer, handle] =
+        agent === "claude"
+          ? (["A", setup.claude, "B", "moth"] as const)
+          : (["B", setup.codex, "A", "fox"] as const)
+      submit(setup, id, bound, "fix the bug please")
+      expect(messaging.personSaid(id)).toBe("fix the bug please")
+      // A lead's message continues the turn's Stop; the person types while it runs.
+      sent(send(peer, handle, "hello"))
+      const continued = stop(id, bound)
+      expect(continued.leaseId).toEqual(expect.any(String))
+      messaging.acknowledge(id, continued.leaseId!)
+      setup.clock.now += 3_000
+      submit(setup, id, bound, "feel free to merge it")
+      expect(messaging.personSaid(id)).toBe("feel free to merge it")
+      // The turn is still the one its first prompt started.
+      expect(messaging.personPrompt(id)).toBe("fix the bug please")
+    })
+
+  for (const agent of ["claude", "codex"] as const)
+    it(`takes ${agent}'s prompt typed while a turn runs, its hook firing as it is queued or steered`, () => {
+      const setup = create()
+      const [id, bound] =
+        agent === "claude" ? (["A", setup.claude] as const) : (["B", setup.codex] as const)
+      submit(setup, id, bound, "fix the bug please")
+      setup.clock.now += 5_000
+      submit(setup, id, bound, "merge it when green")
+      expect(setup.messaging.personSaid(id)).toBe("merge it when green")
+    })
+
+  it("takes Antigravity's prompt queued during a turn, which runs once the turn ends", () => {
+    const setup = create()
+    const { messaging, ask, follow } = setup
+    messaging.register("C", here, "owl", null)
+    const agy = binding("agy", "s-agy", "5")
+    follow("C", agy)
+    submit(setup, "C", agy, "fix the bug please")
+    setup.clock.now += 5_000
+    // Typed while the turn runs: Antigravity holds it, and submits it after its Stop.
+    messaging.keys("C", ["content", "enter"], false)
+    setup.clock.now += 2_000
+    ask("C", agy, "Stop", [stopped(agy)])
+    setup.clock.now += 50
+    ask("C", agy, "PreInvocation", [typed(agy, "merge it when green")])
+    expect(messaging.personSaid("C")).toBe("merge it when green")
+  })
+
+  it("takes the words once, and never a doorbell's, the harness's or a prompt with no Enter of theirs", () => {
+    const setup = create()
+    const { messaging, ask, claude } = setup
+    submit(setup, "A", claude, "fix the bug please")
+    expect(messaging.personSaid("A")).toBe("fix the bug please")
+    expect(messaging.personSaid("A")).toBeUndefined()
+    setup.clock.now += 5_000
+    // No Enter of the person's came: the agent's own prompt.
+    ask("A", claude, "UserPromptSubmit", [typed(claude, "merge it now")])
+    expect(messaging.personSaid("A")).toBeUndefined()
+    ask("A", claude, "UserPromptSubmit", [
+      { ...started(claude), cause: "doorbell", nonce: "n1" } as ActivityEvent,
+    ])
+    expect(messaging.personSaid("A")).toBeUndefined()
   })
 })

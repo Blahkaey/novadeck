@@ -1,4 +1,21 @@
 import { ORPCError } from "@orpc/client"
+import { z } from "zod"
+
+/**
+ * What a server that refuses a client's handshake as too old says of itself: its revision and
+ * the oldest it serves. A server from before revisions were compared by window says nothing.
+ */
+export const serverWindow = z.object({
+  revision: z.number().int(),
+  oldestClient: z.number().int(),
+})
+
+/**
+ * Why a server refused a handshake's token, when it may say: `revoked` for a credential its
+ * owner revoked, which a client tells apart from one the server never knew. Open: a newer
+ * server may give a reason an older client reads as none.
+ */
+export const refusal = z.object({ reason: z.string().min(1).max(64) })
 
 /**
  * The codes the wire defines for both ends, with their HTTP statuses, as an oRPC error map:
@@ -6,10 +23,13 @@ import { ORPCError } from "@orpc/client"
  * refuses with the first three; the app throws the others, and `follow` acts on them.
  */
 export const wireErrors = {
-  /** The handshake's token was missing or wrong, or the session never authenticated. */
-  UNAUTHORIZED: { status: 401 },
-  /** Client and server speak different protocol versions. */
-  INCOMPATIBLE_PROTOCOL: { status: 409 },
+  /**
+   * The handshake's token was missing or wrong, or the session never authenticated. Its data,
+   * when the server says, is why (`refusal`).
+   */
+  UNAUTHORIZED: { status: 401, data: refusal.optional() },
+  /** Client and server are outside each other's window of revisions (`incompatibility`). */
+  INCOMPATIBLE_PROTOCOL: { status: 409, data: serverWindow.optional() },
   /** Too many connections, or too many calls at once on one. */
   RESOURCE_LIMIT: { status: 429 },
   /** The server is shutting down: the call may succeed once it's back. */
@@ -30,6 +50,11 @@ export type WireErrorCode =
   | "CLOSED"
   /** The server failed in a way it doesn't name. */
   | "INTERNAL_SERVER_ERROR"
+  /**
+   * The server's revision is older than the procedure called, which the client says without
+   * asking it (`since` in the procedure's meta).
+   */
+  | "UNSUPPORTED"
 
 /** A failure a wire client reports, identified by a stable `code`: the wire's or the app's. */
 export class WireError<Code extends string = string> extends Error {
@@ -57,3 +82,29 @@ export const hasCode = <Code extends string>(
   error: unknown,
   ...codes: readonly Code[]
 ): error is WireError<Code> => error instanceof WireError && codes.includes(error.code as Code)
+
+/**
+ * Which side a refused handshake leaves behind: the client, too old for the server, or the
+ * server, too old for the client. Revisions are the server's and the client's own, when known.
+ */
+export type Incompatibility = {
+  readonly behind: "client" | "server"
+  readonly server?: number
+  readonly client?: number
+}
+
+/** The incompatibility an `INCOMPATIBLE_PROTOCOL` from a wire client carries, if it is one. */
+export const incompatibility = (error: unknown): Incompatibility | undefined => {
+  if (!hasCode(error, "INCOMPATIBLE_PROTOCOL")) return undefined
+  const data = error.data as Partial<Incompatibility> | undefined
+  return data?.behind === "client" || data?.behind === "server"
+    ? (data as Incompatibility)
+    : undefined
+}
+
+/** Why an `UNAUTHORIZED` from a wire client was refused, when the server said (`refusal`). */
+export const refusalOf = (error: unknown): string | undefined => {
+  if (!hasCode(error, "UNAUTHORIZED")) return undefined
+  const reason = (error.data as { reason?: unknown } | undefined)?.reason
+  return typeof reason === "string" ? reason : undefined
+}

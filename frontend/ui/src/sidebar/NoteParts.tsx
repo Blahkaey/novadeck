@@ -3,6 +3,7 @@ import { noteLimits, type Note, type NoteAuthor } from "@novadeck/core/notes"
 import { AntigravityIcon } from "@novadeck/toolkit/icons/AntigravityIcon"
 import { ClaudeIcon } from "@novadeck/toolkit/icons/ClaudeIcon"
 import { CodexIcon } from "@novadeck/toolkit/icons/CodexIcon"
+import { OpencodeIcon } from "@novadeck/toolkit/icons/OpencodeIcon"
 import { Markdown } from "@novadeck/toolkit/Markdown"
 import { viewOf } from "@novadeck/toolkit/realm"
 import { Tooltip } from "@novadeck/toolkit/Tooltip"
@@ -112,6 +113,7 @@ const agentIcons: Readonly<Record<AgentName, LucideIcon>> = {
   claude: ClaudeIcon,
   codex: CodexIcon,
   agy: AntigravityIcon,
+  opencode: OpencodeIcon,
 }
 
 // The mark at the end of a note an agent added: its agent's icon, which names the agent and

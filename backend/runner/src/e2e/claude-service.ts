@@ -28,9 +28,48 @@ const filetimeEpochMs = 11_644_473_600_000
 export const filetimeMs = (filetime: string): number | undefined =>
   /^\d+$/.test(filetime) ? Number(BigInt(filetime) / 10_000n) - filetimeEpochMs : undefined
 
-/** One of the service's background sessions, by its command line. */
+// How far apart, and how many times, the sessions under the service are sampled until they stop
+// changing before they are ended.
+const settleMs = 400
+const settleSamples = 10
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/**
+ * The first sample that is the same set of processes as the one before it, or the last one
+ * after `most` samples, `ms` apart.
+ */
+export const settled = async <T extends { readonly pid: number }>(
+  sample: () => Promise<readonly T[] | undefined>,
+  ms: number,
+  most: number,
+): Promise<readonly T[] | undefined> => {
+  let last = await sample()
+  for (let taken = 1; taken < most; taken += 1) {
+    // eslint-disable-next-line no-await-in-loop -- Each sample follows the one before.
+    await sleep(ms)
+    // eslint-disable-next-line no-await-in-loop -- Each sample follows the one before.
+    const next = await sample()
+    const same =
+      next !== undefined &&
+      last !== undefined &&
+      next.length === last.length &&
+      next.every((row) => last!.some((one) => one.pid === row.pid))
+    last = next ?? last
+    if (same) return last
+  }
+  return last
+}
+
+/**
+ * One of the service's background sessions, by its command line: the title a session gives
+ * itself (`claude bg-pty-host`), or, on macOS, the command it was started with
+ * (`…/claude.exe --bg-pty-host`), which `ps` shows for a pty host still starting, or again once
+ * the service is gone (seen with Claude Code 2.1.329). Missing that one left the conversation the
+ * agents view moved into the service running, with its MCP relay.
+ */
 export const isSession = (command: string): boolean =>
-  /^claude bg-(?:pty-host|spare)(?:\s|$)/.test(command.trim())
+  /^(?:claude bg-|(?:\S*\/)?claude(?:\.exe)? --bg-)(?:pty-host|spare)(?:\s|$)/.test(command.trim())
 
 const commandLine = async (pid: number): Promise<string> => {
   if (process.platform === "linux")
@@ -48,6 +87,41 @@ const commandLine = async (pid: number): Promise<string> => {
 }
 
 const named = (row: Pick<Listed, "pid" | "command">) => `${row.command ?? "?"} (${row.pid})`
+
+/**
+ * The pids of the Claude Code services among `census`'s processes (`claude.exe daemon run`),
+ * which on Windows names only the sandbox's own: one runs there with no lock in the sandbox's
+ * home to name it (seen on CI's Windows Server, Claude Code 2.1.329), so it is found by its
+ * command line instead.
+ */
+export const services = (census: readonly string[]): readonly number[] =>
+  census.flatMap((line) => {
+    const found = /^claude\.exe \((\d+)[,)]/.exec(line)
+    return found && / as .*claude\.exe"? daemon run /.test(line) ? [Number(found[1])] : []
+  })
+
+/**
+ * Ends each of `pids` that still runs, with what it started, as `endClaudeService` ends the
+ * lock's: each by the tree read from it, so only the process found; names what it ended.
+ */
+export const endServices = async (
+  pids: readonly number[],
+  trees: {
+    read(root: number | Member, timeoutMs?: number): Promise<readonly Member[] | undefined>
+    end(members: readonly Member[], timeoutMs?: number): Promise<void>
+  },
+): Promise<string[]> => {
+  const ended: string[] = []
+  for (const pid of pids) {
+    // eslint-disable-next-line no-await-in-loop -- One at a time, as few as there are.
+    const tree = await trees.read(pid)
+    if (tree?.[0]?.pid !== pid) continue
+    // eslint-disable-next-line no-await-in-loop -- One at a time, as few as there are.
+    await trees.end(tree)
+    ended.push(...tree.map((member) => `${member.name ?? "?"} (${member.pid})`))
+  }
+  return ended
+}
 
 /**
  * Ends the background service whose lock is in the Claude Code home `home`, as a logout
@@ -81,12 +155,22 @@ export const endClaudeService = async (
   if (!rows || !service) return []
   // Held still, so it starts no warm session in place of one ended.
   process.kill(service.pid, "SIGSTOP")
-  const children = rows.filter((row) => row.parent === service.pid && !row.zombie)
-  const commands = await Promise.all(children.map((row) => commandLine(row.pid)))
-  const sessions = withBelow(
-    rows,
-    children.filter((_, at) => isSession(commands[at]!)),
-  )
+  // A session the service is still starting (a slow machine, a test that ended at once) spawns
+  // its agent and that agent's tools after a listing, and none of them would be ended: so it
+  // waits for what runs under the service to stop changing.
+  const sample = async (): Promise<readonly Listed[] | undefined> => {
+    const now = await listing()
+    const under = now?.filter((row) => row.parent === service.pid && !row.zombie) ?? []
+    const commands = await Promise.all(under.map((row) => commandLine(row.pid)))
+    return (
+      now &&
+      withBelow(
+        now,
+        under.filter((_, at) => isSession(commands[at]!)),
+      )
+    )
+  }
+  const sessions = (await settled(sample, settleMs, settleSamples)) ?? []
   await endFollowed(sessions, () => Date.now(), listing)
   // The service by its pid and start, now with no session left under it to end with it.
   const again = await listing()
@@ -94,5 +178,5 @@ export const endClaudeService = async (
     again?.some((row) => sameProcess(row, { pid: lock.pid, start: lock.start! }, process.platform))
   )
     process.kill(service.pid, "SIGKILL")
-  return [service, ...sessions].map((row) => named(rows.find((one) => one.pid === row.pid)!))
+  return [service, ...sessions].map(named)
 }

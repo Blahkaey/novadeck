@@ -1,0 +1,411 @@
+import { agentWorking } from "../agents/finish"
+import type { ChatPermit, ChatRequest } from "../conversation"
+import type { AgentName } from "../harnesses"
+import {
+  ordered,
+  type AgentAsk,
+  type InboxContent,
+  type InboxEntry,
+  type InboxSource,
+  type InboxTurn,
+  type Settled,
+} from "../inbox"
+import {
+  waitingFor,
+  type AgentMessage,
+  type MessageParty,
+  type MessagesState,
+  type MessageWaits,
+  type MessageThread,
+  type TerminalThreads,
+} from "../messages"
+import { isAgentProgram } from "../terminals/process"
+import {
+  type TerminalMetadata,
+  type Workspace,
+  type WorkspaceProject,
+  type WorkspaceSession,
+  terminalKeyOfPath,
+  terminalKeyPath,
+} from "../types"
+import { second } from "../units"
+
+// The Inbox's entries, as a backend that builds them from the app's own state derives them:
+// what every agent terminal waits on the person for, from the terminals' statuses (a usage
+// limit), the stored failed turns (their error), the messages held for release, the requests
+// of the agents that ask, the permits that stand, and what agents wrote through Novadeck's MCP `ask`, `tell` and
+// `done`. A completed turn makes no entry. The runner's Inbox and the demo's keep it current.
+
+// How long a request's dialog may stay unread before its entry shows anyway, to be answered
+// in the terminal.
+export const dialogMs = 3 * second
+
+// A request, with when its hook started on the backend's clock.
+export type Asked = { readonly request: ChatRequest; readonly askedAt: number }
+
+// An Inbox entry an agent wrote through Novadeck's MCP `ask`, `tell` or `done`, from its
+// terminal: an ask, something it told the person, or its report that its task is done. The
+// protocol's `InboxEntry` without its finished turns (`InboxTurn`) and its `sessionId`.
+export type WrittenEntry = {
+  readonly id: string
+  readonly terminalId: string
+  readonly projectId: string
+  readonly workspaceSessionId: string
+  // `newer` for an agent of a harness a newer Novadeck integrates that this one doesn't know.
+  readonly agent: AgentName | "newer"
+  readonly handle: string
+  readonly at: number
+  readonly content:
+    | { readonly kind: "ask"; readonly ask: AgentAsk }
+    | { readonly kind: "tell"; readonly subject: string; readonly body: string }
+    | { readonly kind: "done"; readonly subject: string; readonly body: string }
+    // An entry of a kind a newer Novadeck lists that this one doesn't know.
+    | { readonly kind: "newer" }
+  // Only on an entry that is no longer open.
+  readonly settled?: Settled | undefined
+}
+
+export type InboxInputs = {
+  readonly workspace: Workspace
+  // The backend's stored finished turns, read ones gone.
+  readonly turns: readonly InboxTurn[]
+  readonly messages: MessagesState
+  readonly entries: readonly WrittenEntry[]
+  // The requests of each terminal whose detail is open, by terminal id, oldest first.
+  readonly requests: Readonly<Record<string, readonly Asked[]>>
+  // The shipping gate's permits that stand for each terminal's agent, by terminal id, where its
+  // detail is open and the runner can take them back.
+  readonly permits: Readonly<Record<string, readonly ChatPermit[]>>
+  readonly now: number
+  // How long a message may wait for an idle agent before its hold is raised (the protocol's
+  // `longHoldMs`); null where the backend raises none, as the demo's.
+  readonly longHoldMs: number | null
+}
+
+type Where = {
+  readonly project: WorkspaceProject
+  readonly session: WorkspaceSession
+  readonly terminal: TerminalMetadata
+}
+
+const whereOf = (workspace: Workspace): Where[] =>
+  workspace.projects.flatMap((project) =>
+    project.history.flatMap((session) =>
+      session.state.roster.terminals.map((terminal) => ({ project, session, terminal })),
+    ),
+  )
+
+// The agent a terminal has, running or asleep with its session saved.
+const agentOf = (terminal: TerminalMetadata): AgentName | "newer" | null =>
+  terminal.state === "sleeping"
+    ? terminal.agent
+    : terminal.state === "running" && isAgentProgram(terminal.process)
+      ? (terminal.process as AgentName)
+      : null
+
+const sourceOf = (
+  { project, session, terminal }: Where,
+  agent: AgentName | "newer",
+): InboxSource => ({
+  projectId: project.id,
+  workspaceSessionId: session.id,
+  terminalId: terminal.id,
+  handle: terminal.handle ?? "",
+  agent,
+  title: terminal.name,
+  projectName: project.name,
+})
+
+const heldOf = (
+  thread: MessageThread,
+  message: AgentMessage,
+  where: Where[],
+): InboxEntry | undefined => {
+  const named = (party: MessageParty) =>
+    party.kind === "agent"
+      ? where.find(({ terminal }) => terminal.id === party.terminalId)
+      : undefined
+  const sender = named(message.from)
+  const recipient = named(message.to)
+  const source = [sender, recipient].find((each) => each && agentOf(each.terminal))
+  const agent = source && agentOf(source.terminal)
+  if (!source || !agent) return undefined
+  const person = (party: MessageParty, found: Where | undefined) => {
+    const handle = party.kind === "agent" ? party.handle : "you"
+    return { handle, title: found?.terminal.name ?? handle }
+  }
+  return {
+    id: `held:${thread.id}`,
+    source: sourceOf(source, agent),
+    at: message.sentAt,
+    stopped: !sender || !agentWorking(sender.terminal),
+    seen: false,
+    kind: "held",
+    held: {
+      threadId: thread.id,
+      from: person(message.from, sender),
+      to: person(message.to, recipient),
+      text: message.text,
+      hop: message.hop,
+      heldFor: thread.heldFor,
+    },
+  }
+}
+
+// The messages for a terminal's idle agent, the longest of which has waited at least
+// `longHoldMs`: why the doorbell can't wake it (null where it hasn't said), since when, and
+// how many (none held for the person's release or a pause, which have entries and switches of
+// their own).
+const heldLong = (
+  messages: TerminalThreads | undefined,
+  now: number,
+  longHoldMs: number,
+):
+  | { readonly waits: MessageWaits | null; readonly since: number; readonly count: number }
+  | undefined => {
+  const { waits = null, waitsSince } = messages ?? {}
+  if (!messages || waitsSince == null || now - waitsSince < longHoldMs) return undefined
+  const count = waitingFor(messages).filter((message) => message.state === "queued").length
+  return count > 0 ? { waits, since: waitsSince, count } : undefined
+}
+
+// Whether a terminal's agent reports to a lead whose agent still runs in its project and
+// session: that lead hears of its finished turns, so they are the lead's, not the person's.
+// Stricter than messaging's running lead, a live terminal whatever runs in it, on purpose: a
+// lead whose agent stopped hears nothing, so its workers' finishes come to the person.
+const reportsToLead = ({ project, session, terminal }: Where, where: readonly Where[]): boolean =>
+  !!terminal.ledBy &&
+  where.some(
+    (each) =>
+      each.project.id === project.id &&
+      each.session.id === session.id &&
+      each.terminal.id === terminal.ledBy &&
+      agentOf(each.terminal) !== null,
+  )
+
+// Whether the terminal `terminalId` of the session `context` (`${projectId}/${sessionId}`)
+// reports to a lead whose agent runs, as the Inbox counts: for what else tells the person of
+// that terminal's finish, so it should not.
+export const leadHearsOf = (workspace: Workspace, context: string, terminalId: string): boolean => {
+  const where = whereOf(workspace)
+  const here = where.find(
+    (each) =>
+      `${each.project.id}/${each.session.id}` === context && each.terminal.id === terminalId,
+  )
+  return !!here && reportsToLead(here, where)
+}
+
+// Each terminal's entries.
+const candidates = (
+  { messages, requests, permits, now, longHoldMs }: InboxInputs,
+  here: Where,
+): readonly InboxEntry[] => {
+  const { project, session, terminal } = here
+  const agent = agentOf(terminal)
+  if (!agent || terminal.state !== "running" || !terminal.agent) return []
+  const status = terminal.agent
+  const source = sourceOf(here, agent)
+  const found: InboxEntry[] = []
+  const add = (id: string, at: number, stopped: boolean, content: InboxContent): void => {
+    found.push({ id, source, at, stopped, seen: false, ...content })
+  }
+
+  // A request waiting on the person: the oldest, as the harness asks one at a time, and each
+  // other that asks without waiting (as the shipping gate's cards, one per target), once its
+  // dialog reads or it has waited long enough to be answered in the terminal. It hides
+  // nothing else of the terminal's: one a screen or a subagent raised, or a card, can stand
+  // after the turn ended, beside how it ended.
+  if (status.attention)
+    for (const [index, asked] of (requests[terminal.id] ?? []).entries())
+      if (
+        (index === 0 || asked.request.detached === true) &&
+        (asked.request.dialog !== null || now - asked.askedAt >= dialogMs)
+      )
+        add(`request:${asked.request.id}`, asked.askedAt, true, {
+          kind: "request",
+          request: asked.request,
+        })
+
+  // The permits of the shipping gate that stand for it: nothing waits on the person in them.
+  for (const permit of permits[terminal.id] ?? [])
+    add(`permit:${terminal.id}:${permit.id}`, permit.givenAt, false, { kind: "permit", permit })
+
+  // Its messages held long, as only the person can clear what holds them: in the terminal.
+  // Not while it works, as its status says, whatever the listing last said.
+  const held =
+    !status.working &&
+    longHoldMs !== null &&
+    heldLong(
+      messages.terminals[
+        terminalKeyPath({
+          projectId: project.id,
+          workspaceSessionId: session.id,
+          terminalId: terminal.id,
+        })
+      ],
+      now,
+      longHoldMs,
+    )
+  if (held)
+    add(`waits:${terminal.id}:${held.since}`, held.since, true, {
+      kind: "trouble",
+      trouble: { type: "waits", waits: held.waits, count: held.count },
+    })
+
+  // A usage limit is a state of the current end, not a stored entry: with its window known, limit
+  // trouble; limited with none found, failed trouble. It leaves when the agent works again.
+  const turn = status.lastTurn
+  if (turn && !status.working) {
+    if (turn.limit) {
+      add(`limit:${terminal.id}:${turn.at}`, turn.at, true, {
+        kind: "trouble",
+        trouble: {
+          type: "limit",
+          minutes: turn.limit.minutes ?? 0,
+          resetsAt: turn.limit.resetsAt,
+          ...(turn.limit.scope !== undefined && { scope: turn.limit.scope }),
+          autoResume: null,
+          evidence: [{ text: turn.error ?? "Usage limit reached", result: null, times: 1 }],
+        },
+      })
+    } else if (turn.limited) {
+      add(`limit:${terminal.id}:${turn.at}`, turn.at, true, {
+        kind: "trouble",
+        trouble: { type: "failed", error: turn.error ?? null },
+      })
+    }
+  }
+  return found
+}
+
+// Every entry the Inbox now holds, the newest first: each of a terminal's entries, each thread held
+// for release, and the entries the runner lists resolved.
+export const inboxEntries = (inputs: InboxInputs): InboxEntry[] => {
+  const where = whereOf(inputs.workspace)
+  const all = where.flatMap((here) => candidates(inputs, here))
+  for (const entry of inputs.entries) {
+    const here = where.find(
+      ({ project, session, terminal }) =>
+        project.id === entry.projectId &&
+        session.id === entry.workspaceSessionId &&
+        terminal.id === entry.terminalId &&
+        (terminal.handle ?? "") === entry.handle &&
+        // A newer Novadeck's agent can't be told apart here: its ask stays, rather than going.
+        (entry.content.kind !== "ask" ||
+          entry.settled ||
+          entry.agent === "newer" ||
+          agentOf(terminal) === entry.agent),
+    )
+    // A resolved entry outlives its terminal: it keeps its project, and says whose it was.
+    const project = inputs.workspace.projects.find(({ id }) => id === entry.projectId)
+    if (!here && !(entry.settled && project)) continue
+    const { content: entryContent } = entry
+    const content: InboxContent =
+      entryContent.kind === "ask"
+        ? { kind: "ask", ask: entryContent.ask }
+        : entryContent.kind === "newer"
+          ? {
+              kind: "update",
+              update: {
+                type: "newer",
+                subject: "Something this Novadeck can't show",
+                body: `@${entry.handle} left an entry that needs a newer Novadeck. Update Novadeck to read it here.`,
+              },
+            }
+          : {
+              kind: "update",
+              update: {
+                type: entryContent.kind === "done" ? "done" : "told",
+                subject: entryContent.subject,
+                body: entryContent.body,
+              },
+            }
+    all.push({
+      id: entry.id,
+      source: here
+        ? sourceOf(here, entry.agent)
+        : {
+            projectId: entry.projectId,
+            workspaceSessionId: entry.workspaceSessionId,
+            terminalId: entry.terminalId,
+            handle: entry.handle,
+            agent: entry.agent,
+            title: "Closed terminal",
+            projectName: project!.name,
+          },
+      at: entry.at,
+      stopped:
+        entry.content.kind === "ask" && !entry.settled && !!here && !agentWorking(here.terminal),
+      seen: false,
+      ...content,
+      ...(entry.settled ? { settled: entry.settled } : {}),
+    })
+  }
+
+  // A stored failed turn shows while its terminal exists with the same handle, whatever runs
+  // in it: trouble that stops the agent only while it is the terminal's current end and the
+  // agent rests, and informs otherwise. A completed one makes no entry: it marks its tab unread.
+  for (const entry of inputs.turns) {
+    if (entry.outcome !== "failed") continue
+    const here = where.find(
+      ({ project, session, terminal }) =>
+        project.id === entry.projectId &&
+        session.id === entry.workspaceSessionId &&
+        terminal.id === entry.terminalId &&
+        (terminal.handle ?? "") === entry.handle,
+    )
+    if (!here) continue
+    const source = sourceOf(here, entry.agent)
+    const { terminal } = here
+    const current =
+      terminal.state === "running" &&
+      terminal.agent?.lastTurn?.at === entry.at &&
+      !agentWorking(terminal)
+    all.push({
+      id: entry.id,
+      source,
+      at: entry.at,
+      stopped: current,
+      seen: false,
+      kind: "trouble",
+      trouble: { type: "failed", error: entry.error, stored: true },
+    })
+  }
+
+  // A thread held for release is listed by both its terminals: once, from its oldest
+  // held message.
+  // A thread's parties are terminals by id, looked up in the session of the terminal that
+  // lists it. A party's handle only reads as the party: it may be another terminal's by now.
+  const threads = new Map<string, InboxEntry>()
+  for (const [key, messages] of Object.entries(inputs.messages.terminals)) {
+    const { projectId, workspaceSessionId } = terminalKeyOfPath(key)
+    const session = where.filter(
+      (each) => each.project.id === projectId && each.session.id === workspaceSessionId,
+    )
+    for (const thread of messages.threads) {
+      if (!thread.held || threads.has(thread.id)) continue
+      const message = thread.messages.find((each) => each.held === "release")
+      const entry = message && heldOf(thread, message, session)
+      if (entry) threads.set(thread.id, entry)
+    }
+  }
+
+  // A terminal's entries all show: nothing replaces or hides another.
+  return ordered([...all, ...threads.values()])
+}
+
+// Entries that read the same keep their old objects, so what shows them stays as it is.
+export const reuse = (
+  before: readonly InboxEntry[],
+  next: readonly InboxEntry[],
+): readonly InboxEntry[] => {
+  const old = new Map(before.map((entry) => [entry.id, entry]))
+  const entries = next.map((entry) => {
+    const known = old.get(entry.id)
+    return known && JSON.stringify(known) === JSON.stringify(entry) ? known : entry
+  })
+  return entries.length === before.length &&
+    entries.every((entry, index) => entry === before[index])
+    ? before
+    : entries
+}

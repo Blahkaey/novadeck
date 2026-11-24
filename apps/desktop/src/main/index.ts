@@ -38,9 +38,14 @@ import {
 import {
   apiUrlArgumentPrefix,
   directoryPickerChannel,
+  extraWindowArgumentPrefix,
+  windowKeyArgumentPrefix,
+  windowKeysChannel,
   feedbackArgumentPrefix,
   noticeClickChannel,
   portableStateChannel,
+  projectWindowNavigateChannel,
+  projectWindowsChannel,
   remoteArgumentPrefix,
   runnerPortChannel,
   versionChannel,
@@ -100,6 +105,7 @@ import {
   developmentOrigin,
   murmurEngine,
   relayPath,
+  tourAssets,
   releaseRepository,
   voiceEngine,
   waitForUi,
@@ -137,10 +143,19 @@ import { linuxMenu, macMenu, runnerMenu, windowsMenu } from "./window/menu.js"
 import { registerPanePictureIpc } from "./window/pane-pictures.js"
 import { panelWindows } from "./window/panel-windows.js"
 import { limitPermissions } from "./window/permissions.js"
+import { registerProjectWindowsIpc } from "./window/project-windows-ipc.js"
+import { createProjectWindows } from "./window/project-windows.js"
+import {
+  boundsToOpen,
+  keepWindows,
+  type SavedWindow,
+  type SavedWindows,
+} from "./window/saved-windows.js"
 import { keepScale, registerScaleIpc } from "./window/scale.js"
 import { atspiReaders, runIn } from "./window/screen-reader-linux.js"
 import { electronReaders, registerScreenReaderIpc } from "./window/screen-reader.js"
 import { keepSpellcheckOffline } from "./window/spellcheck.js"
+import { clickNotice, createVoice, windowsToKeep } from "./window/voice.js"
 
 const appId = "dev.mzpk.novadeck"
 // The WebGL context limit, raised before the app is ready; the pages are told it.
@@ -376,6 +391,35 @@ const news = updateNewsOf({
 // A portable launch giving way to a newer copy.
 const portableCopies = portableLaunch({ copies, exitApp, log: warnings("portable") })
 
+// The windows the next launch reopens: each open window's project and bounds, kept as they
+// change (see ./window/saved-windows.ts).
+const savedWindows = keepWindows(join(app.getPath("userData"), "windows.json"))
+const windowsSaveDelayMs = 400
+let windowsTimer: ReturnType<typeof setTimeout> | undefined
+// Each window's key (see `DesktopApp.windowKey`), which it keeps for as long as it lives.
+const windowKeys = new WeakMap<BrowserWindow, string>()
+// The open windows that show a project, as they stand.
+const openWindows = (): SavedWindow[] =>
+  projectWindows.list().flatMap(({ window, projectId }): SavedWindow[] => {
+    const key = windowKeys.get(window)
+    return projectId === undefined || key === undefined || window.isDestroyed()
+      ? []
+      : [{ key, projectId, bounds: window.getNormalBounds(), maximized: window.isMaximized() }]
+  })
+// Keeps the open windows as they stand (see `windowsToKeep`: nothing once a quit is under way,
+// whose closes are no one leaving a window, `before-quit` having kept them before it closes
+// them, and none when the last window closed, which keeps the windows as they stood before it).
+const rememberWindows = (): void => {
+  clearTimeout(windowsTimer)
+  windowsTimer = undefined
+  const keep = windowsToKeep(openWindows(), quitting.stopping)
+  if (keep) void savedWindows.remember(keep)
+}
+const rememberWindowsSoon = (): void => {
+  clearTimeout(windowsTimer)
+  windowsTimer = setTimeout(rememberWindows, windowsSaveDelayMs)
+}
+
 // Asks these windows' pages to finish their saves.
 const saveWindows = (windows: readonly BrowserWindow[]): Promise<void> =>
   savePages(ipcMain, appPages(windows), {
@@ -397,10 +441,62 @@ const shutDown = (): Promise<RunnerEnd> =>
 const badgeOf = (window: BrowserWindow, badge: DesktopBadge): void =>
   applyBadge({ platform: process.platform, app, nativeImage, window }, badge)
 
+// Only the window the person used last (the voice) raises notifications and counts on the
+// app's icon, so two windows never double up (see ./window/voice.ts). `closeNotices` takes away
+// what the app shows, once the notices exist.
+let closeNotices: () => void = () => {}
+const voiceBook = createVoice<BrowserWindow>({
+  hasVoice: (window) => projectWindows.hasVoice(window),
+  applyBadge: badgeOf,
+  closeNotices: () => closeNotices(),
+  alive: (window) => !window.isDestroyed(),
+})
+// How many windows the app has brought forward, which a notification's click watches.
+let forwards = 0
+
+// What each window shows and which the person used last, the project windows' book (see
+// ./window/project-windows.ts). The windows' own pages hear of it, and the badge, the
+// notifications and what the person clicks follow it.
+const projectWindows = createProjectWindows<BrowserWindow>({
+  create: (projectId) => createWindow(appOrigin(), { projectId, extra: true }),
+  forward: (window) => {
+    forwards += 1
+    bringForward(window)
+    if (process.platform === "darwin") app.focus({ steal: true })
+  },
+  tell: (window, state) => {
+    if (window.isDestroyed() || !isAppPage(window.webContents.getURL())) return
+    window.webContents.send(projectWindowsChannel, state)
+  },
+  navigate: (window, target) => {
+    if (window.isDestroyed() || !isAppPage(window.webContents.getURL())) return
+    window.webContents.send(projectWindowNavigateChannel, target)
+  },
+  voiceMoved: (from, to) => voiceBook.moved(from, to),
+})
+// The address the app's own server answers on, once it does.
+const appOrigin = (): string => {
+  if (!server) throw new Error("The app's server is not up yet.")
+  return server.origin
+}
+
 // Opens a window on the app's page, whose preload learns the API's address, the WebGL
-// context limit and whether the app sends feedback notes.
-const createWindow = (origin: string): BrowserWindow => {
+// context limit and whether the app sends feedback notes. `projectId` opens it on that
+// project, `bounds` where it stood, and `extra` marks a window that is not the app's first,
+// which leaves the one-time things to the first.
+const createWindow = (
+  origin: string,
+  options: {
+    readonly projectId?: string
+    readonly extra?: boolean
+    /** The key a reopened window had; a new window gets a new one. */
+    readonly key?: string
+    readonly bounds?: SavedWindow["bounds"]
+    readonly maximized?: boolean
+  } = {},
+): BrowserWindow => {
   const apiUrl = new URL("/api/", origin).href
+  const key = options.key ?? randomUUID()
   const window = openAppWindow({
     ...(remote && { runnerHost: new URL(remote.url).hostname }),
     ground: appearance.current()?.ground ?? "#ffffff",
@@ -411,8 +507,35 @@ const createWindow = (origin: string): BrowserWindow => {
       `${apiUrlArgumentPrefix}${apiUrl}`,
       webglContextsArgument(webglContexts),
       ...(feedbackTo ? [`${feedbackArgumentPrefix}1`] : []),
+      ...(options.extra ? [`${extraWindowArgumentPrefix}1`] : []),
+      `${windowKeyArgumentPrefix}${key}`,
       ...(remote ? [`${remoteArgumentPrefix}1`] : []),
     ],
+    ...(options.bounds
+      ? {
+          bounds: boundsToOpen(
+            options.bounds,
+            screen.getAllDisplays().map((d) => d.workArea),
+          ),
+        }
+      : {}),
+    ...(options.maximized ? { maximized: true } : {}),
+    // Any session and view will do: the page takes the project's own.
+    ...(options.projectId
+      ? { route: `/projects/${encodeURIComponent(options.projectId)}/sessions/_/_` }
+      : {}),
+  })
+  windowKeys.set(window, key)
+  projectWindows.add(window, options.projectId)
+  window.on("focus", () => projectWindows.used(window))
+  window.on("move", rememberWindowsSoon)
+  window.on("resize", rememberWindowsSoon)
+  window.on("closed", () => {
+    // Whether it had the voice, as it did when it closed: its notifications go with it.
+    const wasVoice = projectWindows.hasVoice(window)
+    projectWindows.remove(window)
+    voiceBook.closed(window, wasVoice, projectWindows.size())
+    rememberWindows()
   })
   // Its page opens at the scale, and takes it again whenever it loads.
   window.webContents.on("dom-ready", () => scale.apply(window.webContents))
@@ -556,6 +679,19 @@ const linkRemote = (settings: RemoteSettings): RunnerProcess => {
   return linked
 }
 
+// Opens the app's windows at launch: those the last run had open, each on its project, the
+// first as the app's own and the rest as extra ones; one window when it kept none.
+const openFirstWindows = (origin: string, kept: SavedWindows): void => {
+  const reopened = kept.windows
+  if (reopened.length === 0) {
+    createWindow(origin)
+    return
+  }
+  reopened.forEach(({ key, projectId, bounds, maximized }, index) =>
+    createWindow(origin, { key, projectId, bounds, maximized, extra: index > 0 }),
+  )
+}
+
 const launch = async (): Promise<void> => {
   // The scale windows open at, read before the first one does.
   await scale.load()
@@ -622,6 +758,7 @@ const launch = async (): Promise<void> => {
       entry: join(currentDirectory, "runner.js"),
       database: join(app.getPath("userData"), "workspace.sqlite"),
       relay: relayPath(),
+      tour: JSON.stringify(tourAssets()),
       engine: voice.manifest,
       source: voice.source,
       murmurEngine: murmur.manifest,
@@ -645,8 +782,8 @@ const launch = async (): Promise<void> => {
       nativeTheme.themeSource = next.scheme
       window.setBackgroundColor(next.ground)
       for (const panel of panels.of(window)) panel.setBackgroundColor(next.ground)
-      // Windows' caption buttons draw in the page's ink.
-      if (next.ink) windowControls.get(window)?.paint(next.ink)
+      // Windows' caption buttons draw in the page's ink, on its ground.
+      windowControls.get(window)?.paint(next)
       void appearance.save(next)
     },
   })
@@ -655,26 +792,30 @@ const launch = async (): Promise<void> => {
   const notices = showNotices({
     supported: Notification.isSupported(),
     create: (notice) => new Notification(notificationOptions(notice, process.platform)),
-    clicked: (window: BrowserWindow, id) => {
-      if (window.isDestroyed()) return
-      if (window.isMinimized()) window.restore()
-      window.show()
-      if (process.platform === "darwin") app.focus({ steal: true })
-      window.focus()
-      window.webContents.send(noticeClickChannel, id)
-    },
+    clicked: (window: BrowserWindow, id) =>
+      clickNotice({
+        alone: projectWindows.size() <= 1,
+        raising: window,
+        voice: projectWindows.voice(),
+        alive: (each) => !each.isDestroyed(),
+        send: (target) => target.webContents.send(noticeClickChannel, id),
+        forward: (target) => {
+          forwards += 1
+          bringForward(target)
+          if (process.platform === "darwin") app.focus({ steal: true })
+        },
+        forwards: () => forwards,
+        later: (wait, ms) => void setTimeout(wait, ms),
+      }),
   })
+  closeNotices = notices.closeAll
   // A window whose page shows notices or a badge takes them away with it when that page
   // goes, as it closes, crashes or loads again, since no page is left to take them back.
   const tended = new WeakSet<BrowserWindow>()
   const tend = (window: BrowserWindow): void => {
     if (tended.has(window)) return
     tended.add(window)
-    const reset = (): void => {
-      notices.closeAll()
-      badgeOf(window, { count: 0, image: null })
-    }
-    window.on("closed", reset)
+    const reset = (): void => voiceBook.reset(window)
     window.webContents.on("render-process-gone", reset)
     // Once a new page commits, as a reload: a navigation `will-navigate` cancels, as a file
     // dropped on the window, leaves the page and what it showed.
@@ -683,6 +824,7 @@ const launch = async (): Promise<void> => {
   registerNoticeIpc(ipcMain, {
     window: appWindow,
     show: (window, notice) => {
+      if (!voiceBook.mayRaise(window)) return
       tend(window)
       notices.show(window, notice)
     },
@@ -720,8 +862,20 @@ const launch = async (): Promise<void> => {
     window: appWindow,
     apply: (window: BrowserWindow, badge) => {
       tend(window)
-      badgeOf(window, badge)
+      voiceBook.counted(window, badge)
     },
+  })
+  // The pages' project windows: what each shows, opening one for a project, and
+  // handing a place in a project to the window that takes it.
+  registerProjectWindowsIpc(ipcMain, {
+    window: appWindow,
+    ask: (window) => projectWindows.tell(window),
+    show: (window, projectId, projects) => {
+      projectWindows.show(window, projectId, projects)
+      rememberWindowsSoon()
+    },
+    open: (window, projectId) => projectWindows.open(window, projectId),
+    handOff: (window, target) => projectWindows.handOff(window, target),
   })
   // The page asks for its window's focus when it starts listening, as when it loads again.
   registerWindowFocusIpc(ipcMain, {
@@ -885,6 +1039,18 @@ const launch = async (): Promise<void> => {
   pages.registerIpc((event) => appWindow(event) !== undefined)
   // And pictures of its own companion panes, to stand in while each builds again.
   registerPanePictureIpc(ipcMain, (event) => appWindow(event) !== undefined)
+  // The keys of the windows kept for the next launch or open: a page clears what it kept under
+  // any other, whose window is gone for good.
+  ipcMain.handle(windowKeysChannel, (event) =>
+    appWindow(event)
+      ? [
+          ...new Set([
+            ...savedWindows.current().windows.map(({ key }) => key),
+            ...appWindows().flatMap((window) => windowKeys.get(window) ?? []),
+          ]),
+        ]
+      : null,
+  )
   // Only the app's own pages learn the version it runs.
   ipcMain.handle(versionChannel, (event) => (appWindow(event) ? app.getVersion() : ""))
   if (process.platform === "darwin") registerFilesClipboard(ipcMain, appWindow)
@@ -926,7 +1092,9 @@ const launch = async (): Promise<void> => {
   if (!app.isPackaged) await waitForUi(developmentOrigin)
   if (quitting.stopping) return
 
-  createWindow(server.origin)
+  // The windows the last run had open open again, each on its project; the first as the app's
+  // own, the rest as extra ones.
+  openFirstWindows(server.origin, await savedWindows.load())
   void updates
     .start()
     .catch((error: unknown) =>
@@ -961,11 +1129,11 @@ app.on("render-process-gone", (_event, contents, details) => {
 
 app.on("second-instance", () => {
   quitting.reopenWanted = rememberReopen(quitting.reopenWanted, quitting.stopping)
-  const [window] = appWindows()
+  const window = projectWindows.voice() ?? appWindows()[0]
   if (window) bringForward(window)
-  // On macOS the app lives on with no window, so a second launch has none to show; one
-  // that is quitting opens none.
-  else if (server && !quitting.stopping) createWindow(server.origin)
+  // On macOS the app lives on with no window, so a second launch has none to show: the windows
+  // kept open again, under their keys, as at a launch. One that is quitting opens none.
+  else if (server && !quitting.stopping) openFirstWindows(server.origin, savedWindows.current())
   if (process.platform === "darwin") app.focus({ steal: true })
 })
 
@@ -1003,7 +1171,7 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     quitting.reopenWanted = rememberReopen(quitting.reopenWanted, quitting.stopping)
     if (appWindows().length === 0) {
-      if (server && !quitting.stopping) createWindow(server.origin)
+      if (server && !quitting.stopping) openFirstWindows(server.origin, savedWindows.current())
     }
   })
 })
@@ -1031,7 +1199,11 @@ const quitSteps: QuitSteps = {
   keepUpdate: updates.keepUpdateOnQuit,
   quit: () => app.quit(),
 }
-app.on("before-quit", (event) => void beforeQuit(event, quitSteps))
+app.on("before-quit", (event) => {
+  // The windows as they stand, before the quit closes them.
+  rememberWindows()
+  void beforeQuit(event, quitSteps)
+})
 
 app.on("window-all-closed", () => {
   quitting.orderly = true

@@ -1,6 +1,6 @@
 import { finishGraceMs } from "@novadeck/core/agents/finish"
 import type { AgentName } from "@novadeck/core/harnesses"
-import type { Inbox, InboxRow } from "@novadeck/core/inbox"
+import type { Inbox, InboxEntry } from "@novadeck/core/inbox"
 import type { BackendAction, TerminalKey } from "@novadeck/core/port"
 import { createStore } from "@novadeck/core/store"
 import { isAgentProgram } from "@novadeck/core/terminals/process"
@@ -17,7 +17,9 @@ import { createDemoUpdates, pageUpdateChannel } from "./desktop/updates"
 import { createEmptyChats } from "./emptiness"
 import { createDemoFolders } from "./folders"
 import { createStaleMentions } from "./mentions"
+import { createNewerChat } from "./newer"
 import { createDemoNotices } from "./notices"
+import { createChatPermits } from "./permits"
 import {
   atStartupScreen,
   agentRanHere,
@@ -64,7 +66,7 @@ const crowd = 12
 const crowdWaits = dealKinds(crowd).filter((kind) => kind !== "done").length
 // How long clearing waits between the agents working and resting, for the app to see both.
 const calmMs = 100
-// How long an agent that sleeps after a turn keeps running past its end: the Inbox row of a
+// How long an agent that sleeps after a turn keeps running past its end: the Inbox entry of a
 // completed turn is stored only once it has stood for `finishGraceMs`, while its terminal
 // still runs the agent.
 const sinceTurnEndMs = finishGraceMs + calmMs
@@ -78,11 +80,11 @@ const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 const later = (ms: number, run: () => void): void => void setTimeout(run, ms)
 
-// The longest `afterTold` waits for the Inbox to store a turn's row.
+// The longest `afterTold` waits for the Inbox to store a turn's entry.
 const toldCapMs = 10_000
 
-// Runs `run` once the Inbox has stored the row of the turn `key`'s agent ends from now: its
-// terminal's tab reads that row as unread, and a terminal put to sleep before it is stored
+// Runs `run` once the Inbox has stored the entry of the turn `key`'s agent ends from now: its
+// terminal's tab reads that entry as unread, and a terminal put to sleep before it is stored
 // (a completed turn's waits out `finishGraceMs` while its terminal still runs the agent) has
 // none. Where the Inbox keeps no turns, or none comes, it runs after `sleepAfterMs`, or the cap.
 const afterTold = (inbox: () => Inbox | undefined, key: TerminalKey, run: () => void): void => {
@@ -102,11 +104,11 @@ const afterTold = (inbox: () => Inbox | undefined, key: TerminalKey, run: () => 
     const told = turns
       .getSnapshot()
       ?.some(
-        (row) =>
-          row.projectId === key.projectId &&
-          row.workspaceSessionId === key.workspaceSessionId &&
-          row.terminalId === key.terminalId &&
-          row.at >= since,
+        (entry) =>
+          entry.projectId === key.projectId &&
+          entry.workspaceSessionId === key.workspaceSessionId &&
+          entry.terminalId === key.terminalId &&
+          entry.at >= since,
       )
     if (told) go()
   })
@@ -296,14 +298,14 @@ const farLimitResetMs = 8 * 86_400_000
 // The last stays selected; a done mark needs the person to be looking elsewhere, so the
 // finished ones come first, ending their turns a moment later. An agent's state is its
 // verb's, the rest the terminal's metadata; what an agent asks through its MCP `ask` is an
-// Inbox row of the demo's own, added once the terminal is in its state.
+// Inbox entry of the demo's own, added once the terminal is in its state.
 const gallery: readonly {
   readonly name: string
   readonly state?: (key: TerminalKey, harness: AgentName) => BackendAction[]
   readonly agent?: (verbs: DemoAgentVerbs, key: TerminalKey) => void
   readonly asks?: "text" | "action"
   // What the terminal becomes once its agent's turn has ended: the agent is let go, and
-  // these dispatched, so its turn's Inbox row stays while the agent sleeps.
+  // these dispatched, so its turn's Inbox entry stays while the agent sleeps.
   readonly after?: (key: TerminalKey, harness: AgentName) => BackendAction[]
 }[] = [
   {
@@ -416,6 +418,7 @@ const gallery: readonly {
   { name: "Agent exited", state: (key) => agentRanHere(key) },
   { name: "Starting", state: (key) => starting(key) },
   { name: "Asleep", state: (key, harness) => sleeping(key, harness) },
+  { name: "Asleep, newer agent", state: (key) => sleeping(key, "newer") },
   {
     name: "Asleep, done",
     state: (key, harness) => sleeping(key, harness, true, Date.now() - doneAgoMs),
@@ -457,10 +460,10 @@ const gallery: readonly {
 // The ids of the MCP asks the panel opened, which Clear withdraws; the variant's own stay.
 type PanelAsks = Set<string>
 
-// Whether a row is a done report one of the demo's agents wrote, as `inbox.done` names it,
-// not an Update row of the variant's own.
-const agentDone = (row: InboxRow): boolean =>
-  row.kind === "update" && row.update.type === "done" && row.id.startsWith("entry:demo-done-")
+// Whether an entry is a done report one of the demo's agents wrote, as `inbox.done` names it,
+// not an Update entry of the variant's own.
+const agentDone = (entry: InboxEntry): boolean =>
+  entry.kind === "update" && entry.update.type === "done" && entry.id.startsWith("entry:demo-done-")
 
 // Marks the terminal a set of actions puts to sleep as one the panel holds asleep, and hands
 // the actions back.
@@ -502,10 +505,10 @@ const everyState = (
     const own = inbox()
     if (!isDemoInbox(own)) return
     gallery.forEach(({ asks }, index) => {
-      const row = asks && mcpAsk(workspace(), keys[index]!, asks, Date.now(), harness)
-      if (!row) return
-      own.add(row)
-      panelAsks.add(row.id)
+      const entry = asks && mcpAsk(workspace(), keys[index]!, asks, Date.now(), harness)
+      if (!entry) return
+      own.add(entry)
+      panelAsks.add(entry.id)
     })
   },
 })
@@ -553,7 +556,7 @@ const createWaitingActions = (
   // the done reports its agents wrote, the MCP asks the panel opened are withdrawn and
   // cleared, and each agent works for a moment, then rests, which also calls off a finish
   // still to come. A terminal back at its shell's prompt holds nothing more: its marks are its
-  // stored rows'. The variant's own rows stay, for the Inbox group's actions.
+  // stored entries'. The variant's own entries stay, for the Inbox group's actions.
   const clearWaiting: DemoAction = {
     label: "Clear waiting agents",
     hint: "Answers and reads everything; the Inbox empties of what agents wait on",
@@ -572,12 +575,12 @@ const createWaitingActions = (
       )
       if (isDemoInbox(own)) {
         const { items, answering } = own.state.getSnapshot()
-        for (const row of items.filter(agentDone))
-          own.answer(row.id, { kind: "update", action: "read" })
+        for (const entry of items.filter(agentDone))
+          own.answer(entry.id, { kind: "update", action: "read" })
         // An ask being answered goes as answered.
         const asks = items
-          .filter((row) => panelAsks.has(row.id) && !row.settled && !answering[row.id])
-          .map((row) => row.id)
+          .filter((entry) => panelAsks.has(entry.id) && !entry.settled && !answering[entry.id])
+          .map((entry) => entry.id)
         for (const id of asks) own.resolve(id, "withdrawn")
         for (const id of asks) panelAsks.delete(id)
       }
@@ -606,6 +609,8 @@ export const createDemoStates = (
     openWelcomeBare,
     failNext: failAgents,
     limitAntigravity,
+    outdateOpencode,
+    unsupportOpencode,
   } = createDemoAgents()
   const { notices, Notices } = createDemoNotices()
   const updateControls = createDemoUpdates(undefined, pageUpdateChannel)
@@ -619,8 +624,10 @@ export const createDemoStates = (
     return Promise.reject(new Error("The runner is restarting it, so it stays where it is."))
   }
   const chat = createChatFailures()
+  const permits = createChatPermits()
   const pictures = createChatPictures()
   const mentions = createStaleMentions()
+  const newerChat = createNewerChat()
   const emptyChats = createEmptyChats()
   const panelAsks: PanelAsks = new Set()
   const waitingActions = createWaitingActions(verbs, inbox, panelAsks)
@@ -637,6 +644,11 @@ export const createDemoStates = (
     return actions
   }
   // Sets what a terminal's screen is doing for a while, then shows its output again.
+  // Another window holds the terminal's keyboard, idle or typing, until this one takes it.
+  const observe = (key: TerminalKey, observed: "idle" | "typing"): void => {
+    const id = terminalKeyId(key)
+    screens.update((all) => new Map(all).set(id, { ...all.get(id), observed }))
+  }
   const showScreen = (key: TerminalKey, screen: DemoScreenState, ms: number): void => {
     const id = terminalKeyId(key)
     screens.update((all) => new Map(all).set(id, screen))
@@ -656,7 +668,7 @@ export const createDemoStates = (
       verbs.release(key)
       run(key, context)
     })
-  // The agent ends a turn, then sleeps with the turn's Inbox row standing.
+  // The agent ends a turn, then sleeps with the turn's Inbox entry standing.
   const sleepsAfter = (label: string, outcome: "completed" | "failed", hint: string) =>
     onSelected(label, hint, (key, { dispatch, harness, workspace }) => {
       verbs.finish(key, terminalOf(workspace(), key), outcome, { after: turnMs })
@@ -676,10 +688,25 @@ export const createDemoStates = (
         onSelected("Loading output", "Briefly, as after a reconnect", (key) =>
           showScreen(key, { attaching: true }, attachMs),
         ),
+        onSelected(
+          "Another window has the keyboard",
+          "The screen shows the other window's size under a “Typing in another window · Take over” strip; plain typing takes the keyboard and goes through, Enter or a Ctrl key takes it and says so",
+          (key) => observe(key, "idle"),
+        ),
+        onSelected(
+          "Another window is typing",
+          "As above while the other window types: a key shows the strip's busy form and goes nowhere, and only Take over takes the keyboard",
+          (key) => observe(key, "typing"),
+        ),
         setting(
           "Asleep",
           "The agent has a saved session and no process",
           (key, { dispatch, harness }) => dispatch(hold(key, sleeping(key, harness))),
+        ),
+        setting(
+          "Asleep, a newer Novadeck's agent",
+          "The agent belongs to a harness only a newer Novadeck knows: its tab shows it asleep and this build never wakes it, whoever looks",
+          (key, { dispatch }) => dispatch(hold(key, sleeping(key, "newer"))),
         ),
         setting("Waking", "Its agent is on the way back", (key, { dispatch, harness }) =>
           dispatch(waking(key, harness)),
@@ -825,10 +852,10 @@ export const createDemoStates = (
               says: askWordsMs,
             })
             const own = inbox()
-            const row = mcpAsk(context.workspace(), key, "text", Date.now(), context.harness)
-            if (!row || !isDemoInbox(own)) return
-            own.add(row)
-            panelAsks.add(row.id)
+            const entry = mcpAsk(context.workspace(), key, "text", Date.now(), context.harness)
+            if (!entry || !isDemoInbox(own)) return
+            own.add(entry)
+            panelAsks.add(entry.id)
           },
         },
         verb(
@@ -870,13 +897,13 @@ export const createDemoStates = (
         ),
         verb(
           "Completes",
-          "Works, then calls done; the done mark stands once you look away, plus an Update row",
+          "Works, then calls done; the done mark stands once you look away, plus an Update entry",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, done: doneReport }),
           verbs,
         ),
         verb(
           "Replies, no done call",
-          "Works, then rests; its program brightens until you look, no Inbox row",
+          "Works, then rests; its program brightens until you look, no Inbox entry",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs }),
           verbs,
         ),
@@ -933,37 +960,37 @@ export const createDemoStates = (
         ),
         verb(
           "Shells, one failed",
-          "Turn over; two shells run on and a third failed: the Shells item's failed row is tinted and offers to tell the agent, and the chat's shell lines show each one's last line",
+          "Turn over; two shells run on and a third failed: the Shells item's failed entry is tinted and offers to tell the agent, and the chat's shell lines show each one's last line",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: failedShells }),
           verbs,
         ),
         verb(
           "Shell ended ok",
-          "Turn over; the only shell exited 0: the Shells item stays, its row muted",
+          "Turn over; the only shell exited 0: the Shells item stays, its entry muted",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [doneShell] }),
           verbs,
         ),
         verb(
           "Shell stopped",
-          "Turn over; the only shell was stopped, with no exit code: the row says stopped, its output empty",
+          "Turn over; the only shell was stopped, with no exit code: the entry says stopped, its output empty",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [stoppedShell] }),
           verbs,
         ),
         verb(
           "Shell output elsewhere",
-          "Turn over; a shell the agent ran where Novadeck can't read its output (Codex: in a terminal of its own): its row says so",
+          "Turn over; a shell the agent ran where Novadeck can't read its output (Codex: in a terminal of its own): its entry says so",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [elsewhereShell] }),
           verbs,
         ),
         verb(
           "Shell output unreadable",
-          "Turn over; a shell whose output file is there and can't be read just now: its row says its output can't be read just now",
+          "Turn over; a shell whose output file is there and can't be read just now: its entry says its output can't be read just now",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [lockedShell] }),
           verbs,
         ),
         verb(
           "Shell just started",
-          "Turn over; a shell that started this moment, with nothing of its output to read: its row says No output yet, and after 5 s that Novadeck can't read it",
+          "Turn over; a shell that started this moment, with nothing of its output to read: its entry says No output yet, and after 5 s that Novadeck can't read it",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [newShell] }),
           verbs,
         ),
@@ -975,7 +1002,7 @@ export const createDemoStates = (
         ),
         verb(
           "Shell output gone",
-          "Turn over; a shell whose output went with the agent's session: its row says it is gone",
+          "Turn over; a shell whose output went with the agent's session: its entry says it is gone",
           (v, k, t) => v.finish(k, t, "completed", { after: turnMs, shells: [clearedShell] }),
           verbs,
         ),
@@ -1005,7 +1032,7 @@ export const createDemoStates = (
         ),
         verb(
           "Rest",
-          "Back at its prompt; answered, nothing running; Inbox rows it wrote stay",
+          "Back at its prompt; answered, nothing running; Inbox entries it wrote stay",
           (v, k, t) => v.rest(k, t),
           verbs,
         ),
@@ -1023,12 +1050,12 @@ export const createDemoStates = (
         ),
         setting(
           "At its startup screen",
-          "The chosen harness held at a trust or update screen: the tab's need mark, no Inbox row",
+          "The chosen harness held at a trust or update screen: the tab's need mark, no Inbox entry",
           (key, { dispatch, harness }) => dispatch(atStartupScreen(key, harness)),
         ),
         setting(
           "At its sign-in screen",
-          "Antigravity held at sign-in: the tab's need mark, no Inbox row",
+          "Antigravity held at sign-in: the tab's need mark, no Inbox entry",
           (key, { dispatch }) => dispatch(atStartupScreen(key, "agy", "sign-in")),
         ),
         setting(
@@ -1074,6 +1101,11 @@ export const createDemoStates = (
     },
     {
       section: "Agents",
+      title: "Chat: shipping permits",
+      actions: permits.actions,
+    },
+    {
+      section: "Agents",
       title: "Chat: pictures of recorded prompts",
       actions: pictures.actions,
     },
@@ -1086,6 +1118,11 @@ export const createDemoStates = (
       section: "Agents",
       title: "Chat: a handle given again",
       actions: mentions.actions,
+    },
+    {
+      section: "Agents",
+      title: "Chat: a newer Novadeck's words",
+      actions: newerChat.actions,
     },
     {
       section: "Agents",
@@ -1106,6 +1143,16 @@ export const createDemoStates = (
           hint: "Connected, with a warning in Preferences",
           run: limitAntigravity,
         },
+        {
+          label: "opencode outdated",
+          hint: "Connected, with an update note in Preferences",
+          run: outdateOpencode,
+        },
+        {
+          label: "opencode 2",
+          hint: "Connected, with a note that only opencode 1 works yet",
+          run: unsupportOpencode,
+        },
       ],
     },
   ]
@@ -1122,10 +1169,23 @@ export const createDemoStates = (
     pickDirectory,
     moveTerminal,
     chat: (conversations) =>
-      emptyChats.wrap(mentions.wrap(pictures.wrap(chat.wrap(conversations)))),
+      emptyChats.wrap(
+        newerChat.wrap(permits.wrap(mentions.wrap(pictures.wrap(chat.wrap(conversations))))),
+      ),
     screens,
     failPaste: (key) => pasteFails.delete(terminalKeyId(key)),
     holds: (key) => held.has(terminalKeyId(key)),
+    took: (key) =>
+      screens.update((all) => {
+        const id = terminalKeyId(key)
+        const state = all.get(id)
+        if (!state?.observed) return all
+        const next = new Map(all)
+        const { observed: _, ...rest } = state
+        if (Object.keys(rest).length > 0) next.set(id, rest)
+        else next.delete(id)
+        return next
+      }),
     restart: (key, dispatch) => {
       verbs.release(key)
       dispatch(backToPrompt(key))

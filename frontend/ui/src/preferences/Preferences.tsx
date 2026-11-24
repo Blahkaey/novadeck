@@ -212,6 +212,7 @@ export const Preferences = ({
   hibernation,
   agentModes,
   agentMode,
+  shippingGate,
   tour = false,
   worktrees,
   forges,
@@ -273,6 +274,12 @@ export const Preferences = ({
   agentMode?: {
     readonly mode: AgentMode
     readonly onChange: (mode: AgentMode) => void
+  }
+  // Whether the shipping gate is on, an Experimental feature the backend keeps; absent where it
+  // has none.
+  shippingGate?: {
+    readonly enabled: boolean
+    readonly onChange: (enabled: boolean) => void
   }
   // Whether the backend has a tour, which the Onboarding tour switch offers from the footer.
   tour?: boolean
@@ -417,7 +424,7 @@ export const Preferences = ({
       id: "onboarding-tour",
       label: "Onboarding tour",
       description: tour
-        ? "Add a Help menu to the footer that offers a short tour: your own agent, on its cheapest model, in a sandbox folder."
+        ? "Add a Help menu to the footer that offers a short tour: your own agent, on its cheapest model, in a sandbox repo."
         : "Not available here.",
       checked: tour && value.onboardingTour,
       onToggle: (onboardingTour: boolean) => onChange({ ...value, onboardingTour }),
@@ -442,6 +449,16 @@ export const Preferences = ({
       checked: agentModes?.enabled ?? false,
       onToggle: (enabled: boolean) => agentModes?.onChange(enabled),
       disabled: !agentModes,
+    },
+    {
+      id: "shipping-gate",
+      label: "Shipping gate",
+      description: shippingGate
+        ? "Claude Code, Codex, Antigravity and opencode may push to a branch that isn't their own, land into another branch, open a PR or merge one only with a permit: your own words typed in that agent's terminal, or your Allow on a card in the chat and the Inbox. Without one the command is refused and the agent is told to ask. Applies to agents started after you turn it on. Antigravity and opencode are gated in every mode but one told to skip all permissions; where Windows' cmd prints before hooks, Antigravity isn't covered and asks you as it always did."
+        : "Not available here.",
+      checked: shippingGate?.enabled ?? false,
+      onToggle: (enabled: boolean) => shippingGate?.onChange(enabled),
+      disabled: !shippingGate,
     },
   ]
   const lastView = value.enabledViews.length === 1

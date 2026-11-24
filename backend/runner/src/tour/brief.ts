@@ -5,43 +5,42 @@ import { tourBriefMark } from "../messaging/messages.js"
 
 /**
  * What the tour's agents are told. The tour folder's own instruction files, which every harness
- * loads as it starts there, hold only `sandboxNote`: the agents the lead opens start in the
- * same folder, and a cheap model follows a script it loads over the message that is its task.
- * The lead's script (`tourBrief`) is sent to it instead, by the doorbell, as Novadeck's first
- * notice to it, for every harness (`Tour.brief`); a teammate's task is the message its lead sends.
+ * loads as it starts there, hold only `sandboxNote`, with the run's agent's rule for the shell
+ * (`shellRule`): all the agents start in the same folder,
+ * and a cheap model follows a script it loads over the message that is its task. The lead's
+ * script (`tourBrief`) is sent to it by the doorbell, as Novadeck's first notice to it, for
+ * every harness (`Tour.brief`); its two teammates' tasks are the messages it sends them
+ * (`modellerTask`, `builderTask`, inside the lead's script), with the person's picks and the
+ * models' names written in by the lead.
+ *
+ * The story they play, in the seed project (`seed.ts`), a blank start for a browser game: the
+ * lead asks the person which game to make (a world and a kind), then asks to run the game's dev
+ * server and, once the person has answered that, shows its page and opens a modeller and a
+ * builder. The modeller makes the
+ * game's three models (glTF, in `models/`) and shows them; the builder writes the game in `src/`
+ * to load them by name and shows its changes. Each puts one question of its own to the person.
+ * Each writes in a worktree of its own, and the dev server lays them all over the page; once
+ * the person keeps the project, the runner brings the work home (`bringHome`).
+ *
+ * Tuned on Codex (Luna, low effort) alone, on the owner's word: the other harnesses run the same
+ * texts untuned.
  */
 
 /** What the tour rings its agent where it has gone quiet at a step (`tour.nudge`). */
 export const nudgeLine =
   "Novadeck's tour is waiting on you: look at what you've done so far and carry on from the next step of the tour brief Novadeck sent you. Don't redo a step."
 
-/**
- * The card the lead makes: its file, and how that file is described to the lead. Changing the
- * card's format is changing this (and the words of the steps that name it).
- */
-export const card = {
-  file: "welcome.svg",
-  // What the lead is told the file is; Novadeck shows an SVG file as an image.
-  form: "an SVG image, 800 by 450, made by filling in the template below and changing nothing else",
-  template: [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">',
-    '<rect width="800" height="450" rx="24" fill="BACKGROUND"/>',
-    '<text x="48" y="110" font-family="FONTS" font-size="40" font-weight="bold" fill="TEXT">Welcome, NAME</text>',
-    '<text x="48" y="180" font-family="FONTS" font-size="26" fill="ACCENT">TAGLINE</text>',
-    '<text x="48" y="250" font-family="FONTS" font-size="20" fill="TEXT">PARAGRAPH LINE 1</text>',
-    '<text x="48" y="285" font-family="FONTS" font-size="20" fill="TEXT">PARAGRAPH LINE 2</text>',
-    '<text x="48" y="320" font-family="FONTS" font-size="20" fill="TEXT">PARAGRAPH LINE 3</text>',
-    "</svg>",
-  ],
-} as const
+/** The seed's places the agents' tasks name. Changing one is changing the task that names it. */
+export const modelsGuide = "models/README.md"
+export const gameEntry = "src/main.js"
 
-// The card's look where the designer's is missing or broken: the lead never waits on it.
-const defaults = {
-  background: "#faf7f2",
-  text: "#1f2328",
-  accent: "#0f766e",
-  fonts: "Georgia, serif",
-} as const
+/** The branches the teammates' worktrees are on. */
+export const branches = { modeller: "models", builder: "game" } as const
+
+/** What the lead's sheet offers, and what it takes where the person dismissed it. */
+export const worlds = ["Fantasy", "Sci-fi", "Modern"] as const
+export const kinds = ["RPG", "Shooter", "Strategy"] as const
+export const defaultPicks = { world: "Fantasy", kind: "RPG" } as const
 
 /** A teammate the lead opens: the agent, and the model and effort it runs on. */
 export type Teammate = {
@@ -50,143 +49,252 @@ export type Teammate = {
   readonly effort?: Effort
 }
 
-/** What changes with each run of the tour, and so with the brief. */
-export type BriefFacts = {
-  /** What to call the person (`pickName`). */
-  readonly name: string
-  readonly copywriter: Teammate
-  readonly designer: Teammate
+/** How the game's dev server is started here, and where its page is. */
+export type Serving = {
+  /** The command line, run in the tour's folder: `node dev.mjs 5173`, say. */
+  readonly command: string
+  /** The page's address: `http://127.0.0.1:5173/`. */
+  readonly url: string
 }
+
+/** What changes with each run of the tour, and so with the lead's brief. */
+export type BriefFacts = {
+  readonly mate: Teammate
+  /** None where this computer has neither Node nor Python to run the dev server with. */
+  readonly serving: Serving | null
+}
+
+/** What is known of the lead once its terminal is: its handle, as agents address it (@fox). */
+export type LeadFacts = BriefFacts & { readonly lead: string }
 
 // The arguments `open_agent` takes for a teammate, as the brief gives them.
 const openArguments = ({ agent, model, effort }: Teammate): string =>
   `agent "${agent}", model "${model}"${effort !== undefined ? `, effort "${effort}"` : ""}`
 
-const copywriterBrief = (name: string): string =>
-  `You are the copywriter in Novadeck's tour, a teammate. Your lead is the agent that sent you
-this message: its handle is the \`from\` of this message. Never write files. Never call
-\`open_agent\`: only your lead opens agents. Be quick: do each step at once, and don't explain,
-plan or confirm in prose before a tool call.
-1. Call \`describe\` with title "Copywriter" and summary "Writes the card's words".
-2. Write two tagline options for a welcome card for ${name}, A and B, of at most 40 characters
-   each, and one short paragraph of two sentences. Then go straight to step 3.
-3. Call \`ask\` with subject "Which tagline for the welcome card?", body "The lead is making a
-   welcome card for ${name}. Which tagline should it carry?" and shape
-   {"type":"options","options":[{"label":"A","summary":"<tagline A>"},{"label":"B","summary":"<tagline B>"}],"recommend":0}.
-4. End your turn with one short sentence. Do not wait in a loop: the person's answer arrives by
-   itself as a message.
-5. When the answer arrives, it names the option the person picked, or holds their own words:
-   use that option's tagline, or their words as the tagline. If you are told the person
-   dismissed the question, use tagline A. A message with no words in it isn't their answer:
-   wait for the one that is. Then call \`send\` once, with \`to\` your lead's handle and
-   \`text\` "Tagline: <the tagline>. Paragraph: <your paragraph>".
-6. Say in one short sentence at most that you sent it, and stop.
-The designer may send you the look (colours and fonts) meanwhile: read it, send nothing, and end
-your turn again. Only the person's answer moves you on to step 5.`
+/**
+ * What an agent is told of the shell, by its harness. Claude Code and Antigravity read and write
+ * files with tools of their own, and a shell command of theirs would stop to ask the person, so
+ * they run none. Codex reads files only through its shell (a read needs no approval in its
+ * sandbox), so it is told to use the shell for reading and nothing else: told to run no
+ * command at all, it can't read the file it is to change (probed 2026-11-22, 0.171.0: the
+ * sculptor showed the guide instead of reading it, and the lead asked the person for the
+ * config's text).
+ */
+export const shellRule = (agent: AgentName): string =>
+  agent === "codex"
+    ? "Use shell commands only to read files (cat, ls): never to change, build, install or run anything."
+    : "Run no shell command."
 
-const designerBrief = (name: string): string =>
-  `You are the designer in Novadeck's tour, a teammate. Your lead is the agent that sent you this
-message: its handle is the \`from\` of this message. Never write files. Never call
-\`open_agent\`: only your lead opens agents. Be quick: do each step at once, and don't explain,
-plan or confirm in prose before a tool call.
-1. Call \`describe\` with title "Designer" and summary "Picks the card's look".
-2. Pick the look of a welcome card for ${name} in one go, with no deliberating: three colours as
-   hex codes (background, text and accent, with the text easy to read on the background), and a
-   font stack with no double quotes. Then go straight to step 3.
-3. Call \`send\` with \`to\` COPYWRITER and \`text\` "Look: background <hex>; text <hex>; accent <hex>;
-   fonts <stack>".
-4. Call \`send\` with \`to\` your lead's handle and the same \`text\`.
-5. Say in one short sentence at most that you sent it, and stop.`
+// What every agent's task says of how to work.
+const manners = (agent: AgentName): string =>
+  `${shellRule(agent)} Never call \`open_agent\` or run git, never read vendor/, never use the person's name. Do each step at once, with no prose before a tool call.`
+
+// What a teammate's task says of its team, the picks and the models, which the lead fills in:
+// each [[name]] is a value the lead writes in before it sends the task.
+const picks = (lead: string): string => `${lead} leads you. This repo is a blank browser game
+(README.md). The person picked a [[world]] [[kind]] game. Its characters, enemies and units are
+glTF models in models/: [[one]].gltf (the player), [[two]].gltf (an enemy) and [[three]].gltf.`
+
+// The tools a teammate is told to load.
+const tools = `If Novadeck's tools (\`describe\`, \`open_worktree\`, \`show\`, \`ask\`, \`send\`) are
+deferred, load them first.`
+
+// A teammate's one question to the person, then the wait for the answer.
+const question = (
+  about: string,
+): string => `Call \`ask\` once: one short question about ${about}, yours to
+   choose, as subject, a one-line body, shape {"type":"options","options":[{"label":"..."},
+   {"label":"..."}]} with two or three answers. End your turn with one
+   sentence: the answer comes as a message.`
+
+// What a teammate does with the person's answer.
+const answer = "The answer is their pick or their own words; dismissed, you decide."
+
+/**
+ * The modeller's task, the message its lead sends it: the game's three models, in a worktree of
+ * its own, the first shown as soon as it exists, with one question to the person about them.
+ * `lead` is the lead's handle, the one address `send` takes (never a terminal id).
+ */
+export const modellerTask = (
+  lead: string,
+  agent: AgentName,
+): string => `You are Modeller, a teammate in Novadeck's tour. ${picks(lead)} You make them;
+Builder writes the game. ${tools} ${manners(agent)}
+1. Call \`describe\` with title "Modeller" and summary "Makes the game's 3D models".
+2. Call \`open_worktree\` with branch "${branches.modeller}". Its result names the worktree's folder.
+   Work only there, by absolute path, never in your own folder.
+3. Read ${modelsGuide} there: it says how to make a model.
+4. Make models/[[one]].gltf there as it says. Then call
+   \`show\` with \`file\` {"path": "<that file's absolute path>"} and \`open\` true.
+5. ${question("the look of the game's characters")}
+6. ${answer} Make models/[[two]].gltf and
+   models/[[three]].gltf, following it, and \`show\` each as in step 4.
+7. Call \`send\` with \`to\` "${lead}" (its handle, never an id) and \`text\` "Models done."
+8. Say in one short sentence at most that it is done, and stop.`
+
+/**
+ * The builder's task, the message its lead sends it: the game, in `src/` of a worktree of its
+ * own, loading the modeller's models by name, its changes shown, then one question to the
+ * person and that change made.
+ */
+export const builderTask = (
+  lead: string,
+  agent: AgentName,
+): string => `You are Builder, a teammate in Novadeck's tour. ${picks(lead)} Modeller
+makes them; until one exists, the placeholder shows in its place. ${tools} ${manners(agent)}
+1. Call \`describe\` with title "Builder" and summary "Writes the game".
+2. Call \`open_worktree\` with branch "${branches.builder}". Its result names the worktree's folder.
+   Work only there, by absolute path, never in your own folder.
+3. Read README.md, ${gameEntry} and src/models.js there.
+4. Write the game in src/ there, from ${gameEntry}, in one go: small and playable, its goal
+   and controls on screen, a way to win or lose. Load the three models with src/models.js
+   (\`loadModel("[[one]]")\` in 3D, \`modelPicture("[[one]]")\` in 2D). Under 400 lines.
+   Change nothing in models/, index.html or vendor/.
+5. Call \`show\` with \`changes\` {"path": "<your worktree's folder>"} and \`open\` true.
+6. ${question("what the game should get next")}
+7. ${answer} Make that change in src/ there, and \`show\` the changes again.
+8. Call \`send\` with \`to\` "${lead}" (its handle, never an id) and \`text\` "Game done."
+9. Say in one short sentence at most that it is done, and stop.`
 
 /**
  * The folder's own instructions, which every harness loads: the sandbox's rules and no role or
  * step, so an agent opened there does the task it was given and nothing else.
  */
-export const sandboxNote = `# Novadeck tour sandbox
+export const sandboxNote = (agent: AgentName): string => `# Novadeck tour sandbox
 
-Novadeck made this folder for its tour and empties it each time the tour starts. Work only in
-this folder: don't read or change anything outside it, don't install anything, and don't run git.
-If you were given a task, do only that task.
+Novadeck made this repo for its tour: a blank start for a small browser game (README.md). Work
+only in this repo and in its worktrees under ~/.novadeck/worktrees: don't read or change
+anything outside them, don't install anything, never run git, and never read anything in
+vendor/ (two large libraries). ${shellRule(agent)} If you were given a task, do only that task.
 `
 
-/** The lead's script for a run, with the person's name and the teammates' models. */
+/**
+ * The folder's instructions once the person keeps the project (\`Tour.keep\`): the tour's rules
+ * are gone, and what is left says what the project is.
+ */
+export const projectNote = `# Your game
+
+A small browser game that Novadeck's tour built: see README.md for what is where and how to run
+it. Every character, enemy and unit is a glTF model in models/ (${modelsGuide} says how to make
+one), and the game is in src/. three.js and Phaser are files in vendor/, which is large: don't
+read it.
+`
+
+/** What the lead is rung once the tour is over and the project is the person's: the tour's rules no longer hold. */
+export const keptLine = `Novadeck's tour is over, and this project is now the person's to build on. The tour brief's rules and steps no longer apply: from now on work as you normally would, on whatever the person asks. Novadeck committed the team's work on main in this folder ("The team's game"), and its worktrees hold nothing more.`
+
+// How the lead names the game's models, which its team's tasks take, then runs its turn on to
+// the team: `verb` is the sentence's first word.
+const names = (
+  verb: string,
+) => `${verb} three lowercase one-word names for the game's models, fitting the picks: the player,
+   an enemy, and one thing more (a unit, a building or an item), as knight, goblin, chest.
+   From here your turn runs to the second \`open_agent\`: no sentence, no end of turn before it.`
+
+// The lead's steps from the person's answer to its team: where this computer can run the dev
+// server, it asks to run it first and opens its team only once the person has answered that, so
+// the approval has the screen to itself and the page is live before the team is hired.
+const teamSteps = (mate: Teammate, lead: string, serving: Serving | null): string => {
+  const first = serving ? 5 : 4
+  const opening = `${first}. Call \`open_agent\` with ${openArguments(mate)}, and as \`message\` this text, each [[name]]
+   replaced: [[world]] and [[kind]] by the picks, [[one]], [[two]], [[three]] by the names:
+
+${indent(modellerTask(lead, mate.agent))}
+
+${first + 1}. Call \`open_agent\` again with ${openArguments(mate)}, and as \`message\` this text, replaced
+   the same way:
+
+${indent(builderTask(lead, mate.agent))}
+
+${first + 2}. Say in one sentence that the team is at work, and end your turn.`
+  if (!serving)
+    return `3. ${answerLine}
+   ${names("Pick")}
+${opening}`
+  return `3. ${answerLine}
+   Call \`open_terminal\` with \`command\` "${serving.command}" and \`title\` "Game server". Then say
+   in one sentence that the game starts once the person approves it, and end your turn.
+4. When Novadeck says the command started, call \`show\` with \`page\` {"url": "${serving.url}"}
+   and \`open\` true; if it says anything else, don't ask again. Then
+   ${names("pick")}
+${opening}`
+}
+
+// How the lead takes the person's answer to its sheet.
+const answerLine = `The answer arrives as a message: the world and the kind picked, or the person's own words.
+   If they dismissed it, take ${defaultPicks.world} and ${defaultPicks.kind}. A message with no words isn't the answer.`
+
+// The lead's sheet: the world and the kind, as `ask`'s questions shape.
+const sheet = JSON.stringify({
+  type: "questions",
+  questions: [
+    {
+      header: "The world",
+      question: "Where is your game set?",
+      options: worlds.map((label) => ({ label })),
+    },
+    {
+      header: "The kind",
+      question: "What kind of game is it?",
+      options: kinds.map((label) => ({ label })),
+    },
+  ],
+})
+
+/** The lead's script for a run, with its teammates' model. */
 export const tourBrief = ({
-  name,
-  copywriter,
-  designer,
-}: BriefFacts): string => `${tourBriefMark} The person just started the tour to see how Novadeck
-works with agents, and this is your task now: you are the lead agent. This folder is a sandbox
-Novadeck made for it, and Novadeck empties it each time the tour starts.
+  mate,
+  serving,
+  lead,
+}: LeadFacts): string => `${tourBriefMark} The person just started the tour to see how Novadeck
+works with agents. Your task now: lead a small team that builds the browser game the person
+chooses, in a sandbox repo Novadeck made for the tour: a blank start (README.md).
 
 ## Rules
 
-- Work only in this folder. Don't read or change anything outside it.
-- Don't install anything, and don't run git. Run no shell command at all: you need none, as
-  these steps only have you call Novadeck's tools and write one file.
-- Keep every reply to one or two short sentences: the person is watching Novadeck, not reading.
-- Be quick: the whole tour should take about 2 minutes. Say nothing between steps beyond the
-  one-sentence greeting and the final line, and don't explain, plan or confirm in prose.
-- Novadeck's own tools (\`describe\`, \`open_agent\`, \`send\`, \`ask\`, \`show\`) are how you
-  work here. They run without asking.
-- Only you, the lead, write files here. Your teammates never do.
-- Never answer your teammates' questions to the person yourself: the person chooses.
-- Do the steps in order, one at a time. Don't skip one and don't add one.
-
-## The task
-
-Make a one-page welcome card for ${name}, with two teammates: a copywriter and a designer.
+- ${shellRule(mate.agent)} Install nothing, run no git, never read vendor/.
+- Be quick: the person is watching. Say only the sentences the steps ask for.
+- Novadeck's tools (\`describe\`, \`ask\`, \`open_agent\`, \`open_terminal\`, \`show\`, \`send\`)
+  need no permission of yours; if they're deferred, load all six in one go before step 1.
+- Write no code and make no model: your teammates do. Never answer their questions to the
+  person. Call \`show\` only where a step says to. Never use the person's name: say "you".
+- Do the steps in order, none skipped or added. Never poll or wait in a loop: messages wake you.
 
 ## Steps
 
-1. Call \`describe\` with the title "Tour lead" and the summary "Leads Novadeck's tour".
-2. Greet the person in one sentence: you are their own agent, running in a sandbox, and the
-   tour has begun.
-3. Call \`open_agent\` with ${openArguments(copywriter)}, and as \`message\` exactly this text:
+1. Call \`describe\` with the title "Game lead" and the summary "Leads the team building your game".
+2. Call \`ask\` with subject "Which game shall we build?", body "Pick a world and a kind, or
+   write your own: a small team of agents builds it." and shape
+   ${sheet}
+   Then say in one sentence that you're their own agent and your team builds what they pick,
+   and end your turn.
+${teamSteps(mate, lead, serving)}
 
-${indent(copywriterBrief(name))}
+## Messages
 
-   The result names the new terminal's handle, like @fox. It is the copywriter's.
-4. Call \`open_agent\` with ${openArguments(designer)}, and as \`message\` exactly this text, with
-   COPYWRITER replaced by the copywriter's handle from step 3:
+After that, whenever a message arrives, do what fits it, then end your turn:
 
-${indent(designerBrief(name))}
-
-5. End your turn with one short sentence, such as "The team is working." Don't poll: your
-   teammates' messages arrive by themselves, and each wakes you.
-6. The designer sends you the look, and the copywriter the chosen tagline and a paragraph. Wait
-   until you have both.
-7. Write \`${card.file}\` in this folder: ${card.form}. Replace BACKGROUND, TEXT, ACCENT and FONTS
-   with the designer's values, NAME with "${name}", TAGLINE with the chosen tagline, and
-   PARAGRAPH LINE 1 to 3 with the copywriter's paragraph cut into at most 3 lines of about 60
-   characters each (drop the lines you don't need). So the file stays valid and fits:
-   - In everything you put in, replace "&" with "and", and drop "<", ">" and '"'.
-   - A colour that isn't "#" and 3 or 6 hex digits, or one the designer never sent, is
-     ${defaults.background} for BACKGROUND, ${defaults.text} for TEXT and ${defaults.accent} for ACCENT; missing fonts are ${defaults.fonts}.
-   - A tagline longer than 40 characters is cut at a word, to 40 at most.
-   The template:
-
-${card.template.map((line) => `       ${line}`).join("\n")}
-
-8. Call \`show\` with \`file\` {"path":"${card.file}"} and \`open\` true.
-9. Say in one sentence that the card is ready, and stop.
+- A teammate asks you something: answer it with \`send\` to its handle, in one sentence.
+- A teammate is done: one short sentence at most; once both are, say the game is ready to play.
 `
 
 const indent = (text: string): string =>
   text
     .split("\n")
-    .map((line) => `   > ${line}`)
+    .map((line) => `> ${line}`)
     .join("\n")
 
 /**
- * The files the tour's folder starts with, by name: the sandbox's rules, which every harness
- * loads and which hold no role and no step, and a Claude Code project file. The lead's
- * script is `tourBrief`, rung to it.
+ * The files the tour writes beside the seed project, by name: the sandbox's rules, which every
+ * harness loads and which hold no role and no step, and a Claude Code project file. The folder
+ * is made a git repo around them and the seed (`commitSandbox`).
  */
-export const briefFiles: Readonly<Record<string, string>> = {
-  "AGENTS.md": sandboxNote,
+export const briefFiles = (agent: AgentName): Readonly<Record<string, string>> => ({
+  "AGENTS.md": sandboxNote(agent),
   "CLAUDE.md": "@AGENTS.md\n",
   // Claude Code's project settings for this folder: its teammates, which are given no launch
-  // flags, take edits unasked too, and a plan mode the person's own settings start them in
-  // doesn't hold them (project settings outrank the user's). Only the tour folder's own file.
+  // flags by anything but the tour, take edits unasked too, and a plan mode the person's own
+  // settings start them in doesn't hold them (project settings outrank the user's). Only the
+  // tour folder's own file, removed once the person keeps the project.
   ".claude/settings.json": '{"permissions":{"defaultMode":"acceptEdits"}}\n',
-}
+})

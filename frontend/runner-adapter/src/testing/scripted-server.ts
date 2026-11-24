@@ -2,7 +2,7 @@ import type { ThemeSource } from "@novadeck/core/port"
 import type { CanvasLayout } from "@novadeck/core/types"
 import {
   contract,
-  protocolVersion,
+  compatibility,
   type TerminalChange,
   type TerminalEvent,
   type TerminalSummary,
@@ -150,7 +150,10 @@ export const scriptedRunner = ({
   }
   const router = api.router({
     wire: {
-      handshake: api.wire.handshake.handler(() => ({ epoch: id(99), protocolVersion })),
+      handshake: api.wire.handshake.handler(() => ({
+        epoch: id(99),
+        protocolVersion: compatibility.revision,
+      })),
     },
     projects: {
       list: api.projects.list.handler(() => [
@@ -159,6 +162,7 @@ export const scriptedRunner = ({
       create: api.projects.create.handler(unplayed("projects.create")),
       rename: api.projects.rename.handler(unplayed("projects.rename")),
       arrange: api.projects.arrange.handler(() => {}),
+      watch: api.projects.watch.handler(idle),
       remove: api.projects.remove.handler(unplayed("projects.remove")),
       folder: api.projects.folder.handler(unplayed("projects.folder")),
       filesExclude: api.projects.filesExclude.handler(unplayed("projects.filesExclude")),
@@ -181,6 +185,8 @@ export const scriptedRunner = ({
       arrange: api.sessions.arrange.handler(() => {}),
       remove: api.sessions.remove.handler(unplayed("sessions.remove")),
       save: api.sessions.save.handler(() => {}),
+      change: api.sessions.change.handler(() => ({ revision: 1 })),
+      watch: api.sessions.watch.handler(idle),
     },
     terminals: {
       list: api.terminals.list.handler(() => [...summaries.values()]),
@@ -192,6 +198,7 @@ export const scriptedRunner = ({
       release: api.terminals.release.handler(unplayed("terminals.release")),
       move: api.terminals.move.handler(unplayed("terminals.move")),
       active: api.terminals.active.handler(() => {}),
+      showing: api.terminals.showing.handler(() => {}),
       seen: api.terminals.seen.handler(() => {}),
       watch: api.terminals.watch.handler(async function* ({ signal }) {
         const changes = channel<TerminalChange>()
@@ -261,6 +268,13 @@ export const scriptedRunner = ({
         })
       }),
       ack: api.terminals.ack.handler(() => {}),
+      // No other client attaches in a script: it controls every terminal it attaches to, and
+      // hears no news of control.
+      take: api.terminals.take.handler(() => {}),
+      controls: api.terminals.controls.handler(async function* ({ signal }) {
+        await nextOrAbort(new Promise<never>(() => {}), signal)
+        yield* []
+      }),
       // As the runner does: a terminal it has goes, and watchers hear of it; one it doesn't
       // is not found.
       close: api.terminals.close.handler(({ input: { terminalId } }) => {
@@ -270,7 +284,14 @@ export const scriptedRunner = ({
       rename: api.terminals.rename.handler(unplayed("terminals.rename")),
       resetTitle: api.terminals.resetTitle.handler(unplayed("terminals.resetTitle")),
       busy: api.terminals.busy.handler(() => ({ busy: [], unknown: [] })),
-      upload: api.terminals.upload.handler(unplayed("terminals.upload")),
+      // As the runner does: a file starts by its name, in a folder of its own, and its later
+      // parts add to it; the script keeps only the names.
+      upload: api.terminals.upload.handler(({ input: { terminalId, name, path } }) => {
+        if (path !== undefined) return { path }
+        const saved = `/uploads/${(uploads.length + 1).toString()}/${name!}`
+        uploads.push({ terminalId, path: saved })
+        return { path: saved }
+      }),
       restart: api.terminals.restart.handler(unplayed("terminals.restart")),
     },
     agents: {
@@ -284,6 +305,7 @@ export const scriptedRunner = ({
       prompt: api.agents.prompt.handler(unplayed("agents.prompt")),
       answer: api.agents.answer.handler(unplayed("agents.answer")),
       saveDialog: api.agents.saveDialog.handler(unplayed("agents.saveDialog")),
+      takeBack: api.agents.takeBack.handler(unplayed("agents.takeBack")),
       interrupt: api.agents.interrupt.handler(unplayed("agents.interrupt")),
       keys: api.agents.keys.handler(unplayed("agents.keys")),
       takeBox: api.agents.takeBox.handler(unplayed("agents.takeBox")),
@@ -347,6 +369,7 @@ export const scriptedRunner = ({
       list: api.inbox.list.handler(unplayed("inbox.list")),
       watch: api.inbox.watch.handler(idle),
       answer: api.inbox.answer.handler(unplayed("inbox.answer")),
+      answerQuestions: api.inbox.answerQuestions.handler(unplayed("inbox.answerQuestions")),
       read: api.inbox.read.handler(unplayed("inbox.read")),
       dismiss: api.inbox.dismiss.handler(unplayed("inbox.dismiss")),
       clear: api.inbox.clear.handler(unplayed("inbox.clear")),
@@ -358,6 +381,7 @@ export const scriptedRunner = ({
     },
     messages: {
       list: api.messages.list.handler(unplayed("messages.list")),
+      rings: api.messages.rings.handler(unplayed("messages.rings")),
       watch: api.messages.watch.handler(idle),
       pause: api.messages.pause.handler(unplayed("messages.pause")),
       release: api.messages.release.handler(unplayed("messages.release")),
@@ -381,10 +405,17 @@ export const scriptedRunner = ({
       set: api.murmur.set.handler(unplayed("murmur.set")),
       noteOffered: api.murmur.noteOffered.handler(unplayed("murmur.noteOffered")),
     },
+    devices: {
+      mint: api.devices.mint.handler(unplayed("devices.mint")),
+      list: api.devices.list.handler(() => []),
+      revoke: api.devices.revoke.handler(unplayed("devices.revoke")),
+    },
     tour: {
       prepare: api.tour.prepare.handler(unplayed("tour.prepare")),
       brief: api.tour.brief.handler(unplayed("tour.brief")),
       nudge: api.tour.nudge.handler(unplayed("tour.nudge")),
+      artist: api.tour.artist.handler(unplayed("tour.artist")),
+      keep: api.tour.keep.handler(unplayed("tour.keep")),
     },
     settings: {
       get: api.settings.get.handler(() => ({
@@ -397,13 +428,22 @@ export const scriptedRunner = ({
         hibernateAfterMinutes: 60,
         agentModes: false,
         agentMode: "herd",
+        shippingGate: false,
         worktrees: false,
       })),
       set: api.settings.set.handler(() => {}),
+      watch: api.settings.watch.handler(idle),
+    },
+    preferences: {
+      get: api.preferences.get.handler(() => ({ values: {}, revision: 0, writer: null })),
+      set: api.preferences.set.handler(unplayed("preferences.set")),
+      watch: api.preferences.watch.handler(idle),
     },
   })
   // What the app typed into the terminals.
   const typed: { terminalId: string; data: string }[] = []
+  // The files the app saved on the runner, in order, and where.
+  const uploads: { terminalId: string; path: string }[] = []
   let connections = 0
   const connect = (signal: AbortSignal, theme: ThemeSource) => {
     const [server, client] = memoryPorts()
@@ -444,6 +484,8 @@ export const scriptedRunner = ({
     written: () => written,
     // What the app typed into the terminals, in order.
     typed: (): readonly { readonly terminalId: string; readonly data: string }[] => typed,
+    // The files the app saved on the runner, in order, and where.
+    uploads: (): readonly { readonly terminalId: string; readonly path: string }[] => uploads,
     // How many terminals' streams are attached now.
     streaming: () => streaming,
     // How many streams have attached, over the runner's life.

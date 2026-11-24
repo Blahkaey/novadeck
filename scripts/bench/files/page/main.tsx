@@ -158,7 +158,7 @@ const Harness = (): React.JSX.Element => {
         roster={roster}
         squads={squads}
         active
-        visible
+        showing
         onHide={noop}
       />
     </div>

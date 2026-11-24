@@ -30,10 +30,11 @@ const open = (answer: () => Promise<void> = async () => {}, ready = async () => 
   const visits: (number | null)[] = []
   let latest: Workspace | undefined
   const saves = createSessionSaves({
-    save: (sessionId, _state, visitedAt) => {
+    save: async (sessionId, _state, visitedAt) => {
       sent.push(sessionId)
       visits.push(visitedAt)
-      return answer()
+      await answer()
+      return undefined
     },
     ready: () => ready(),
     latest: () => latest,
@@ -51,6 +52,26 @@ const open = (answer: () => Promise<void> = async () => {}, ready = async () => 
 
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
+
+describe("the session a window shows in a project", () => {
+  it("is kept under the window's key as it changes, and from the first workspace", () => {
+    const key = "0b0f6a5e-1c3d-4e8f-9a7b-2d4c6e8f0a1b"
+    vi.stubGlobal("novadeck", { windowKey: key })
+    const { commit } = open()
+    const workspace = workspaceFixture()
+    const project = workspace.projects[0]!
+    const entry = `novadeck:window-session:${key}:${project.id}`
+    commit(workspace)
+    expect(localStorage.getItem(entry)).toBe(project.activeSessionId)
+    commit({
+      ...workspace,
+      projects: [{ ...project, activeSessionId: "other" }, ...workspace.projects.slice(1)],
+    })
+    expect(localStorage.getItem(entry)).toBe("other")
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  })
+})
 
 describe("session saves", () => {
   context("when the workspace first arrives", () => {

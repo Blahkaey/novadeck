@@ -8,15 +8,17 @@ import {
   type WorkChange,
   type WorkMade,
   type ItemContent,
+  maxClientStateLength,
 } from "@novadeck/protocol"
 import { TerminalError } from "@novadeck/terminal"
-import type { SessionContext } from "@novadeck/wire/server"
+import { dropUnknownKeys, type SessionContext } from "@novadeck/wire/server"
 import { implement, ORPCError } from "@orpc/server"
 
 import { savePlan } from "./companions/content.js"
 import { refuseMoved } from "./companions/editing.js"
 import type { CompanionItems } from "./companions/items.js"
 import { planSaveFolders } from "./companions/plan-folders.js"
+import type { Devices } from "./devices/devices.js"
 import { DomainError } from "./errors.js"
 import type { Forges } from "./forges/service.js"
 import type { Harnesses } from "./harnesses/service.js"
@@ -24,7 +26,9 @@ import type { History } from "./history.js"
 import { logs } from "./log.js"
 import type { Feedback } from "./messaging/feedback.js"
 import type { Murmur } from "./murmur/service.js"
+import type { Shipping } from "./shipping/service.js"
 import type { ActiveTerminals } from "./terminals/active.js"
+import type { ClientWindows } from "./terminals/client-windows.js"
 import type { Terminals } from "./terminals/index.js"
 import type { SeenTerminals } from "./terminals/seen.js"
 import type { Uploads } from "./terminals/uploads.js"
@@ -36,14 +40,32 @@ import type { FileImports } from "./workspaces/file-imports.js"
 import { filesExcludeOf, saveFilesExclude } from "./workspaces/files-exclude.js"
 import { browseFolder, listFolder } from "./workspaces/folder.js"
 import type { Notes } from "./workspaces/notes.js"
+import { keptPreferences } from "./workspaces/preferences.js"
+import type { Preferences } from "./workspaces/preferences.js"
 import type { Projects } from "./workspaces/projects.js"
+import { SettingsFeed } from "./workspaces/settings-feed.js"
 import type { WorkspaceStore } from "./workspaces/store.js"
 import type { MainCheckouts } from "./worktrees/main-checkout.js"
 
 const log = logs.for("router")
 
-// The wire serves its own handshake; the runner serves the rest of the contract.
-const { wire: _, ...served } = contract
+// Each unknown key told of once per procedure: a newer client sends it on every call.
+const told = new Set<string>()
+
+// The wire serves its own handshake; the runner serves the rest of the contract. A newer UI
+// may send a field this runner doesn't know: it is dropped before the handler runs, so the
+// field must be one an older runner may ignore (docs/backend-api.md, "Versions"). The
+// contract's own schemas, which the runner also parses agents' tool arguments with, stay strict.
+const { wire: _, ...contracted } = contract
+const served = dropUnknownKeys(contracted, (procedure, keys) => {
+  const path = procedure.join(".")
+  const fresh = keys.filter((key) => !told.has(`${path}:${key}`))
+  if (fresh.length === 0) return
+  for (const key of fresh) told.add(`${path}:${key}`)
+  log.info("rpc.dropped", "A client sent fields this runner doesn't know; they were dropped.", {
+    data: { path, keys: fresh.join(",") },
+  })
+})
 
 /** The runner's failures as the contract's errors, which its clients see. */
 export const apiError = (error: unknown): unknown => {
@@ -110,13 +132,28 @@ const noCheckouts = {
   update: () => Promise.resolve({ ok: false as const, said: "There is nothing to update." }),
 }
 
-const noTour: Pick<Tour, "prepare" | "brief" | "nudge"> = {
+const noTour: Pick<Tour, "prepare" | "brief" | "nudge" | "artist" | "keep"> = {
   prepare: () => Promise.reject(new DomainError("CONFLICT", "No tour is offered.")),
   brief: () => {
     throw new DomainError("CONFLICT", "No tour is offered.")
   },
   nudge: () => {
     throw new DomainError("CONFLICT", "No tour is offered.")
+  },
+  artist: () => {
+    throw new DomainError("CONFLICT", "No tour is offered.")
+  },
+  keep: () => Promise.reject(new DomainError("CONFLICT", "No tour is offered.")),
+}
+
+// What a router without devices answers: none, and none can be added.
+const noDevices: Pick<Devices, "mint" | "list" | "revoke"> = {
+  mint: () => {
+    throw new DomainError("CONFLICT", "This runner keeps no devices.")
+  },
+  list: () => [],
+  revoke: () => {
+    throw new DomainError("NOT_FOUND", "The runner has no such device.")
   },
 }
 
@@ -151,12 +188,22 @@ export const createRouter = (options: {
   closing: () => boolean
   /** Which terminals the people at the clients use; without it, reports of them are ignored. */
   activity?: Pick<ActiveTerminals, "report">
+  /** Which project each client shows; without it, reports of it are ignored. */
+  clients?: Pick<ClientWindows, "report" | "touch" | "active">
   /** Which terminals the clients have in sight; without it, reports of them are ignored. */
   seen?: Pick<SeenTerminals, "report">
   /** The runner settings were saved. */
   settingsSaved?: () => void
+  /** The shipping gate was switched on or off by a settings change. */
+  shippingSwitched?: () => void
+  /** The shipping gate, whose standing permits the person takes back; without it, none stand. */
+  shipping?: Pick<Shipping, "takeBack">
   /** Novadeck's tour; without it, starting one is a CONFLICT. */
   tour?: Tour
+  /** The person's preferences; without it, kept in `store`'s settings. */
+  preferences?: Preferences
+  /** The devices with credentials of their own; without it there are none, and none can be added. */
+  devices?: Devices
 }) => {
   const { store, terminals, feedback, projects, items, agents, uploads, voice, murmur } = options
   const history = options.history ?? noHistory
@@ -164,7 +211,8 @@ export const createRouter = (options: {
   const { notes } = options
   const checkouts = options.checkouts ?? noCheckouts
   const forges = options.forges ?? noForges
-  const tour: Pick<Tour, "prepare" | "brief" | "nudge"> = options.tour ?? noTour
+  const tour: Pick<Tour, "prepare" | "brief" | "nudge" | "artist" | "keep"> = options.tour ?? noTour
+  const devices: Pick<Devices, "mint" | "list" | "revoke"> = options.devices ?? noDevices
   // A plan's content says whether Novadeck's plugin is installed into its agent, which the
   // companions can't know: it is looked up as the content leaves.
   const withSkill = async (content: ItemContent, agent: AgentName | undefined) =>
@@ -174,14 +222,29 @@ export const createRouter = (options: {
   // The save of each plan or file under way, which the next waits for.
   const saving = new Map<string, Promise<void>>()
   const api = implement(served).$context<SessionContext>()
+  // The projects' and sessions' changes, for clients that share them.
+  const { projectFeed, sessionFeed } = projects
+  // The person's settings and preferences as they change, for every device they use.
+  const runnerSettings = async () => ({
+    ...store.settings.runner(),
+    transcriptsAvailable: await options.transcriptsAvailable(),
+  })
+  const settingsFeed = new SettingsFeed(runnerSettings)
+  const preferences = options.preferences ?? keptPreferences(store.settings)
 
   return api.router({
     projects: {
       list: api.projects.list.handler(() => projects.list()),
-      create: api.projects.create.handler(({ input }) =>
-        store.createProject({ ...input, cwd: input.cwd ?? homedir() }),
-      ),
-      rename: api.projects.rename.handler(({ input }) => store.renameProject(input)),
+      create: api.projects.create.handler(async ({ input }) => {
+        const made = await store.createProject({ ...input, cwd: input.cwd ?? homedir() })
+        projectFeed.changed()
+        return made
+      }),
+      rename: api.projects.rename.handler(({ input }) => {
+        const renamed = store.renameProject(input)
+        projectFeed.changed()
+        return renamed
+      }),
       arrange: api.projects.arrange.handler(({ input }) =>
         projects.arrange(input.order, input.pinned),
       ),
@@ -194,6 +257,9 @@ export const createRouter = (options: {
         projects.ensureNotRemoving(input.projectId)
         return listFolder(store.project(input.projectId).cwd, input.folder)
       }),
+      watch: api.projects.watch.handler(({ signal }) =>
+        projectFeed.watch(signal ?? new AbortController().signal),
+      ),
       filesExclude: api.projects.filesExclude.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
         return filesExcludeOf(store, input.projectId)
@@ -239,19 +305,42 @@ export const createRouter = (options: {
       list: api.sessions.list.handler(({ input }) => projects.sessions(input.projectId)),
       create: api.sessions.create.handler(({ input }) => {
         projects.ensureNotRemoving(input.projectId)
-        return store.createSession(input)
+        const made = store.createSession(input)
+        sessionFeed.changed(made.id)
+        return made
       }),
-      rename: api.sessions.rename.handler(({ input }) => store.renameSession(input)),
-      arrange: api.sessions.arrange.handler(({ input }) =>
-        projects.arrangeSessions(input.projectId, input.order),
-      ),
-      remove: api.sessions.remove.handler(({ input }) => projects.removeSession(input.sessionId)),
+      rename: api.sessions.rename.handler(({ input }) => {
+        const renamed = store.renameSession(input)
+        sessionFeed.changed(renamed.id)
+        return renamed
+      }),
+      arrange: api.sessions.arrange.handler(({ input }) => {
+        projects.arrangeSessions(input.projectId, input.order)
+      }),
+      remove: api.sessions.remove.handler(async ({ input }) => {
+        await projects.removeSession(input.sessionId)
+      }),
       save: api.sessions.save.handler(({ input }) => {
         // Shells exiting during shutdown would otherwise overwrite the last state saved
         // before it with one where nothing runs.
         if (options.closing()) throw new DomainError("CLOSING")
         store.saveSession(input)
+        sessionFeed.changed(input.sessionId)
       }),
+      change: api.sessions.change.handler(({ input }) => {
+        if (options.closing()) throw new DomainError("CLOSING")
+        const revision = store.changeSession({
+          sessionId: input.sessionId,
+          patch: input.patch,
+          visitedAt: input.visitedAt,
+          maxLength: maxClientStateLength,
+        })
+        sessionFeed.changed(input.sessionId, { writer: input.writer, base: input.base })
+        return { revision }
+      }),
+      watch: api.sessions.watch.handler(({ signal }) =>
+        sessionFeed.watch(signal ?? new AbortController().signal),
+      ),
     },
     terminals: {
       list: api.terminals.list.handler(({ input }) => {
@@ -295,8 +384,18 @@ export const createRouter = (options: {
           signal,
         ),
       ),
-      active: api.terminals.active.handler(({ input, context }) =>
-        options.activity?.report(context.session.id, input.terminalId),
+      take: api.terminals.take.handler(({ input, context }) =>
+        terminals.controls.take(input, context.session.id),
+      ),
+      controls: api.terminals.controls.handler(({ context, signal }) =>
+        terminals.controls.follow(context.session.id, signal),
+      ),
+      active: api.terminals.active.handler(({ input, context }) => {
+        options.clients?.active(context.session.id, input.terminalId)
+        options.activity?.report(context.session.id, input.terminalId)
+      }),
+      showing: api.terminals.showing.handler(({ input, context }) =>
+        options.clients?.report(context.session.id, input.projectId),
       ),
       seen: api.terminals.seen.handler(({ input, context }) =>
         options.seen?.report(context.session.id, input.terminalIds),
@@ -346,8 +445,16 @@ export const createRouter = (options: {
       takeBox: api.agents.takeBox.handler(({ input }) => terminals.takeBox(input.terminalId)),
       putBox: api.agents.putBox.handler(({ input }) => terminals.putBox(input)),
       clearBox: api.agents.clearBox.handler(({ input }) => terminals.clearBox(input)),
-      answer: api.agents.answer.handler(({ input }) => terminals.answer(input)),
+      answer: api.agents.answer.handler(({ input, context }) =>
+        terminals.answer(input, context.session.id),
+      ),
       saveDialog: api.agents.saveDialog.handler(({ input }) => terminals.saveDialog(input)),
+      takeBack: api.agents.takeBack.handler(({ input, context }) => {
+        if (!options.shipping) return { ended: false }
+        const ended = options.shipping.takeBack(input.terminalId, input.permit, context.session.id)
+        if (ended === undefined) throw new DomainError("NOT_FOUND", "That terminal isn't open.")
+        return { ended }
+      }),
       interrupt: api.agents.interrupt.handler(({ input }) => terminals.interrupt(input)),
       set: api.agents.set.handler(async ({ input }) => {
         const result = await agents.set(input.agent, input.connected)
@@ -477,6 +584,9 @@ export const createRouter = (options: {
       list: api.inbox.list.handler(() => terminals.inboxEntries()),
       watch: api.inbox.watch.handler(({ signal }) => terminals.watchInbox(signal)),
       answer: api.inbox.answer.handler(({ input }) => terminals.answerAsk(input.id, input.answer)),
+      answerQuestions: api.inbox.answerQuestions.handler(({ input }) =>
+        terminals.answerAsk(input.id, { type: "questions", answers: input.answers }),
+      ),
       read: api.inbox.read.handler(({ input }) => terminals.readTells(input.ids)),
       dismiss: api.inbox.dismiss.handler(({ input }) => terminals.dismissAsk(input.id)),
       clear: api.inbox.clear.handler(() => terminals.clearInbox()),
@@ -488,6 +598,9 @@ export const createRouter = (options: {
     },
     messages: {
       list: api.messages.list.handler(({ input }) => terminals.messages(input.terminalId)),
+      rings: api.messages.rings.handler(({ input }) =>
+        terminals.rings(input.terminalId, input.since),
+      ),
       watch: api.messages.watch.handler(({ input, signal }) =>
         terminals.watchMessages(input.terminalId, signal),
       ),
@@ -525,21 +638,48 @@ export const createRouter = (options: {
     },
     // The store keeps the settings; the terminals apply the transcript switch.
     settings: {
-      get: api.settings.get.handler(async () => ({
-        ...store.settings.runner(),
-        transcriptsAvailable: await options.transcriptsAvailable(),
-      })),
+      get: api.settings.get.handler(() => runnerSettings()),
       set: api.settings.set.handler(({ input }) => {
         if (options.closing()) throw new DomainError("CLOSING")
         store.settings.saveRunner(input)
         options.settingsSaved?.()
+        if (input.shippingGate !== undefined) options.shippingSwitched?.()
         if (input.transcripts !== undefined) terminals.keepTranscripts(input.transcripts)
+        void settingsFeed.changed().catch((error: unknown) =>
+          log.error("settings.feed-failed", "Novadeck could not tell clients of a change.", {
+            err: error,
+          }),
+        )
       }),
+      watch: api.settings.watch.handler(({ signal }) =>
+        settingsFeed.watch(signal ?? new AbortController().signal),
+      ),
+    },
+    preferences: {
+      get: api.preferences.get.handler(() => preferences.get()),
+      set: api.preferences.set.handler(({ input }) => {
+        if (options.closing()) throw new DomainError("CLOSING")
+        return preferences.set(input)
+      }),
+      watch: api.preferences.watch.handler(({ signal }) =>
+        preferences.watch(signal ?? new AbortController().signal),
+      ),
+    },
+    devices: {
+      mint: api.devices.mint.handler(({ input, context }) =>
+        devices.mint(input.name, context.session),
+      ),
+      list: api.devices.list.handler(() => devices.list()),
+      revoke: api.devices.revoke.handler(({ input, context }) =>
+        devices.revoke(input.id, context.session),
+      ),
     },
     tour: {
       prepare: api.tour.prepare.handler(({ input }) => tour.prepare(input.agent)),
       brief: api.tour.brief.handler(({ input }) => tour.brief(input.terminalId)),
       nudge: api.tour.nudge.handler(({ input }) => tour.nudge(input.terminalId)),
+      artist: api.tour.artist.handler(({ input }) => tour.artist(input.terminalId)),
+      keep: api.tour.keep.handler(() => tour.keep()),
     },
   })
 }

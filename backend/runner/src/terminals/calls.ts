@@ -1,8 +1,8 @@
 import { resolve as resolvePath } from "node:path"
 
 import type { Effort, Install, Model } from "@novadeck/harness-core/harness"
-import { doorbellLine } from "@novadeck/harness-core/prompts"
-import type { AgentName } from "@novadeck/protocol"
+import { startLine } from "@novadeck/harness-core/prompts"
+import { isAgentName, type AgentName } from "@novadeck/protocol"
 import type { Trees } from "@novadeck/terminal/pty"
 import { freshNonce } from "@novadeck/tui-input"
 
@@ -11,7 +11,8 @@ import type { Feedback } from "../messaging/feedback.js"
 import type { Inbox } from "../messaging/inbox.js"
 import { agentLabel } from "../messaging/messages.js"
 import type { AgentsAnswer, SendAnswer, TeamAnswer } from "../messaging/sending.js"
-import { unansweredCalls, type Call } from "../shell/reports.js"
+import { openCallMs, unansweredCalls, type Call } from "../shell/reports.js"
+import type { Shipping } from "../shipping/service.js"
 import { list } from "../text.js"
 import { WorktreeCalls, type WorktreeCallsHost } from "../worktrees/calls.js"
 import { closeWay, type ApprovalOutcome } from "./approvals.js"
@@ -86,6 +87,14 @@ const unopened = {
   late: "Novadeck didn't confirm the new terminal in time; it may still open, so check before asking again.",
 }
 
+// How long before an open call's own limit (`openCallMs`) the runner stops waiting for its
+// terminal, to answer in time.
+const answerMarginMs = 2_000
+
+// What an agent asked to start with a task hears when no terminal was made for it in time.
+const untasked =
+  "Its task wasn't sent: if the terminal opens, send the task there with send, as nothing waits for it."
+
 // `LeadsHost` holds the runner's records and stop, its messaging, peers, approvals,
 // bindings, and whether a terminal is closing.
 export type CallsHost = LeadsHost &
@@ -93,6 +102,8 @@ export type CallsHost = LeadsHost &
   Pick<NoteCallsHost, "notes"> & {
     readonly inbox: () => Inbox
     readonly feedback: () => Feedback
+    /** The shipping gate, where the runner offers it. */
+    readonly shipping: () => Shipping | undefined
     /** Agents' requests for a new terminal, on their way to the client. */
     readonly opens: () => OpenRequests
     readonly companion: () => Companion
@@ -210,16 +221,32 @@ export class Calls {
    * more.
    */
   async open(call: Call): Promise<OpenAnswer> {
+    // A terminal being made past the window's deadline is waited for only while this call can
+    // still answer: a task never goes after the agent heard nothing opened.
+    const until = Date.now() + openCallMs - answerMarginMs
     const record = callerOf(this.host.records(), call)
     if (!record) return unansweredCalls.open
     const read = readOpenRequest(call.request)
     if (!read.ok) return read
     const { request } = read
-    const choice = {
-      ...(request.model !== undefined && { model: request.model }),
-      ...(request.effort !== undefined && { effort: request.effort }),
-    }
-    const policy = request.agent !== undefined ? this.host.openPolicy(call.terminalId) : {}
+    const policy: OpenPolicy =
+      request.agent !== undefined ? this.host.openPolicy(call.terminalId) : {}
+    // A new agent the call names neither a model nor an effort for starts on the one its policy
+    // gives for the folder it asks for, if any, with that effort. A resume keeps its session's
+    // model, and an effort alone is refused as for every call (it needs a model).
+    const given =
+      request.agent !== undefined &&
+      request.model === undefined &&
+      request.effort === undefined &&
+      request.resume === undefined
+        ? policy.choice?.(request.agent, resolvePath(record.summary.cwd, request.cwd ?? "."))
+        : undefined
+    const choice = given
+      ? { model: given.model, ...(given.effort !== undefined && { effort: given.effort }) }
+      : {
+          ...(request.model !== undefined && { model: request.model }),
+          ...(request.effort !== undefined && { effort: request.effort }),
+        }
     if (request.agent !== undefined) {
       if (policy.refusal) return refused(policy.refusal)
       const unfit = await this.unfitChoice(request.agent, choice)
@@ -303,7 +330,13 @@ export class Calls {
           ? { command: request.command, prompted: true }
           : resuming?.ok
             ? { command: commandLine(resuming.argv), prompted: true }
-            : await this.taskCommand(request.agent, cwd, choice, request.message !== undefined)
+            : await this.taskCommand(
+                request.agent,
+                cwd,
+                choice,
+                request.message !== undefined,
+                policy.flags?.(request.agent, cwd),
+              )
     } catch (error) {
       if (!(error instanceof RangeError)) throw error
       return refused("The agent's start line holds a character no shell quotes safely.")
@@ -330,6 +363,45 @@ export class Calls {
     this.allOpened = all
     if (asks && request.command !== undefined)
       return this.askToRun(record, charged, { cwd, command: request.command, request })
+    let task: SendAnswer | undefined
+    let adopted = false
+    const adopt = (terminalId: string): void => {
+      if (adopted) return
+      adopted = true
+      this.openers.set(terminalId, charged)
+      // The opening result names it, so its handle is the caller's to use.
+      this.host.peers().introduce(call.terminalId, terminalId)
+      const opened = this.host.records().get(terminalId)
+      if (opened) {
+        // The task goes to the first session of the agent it starts there, from the opener,
+        // which leads that terminal: it is the lead's first message. Its first typed entry
+        // is the launch line, where a transcript tells its prompts.
+        if (request.message !== undefined && started.prompted && started.nonce)
+          opened.startedWith = started.nonce
+        if (request.message !== undefined) {
+          this.host.save(opened)
+          // Only a brief-only lead's brief is held as its one marked message: an ordinary
+          // lead's later messages carry the mark too.
+          // The row the agent's start prompt shows is drawn as this task.
+          if (started.prompted && started.nonce)
+            this.host
+              .messaging()
+              .noteStart(opened.summary.id, started.nonce, record.summary.handle, request.message)
+          const brief = { to: opened.summary.handle, text: request.message }
+          task = briefOnly
+            ? this.host.messaging().sendBrief(call.terminalId, brief)
+            : this.host.messaging().send(call.terminalId, brief)
+        } else if (leads)
+          // With no task to say so, the agent is told who leads it.
+          this.host
+            .messaging()
+            .notice(opened.summary.id, leadNotice.openedLed(record.summary.handle), {
+              always: true,
+            })
+        if (briefOnly) this.endLeadAfter(record, opened, task)
+      } else if (request.message !== undefined)
+        task = { ok: false, reason: "the new terminal closed before the task could be sent." }
+    }
     const asked = await this.host.opens().request(
       {
         from: call.terminalId,
@@ -353,40 +425,20 @@ export class Calls {
           request.resume !== undefined &&
           resuming?.ok && { resume: { agent: request.agent, session: request.resume } }),
       },
+      // Taken up as soon as the runner makes it, before the client confirms it: the agent
+      // there may submit its start prompt, which asks for its task, before that.
+      adopt,
+      until,
     )
-    let task: SendAnswer | undefined
-    if (asked.type === "answered" && "terminalId" in asked.answer) {
-      this.openers.set(asked.answer.terminalId, charged)
-      // The opening result names it, so its handle is the caller's to use.
-      this.host.peers().introduce(call.terminalId, asked.answer.terminalId)
-      const opened = this.host.records().get(asked.answer.terminalId)
-      if (opened) {
-        // The task goes to the first session of the agent it starts there, from the opener,
-        // which leads that terminal: it is the lead's first message. Its first typed entry
-        // is the launch line, where a transcript tells its prompts.
-        if (request.message !== undefined && started.prompted && started.nonce)
-          opened.startedWith = started.nonce
-        if (request.message !== undefined) {
-          this.host.save(opened)
-          // Only a brief-only lead's brief is held as its one marked message: an ordinary
-          // lead's later messages carry the mark too.
-          const brief = { to: opened.summary.handle, text: request.message }
-          task = briefOnly
-            ? this.host.messaging().sendBrief(call.terminalId, brief)
-            : this.host.messaging().send(call.terminalId, brief)
-        } else if (leads)
-          // With no task to say so, the agent is told who leads it.
-          this.host
-            .messaging()
-            .notice(opened.summary.id, leadNotice.openedLed(record.summary.handle), {
-              always: true,
-            })
-        if (briefOnly) this.endLeadAfter(record, opened, task)
-      } else if (request.message !== undefined)
-        task = { ok: false, reason: "the new terminal closed before the task could be sent." }
-    }
+    // A client that confirmed a terminal the runner never told of, as a stand-in may.
+    if (asked.type === "answered" && "terminalId" in asked.answer) adopt(asked.answer.terminalId)
     const answer = this.opening(asked, cwd, command)
-    if (!answer.ok) return answer
+    if (!answer.ok)
+      return request.message !== undefined &&
+        !adopted &&
+        (asked.type === "late" || asked.type === "gone")
+        ? refused(`${answer.reason} ${untasked}`)
+        : answer
     return {
       ...answer,
       ...(request.agent !== undefined && { led: leads }),
@@ -425,24 +477,25 @@ export class Calls {
             if (this.host.stopping() || this.host.records().get(id) !== caller) return
             if (outcome === "declined") return tell(runNotice.declined(command))
             if (outcome !== "confirmed") return tell(runNotice.gone(command))
-            const asked = await this.host
-              .opens()
-              .request(
-                { from: id, sessionId, cwd, command, focus: request.focus === true },
-                this.openMs,
-                {
-                  by: id,
-                  handle,
-                  ...(request.title !== undefined && { title: request.title }),
-                  command,
-                  leads: false,
-                },
-              )
-            if (this.host.stopping() || this.host.records().get(id) !== caller) return
-            if (asked.type === "answered" && "terminalId" in asked.answer) {
-              this.openers.set(asked.answer.terminalId, charged)
-              this.host.peers().introduce(id, asked.answer.terminalId)
+            const adopt = (terminalId: string) => {
+              this.openers.set(terminalId, charged)
+              this.host.peers().introduce(id, terminalId)
             }
+            const asked = await this.host.opens().request(
+              { from: id, sessionId, cwd, command, focus: request.focus === true },
+              this.openMs,
+              {
+                by: id,
+                handle,
+                ...(request.title !== undefined && { title: request.title }),
+                command,
+                leads: false,
+              },
+              adopt,
+            )
+            if (this.host.stopping() || this.host.records().get(id) !== caller) return
+            if (asked.type === "answered" && "terminalId" in asked.answer)
+              adopt(asked.answer.terminalId)
             const answer = this.opening(asked, cwd, command)
             tell(
               answer.ok && "handle" in answer && answer.handle !== undefined
@@ -502,36 +555,39 @@ export class Calls {
    * it may not take one (Antigravity, whose prompt would start a turn before Novadeck's
    * tools load, or behind its trust dialog), when the task arrives once its prompt shows,
    * rung as any message is. Without a task, it just starts at its prompt, with the model
-   * and effort chosen.
+   * and effort chosen. `flags` are the policy's, for this launch only, right after them.
    */
   private async taskCommand(
     agent: AgentName,
     cwd: string,
     choice: { readonly model?: string; readonly effort?: Effort },
     withTask: boolean,
+    flags: readonly string[] = [],
   ): Promise<{ readonly command: string; readonly prompted: boolean; readonly nonce?: string }> {
     const { launch } = harnesses[agent]
     const install = withTask ? await this.host.install(agent).catch(() => undefined) : undefined
     const nonce = freshNonce()
     const prompted = withTask
-      ? await launch.initialPrompt(doorbellLine(nonce), { install, cwd }).catch(() => undefined)
+      ? await launch.initialPrompt(startLine(nonce), { install, cwd }).catch(() => undefined)
       : undefined
     const [program = "", ...rest] = prompted ?? launch.start
     // Right after the program, so before any flag of a prompt's that takes the line.
-    const command = commandLine([program, ...launch.choose(choice), ...rest])
+    const command = commandLine([program, ...launch.choose(choice), ...flags, ...rest])
     return { command, prompted: prompted !== undefined, ...(withTask && { nonce }) }
   }
 
   /** What the agent learns of the client's answer. */
   private opening(asked: Asked, cwd: string, command: string | undefined): OpenAnswer {
-    if (asked.type !== "answered") return refused(unopened[asked.type])
-    const { answer } = asked
-    if ("reason" in answer) return refused(answer.reason)
-    const opened = this.host.records().get(answer.terminalId)
+    if (asked.type !== "answered" && asked.type !== "made") return refused(unopened[asked.type])
+    // Made, though the client hasn't confirmed it yet: it opened all the same.
+    const made = asked.type === "made" ? asked : asked.answer
+    if ("reason" in made) return refused(made.reason)
+    const { terminalId } = made
+    const opened = this.host.records().get(terminalId)
     if (!opened) return unansweredCalls.open
     return {
       ok: true,
-      terminalId: answer.terminalId,
+      terminalId,
       handle: opened.summary.handle,
       title: opened.summary.title,
       cwd,
@@ -749,14 +805,48 @@ export class Calls {
         return this.teams.leave(call)
       case "handLead":
         return this.teams.hand(call)
-      case "worktrees":
-        return Promise.resolve(this.worktrees.listed(call))
-      case "mode":
+      case "worktrees": {
+        // Also whether the Experimental shipping gate is on, which lists `request_permit`.
+        const listed = this.worktrees.listed(call)
         return Promise.resolve(
-          callerOf(this.host.records(), call)
-            ? { ok: true, mode: this.host.agentMode() }
-            : unansweredCalls.mode,
+          listed.ok ? { ...listed, gate: this.host.shipping()?.enabled() === true } : listed,
         )
+      }
+      case "permit": {
+        const caller = callerOf(this.host.records(), call)
+        const shipping = this.host.shipping()
+        if (!caller) return Promise.resolve(unansweredCalls.permit)
+        if (!shipping?.enabled())
+          return Promise.resolve({
+            ok: false,
+            reason: "The shipping gate is off, so no shipping command needs a permit.",
+          })
+        const { action, target, said, folder, remote, repo, auto, admin } = call.request as {
+          [key: string]: unknown
+        }
+        return shipping.declare(call.terminalId, {
+          action: typeof action === "string" ? action : "",
+          ...(typeof target === "string" && { target }),
+          ...(typeof said === "string" && { said }),
+          ...(typeof folder === "string" && { folder }),
+          ...(typeof remote === "string" && { remote }),
+          ...(typeof repo === "string" && { repo }),
+          ...(auto === true && { auto }),
+          ...(admin === true && { admin }),
+        })
+      }
+      case "mode": {
+        const caller = callerOf(this.host.records(), call)
+        if (!caller) return Promise.resolve(unansweredCalls.mode)
+        // Also whether the shipping gate covers this terminal's harness, which the approval
+        // rule in the texts says.
+        const agent = caller.summary.agent
+        return Promise.resolve({
+          ok: true,
+          mode: this.host.agentMode(),
+          gated: isAgentName(agent) && this.host.shipping()?.covers(agent) === true,
+        })
+      }
       case "openWorktree":
         return this.worktrees.open(call)
       case "takeWorktree":

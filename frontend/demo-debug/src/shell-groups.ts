@@ -1,6 +1,6 @@
 import type { ConnectFailure } from "@novadeck/core/port"
 
-import { bootFailures } from "./boot-failures"
+import { bootFailures, failureKey } from "./boot-failures"
 import type { DemoLaunch, DemoShell } from "./debug-demo"
 import { showRemoteSettings } from "./desktop/remote"
 import { sampleFix } from "./desktop/sandbox"
@@ -15,12 +15,23 @@ const failureCopy: Record<ConnectFailure["kind"], { label: string; hint: string 
   transient: { label: "Transient", hint: "splash retries and connects" },
   unauthorized: { label: "Unauthorized", hint: "Retry connects" },
   unknown: { label: "Unknown error", hint: "Retry connects" },
-  incompatible: { label: "Incompatible runner", hint: "Quit only" },
+  incompatible: { label: "Older runner", hint: "Quit only; says to update the runner" },
   outdated: {
     label: "Newer workspace",
     hint: "Quit only; names the newer Novadeck",
   },
 }
+
+// An app older than its runner reads two ways: a page reloads, the desktop app quits; and a
+// device refused as signed out reads apart from one never let in.
+const copyOf = (failure: ConnectFailure): { label: string; hint: string } =>
+  failure.revoked
+    ? { label: "Device signed out", hint: "Retry asks again; says the owner can let it in" }
+    : failure.update !== "app"
+      ? failureCopy[failure.kind]
+      : failure.reload
+        ? { label: "Older page", hint: "Reload only; loads the runner's newer page" }
+        : { label: "Older app", hint: "Quit only; says to update this app" }
 
 // The panel's groups for the shell around the demo: how it starts, how it fails to,
 // its runner, its sandbox and the guides drawn over it.
@@ -81,12 +92,12 @@ export const shellGroups = ({
       section: "App",
       title: "Boot failures",
       actions: bootFailures.map((failure) => {
-        const { label, hint } = failureCopy[failure.kind]
+        const { label, hint } = copyOf(failure)
         return {
           label,
           hint: `${failure.code} \u00b7 ${hint}`,
           reboots: true,
-          run: () => rehearsals.rehearse({ fail: failure.code }),
+          run: () => rehearsals.rehearse({ fail: failureKey(failure) }),
         }
       }),
     },
@@ -165,7 +176,7 @@ export const shellGroups = ({
       actions: [
         {
           label: "macOS, in the header",
-          hint: "The window's close, minimise and zoom buttons sit at the header's start, where the mark gives way to them; in Zen they hide, and come back while the pointer is in the top-left corner",
+          hint: "The rail and the sidebar run to the window's top, and the window's close, minimise and zoom buttons sit on them; with the sidebar closed the header runs the width and its start gives way to them; in Zen they hide, and come back while the pointer is in the top-left corner",
           reboots: true,
           run: () => launch.setWindowControls("inset"),
         },
@@ -177,7 +188,7 @@ export const shellGroups = ({
         },
         {
           label: "Windows, in the header",
-          hint: "The window's caption buttons hold the header's end, as tall as it is, and the header keeps clear of them; in Zen they stay, on the Focus window's header or on a plate in the corner",
+          hint: "The window's caption buttons hold the header's top-right corner, 32px tall as a Windows 11 title bar; the mark, project and views keep to the header's top, Search and Preferences to its bottom, below them; in Zen a strip holds them",
           reboots: true,
           run: () => launch.setWindowControls("caption"),
         },

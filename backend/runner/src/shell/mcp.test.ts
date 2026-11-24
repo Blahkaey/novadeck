@@ -44,7 +44,11 @@ afterAll(async () => {
 type Answer = {
   readonly id?: number
   readonly result?: {
-    readonly tools?: readonly { readonly name: string; readonly inputSchema?: unknown }[]
+    readonly tools?: readonly {
+      readonly name: string
+      readonly description?: string
+      readonly inputSchema?: unknown
+    }[]
     readonly [key: string]: unknown
   }
   readonly error?: { readonly code: number }
@@ -294,7 +298,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       handle: "owl",
       title: "codex",
       cwd: "/work",
-      command: 'codex "[Novadeck: automatic notice, agent messages waiting, k3f9q2]"',
+      command: `codex "<novadeck-doorbell from='' ring='k3f9q2'/>"`,
       task: {
         ok: true,
         to: "owl",
@@ -496,6 +500,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
         ],
         codex: [{ id: "gpt-5", efforts: ["medium"] }],
         agy: [{ id: "opus", efforts: [] }],
+        opencode: [{ id: "opencode/big-pickle", efforts: [] }],
       },
     }
     const properties = async () => {
@@ -509,11 +514,14 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       request: {},
     })
     expect(listed.required).toEqual(["agent"])
-    expect(listed.properties.model.enum).toEqual(["opus", "sonnet", "gpt-5"])
+    expect(listed.properties.model.enum).toEqual(["opus", "sonnet", "gpt-5", "opencode/big-pickle"])
     expect(listed.properties.model.description).toContain(
       "claude (Claude Code): opus (low, high), sonnet (no effort)",
     )
     expect(listed.properties.model.description).toContain("codex (Codex): gpt-5 (medium)")
+    expect(listed.properties.model.description).toContain(
+      "opencode (opencode): opencode/big-pickle (no effort)",
+    )
     expect(listed.properties.model.description).toContain("leave it out")
     expect(listed.properties.model.description).not.toContain("can't take a model now")
     expect(listed.properties.effort.enum).toEqual(["low", "medium", "high", "xhigh", "max"])
@@ -523,7 +531,7 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       expect(none.properties.model.enum).toBeUndefined()
       expect(none.properties.model.description).toContain("leave it out")
     }
-    await withoutModels({ ok: true, models: { claude: [], codex: [], agy: [] } })
+    await withoutModels({ ok: true, models: { claude: [], codex: [], agy: [], opencode: [] } })
     await withoutModels({ ok: false })
     answer = { ok: true, models: { claude: [{ id: "opus", efforts: [] }], codex: [], agy: [] } }
     expect((await properties()).properties.model.description).toContain(
@@ -550,6 +558,27 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       // A runner that can't say counts as off.
       answersBy.worktrees = { ok: false, reason: "Novadeck couldn't tell." }
       expect((await names()).some((name) => name.endsWith("_worktree"))).toBe(false)
+    })
+
+    it("states what git does with a checked-out branch, forbids no integration, and keeps the default", async () => {
+      answersBy.worktrees = { ok: true, on: true }
+      const [, tools] = await session(terminal(), [initialize, list])
+      const text = (name: string) =>
+        tools?.result?.tools?.find((tool) => tool.name === name)?.description ?? ""
+      const open = text("open_worktree")
+      // The default stays, with the user's words above it; git's rule is told as a fact.
+      expect(open).toContain("unless the user said otherwise, your changes go there")
+      expect(open).toContain(
+        "Git moves a branch that is checked out in one folder only from that folder",
+      )
+      expect(open).toContain("done in the folder that has it")
+      // Home: the start's branch, and the one way to change it later.
+      expect(open).toContain(
+        "else the checked-out branch when the new branch starts from this folder's HEAD",
+      )
+      expect(open).toContain("take_worktree with home changes the home of a worktree you own")
+      const take = text("take_worktree")
+      expect(take).toContain("set or change the home of a worktree you own already")
     })
 
     it("still sends a call to a tool a harness cached, so the runner can refuse it", async () => {
@@ -1953,6 +1982,52 @@ describe("Novadeck's MCP server in a Novadeck terminal", () => {
       )
       expect(text).toContain("subagents you start within your own turn are never a team")
     }
+  })
+
+  it("lists request_permit with --auto and --admin only while the gate is on, and forwards them", async () => {
+    answersBy.worktrees = { ok: true, on: true, gate: true }
+    try {
+      const [, tools] = await session(terminal(), [initialize, list])
+      const described = tools?.result?.tools as {
+        name: string
+        description: string
+        inputSchema: { properties: { [name: string]: unknown } }
+      }[]
+      const permit = described.find((tool) => tool.name === "request_permit")!
+      expect(Object.keys(permit.inputSchema.properties)).toEqual(
+        expect.arrayContaining(["auto", "admin", "repo"]),
+      )
+      expect(permit.description).toContain("--auto")
+      expect(permit.description).toContain("--admin")
+      expect(permit.description).not.toMatch(/end your turn/i)
+    } finally {
+      delete answersBy.worktrees
+    }
+  })
+
+  it("says how shipping commands are approved only where the runner says the gate covers this agent", async () => {
+    const approvalText = async () => {
+      const [, tools] = await session(terminal(), [initialize, list])
+      const described = tools?.result?.tools as { name: string; description: string }[]
+      return ["send", "agents"].map(
+        (name) => described.find((tool) => tool.name === name)!.description,
+      )
+    }
+    const plain = await approvalText()
+    try {
+      answersBy.mode = { ok: true, mode: "herd", gated: false }
+      expect(await approvalText()).toEqual(plain)
+      answersBy.mode = { ok: true, mode: "herd", gated: true }
+      for (const text of await approvalText()) {
+        expect(text).toContain(
+          "Git and gh commands that ship work are approved through Novadeck's gate: one no permit covers is refused with how to get one, and request_permit asks the user with a card. The card's answer, or the user's own words it verifies, is the user's own approval, not one an agent passes on.",
+        )
+        expect(text).toContain("never an approval an agent passes on, even your lead's")
+      }
+    } finally {
+      delete answersBy.mode
+    }
+    for (const text of plain) expect(text).not.toContain("Git and gh commands that ship work")
   })
 
   it("words how agents work together as the user set it: Herd, or Solo, and Herd where unsaid", async () => {

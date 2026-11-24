@@ -1,5 +1,5 @@
 import { createTelemetryStore, dropTerminal, setUsage } from "@novadeck/core/agents/telemetry"
-import { rowKey, withSnoozes, type Inbox } from "@novadeck/core/inbox"
+import { entryKey, withSnoozes, type Inbox } from "@novadeck/core/inbox"
 import type {
   Backend,
   BackendAction,
@@ -10,8 +10,9 @@ import type {
   TerminalKey,
   ThemeSource,
 } from "@novadeck/core/port"
-import { TourNeedsAgent } from "@novadeck/core/port"
+import { TourNeedsAgent, type TourRun } from "@novadeck/core/port"
 import { sameArgv } from "@novadeck/core/roster"
+import { projectFromSeed } from "@novadeck/core/seed"
 import { createStore } from "@novadeck/core/store"
 import { handleText } from "@novadeck/core/terminals/handle"
 import { createTerminalRegistry } from "@novadeck/core/terminals/registry"
@@ -30,7 +31,8 @@ import {
   maxInboxHistoryLength,
   maxInboxOrder,
   maxInboxHistoryRows,
-  maxInboxRowIdLength,
+  maxInboxEntryIdLength,
+  newer,
   type AgentName,
   type AgentIntegration,
   type ForgeIntegration,
@@ -40,6 +42,7 @@ import {
   type TerminalRequest,
   type TerminalRequestAnswer,
   type TerminalSummary,
+  type WorkspaceSession as RunnerSession,
 } from "@novadeck/protocol"
 import {
   hasCode,
@@ -50,6 +53,7 @@ import {
 } from "@novadeck/runner-client"
 import { createTerminalMount } from "@novadeck/terminal-views/mount"
 import { createTerminalScreens } from "@novadeck/terminal/view"
+import { readTolerantly } from "@novadeck/wire"
 import type { WireStatus } from "@novadeck/wire/client"
 
 import { createRunnerMurmur } from "./addons/murmur"
@@ -58,12 +62,16 @@ import { createRunnerConversations } from "./agents/conversations"
 import { runnerFeedback } from "./agents/feedback"
 import { createRunnerInbox } from "./agents/inbox"
 import { createRunnerMessages } from "./agents/messages"
+import { takeBackCall } from "./agents/permits"
 import { createRunnerCompanions } from "./companions/content"
 import { createRunnerItems } from "./companions/items"
 import { answerLook, type Looks } from "./companions/looks"
 import { createRunnerFiles } from "./files"
 import { createRunnerHistory } from "./history"
 import { createRunnerNotes } from "./notes"
+import { runnerPreferences } from "./person"
+import { listProject } from "./sessions/listing"
+import { followProjects, type ProjectArrangement } from "./sessions/projects-feed"
 import { createSessionSaves } from "./sessions/saves"
 import {
   cleanlyExited,
@@ -76,6 +84,7 @@ import {
   terminalRuns,
   type RunnerListing,
 } from "./sessions/seed"
+import { createSessionSharing } from "./sessions/sharing"
 import { consume, reportCaught } from "./streams"
 import { runnerSwitches } from "./switches"
 import {
@@ -103,6 +112,7 @@ export type RunnerApi = Pick<
   Runner,
   | "status"
   | "watch"
+  | "supports"
   | "projects"
   | "sessions"
   | "terminals"
@@ -119,19 +129,29 @@ export type RunnerApi = Pick<
   | "works"
 > &
   // Not every runner has them (an older one doesn't): none are offered without.
-  Partial<Pick<Runner, "forges" | "tour">>
+  Partial<Pick<Runner, "forges" | "tour" | "preferences">>
+
+// What a terminal says while another window controls it and this one waits its turn.
+const openElsewhere: TerminalStatus = { state: "failed", message: "Open in another window" }
+
+// How long settling a window's saves and creates waits at most.
+const settleLimitMs = 3_000
 
 // The tour as the runner readies it, each call held as work the backend waits for.
 export const runnerTour = (
   tour: Runner["tour"],
   track: <T>(work: Promise<T>) => Promise<T>,
+  // Wraps each prepare, which removes the tours before on the runner itself.
+  preparing: (work: Promise<TourRun>) => Promise<TourRun> = (work) => work,
 ): NonNullable<Backend["tour"]> => ({
   prepare: (agent) =>
-    track(tour.prepare(agent)).catch((error: unknown) => {
+    preparing(track(tour.prepare(agent))).catch((error: unknown) => {
       throw hasCode(error, "MODELS_UNLISTED") ? new TourNeedsAgent(error.message, agent) : error
     }),
   brief: (terminalId) => track(tour.brief(terminalId)),
   nudge: (terminalId) => track(tour.nudge(terminalId)),
+  artist: (terminalId) => track(tour.artist(terminalId)),
+  keep: () => track(tour.keep()),
 })
 
 export type RunnerBackendOptions = {
@@ -155,6 +175,8 @@ export type RunnerBackendOptions = {
   // Where the app shows the Inbox count on the app icon.
   readonly badge?: Backend["badge"]
   readonly windowFocus?: Backend["windowFocus"]
+  // Where the app can open a project in a window of its own.
+  readonly projectWindows?: Backend["projectWindows"]
   // Where the window's own controls sit over the page's header (macOS).
   readonly windowControls?: Backend["windowControls"]
   readonly screenReader?: Backend["screenReader"]
@@ -194,6 +216,9 @@ export type RunnerBackendOptions = {
   readonly agentModes?: boolean
   // How agents work with each other, as the runner said at startup; not offered when absent.
   readonly agentMode?: AgentMode
+  // Whether the shipping gate is on (an Experimental switch), as the runner said at startup;
+  // not offered when absent.
+  readonly shippingGate?: boolean
   // Whether the runner lets agents open worktrees, as it said at startup; not offered when
   // absent.
   readonly worktrees?: boolean
@@ -208,13 +233,13 @@ export type RunnerBackendOptions = {
   // absent.
   readonly placesNotes?: boolean
   readonly welcomed?: boolean
-  // The order the person dragged the Inbox's rows into, as the runner said at startup; the
+  // The order the person dragged the Inbox's entries into, as the runner said at startup; the
   // rows keep the Inbox's own order, and can't be dragged, when absent.
   readonly inboxOrder?: readonly string[]
-  // The Inbox's rows the person snoozed, as the runner said at startup; none can be snoozed
+  // The Inbox's entries the person snoozed, as the runner said at startup; none can be snoozed
   // when absent.
   readonly inboxSnoozed?: readonly string[]
-  // The Inbox's rows that ended and the runner can't tell of, as the runner kept them; none
+  // The Inbox's entries that ended and the runner can't tell of, as the runner kept them; none
   // when absent.
   readonly inboxHistory?: readonly string[]
   // The page's theme, which its terminals draw in; tests pass `noTheme`.
@@ -273,6 +298,8 @@ type RunnerEntry = {
   closed: boolean
   // The surface's attachment while one is mounted.
   attachment: AttachedTerminal | undefined
+  // It has waited for another window to let go of it, and says so (`SurfaceRuntime.elsewhere`).
+  elsewhere?: boolean
   // What the adapter last reported, so each change reaches the store once.
   status: TerminalStatus
   process: string
@@ -290,8 +317,12 @@ export type SurfaceRuntime = {
   // The surface's attachment, until the returned release; releasing leaves one that
   // took its place, as another surface's, alone.
   readonly attached: (key: TerminalKey, attachment: AttachedTerminal) => () => void
-  // Attaches to the terminal; with `after`, going on from where an earlier attachment stood.
+  // Attaches taking control where it is free, else observing, where the runner supports it
+  // (`terminals.controls`); otherwise as control alone.
   readonly attach: (terminalId: string, after?: TerminalPosition) => Promise<AttachedTerminal>
+  // Whether the runner hands control between clients (`terminals.controls`): a terminal another
+  // client controls is observed, never refused as in use.
+  readonly observes?: () => boolean
   // Saves a file pasted into a terminal on the runner's machine; resolves with its path.
   readonly upload: Runner["terminals"]["upload"]
   // Resolves once the runner is reachable again, or closed for good.
@@ -315,6 +346,13 @@ export type SurfaceRuntime = {
   // Whether the terminal still exists and its session is the one on screen, so a screen
   // no view shows right now is kept for the next; one off screen is kept for a while.
   readonly shown: (key: TerminalKey) => boolean
+  // Whether this window shares the runner's terminals with others by project (project windows
+  // on): a terminal another window still controls, as it lets go of the project, is waited for
+  // rather than failed. Absent, or false, a terminal another window controls is failed.
+  readonly sharing?: () => boolean
+  // The terminal has waited some seconds for another window to let go of it: the surface shows
+  // that it is open in another window, and attaches once it is, its normal status returning.
+  readonly elsewhere?: (key: TerminalKey) => void
 }
 
 export type RunnerBackend = {
@@ -373,10 +411,10 @@ const trimmed = (keys: readonly string[], listed: ReadonlySet<string>): string[]
   return keys.filter((key) => listed.has(key) || away.has(key))
 }
 
-// Inbox rows as the runner keeps them: as many as it takes, from the top (the rows below
+// Inbox entries as the runner keeps them: as many as it takes, from the top (the rows below
 // keep the Inbox's own order), each of an id it can take.
 const fitted = (ids: readonly string[]): string[] =>
-  ids.filter((id) => id.length > 0 && id.length <= maxInboxRowIdLength).slice(0, maxInboxOrder)
+  ids.filter((id) => id.length > 0 && id.length <= maxInboxEntryIdLength).slice(0, maxInboxOrder)
 
 // A backend over a connected runner and what it listed at startup. Creating it starts
 // nothing: I/O begins with the first commit that changes the workspace, or `start`.
@@ -387,8 +425,8 @@ export const runnerBackend = (
 ): RunnerBackend => {
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? Date.now
-  const lostAtStart = lostTerminals(listing)
-  const runs = terminalRuns(listing)
+  const lostAtStart = new Set(lostTerminals(listing))
+  const runs = new Map(terminalRuns(listing))
   const leftovers = [...cleanlyExited(listing)]
   // When the runner came back as a new process, to spot one that keeps crashing.
   const restarts: number[] = []
@@ -410,6 +448,11 @@ export const runnerBackend = (
     return work
   }
   const inUse = terminalInUse((terminalId) => runner.terminals.active(terminalId))
+  // The project this window shows, told to the runner so an agent's request reaches the window
+  // that shows its project (see `terminals.showing`).
+  // The project this window told the runner it shows, where the app opens project windows.
+  let shownProject: string | null = null
+  const showing = terminalInUse((projectId) => runner.terminals.showing(projectId))
   const inSight = terminalsInSight((terminalIds) => runner.terminals.seen(terminalIds))
   // Every terminal a surface wants seen, told to the runner as it changes (see `terminals.seen`).
   const tellSight = (): void =>
@@ -802,6 +845,8 @@ export const runnerBackend = (
   }
   // Sessions the person deleted, whose terminals the runner closes as it removes them.
   const removedSessions = new Set<string>()
+  // Terminals the runner reported gone, as another window closed them, until their close here.
+  const endedThere = new Set<string>()
   // Removes the session on the runner once it has it, as a project's removal does. One
   // already gone, as removed from another window, is left as it is, and so is a project's
   // last session, which the runner keeps (the workspace never removes it).
@@ -1252,6 +1297,9 @@ export const runnerBackend = (
     const { terminalId, workspaceSessionId } = entry.key
     const { cols, rows } = entry.size
     const agent = resumeAgent(entry)
+    // An agent of a harness a newer Novadeck integrates is never woken from here: without its
+    // resume the runner would start a plain shell in its place. It stays asleep, its session kept.
+    if (agent === newer) return
     const retry: Retry = { done: ["CONFLICT"], stillWanted, cancelled: () => entry.closed }
     const resume = agent ? { resume: agent } : {}
     const create = async () => {
@@ -1363,13 +1411,13 @@ export const runnerBackend = (
   // The program the terminal waits to restore, as the workspace last committed it.
   const restoredOf = ({ key }: RunnerEntry): string | undefined => terminalOf(key)?.restoredProcess
   // The agent a fresh shell resumes: a sleeper's own, else the program the terminal lost.
-  const resumeAgent = (entry: RunnerEntry): AgentName | undefined =>
+  const resumeAgent = (entry: RunnerEntry): AgentName | typeof newer | undefined =>
     entry.status.state === "sleeping"
       ? entry.status.agent
       : (runnerSummaries.get(entry.key.terminalId)?.restingAgent ??
         resumableProgram(restoredOf(entry)))
   // The agent the runner is waking for a terminal it has no shell for: not asleep, and wanted.
-  const restingOf = (entry: RunnerEntry): AgentName | undefined => {
+  const restingOf = (entry: RunnerEntry): AgentName | typeof newer | undefined => {
     const summary = runnerSummaries.get(entry.key.terminalId)
     return summary && !summary.started && !summary.sleeping
       ? (summary.restingAgent ?? undefined)
@@ -1441,12 +1489,17 @@ export const runnerBackend = (
   const messages = createRunnerMessages(
     {
       watch: (terminalId) => runner.messages.watch(terminalId),
+      rings: (terminalId, since) => runner.messages.rings(terminalId, since),
       pause: (paused) => runner.messages.pause(paused),
       release: (thread) => runner.messages.release(thread),
       stop: (thread) => runner.messages.stop(thread),
     },
     track,
   )
+  const { take: takeSettings, ...switches } = runnerSwitches(runner, options, track)
+  // Whether the runner has the call, as one from before it has none: the shipping gate's
+  // standing permits are neither shown nor taken back there.
+  const takeBack = takeBackCall(runner)
   const conversations = createRunnerConversations(
     {
       detail: (terminalId) => runner.agents.detail(terminalId),
@@ -1462,6 +1515,7 @@ export const runnerBackend = (
       clearBox: (terminalId, seen) => runner.agents.clearBox(terminalId, seen),
       answer: (terminalId, request, answer) => runner.agents.answer(terminalId, request, answer),
       saveDialog: (terminalId, request) => runner.agents.saveDialog(terminalId, request),
+      ...(takeBack && { takeBack }),
     },
     track,
     messages.state,
@@ -1473,6 +1527,7 @@ export const runnerBackend = (
     {
       inbox: runner.inbox,
       detail: (terminalId) => runner.agents.detail(terminalId),
+      ...(takeBack && switches.shippingGate && { takeBack, gate: switches.shippingGate.enabled }),
       answer: (key, request, answer) => conversations.answer(key, request, answer),
       send: (key, text, sending) => conversations.send(key, text, sending),
       interrupt: async (key) => (await conversations.interrupt(key)).words,
@@ -1493,7 +1548,7 @@ export const runnerBackend = (
       },
     },
   )
-  // The chat answers a dialog too: the Inbox row it resolves says what with.
+  // The chat answers a dialog too: the Inbox entry it resolves says what with.
   const answeringChat: typeof conversations = {
     ...conversations,
     answer: (key, requestId, answer) => {
@@ -1504,16 +1559,50 @@ export const runnerBackend = (
       if (request) inbox.answered(requestId, request, answer)
       return conversations.answer(key, requestId, answer)
     },
+    // A permit the chat takes back resolves its Inbox entry as taken back, not as lapsed.
+    ...(conversations.takeBack && {
+      takeBack: (key, permit) => {
+        inbox.takenBack(key.terminalId, permit)
+        return conversations.takeBack!(key, permit).catch((error: unknown) => {
+          inbox.takenBack(key.terminalId, permit, true)
+          throw error
+        })
+      },
+    }),
   }
-  // The person's order of the Inbox's rows and their snoozes: shown at once, kept by the
+  // The person's order of the Inbox's entries and their snoozes: shown at once, kept by the
   // runner (`fitted`).
   const inboxOrder = options.inboxOrder && createStore(options.inboxOrder)
+  // Both follow another device's as the runner tells (`settings.watch`); a change of this
+  // one's own under way stands until it is sent.
+  let takeSnoozes: ((keys: readonly string[]) => void) | undefined
+  let ordering = 0
+  let snoozing = 0
   const snoozable = (shown: Inbox): Inbox =>
     options.inboxSnoozed
-      ? withSnoozes(shown, options.inboxSnoozed, (ids) => {
-          void track(runner.settings.set({ inboxSnoozed: fitted(ids) })).catch(() => {})
-        })
+      ? withSnoozes(
+          shown,
+          options.inboxSnoozed,
+          (ids) => {
+            snoozing += 1
+            void track(runner.settings.set({ inboxSnoozed: fitted(ids) }))
+              .catch(() => {})
+              .finally(() => (snoozing -= 1))
+          },
+          (take) => (takeSnoozes = take),
+        )
       : shown
+  const takeInbox = (settings: {
+    readonly inboxOrder: readonly string[]
+    readonly inboxSnoozed: readonly string[]
+  }): void => {
+    if (inboxOrder && ordering === 0) {
+      const order = inboxOrder.getSnapshot()
+      if (order.join("\n") !== settings.inboxOrder.join("\n"))
+        inboxOrder.update(() => settings.inboxOrder)
+    }
+    if (snoozing === 0) takeSnoozes?.(settings.inboxSnoozed)
+  }
   // The voice input addon, followed from `start` like the messages.
   const voice = createRunnerVoice(runner.voice, track)
   // Murmur, followed the same way.
@@ -1598,11 +1687,20 @@ export const runnerBackend = (
     close: (entry, key) => {
       entry.closed = true
       clearTimeout(entry.dwell)
-      closedHere.add(key.terminalId)
-      entries.delete(key.terminalId)
+      // Left out of a project read again, a terminal is gone or filed elsewhere now, not
+      // closed here: its shell, if it lives, is not ours to end, and its new entry stays.
+      if (!reading) closedHere.add(key.terminalId)
+      if (entries.get(key.terminalId) === entry) entries.delete(key.terminalId)
       // A removed project's terminals are closed by the runner, as it removes the project.
       // A deleted session's are too, as it removes the session.
-      if (!removedProjects.has(key.projectId) && !removedSessions.has(key.workspaceSessionId))
+      // One the runner reported gone was closed there.
+      const ended = endedThere.delete(key.terminalId)
+      if (
+        !reading &&
+        !ended &&
+        !removedProjects.has(key.projectId) &&
+        !removedSessions.has(key.workspaceSessionId)
+      )
         void track(endShell(entry))
       // After the shell's end is under way, and once this commit is done: what it tells
       // its stores' readers, who may start a transaction of their own, as the companion's
@@ -1615,30 +1713,134 @@ export const runnerBackend = (
     },
   })
 
+  // Sends what changed and resolves once the runner has all of it and every create this window
+  // started has landed, within a few seconds, as before another window reads a project: a read
+  // over a terminal still being created would drop it from the layout.
+  const settleSaves = async (): Promise<void> => {
+    const landed = (async () => {
+      await saves.settle()
+      // eslint-disable-next-line no-await-in-loop -- Work started meanwhile is waited for too.
+      while (pending.size) await Promise.allSettled(pending)
+    })()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      landed,
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, settleLimitMs))),
+    ])
+    clearTimeout(timer)
+  }
+  const listedStates = listing.flatMap(({ sessions: listed }) =>
+    listed.flatMap(({ session }) =>
+      session.state === null
+        ? []
+        : [
+            [
+              session.id,
+              { state: session.state, visitedAt: session.visitedAt, revision: session.revision },
+            ] as const,
+          ],
+    ),
+  )
+  // The runner's settings and the person's preferences as another client changes them, where
+  // the runner tells (`settings.watch`, `preferences.watch`).
+  const has = (path: "settings.watch" | "preferences.get"): boolean =>
+    typeof (runner as Partial<typeof runner>).supports === "function" && runner.supports(path)
+  let settingsStream: AsyncIterableIterator<unknown> | undefined
+  const followSettings = (): void => {
+    if (settingsStream || !has("settings.watch")) return
+    const changes = runner.settings.watch()
+    settingsStream = changes
+    void consume(changes, (settings) => {
+      if (settingsStream !== changes) return
+      takeSettings(settings)
+      takeInbox(settings)
+    })
+  }
+  const stopSettings = (): void => {
+    const ended = settingsStream
+    settingsStream = undefined
+    void ended?.return?.()?.catch(() => {})
+  }
+  const person =
+    runner.preferences && has("preferences.get")
+      ? runnerPreferences(runner as Pick<Runner, "preferences">, track)
+      : undefined
+  // Sessions shared with the runner's other clients: this one's changes as patches, theirs as
+  // they arrive (sessions/sharing.ts).
+  // How what another client made opens here, where it has no view of its own: as this
+  // window's open session is shown.
+  const seedDefaults = () => {
+    const project = latest?.projects.find(({ id }) => id === latest?.activeProjectId)
+    const shown = project?.history.find(({ id }) => id === project.activeSessionId)?.state
+    return {
+      view: shown?.view ?? ("grid" as const),
+      windowedView: shown?.windowedView ?? ("grid" as const),
+      now: now(),
+    }
+  }
+  // A session another client made in a project this window holds: listed here, unopened, as
+  // the runner has it, and never created again; its terminals the runner already told of
+  // join it, as those of a session this window knew do.
+  const arrive = (session: RunnerSession): boolean => {
+    const project = latest?.projects.find(({ id }) => id === session.projectId)
+    if (!project || removedSessions.has(session.id)) return false
+    if (project.history.some(({ id }) => id === session.id)) return false
+    asked.add(session.id)
+    sessions.set(session.id, created)
+    const listed: RunnerListing = [
+      {
+        project: { id: project.id, name: project.name, cwd: project.directory, pinned: false },
+        sessions: [{ session, terminals: [] }],
+      },
+    ]
+    const seeded = runnerSeed(listed, quickExitMs).projects[0]
+    const made = seeded && projectFromSeed(seeded, seedDefaults()).history[0]
+    if (!made) return false
+    dispatch([{ type: "session/arrived", projectId: project.id, session: made }])
+    queueMicrotask(() => {
+      for (const summary of runnerSummaries.values())
+        if (summary.sessionId === session.id) adopt(summary)
+    })
+    return true
+  }
+  // Who hears how the runner has the projects arranged, as another client arranges them.
+  const arrangedListeners = new Set<(arrangement: ProjectArrangement) => void>()
+  // Tour runs being prepared from this window, and the projects feed while it's followed.
+  let tourPreparing = 0
+  let liveProjects: ReturnType<typeof followProjects> | undefined
+  const sharing = createSessionSharing({
+    runner,
+    saves: () => saves,
+    latest: () => latest,
+    dispatch: (actions) => dispatch(actions),
+    track,
+    arrive,
+    now,
+  })
   // Every changed session is sent after a quiet spell, or at once on pagehide.
   const saves = createSessionSaves({
-    save: (sessionId, state, visitedAt) => runner.sessions.save({ sessionId, state, visitedAt }),
+    save: sharing.save,
     ready: sessionById,
     latest: () => latest,
     track,
     halted: () => halted,
     delay: saveDelay,
-    saved: listing.flatMap(({ sessions: listed }) =>
-      listed.flatMap(({ session }) =>
-        session.state === null
-          ? []
-          : [[session.id, { state: session.state, visitedAt: session.visitedAt }] as const],
-      ),
-    ),
+    saved: listedStates,
   })
+  // What the runner held of every session as this window loaded.
+  sharing.listed(listing.flatMap(({ sessions: listed }) => listed.map(({ session }) => session)))
   const { flush } = saves
   // Whether the first commit, which renders the page, has happened.
   let initialized = false
+
+  // Whether the commit under way puts a project the runner holds in place of this window's copy.
+  let reading = false
 
   const commit: Backend["commit"] = (workspace, actions) => {
     const initial = !initialized
     initialized = true
     latest = workspace
+    reading = actions.some((action) => action.type === "project/sync")
     for (const project of workspace.projects) {
       if (!asked.has(project.id)) void projectReady(project)
       for (const session of project.history)
@@ -1664,7 +1866,14 @@ export const runnerBackend = (
         : [],
     )
     for (const sessionId of deleted) removedSessions.add(sessionId)
+    // What another client removed is gone on the runner already, its terminals closed there:
+    // nothing of it is closed or removed again from here.
+    for (const action of actions) {
+      if (action.type === "project/gone") removedProjects.add(action.projectId)
+      if (action.type === "session/gone") removedSessions.add(action.workspaceSessionId)
+    }
     registry.reconcile(workspace, actions)
+    reading = false
     for (const projectId of removed) void removeOnRunner(projectId)
     for (const sessionId of deleted) void removeSessionOnRunner(sessionId)
     // The person's renames and arrangements of sessions, as the workspace has them now.
@@ -1677,6 +1886,10 @@ export const runnerBackend = (
       else void track(arrangeOnRunner(project))
     }
     saves.note(workspace)
+    sharing.seen(
+      initial,
+      actions.flatMap((action) => (action.type === "project/sync" ? [action.project.id] : [])),
+    )
     // What the person did to items and windows, renames of windows among it.
     items.commit(actions)
     for (const action of actions) {
@@ -1690,20 +1903,67 @@ export const runnerBackend = (
     if (!initial) queueMicrotask(reviveOnScreen)
   }
 
+  // Reads a project from the runner again, as a window that takes it on from another holds
+  // what the runner has now rather than the copy it loaded: what it keeps of the runner's terminals
+  // and sessions is brought up to date, and the project is handed back as a seed, for the page to
+  // put in place (`project/sync`). Undefined for a project the runner no longer has.
+  const syncProject: NonNullable<Backend["syncProject"]> = async (projectId) => {
+    // What this window has yet to send or create is not read over.
+    await settleSaves()
+    const project = (await runner.projects.list()).find((each) => each.id === projectId)
+    if (!project || halted) return undefined
+    const entry = await listProject(runner, project, newId, now)
+    if (!entry || halted) return undefined
+    const one: RunnerListing = [entry]
+    const terminals = entry.sessions.flatMap((each) => each.terminals)
+    for (const { id } of terminals) lostAtStart.delete(id)
+    for (const id of lostTerminals(one)) lostAtStart.add(id)
+    for (const [id, run] of terminalRuns(one)) runs.set(id, run)
+    for (const summary of terminals) runnerSummaries.set(summary.id, summary)
+    telemetry.update((held) => ({ ...held, ...runnerTelemetry(one, quickExitMs) }))
+    // It and its sessions exist on the runner: nothing creates them.
+    asked.add(project.id)
+    projects.set(project.id, created)
+    for (const { session } of entry.sessions) {
+      asked.add(session.id)
+      sessions.set(session.id, created)
+    }
+    sharing.listed(entry.sessions.map(({ session }) => session))
+    return runnerSeed(one, quickExitMs).projects[0]
+  }
+
   const runtime: SurfaceRuntime = {
     entry: (key) => registry.get(key)?.entry,
     resized: (key, size) => {
       const entry = registry.get(key)?.entry
       if (entry) entry.size = size
     },
+    elsewhere: (key) => {
+      const entry = registry.get(key)?.entry
+      if (!entry || entry.closed || entry.elsewhere) return
+      entry.elsewhere = true
+      dispatch(statusAction(entry, openElsewhere))
+    },
     attached: (key, attachment) => {
       const entry = registry.get(key)?.entry
       if (entry) entry.attachment = attachment
+      // It was open in another window until now: its own status comes back.
+      if (entry?.elsewhere) {
+        entry.elsewhere = false
+        const summary = runnerSummaries.get(key.terminalId)
+        const back = summary && terminalActivity(summary, quickExitMs).status
+        if (back && back !== "clean") dispatch(statusAction(entry, back))
+      }
       return () => {
         if (entry?.attachment === attachment) entry.attachment = undefined
       }
     },
-    attach: (terminalId, from) => runner.terminals.attach(terminalId, from && { after: from }),
+    attach: (terminalId, from) =>
+      runner.terminals.attach(terminalId, {
+        ...(runner.supports("terminals.controls") && { mode: "control-else-observe" }),
+        ...(from && { after: from }),
+      }),
+    observes: () => runner.supports("terminals.controls"),
     upload: (terminalId, file) => track(runner.terminals.upload(terminalId, file)),
     connected,
     lost: (key, error) => {
@@ -1748,6 +2008,8 @@ export const runnerBackend = (
         entry.dwell = undefined
       }
     },
+    // A shown project is told only where the app opens project windows.
+    sharing: () => shownProject !== null,
     shown: (key) => {
       const entry = registry.get(key)?.entry
       return entry !== undefined && !entry.closed && onScreen(entry)
@@ -1771,8 +2033,10 @@ export const runnerBackend = (
       if (change.type === "removed") {
         closedPending.delete(change.terminalId)
         runnerSummaries.delete(change.terminalId)
-        // Closed, as by another window: it is gone from its session here too.
+        // Closed, as by another window: it is gone from its session here too, and its shell, gone
+        // on the runner already, isn't ended again from here.
         const entry = entries.get(change.terminalId)
+        if (entry && !entry.closed) endedThere.add(change.terminalId)
         if (entry && !entry.closed)
           dispatch([
             { type: "terminal/close", target: target(entry.key), terminalId: change.terminalId },
@@ -1856,6 +2120,7 @@ export const runnerBackend = (
       if (status.state === "connected") {
         saves.schedule()
         inUse.connected()
+        showing.connected()
         inSight.connected()
       }
     }
@@ -1972,6 +2237,26 @@ export const runnerBackend = (
     notes.follow()
     works.readOnce()
     inbox.follow()
+    sharing.follow()
+    liveProjects = followProjects({
+      runner,
+      latest: () => latest,
+      dispatch,
+      now,
+      holding: () => tourPreparing > 0,
+      read: async (projectId) => {
+        const read = await syncProject(projectId)
+        return read && projectFromSeed(read, seedDefaults())
+      },
+      removedHere: (projectId) => removedProjects.has(projectId),
+      arranged: (arrangement) => {
+        for (const listener of arrangedListeners) listener(arrangement)
+      },
+      sessionsArranged: sharing.arranged,
+      listed: listing.map(({ project }) => project.id),
+    })
+    followSettings()
+    person?.follow()
     window.addEventListener("pagehide", flush)
     // The app waits for these saves, removals and closes before a close or quit can end
     // the shells, so they name what still runs.
@@ -1997,13 +2282,18 @@ export const runnerBackend = (
       history.stop()
       notes.stop()
       works.stop()
+      sharing.stop()
+      liveProjects?.stop()
+      liveProjects = undefined
+      stopSettings()
+      person?.stop()
       // The last changes are saved; nothing retries after this.
       flush()
       halted = true
     }
   }
 
-  const screenOptions = screensOptions(runtime, { theme: options.theme })
+  const screenOptions = screensOptions(runtime, { theme: options.theme, messages: messages.state })
   const screens = createTerminalScreens(screenOptions)
   const backend: Backend = {
     seed,
@@ -2026,7 +2316,24 @@ export const runnerBackend = (
     voice: voice.voice,
     murmur: murmur.murmur,
     typeInto: screens.typeInto,
+    observing: screens.observing,
+    takeControl: screens.take,
     activeTerminal: inUse.report,
+    showingProject: (projectId, others) => {
+      // A project this window stops showing is let go of at once where another window may take
+      // it over: its screens detach, so that window can control its terminals, rather than the
+      // screens parking and keeping control for seconds or minutes. Alone, they stay warm.
+      if (
+        others === true &&
+        projectId !== null &&
+        shownProject !== null &&
+        shownProject !== projectId
+      )
+        screens.release((key) => key.projectId === shownProject)
+      shownProject = projectId
+      showing.report(projectId)
+    },
+    syncProject,
     start,
     companions: {
       ...createRunnerCompanions(runner.companions, {
@@ -2052,9 +2359,12 @@ export const runnerBackend = (
             ...inbox,
             order: inboxOrder,
             arrange: (keys) => {
-              const kept = trimmed(keys, new Set(inbox.state.getSnapshot().items.map(rowKey)))
+              const kept = trimmed(keys, new Set(inbox.state.getSnapshot().items.map(entryKey)))
               inboxOrder.update(() => kept)
-              void track(runner.settings.set({ inboxOrder: fitted(kept) })).catch(() => {})
+              ordering += 1
+              void track(runner.settings.set({ inboxOrder: fitted(kept) }))
+                .catch(() => {})
+                .finally(() => (ordering -= 1))
             },
           }
         : inbox,
@@ -2090,6 +2400,10 @@ export const runnerBackend = (
     },
     // After the projects the person just added exist on the runner, or the arrangement
     // would name ones it doesn't have yet.
+    arranged: (listener) => {
+      arrangedListeners.add(listener)
+      return () => void arrangedListeners.delete(listener)
+    },
     arrange: (arrangement) =>
       track(
         Promise.allSettled(projects.values()).then(async () => {
@@ -2132,23 +2446,39 @@ export const runnerBackend = (
     // unavailable, never "nothing busy".
     busyTerminals: (only) =>
       runner.terminals.busy(only).then(
-        (answer) => {
-          const read = busyShells.safeParse(answer)
-          return read.success ? read.data : undefined
-        },
+        // Keys a newer runner added are dropped, not taken for another shape.
+        (answer) => readTolerantly(busyShells, answer),
         () => undefined,
       ),
     connection,
     crashLoop: { crashes: crashLooping, retry: retryAfterCrashLoop },
     boot: boot.store,
-    ...runnerSwitches(runner, options, track),
-    ...(runner.tour && { tour: runnerTour(runner.tour, track) }),
+    ...switches,
+    ...(person && { preferences: person.preferences }),
+    ...(runner.tour && {
+      // The tours it removes are this window's to remove, as it opens the new one: the projects
+      // feed holds what goes meanwhile, and lets go only of what the run didn't remove.
+      tour: runnerTour(runner.tour, track, async (work) => {
+        tourPreparing += 1
+        let removed: readonly string[] = []
+        try {
+          const run = await work
+          removed = run.removed
+          return run
+        } finally {
+          tourPreparing -= 1
+          for (const projectId of removed) removedProjects.add(projectId)
+          liveProjects?.released()
+        }
+      }),
+    }),
     ...(options.pickDirectory ? { pickDirectory: options.pickDirectory } : {}),
     ...(options.showAppearance ? { showAppearance: options.showAppearance } : {}),
     ...(options.showScale ? { showScale: options.showScale } : {}),
     ...(options.notices ? { notices: options.notices } : {}),
     ...(options.badge ? { badge: options.badge } : {}),
     ...(options.windowFocus ? { windowFocus: options.windowFocus } : {}),
+    ...(options.projectWindows ? { projectWindows: options.projectWindows } : {}),
     ...(options.windowControls ? { windowControls: options.windowControls } : {}),
     ...(options.screenReader ? { screenReader: options.screenReader } : {}),
     ...(options.panePicture ? { panePicture: options.panePicture } : {}),

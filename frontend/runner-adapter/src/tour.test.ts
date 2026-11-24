@@ -11,10 +11,20 @@ const run: TourRun = {
   brief: "launch",
   model: "gpt-6-luna",
   removed: [],
+  page: true,
 }
 
 const tourAnswering = (prepare: () => Promise<TourRun>): Runner["tour"] =>
-  ({ prepare, brief: () => Promise.resolve() }) as unknown as Runner["tour"]
+  ({
+    prepare,
+    brief: () => Promise.resolve(),
+    artist: (terminalId: string) => (rung.push(terminalId), Promise.resolve()),
+    keep: () => (kept.push(true), Promise.resolve()),
+  }) as unknown as Runner["tour"]
+
+// The terminals the runner was asked to ring the artist's brief to, and the keeps it was asked.
+const rung: string[] = []
+const kept: boolean[] = []
 
 const track = <T>(work: Promise<T>): Promise<T> => work
 
@@ -37,6 +47,24 @@ describe("The runner's tour", () => {
     const refused = await tour.prepare("codex").catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(TourNeedsAgent)
     expect(refused).toMatchObject({ agent: "codex", message: "Codex hasn't listed its models." })
+  })
+
+  it("rings the artist's brief to the terminal, as the runner's call", async () => {
+    const tour = runnerTour(
+      tourAnswering(() => Promise.resolve(run)),
+      track,
+    )
+    await expect(tour.artist?.("t7")).resolves.toBeUndefined()
+    expect(rung).toEqual(["t7"])
+  })
+
+  it("keeps the project, as the runner's call", async () => {
+    const tour = runnerTour(
+      tourAnswering(() => Promise.resolve(run)),
+      track,
+    )
+    await expect(tour.keep?.()).resolves.toBeUndefined()
+    expect(kept).toEqual([true])
   })
 
   it("passes any other refusal on as it came", async () => {

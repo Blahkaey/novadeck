@@ -7,6 +7,8 @@ import { randomBytes, randomUUID } from "node:crypto"
 import { link, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 
+import { keyIn } from "../transcript-key-file.js"
+
 const keyBytes = 32
 
 /** Why a key file can't be used; the message names the file, never what it holds. */
@@ -68,6 +70,8 @@ const read = async (path: string, platform: NodeJS.Platform): Promise<Uint8Array
   const bytes = await readFile(path).catch((error: unknown) =>
     refuse(`can't be read: ${(error as Error).message}`),
   )
-  if (bytes.length !== keyBytes) refuse(`doesn't hold a key: it must be ${keyBytes} bytes.`)
-  return new Uint8Array(bytes)
+  if (bytes.length === keyBytes) return new Uint8Array(bytes)
+  const decoded = keyIn(bytes.toString("utf8"))
+  if (!decoded) return refuse(`doesn't hold a key: it must be ${keyBytes} bytes.`)
+  return decoded
 }

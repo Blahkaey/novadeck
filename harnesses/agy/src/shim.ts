@@ -1,6 +1,6 @@
 import { header } from "@novadeck/harness-core/header"
 import { cmdLaunch, posixLaunch } from "@novadeck/harness-core/launch-mark"
-import { cmdAdd, posixAdd } from "@novadeck/harness-core/shim-root"
+import { cmdAdd, cmdValue, posixAdd } from "@novadeck/harness-core/shim-root"
 
 /**
  * The rule that lets a session run Novadeck's own tools without asking: its plugin's server,
@@ -20,6 +20,18 @@ import { cmdAdd, posixAdd } from "@novadeck/harness-core/shim-root"
  * written there), the shim's file left as it was, and the next launch passed it on.
  */
 export const allowNovadeck = "mcp(novadeck_novadeck/*)"
+
+/**
+ * The rules the shim adds while the shipping gate is on, for the two commands the gate's reader
+ * always reads as shipping: its hook then denies or stays silent for them exactly, and agy's rule
+ * runs a permitted one with no dialog (probed 1.5.14: an exact `command(<program> <subcommand>)`
+ * rule covers `<program> <subcommand> <args>` and `cd X && …`, never a tail, `;` or a
+ * longer subcommand; a glob never matches). The relay answers deny, not ask, for these on every
+ * path where the runner doesn't answer (backend/relay's `hook.rs` holds the same list, and a test
+ * pins them equal): a rule makes `ask` run the command unasked.
+ * Not written where the launch skips every permission (`--dangerously-skip-permissions`).
+ */
+export const shippingRules = ["command(gh pr create)", "command(gh pr merge)"] as const
 
 /**
  * The folder in Novadeck's shell files, beside the shims' own, where the relay writes the rules
@@ -71,7 +83,7 @@ export const valued = [
 // and the person's allow rules with Novadeck's own tools added (`allowNovadeck`).
 // As a session starts, it tells Novadeck so (`posixLaunch`, and `cmdLaunch` on Windows). Its
 // commands, and anything outside Novadeck's shells, run unchanged.
-export const posixShim = (root?: string): string => `#!/bin/sh
+export const posixShim = (root?: string, gate = false): string => `#!/bin/sh
 ${header("#", "shim for agy")}
 # Runs the real agy with access to the folder where agents' worktrees live, and with
 # Novadeck's own tools allowed beside the person's own rules.
@@ -117,12 +129,31 @@ done
 novadeck_settings=
 if [ -n "\${HOME:-}" ] && novadeck_dir=$(cd "$(dirname "$0")/.." && pwd); then
   novadeck_settings=$novadeck_dir/${allowFolder}/$NOVADECK_TERMINAL_ID.json
-  "$novadeck_dir/novadeck-relay" allow "$HOME/.gemini/antigravity-cli/settings.json" '${allowNovadeck}' "$novadeck_settings" >/dev/null 2>&1 ||
+  "$novadeck_dir/novadeck-relay" allow "$HOME/.gemini/antigravity-cli/settings.json" '${allowNovadeck}' "$novadeck_settings"${
+    gate ? ` ${shippingRules.map((rule) => `'${rule}'`).join(" ")} -- "$@"` : ""
+  } >/dev/null 2>&1 ||
     novadeck_settings=
 fi
 ${posixLaunch("agy")}
 exec "$novadeck_real" \${novadeck_add:+"$novadeck_add"} \${novadeck_settings:+--settings "$novadeck_settings"} "$@"
 `
+
+/** A Windows path with its drive letter in lower case, which sorts after any in upper case. */
+export const lowerDrive = (path: string): string =>
+  path.replace(/^[A-Z]:/, (drive) => drive.toLowerCase())
+
+const drives = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].join(" ")
+
+// The line of the cmd shim that gives its own folder, which agy inherits, its drive letter in
+// upper case: through the drive's root, as a `cd` to the same folder keeps its case. `%CD%` is
+// read as the line is, so a failed second `cd` goes back where it was, and `setlocal` gives the
+// terminal its folder back after.
+const cmdUpperDrive = `for %%d in (${drives}) do if /i "%CD:~0,1%"=="%%d" if not "%CD:~0,1%"=="%%d" cd /d %%d:\\ 2>nul && cd /d "%%d%CD:~1%" 2>nul || cd /d "%CD%"`
+
+// The line of the cmd shim that sets `novadeck_hooks` to the option adding `folder`, its drive
+// letter in lower case, so it sorts after the shim's own folder (`cmdUpperDrive`).
+const cmdHooks = (folder: string): string =>
+  `set novadeck_hooks=--add-dir="${cmdValue(lowerDrive(folder))}"`
 
 // Where cmd's AutoRun prints, Antigravity's hooks (which it runs as "cmd /c <command>" through
 // whatever "cmd" PATH names first; Go does not read ComSpec, and adds no "/d") stand behind
@@ -144,12 +175,27 @@ exec "$novadeck_real" \${novadeck_add:+"$novadeck_add"} \${novadeck_settings:+--
 // file, as cmd would read the quotes of JSON, which the relay writes and says it did by its exit
 // code, so nothing it prints is read back through cmd. Only a session tells Novadeck it starts
 // (`cmdLaunch`): its commands go on as before, with the folder and the rules, but say nothing.
+//
+// Where cmd prints, the plugin, which is global, registers no PreToolUse (plugin.ts), so with
+// the pass-through the shim also adds `hooksFolder`, Novadeck's folder holding that hook alone
+// (`launchHooks`), to the session as a workspace, and it runs in Novadeck's terminals only.
+// Antigravity orders its workspaces by path, case and all, and tells the model the first is its
+// commands' working directory, where a command that names none runs (probed 2026-11-23, 1.5.13,
+// e2e/probes/agy-settings-hooks): the folder goes in with its drive letter in lower case, and the
+// shim first gives its own folder's drive letter in upper case (`cmdUpperDrive`), which then
+// sorts first. Nothing is written in the folder, so its case matters to nothing else. (The
+// worktrees' folder keeps its case, and goes in only where it sorts after: harness-core's
+// shim-root.ts.)
 export const makeCmdShim = ({
   cmdShimDir,
+  hooksFolder,
   root,
+  gate = false,
 }: {
   readonly cmdShimDir?: string | undefined
+  readonly hooksFolder?: string | undefined
   readonly root?: string | undefined
+  readonly gate?: boolean | undefined
 }): string => `@echo off
 ${header("rem", "shim for agy")}
 rem Runs the real agy with access to the folder where agents' worktrees live, with Novadeck's own
@@ -165,10 +211,14 @@ if not defined novadeck_real (
 if not defined NOVADECK_TERMINAL_ID goto plain
 rem Only while Antigravity is connected: Novadeck's shells name the harnesses whose shims apply.
 echo " %NOVADECK_SHIMS% " | findstr /c:" agy " >nul || goto plain
-${cmdAdd(root)}${cmdShimDir === undefined ? "" : `\nset "PATH=${cmdShimDir};%PATH%"`}
+${hooksFolder === undefined ? "" : `${cmdUpperDrive}\n`}${cmdAdd(root)}${cmdShimDir === undefined ? "" : `\nset "PATH=${cmdShimDir};%PATH%"`}${
+  hooksFolder === undefined ? "" : `\n${cmdHooks(hooksFolder)}`
+}
 set "novadeck_settings=%~dp0..\\${allowFolder}\\%NOVADECK_TERMINAL_ID%.json"
 set "novadeck_with="
-"%~dp0..\\novadeck-relay.exe" allow "%USERPROFILE%\\.gemini\\antigravity-cli\\settings.json" "${allowNovadeck}" "%novadeck_settings%" >nul 2>nul && set novadeck_with=--settings "%novadeck_settings%"
+"%~dp0..\\novadeck-relay.exe" allow "%USERPROFILE%\\.gemini\\antigravity-cli\\settings.json" "${allowNovadeck}" "%novadeck_settings%"${
+  gate ? ` ${shippingRules.map((rule) => `"${rule}"`).join(" ")} -- %*` : ""
+} >nul 2>nul && set novadeck_with=--settings "%novadeck_settings%"
 rem The first word that isn't an option or an option's value may be another command, which
 rem starts no session, so it doesn't tell Novadeck one starts; it runs as a session does. The
 rem words are walked as Claude Code's are (harnesses/claude/src/shim.ts), and %* keeps them all.
@@ -192,7 +242,7 @@ goto command
 ${cmdLaunch("agy")}
 :run
 set "novadeck_arg="
-"%novadeck_real%" %novadeck_add% %novadeck_with% %*
+"%novadeck_real%" %novadeck_add%${hooksFolder === undefined ? "" : " %novadeck_hooks%"} %novadeck_with% %*
 exit /b %ERRORLEVEL%
 :plain
 "%novadeck_real%" %*

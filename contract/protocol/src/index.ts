@@ -37,11 +37,14 @@ export {
   promptFailure,
   promptResult,
   type AgentDetail,
+  standingPermit,
+  type StandingPermit,
   type PromptReceipt,
   type PromptResult,
   type AgentIntegration,
   agentLimits,
   agentName,
+  agentNameRead,
   agentSessionId,
   type AgentTelemetry,
   conflictReason,
@@ -155,7 +158,10 @@ export {
   type WorkPreviewWork,
   workPreviewWork,
 } from "./works.js"
-export { fitsRunner, maxWebSocketMessageBytes, protocolVersion } from "./connection.js"
+export { compatibility, type Compatibility } from "./compatibility.js"
+export { isDropped, newer, openMark, readerOf, type Open, type Sent, type Unknown } from "./open.js"
+export { answerReaders } from "./readers.js"
+export { fitsRunner, maxWebSocketMessageBytes } from "./connection.js"
 export { fileImportLimits, type FileImportEntry, type FileImportWrite } from "./file-import.js"
 export {
   type ForgeHost,
@@ -165,6 +171,7 @@ export {
   forgeLimits,
   type ForgeName,
   forgeName,
+  forgeNameRead,
   type PullRequest,
   pullRequest,
 } from "./forges.js"
@@ -174,6 +181,7 @@ export {
   requestAnswer,
   type RequestAnswer,
   requestDialog,
+  requestDialogRead,
   type RequestDialog,
 } from "./dialogs.js"
 export { type FeedbackDraft, feedbackKind, type FeedbackKind, maxFeedbackText } from "./feedback.js"
@@ -182,22 +190,37 @@ export {
   type AgentAsk,
   askAnswer,
   type AskAnswer,
+  inboxContent,
   inboxEntry,
   type InboxEntry,
   inboxTextLimits,
   maxAskOptions,
+  maxAskQuestions,
+  maxQuestionOptions,
+  questionsAnswer,
+  type QuestionsAnswer,
 } from "./inbox.js"
 export {
   type DeliveredNotice,
+  type DeliveryContent,
   type DeliveryState,
+  listedDeliveriesMost,
+  listedDeliveryIdsMost,
   listedNoticesMost,
+  listedRingsMost,
   longHoldMs,
   type MessageParty,
   type MessageRecipient,
   type MessageState,
   type MessageThread,
+  type RingContent,
+  ringPartsMost,
+  type RingPart,
+  ringTextMost,
   terminalMessages,
   type TerminalMessages,
+  terminalRings,
+  type TerminalRings,
 } from "./messages.js"
 export {
   type CheckoutState,
@@ -209,6 +232,10 @@ export {
   type FolderListing,
   maxClientStateLength,
   type Project,
+  sessionPatch,
+  type SessionChange,
+  type ProjectsChange,
+  type SessionPatch,
   type WorkspaceSession,
 } from "./projects.js"
 export {
@@ -221,11 +248,28 @@ export {
   maxInboxHistoryRows,
   maxInboxOrder,
   maxInboxResolved,
-  maxInboxRowIdLength,
+  maxInboxEntryIdLength,
   runnerSettings,
   type RunnerSettings,
   type RunnerSettingsState,
 } from "./settings.js"
+export {
+  device,
+  deviceId,
+  deviceName,
+  maxDevices,
+  mintedDevice,
+  type Device,
+  type MintedDevice,
+} from "./devices.js"
+export {
+  maxPreferenceLength,
+  maxPreferences,
+  preferenceChange,
+  preferenceKey,
+  preferenceValue,
+  type PreferenceChange,
+} from "./preferences.js"
 export { tourPrepared, type TourPrepared } from "./tour.js"
 export {
   type Approval,
@@ -244,6 +288,7 @@ export {
   type BusyShells,
   type TerminalAttached,
   type TerminalChange,
+  type TerminalControl,
   type TerminalEvent,
   type TerminalExit,
   type TerminalRequest,

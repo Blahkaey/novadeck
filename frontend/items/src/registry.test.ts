@@ -11,6 +11,7 @@ import {
   Globe,
   Image,
   type LucideIcon,
+  PanelTop,
 } from "lucide-react"
 
 import type { StackKind } from "./bar/bar"
@@ -45,6 +46,8 @@ const oldStackNames: Record<StackKind, { one: string; many: string }> = {
   page: { one: "page", many: "Pages" },
   changes: { one: "change", many: "Changes" },
   shells: { one: "shells", many: "Shells" },
+  // A kind a newer Novadeck shows, which the switches never had.
+  newer: { one: "item", many: "Items" },
 }
 
 describe("the registry", () => {
@@ -62,6 +65,7 @@ describe("the registry", () => {
         changes: true,
         plan: true,
         shells: true,
+        newer: true,
       }
       expect(Object.keys(registry).toSorted()).toEqual(Object.keys(kinds).toSorted())
       for (const [key, registration] of Object.entries(registry))
@@ -80,6 +84,12 @@ describe("the registry", () => {
         ["page", "localhost"],
       ] as const)
         expect(iconOf({ kind, name }), `${kind} ${name}`).toBe(oldIconOf({ kind, name }))
+    })
+
+    it("gives a file the icon of its path's type, whatever its title", () => {
+      expect(iconOf({ kind: "file", name: "Design notes", path: "/work/notes.md" })).toBe(BookText)
+      expect(iconOf({ kind: "file", name: "Strip", path: "/work/strip.html" })).toBe(PanelTop)
+      expect(iconOf({ kind: "file", name: "notes.md", path: "/work/notes.ts" })).toBe(FileCode2)
     })
   })
 

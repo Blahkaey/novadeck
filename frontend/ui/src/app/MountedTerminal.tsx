@@ -8,8 +8,16 @@ import type {
 } from "@novadeck/core/port"
 import { endingText, terminalEnding, terminalPhase } from "@novadeck/core/terminals/ending"
 import type { TerminalMetadata, ViewMode } from "@novadeck/core/types"
+import { useFileDrop } from "@novadeck/toolkit/file-drops"
 import { useShown } from "@novadeck/toolkit/shown"
-import { TerminalEndingBar, TerminalLock, TerminalNotice } from "@novadeck/toolkit/TerminalStatus"
+import {
+  TerminalControlStrip,
+  TerminalDrop,
+  terminalDropNotice,
+  TerminalEndingBar,
+  TerminalLock,
+  TerminalNotice,
+} from "@novadeck/toolkit/TerminalStatus"
 import {
   useCallback,
   useEffect,
@@ -40,7 +48,11 @@ const ignore = (): (() => void) => () => {}
 
 // The agent a sleeping or waking terminal resumes.
 const agentOf = (terminal: TerminalMetadata): string | undefined =>
-  terminal.state === "sleeping" ? terminal.agent : terminal.restoredProcess
+  terminal.state === "sleeping"
+    ? terminal.agent === "newer"
+      ? undefined
+      : terminal.agent
+    : terminal.restoredProcess
 
 // What stands where the agent will draw: while it sleeps a bare `z`, nothing of its last screen
 // (replaying that would write into the emulator the resuming agent draws in); while it wakes,
@@ -146,7 +158,7 @@ export const MountedTerminal = ({
   )
   const latest = useRef(props)
   const ending = terminalEnding(terminal)
-  const { lock, notice } = useSyncExternalStore(
+  const { lock, notice, control } = useSyncExternalStore(
     mount?.state.subscribe ?? ignore,
     () => mount?.state.getSnapshot() ?? opening,
   )
@@ -188,13 +200,25 @@ export const MountedTerminal = ({
     // Intercept before XYFlow's native listener, but let zoom gestures reach it.
     if (!event.ctrlKey && !event.metaKey) event.stopPropagation()
   }, [])
+  // Files dragged over the terminal: how many, while it would take them. A drop pastes their
+  // paths as a paste of them does, in every view alike. Its zone is the body its window holds it
+  // in (`.terminal-host`), not the companion pane beside or over it: Canvas lets an unselected
+  // window's content take no pointer, so a press selects it, and its drags reach that body. Not
+  // while its chat covers it, whose own box takes them.
+  const [dropping, setDropping] = useState<number | null>(null)
+  const dropZone = useFileDrop({
+    accepts: () => !covered && (mount?.takesFiles?.() ?? false),
+    over: setDropping,
+    drop: (data) => mount?.dropFiles?.(data),
+  })
   const onRoot = useCallback(
     (content: HTMLDivElement | null): void => {
       root.current?.removeEventListener("wheel", onWheel)
       root.current = content
       content?.addEventListener("wheel", onWheel, { passive: true })
+      dropZone(content?.closest(".terminal-host") ?? content)
     },
-    [onWheel],
+    [onWheel, dropZone],
   )
   // Where the content remounts, the element moves into the new slot, and takes the focus it
   // held in the old.
@@ -220,6 +244,16 @@ export const MountedTerminal = ({
           className="terminal-content terminal-mounted nodrag nopan relative flex min-h-0 flex-1 flex-col"
           data-locked={locked || undefined}
         >
+          {control && (
+            <TerminalControlStrip
+              busy={control === "busy"}
+              onTake={() => {
+                mount?.take?.()
+                // Typing goes on in the terminal the keyboard was just taken for.
+                mount?.focus()
+              }}
+            />
+          )}
           <div ref={onSlot} className="flex min-h-0 flex-1 flex-col" />
           <TerminalEndingBar
             ending={ending}
@@ -244,6 +278,7 @@ export const MountedTerminal = ({
           ) : (
             lock && <TerminalLock notice={lockNotices[lock]} />
           )}
+          {dropping !== null && <TerminalDrop notice={terminalDropNotice(dropping)} />}
         </div>,
       )}
       {/* Announced from outside the window: the bar is inert while hidden, the content
@@ -253,7 +288,7 @@ export const MountedTerminal = ({
       <span aria-live="polite" aria-atomic className="sr-only">
         {ending ? endingText(ending) : ""}
       </span>
-      {/* A failed paste or a copy, announced the same way. */}
+      {/* A failed paste, a copy or a takeover, announced the same way. */}
       <span aria-live="polite" aria-atomic className="sr-only">
         {notice ?? ""}
       </span>

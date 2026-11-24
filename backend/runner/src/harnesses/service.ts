@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
-import { readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import type { Command, Harness, Install, Model } from "@novadeck/harness-core/harness"
 import type { AgentIntegration, AgentName } from "@novadeck/protocol"
@@ -347,7 +347,15 @@ export const createHarnesses = (
     // Its own settings go back before its plugin does, so nothing names a missing hook.
     if (!connected) await settle("revert")
     const before = connected && (await harness.connected(where))
+    // A harness connected by a file of Novadeck's own (`Harness.marker`): written before its
+    // commands, removed after them, so what reads it never names a plugin half set up.
+    const connection = harness.marker?.(where)
+    if (connection !== undefined && connected) {
+      await mkdir(dirname(connection), { recursive: true })
+      await writeFile(connection, "connected\n")
+    }
     await steps(harness, where, connected ? harness.connect(where) : harness.disconnect, settings)
+    if (connection !== undefined && !connected) await rm(connection, { force: true })
     const after = await state(harness, where)
     if (after.connected !== connected)
       throw new DomainError(
@@ -469,13 +477,15 @@ export const createHarnesses = (
      * at the next start. Resolves to the agents it installed into; one that fails is
      * logged, and the rest go on.
      */
-    refresh: async (): Promise<AgentName[]> => {
+    refresh: async (gated = false): Promise<AgentName[]> => {
       const install = await installs()
       if (!install) return []
       const refreshed: AgentName[] = []
       for (const agent of agents) {
         const { installed } = harnesses[agent]
-        if (!installed) continue
+        // A copy that differs only with the shipping gate is looked at only while it is on, or
+        // once it was switched (`gated`).
+        if (!installed || (installed.gated === true && !gated)) continue
         const where = install(agent)
         try {
           // eslint-disable-next-line no-await-in-loop -- One agent at a time, as `set` runs them.

@@ -1,4 +1,4 @@
-import { emptyInbox, type InboxRow, type InboxState } from "@novadeck/core/inbox"
+import { emptyInbox, type InboxEntry, type InboxState } from "@novadeck/core/inbox"
 import type { Notice } from "@novadeck/core/port"
 import { createStore, createWorkspaceStore } from "@novadeck/core/store"
 import { appearance, workspaceFixture } from "@novadeck/core/testing"
@@ -16,7 +16,7 @@ const workspaceOnScreen = () => createWorkspaceStore(workspaceFixture())
 // A ding that sounds nothing: the board under test is about its notices.
 const testDing = createDing({ sound: () => ({ on: false, volume: 0, name: "felt" }) })
 
-const sourceOf = (terminalId: string): InboxRow["source"] => ({
+const sourceOf = (terminalId: string): InboxEntry["source"] => ({
   projectId: "p",
   workspaceSessionId: "s",
   terminalId,
@@ -26,7 +26,7 @@ const sourceOf = (terminalId: string): InboxRow["source"] => ({
   projectName: "Project",
 })
 
-const ask = (id: string, terminalId = "t1", at = Date.now()): InboxRow => ({
+const ask = (id: string, terminalId = "t1", at = Date.now()): InboxEntry => ({
   id,
   source: sourceOf(terminalId),
   at,
@@ -42,7 +42,7 @@ const ask = (id: string, terminalId = "t1", at = Date.now()): InboxRow => ({
   },
 })
 
-const update = (id: string): InboxRow => ({
+const update = (id: string): InboxEntry => ({
   id,
   source: sourceOf("t1"),
   at: Date.now(),
@@ -52,7 +52,7 @@ const update = (id: string): InboxRow => ({
   update: { type: "told", subject: "Done", body: "" },
 })
 
-const setup = (items: InboxRow[] = [], pings = true) => {
+const setup = (items: InboxEntry[] = [], pings = true) => {
   const inbox = createStore<InboxState>({ ...emptyInbox, items })
   const ui = createUiStore(
     initialUi({
@@ -91,7 +91,7 @@ const setup = (items: InboxRow[] = [], pings = true) => {
   const shown: string[] = []
   const closed: string[] = []
   const board = {
-    show: (row: InboxRow) => void shown.push(`${row.source.terminalId}:${row.id}`),
+    show: (entry: InboxEntry) => void shown.push(`${entry.source.terminalId}:${entry.id}`),
     close: (terminalId: string, itemId: string) => void closed.push(`${terminalId}:${itemId}`),
   }
   const dings: string[] = []
@@ -101,7 +101,7 @@ const setup = (items: InboxRow[] = [], pings = true) => {
     ding: (terminalId) => void dings.push(terminalId),
     desktop: () => true,
   })
-  const set = (next: InboxRow[]) => inbox.update((state) => ({ ...state, items: next }))
+  const set = (next: InboxEntry[]) => inbox.update((state) => ({ ...state, items: next }))
   const change = (patch: (state: UiState) => UiState) => ui.update(patch)
   const route = (patch: Partial<UiState["location"]["route"]>) =>
     change((state) => ({
@@ -121,7 +121,7 @@ beforeEach(() => {
 afterEach(() => void vi.useRealTimers())
 
 describe("toasts for what needs the person", () => {
-  context("when a new row needs them while Novadeck has their focus", () => {
+  context("when a new entry needs them while Novadeck has their focus", () => {
     it("shows one toast once the grace has passed", () => {
       const { set, shown, stop } = setup()
       set([ask("a")])
@@ -132,7 +132,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("sounds the ding with the toast, and none for a row that shows none", () => {
+    it("sounds the ding with the toast, and none for an entry that shows none", () => {
       const { set, shown, dings, stop } = setup()
       set([ask("a"), update("u")])
       vi.advanceTimersByTime(1999)
@@ -143,7 +143,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("shows none for a row that is answered within the grace, or for an update", () => {
+    it("shows none for an entry that is answered within the grace, or for an update", () => {
       const { set, shown, stop } = setup()
       set([ask("a"), update("u")])
       vi.advanceTimersByTime(1000)
@@ -153,7 +153,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("takes the rows already there as seen", () => {
+    it("takes the entries already there as seen", () => {
       const { shown, stop } = setup([ask("a")])
       vi.advanceTimersByTime(5000)
       expect(shown).toEqual([])
@@ -162,12 +162,12 @@ describe("toasts for what needs the person", () => {
 
     it("waits out its whole grace again when it leaves before ringing and comes back", () => {
       const { set, shown, stop } = setup()
-      const row = ask("a")
-      set([row])
+      const entry = ask("a")
+      set([entry])
       vi.advanceTimersByTime(1000)
       set([])
       vi.advanceTimersByTime(500)
-      set([row])
+      set([entry])
       vi.advanceTimersByTime(1999)
       expect(shown).toEqual([])
       vi.advanceTimersByTime(1)
@@ -176,7 +176,7 @@ describe("toasts for what needs the person", () => {
     })
   })
 
-  context("when a rule fails as the row rings", () => {
+  context("when a rule fails as the entry rings", () => {
     it("shows none while the person doesn't want them", () => {
       const { set, change, shown, stop } = setup()
       change((state) => ({
@@ -189,7 +189,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("shows none while the Inbox is open, and none later for that row", () => {
+    it("shows none while the Inbox is open, and none later for that entry", () => {
       const { set, route, shown, stop } = setup()
       route({ panel: "inbox" })
       set([ask("a")])
@@ -223,7 +223,7 @@ describe("toasts for what needs the person", () => {
     })
   })
 
-  context("while Preferences or Search is open as the row rings", () => {
+  context("while Preferences or Search is open as the entry rings", () => {
     it("holds the toast until the dialog closes", () => {
       const { set, route, shown, stop } = setup()
       route({ dialog: "preferences" })
@@ -245,7 +245,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("drops it if its row was answered meanwhile", () => {
+    it("drops it if its entry was answered meanwhile", () => {
       const { set, route, shown, stop } = setup()
       route({ dialog: "search" })
       set([ask("a")])
@@ -267,7 +267,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("shows only the newest of a terminal's held rows", () => {
+    it("shows only the newest of a terminal's held entries", () => {
       const { set, route, shown, stop } = setup()
       route({ dialog: "search" })
       const first = ask("a")
@@ -296,7 +296,7 @@ describe("toasts for what needs the person", () => {
   })
 
   context(
-    "while the person leaves the app with the dialog open and no ping can take the row",
+    "while the person leaves the app with the dialog open and no ping can take the entry",
     () => {
       it("keeps it held until they return and the dialog is closed", () => {
         const { set, route, change, shown, stop } = setup([], false)
@@ -313,7 +313,7 @@ describe("toasts for what needs the person", () => {
     },
   )
 
-  context("while another modal dialog is open as the row rings", () => {
+  context("while another modal dialog is open as the entry rings", () => {
     it("holds the toast for the close confirmation, the crash-loop question and the switcher", () => {
       const { set, change, shown, stop } = setup()
       const open = [
@@ -342,16 +342,16 @@ describe("toasts for what needs the person", () => {
     })
   })
 
-  context("when a held row leaves and returns", () => {
+  context("when a held entry leaves and returns", () => {
     it("shows its toast once, not again when its new grace ends", () => {
       const { set, route, shown, stop } = setup()
-      const row = ask("a")
+      const entry = ask("a")
       route({ dialog: "search" })
-      set([row])
+      set([entry])
       vi.advanceTimersByTime(2000)
       set([])
       vi.advanceTimersByTime(2000)
-      set([row])
+      set([entry])
       vi.advanceTimersByTime(1000)
       route({ dialog: null })
       vi.advanceTimersByTime(5000)
@@ -361,7 +361,7 @@ describe("toasts for what needs the person", () => {
   })
 
   context("when a modal dialog opens over standing toasts", () => {
-    it("closes them all, leaving their rows in the Inbox", () => {
+    it("closes them all, leaving their entries in the Inbox", () => {
       const { set, inbox, route, closed, stop } = setup()
       set([ask("a", "t1"), ask("b", "t2")])
       vi.advanceTimersByTime(2000)
@@ -408,7 +408,7 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("still shows a row held meanwhile once it closes", () => {
+    it("still shows an entry held meanwhile once it closes", () => {
       const { set, route, closed, shown, stop } = setup()
       const first = ask("a", "t1")
       set([first])
@@ -471,7 +471,7 @@ describe("toasts for what needs the person", () => {
     })
   })
 
-  context("when a terminal gets a newer row", () => {
+  context("when a terminal gets a newer entry", () => {
     it("shows it for the same terminal, which the board puts in place of the older", () => {
       const { set, shown, stop } = setup()
       const first = ask("a")
@@ -484,7 +484,7 @@ describe("toasts for what needs the person", () => {
     })
   })
 
-  context("when a row with a toast leaves the Inbox", () => {
+  context("when an entry with a toast leaves the Inbox", () => {
     it("takes its toast back once it has stayed gone for the grace", () => {
       const { set, closed, stop } = setup()
       set([ask("a")])
@@ -497,14 +497,14 @@ describe("toasts for what needs the person", () => {
       stop()
     })
 
-    it("keeps it when the row drops out of a recompute and comes back", () => {
+    it("keeps it when the entry drops out of a recompute and comes back", () => {
       const { set, closed, stop } = setup()
-      const row = ask("a")
-      set([row])
+      const entry = ask("a")
+      set([entry])
       vi.advanceTimersByTime(2000)
       set([])
       vi.advanceTimersByTime(500)
-      set([row])
+      set([entry])
       vi.advanceTimersByTime(5000)
       expect(closed).toEqual([])
       stop()
@@ -572,7 +572,7 @@ describe("toasts and desktop notifications together", () => {
   })
 })
 
-describe("a row held behind a modal dialog", () => {
+describe("an entry held behind a modal dialog", () => {
   const held = () => {
     const { inbox, ui, set, change, route, shown } = setup()
     const pings: Notice[] = []
@@ -615,7 +615,7 @@ describe("a row held behind a modal dialog", () => {
     stop()
   })
 
-  it("is forgotten by the ping once its row leaves", () => {
+  it("is forgotten by the ping once its entry leaves", () => {
     const { set, change, pings, stop } = held()
     set([])
     vi.advanceTimersByTime(2000)
@@ -625,7 +625,7 @@ describe("a row held behind a modal dialog", () => {
   })
 })
 
-describe("a row that no toast waits for", () => {
+describe("an entry that no toast waits for", () => {
   it("is not deferred to the ping either: it never pings behind a dialog", () => {
     const { inbox, ui, set, change, route } = setup()
     const pings: Notice[] = []

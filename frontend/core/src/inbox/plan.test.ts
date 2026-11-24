@@ -1,5 +1,5 @@
 import type { AgentName } from "../harnesses"
-import type { InboxRow } from "../inbox"
+import type { InboxEntry } from "../inbox"
 import { itemIdOf, type Item } from "../items"
 import { context, describe, expect, it } from "../test"
 import { workspaceFixture } from "../testing"
@@ -11,7 +11,7 @@ const asked = 1_000_000
 const approval = (
   agent: AgentName,
   { subagent = false, at = asked }: { subagent?: boolean; at?: number } = {},
-): InboxRow => ({
+): InboxEntry => ({
   id: "request:r",
   source: {
     projectId: "p",
@@ -29,7 +29,7 @@ const approval = (
   request: {
     id: "r",
     kind: "plan",
-    tool: { claude: "ExitPlanMode", codex: "plan", agy: "artifact" }[agent],
+    tool: { claude: "ExitPlanMode", codex: "plan", agy: "artifact", opencode: "plan_exit" }[agent],
     subject: null,
     choices: [],
     subagent,
@@ -40,7 +40,7 @@ const approval = (
 })
 
 // A plan item as the runner shows each harness's: Claude Code's plan file, Codex's plan in
-// its rollout, Antigravity's artifact in its brain folder.
+// its rollout, Antigravity's artifact in its brain folder, opencode's plan file in the project.
 const sources = {
   claude: { path: "/home/me/.claude/plans/checkout.md", source: "file", agent: "Claude Code" },
   codex: { path: "/home/me/.codex/sessions/rollout.jsonl", source: "text", agent: "Codex" },
@@ -48,6 +48,11 @@ const sources = {
     path: "/home/me/.gemini/antigravity-cli/brain/c0/implementation_plan.md",
     source: "file",
     agent: "Antigravity",
+  },
+  opencode: {
+    path: "/home/me/project/.opencode/plans/1795350000000-calm-fox.md",
+    source: "file",
+    agent: "opencode",
   },
 } as const
 
@@ -101,6 +106,11 @@ describe("the plan a plan approval asks about", () => {
       const item = plan("agy", asked - 4 * 60_000)
       expect(planItemOf([item], approval("agy"), asked)).toEqual({ state: "found", item })
     })
+
+    it("is opencode's plan file, which its plan_exit question names as it asks", () => {
+      const item = plan("opencode", asked - 20_000)
+      expect(planItemOf([item], approval("opencode"), asked)).toEqual({ state: "found", item })
+    })
   })
 
   it("is the plan still, hidden from its bar or undocked into a window", () => {
@@ -141,13 +151,13 @@ describe("the plan a plan approval asks about", () => {
     expect(planItemOf([earlier], approval("codex"), asked + planWaitMs)).toEqual({ state: "none" })
   })
 
-  it("is none for a row that is no plan approval", () => {
-    const row = approval("claude")
-    const permission: InboxRow = {
-      ...row,
+  it("is none for an entry that is no plan approval", () => {
+    const entry = approval("claude")
+    const permission: InboxEntry = {
+      ...entry,
       kind: "request",
-      request: { ...(row.kind === "request" && row.request), kind: "permission", tool: "Bash" },
-    } as InboxRow
+      request: { ...(entry.kind === "request" && entry.request), kind: "permission", tool: "Bash" },
+    } as InboxEntry
     expect(planItemOf([plan("claude", asked)], permission, asked)).toEqual({ state: "none" })
   })
 
@@ -212,7 +222,7 @@ describe("the plan a plan approval asks about", () => {
   })
 })
 
-describe("the items of an Inbox row's session", () => {
+describe("the items of an Inbox entry's session", () => {
   it("are those its terminal's session holds", () => {
     const workspace = workspaceFixture()
     const project = workspace.projects[0]!

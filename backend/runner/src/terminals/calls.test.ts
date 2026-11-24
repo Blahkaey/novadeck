@@ -1,6 +1,6 @@
 import { resolve as resolvePath } from "node:path"
 
-import type { AgentMode } from "@novadeck/protocol"
+import type { AgentMode, AgentName } from "@novadeck/protocol"
 import { describe, expect, it } from "vitest"
 
 import { Approvals } from "./approvals.js"
@@ -34,7 +34,7 @@ describe("the models call", () => {
     ).call(call)
     expect(answer).toEqual({
       ok: true,
-      models: { claude, codex: [], agy: [] },
+      models: { claude, codex: [], agy: [], opencode: [] },
     })
   })
 
@@ -63,6 +63,7 @@ describe("the open call", () => {
     ])
     const asked: { command?: string; opener: Opener }[] = []
     const sent: { to: string; text: string }[] = []
+    const starts: { terminal: string; nonce: string; from: string; text: string }[] = []
     const notices: { to: string; text: string }[] = []
     const ended: string[] = []
     let listener: ((change: { kind: "terminal"; terminalId: string }) => void) | undefined
@@ -70,6 +71,11 @@ describe("the open call", () => {
     let briefed = false
     let plain = 0
     let barred: string | undefined
+    let flagged: readonly string[] | undefined
+    let given: { model: string; effort?: "low" | "max" } | undefined
+    // How the client answers: it confirms the terminal in time, confirms it only after the
+    // runner made it and the deadline passed, or makes none in time.
+    let window: "confirms" | "slow" | "late" = "confirms"
     const opened = {
       summary: { id: "t2", handle: "fox", title: "claude", ledBy: "t1" },
       terminal: { exiting: false },
@@ -91,8 +97,17 @@ describe("the open call", () => {
       peers: () => ({ introduce: () => undefined }),
       save: () => undefined,
       install: () => Promise.resolve(undefined),
-      models: () => Promise.resolve([{ id: "opus", efforts: ["low", "max"] }]),
-      openPolicy: () => ({ ...(barred !== undefined && { refusal: barred }) }),
+      models: (agent: AgentName) =>
+        Promise.resolve(
+          agent === "opencode"
+            ? [{ id: "opencode/e2e-free", efforts: [] }]
+            : [{ id: "opus", efforts: ["low", "max"] }],
+        ),
+      openPolicy: () => ({
+        ...(barred !== undefined && { refusal: barred }),
+        ...(flagged !== undefined && { flags: () => flagged! }),
+        ...(given !== undefined && { choice: () => given }),
+      }),
       claims: () => claims,
       launcher: () => ({
         connected: () => Promise.resolve(true),
@@ -100,13 +115,23 @@ describe("the open call", () => {
         directory: (path: string) => Promise.resolve(path),
       }),
       opens: () => ({
-        request: (request: { command?: string }, _ms: number, opener: Opener) => {
+        request: (
+          request: { command?: string },
+          _ms: number,
+          opener: Opener,
+          made?: (terminalId: string) => void,
+        ) => {
           asked.push({ ...request, opener })
+          if (window === "late") return Promise.resolve({ type: "late" })
           records.set("t2", opened)
-          return Promise.resolve({
-            type: "answered",
-            answer: { requestId: "r", terminalId: "t2" },
-          })
+          if (window === "confirms")
+            return Promise.resolve({
+              type: "answered",
+              answer: { requestId: "r", terminalId: "t2" },
+            })
+          // The runner makes the terminal, and the client confirms it only past the deadline.
+          made?.("t2")
+          return Promise.resolve({ type: "made", terminalId: "t2" })
         },
       }),
       messaging: () => ({
@@ -123,6 +148,8 @@ describe("the open call", () => {
           briefed = true
           return { ok: true, id: "m1", to: request.to, state: "queued" }
         },
+        noteStart: (terminal: string, nonce: string, from: string, text: string) =>
+          void starts.push({ terminal, nonce, from, text }),
         briefOf: () => (briefed ? "m1" : undefined),
         notice: (to: string, text: string) => {
           notices.push({ to, text })
@@ -164,12 +191,16 @@ describe("the open call", () => {
       questions,
       asked,
       sent,
+      starts,
       notices,
       ended,
       claims,
       opened,
       bar: (reason: string) => (barred = reason),
+      flag: (flags: readonly string[]) => (flagged = flags),
+      give: (choice: { model: string; effort?: "low" | "max" }) => (given = choice),
       mode: (next: AgentMode) => (mode = next),
+      window: (next: typeof window) => (window = next),
       open: (request: object) =>
         run.open({
           type: "open",
@@ -187,7 +218,7 @@ describe("the open call", () => {
     }
   }
 
-  const line = /^claude "\[Novadeck: automatic notice, agent messages waiting, [A-Za-z0-9]{6}\]"$/
+  const line = /^claude "<novadeck-doorbell from='' ring='[A-Za-z0-9]{6}'\/>"$/
 
   it("starts an agent at its prompt without a message, unled unless asked to lead it", async () => {
     const plain = setup()
@@ -259,6 +290,53 @@ describe("the open call", () => {
     })
   })
 
+  it("starts an agent with the flags the runner's policy gives, right after its model, for that launch only", async () => {
+    const run = setup()
+    run.flag(["--permission-mode", "acceptEdits"])
+    await run.open({ agent: "claude", model: "opus", effort: "low" })
+    expect(run.asked[0]!.command).toBe(
+      "claude --model opus --effort low --permission-mode acceptEdits",
+    )
+  })
+
+  it("starts an agent the call names no model for on the one the runner's policy gives", async () => {
+    const run = setup()
+    run.give({ model: "opus", effort: "low" })
+    await run.open({ agent: "claude" })
+    expect(run.asked[0]!.command).toBe("claude --model opus --effort low")
+  })
+
+  it("still refuses an effort with no model, whatever the runner's policy gives", async () => {
+    const run = setup()
+    run.give({ model: "opus", effort: "low" })
+    expect(await run.open({ agent: "claude", effort: "max" })).toEqual({
+      ok: false,
+      reason: "Give a model with effort: Claude Code's efforts depend on the model.",
+    })
+  })
+
+  it("starts an opencode agent the call names no model for on the policy's, by its own flag", async () => {
+    const run = setup()
+    run.give({ model: "opencode/e2e-free" })
+    const answer = await run.open({ agent: "opencode" })
+    expect(answer).toMatchObject({ ok: true })
+    expect(run.asked[0]!.command).toBe("opencode --model opencode/e2e-free")
+  })
+
+  it("starts on the runner's policy model with no effort where it gives none", async () => {
+    const run = setup()
+    run.give({ model: "opus" })
+    await run.open({ agent: "claude" })
+    expect(run.asked[0]!.command).toBe("claude --model opus")
+  })
+
+  it("keeps the model the call names over the one the runner's policy gives", async () => {
+    const run = setup()
+    run.give({ model: "haiku" })
+    await run.open({ agent: "claude", model: "opus", effort: "max" })
+    expect(run.asked[0]!.command).toBe("claude --model opus --effort max")
+  })
+
   it("starts an agent with a brief as its prompt's doorbell, and leads it by default", async () => {
     const run = setup()
     const answer = await run.open({ agent: "claude", message: "Review a.ts." })
@@ -273,11 +351,52 @@ describe("the open call", () => {
       task: { ok: true, id: "m1" },
     })
     expect(run.opened.startedWith).toMatch(/^[A-Za-z0-9]{6}$/)
+    // Its start prompt's row says the task, from the agent that opened it.
+    expect(run.starts).toEqual([
+      { terminal: "t2", nonce: run.opened.startedWith, from: "moth", text: "Review a.ts." },
+    ])
     // The brief tells it who leads it: no notice beside it.
     expect(run.notices).toEqual([])
     run.deliver()
     await Promise.resolve()
     expect(run.ended).toEqual([])
+  })
+
+  it("sends the brief as the terminal is made, and answers it opened, when the client confirms it late", async () => {
+    const run = setup()
+    run.window("slow")
+    const answer = await run.open({ agent: "claude", message: "Review a.ts.", lead: true })
+    expect(run.sent).toEqual([{ to: "fox", text: "Review a.ts." }])
+    expect(run.starts).toEqual([
+      { terminal: "t2", nonce: run.opened.startedWith, from: "moth", text: "Review a.ts." },
+    ])
+    expect(answer).toMatchObject({
+      ok: true,
+      terminalId: "t2",
+      handle: "fox",
+      led: true,
+      task: { ok: true, id: "m1" },
+    })
+  })
+
+  it("says the brief wasn't sent when no terminal was made in time", async () => {
+    const run = setup()
+    run.window("late")
+    expect(await run.open({ agent: "claude", message: "Review a.ts." })).toEqual({
+      ok: false,
+      reason:
+        "Novadeck didn't confirm the new terminal in time; it may still open, so check before " +
+        "asking again. Its task wasn't sent: if the terminal opens, send the task there with " +
+        "send, as nothing waits for it.",
+    })
+    expect(run.sent).toEqual([])
+    // Without a task there is nothing to say of one.
+    expect(await run.open({ agent: "claude" })).toEqual({
+      ok: false,
+      reason:
+        "Novadeck didn't confirm the new terminal in time; it may still open, so check before " +
+        "asking again.",
+    })
   })
 
   it("leads only until the brief is delivered when asked not to lead with one", async () => {
@@ -337,6 +456,13 @@ describe("the open call", () => {
     // The brief goes as a message after: the resumed session isn't started with a prompt.
     expect(run.sent).toEqual([{ to: "fox", text: "Carry on." }])
     expect(run.opened.startedWith).toBeUndefined()
+  })
+
+  it("resumes a session on its own model, not the one the runner's policy gives", async () => {
+    const run = setup()
+    run.give({ model: "opus", effort: "low" })
+    await run.open({ agent: "claude", resume: "s-1" })
+    expect(run.asked[0]!.command).toBe("claude --resume s-1")
   })
 
   it("resumes with the flags the session was launched with, from a saved row or a live one", async () => {
@@ -555,5 +681,72 @@ describe("the open call", () => {
       expect(run.questions).toEqual([])
       expect(run.asked[0]!.command).toMatch(line)
     })
+  })
+})
+
+describe("the mode call", () => {
+  const answer = async (agent: string | null, enabled: boolean) => {
+    const host = {
+      records: () => new Map([["t1", { terminal: { exiting: false }, token, summary: { agent } }]]),
+      agentMode: () => "herd",
+      shipping: () => ({ covers: () => enabled }),
+    } as unknown as CallsHost
+    return new Calls(1000, host).call({ type: "mode", terminalId: "t1", token, request: {} })
+  }
+
+  it("says whether the shipping gate covers the caller's harness", async () => {
+    expect(await answer("claude", true)).toEqual({ ok: true, mode: "herd", gated: true })
+    expect(await answer("codex", true)).toEqual({ ok: true, mode: "herd", gated: true })
+    expect(await answer("claude", false)).toEqual({ ok: true, mode: "herd", gated: false })
+    expect(await answer("agy", true)).toEqual({ ok: true, mode: "herd", gated: true })
+    expect(await answer("opencode", true)).toEqual({ ok: true, mode: "herd", gated: true })
+    expect(await answer(null, true)).toEqual({ ok: true, mode: "herd", gated: false })
+  })
+})
+
+describe("the permit call", () => {
+  const permit = {
+    type: "permit",
+    terminalId: "t1",
+    token,
+    request: { action: "push", target: "main", said: "push it", folder: "/w", remote: "fork" },
+  } as const
+  const setup = (enabled: boolean) => {
+    const declared: unknown[][] = []
+    const shipping = {
+      enabled: () => enabled,
+      declare: async (...args: unknown[]) => (declared.push(args), { ok: true, state: "asked" }),
+    }
+    const host = {
+      records: () => new Map([["t1", { terminal: { exiting: false }, token }]]),
+      shipping: () => shipping,
+    } as unknown as CallsHost
+    return { permitting: new Calls(1000, host), declared }
+  }
+
+  it("declares what the agent said to the gate, as the terminal that called", async () => {
+    const { permitting, declared } = setup(true)
+    expect(await permitting.call(permit)).toEqual({ ok: true, state: "asked" })
+    expect(declared).toEqual([
+      ["t1", { action: "push", target: "main", said: "push it", folder: "/w", remote: "fork" }],
+    ])
+  })
+
+  it("keeps to the strings it is given, and an action it names", async () => {
+    const { permitting, declared } = setup(true)
+    await permitting.call({ ...permit, request: { action: 7, target: 1, said: {}, remote: [] } })
+    expect(declared).toEqual([["t1", { action: "" }]])
+  })
+
+  it("is refused while the gate is off, and for a caller without the terminal's token", async () => {
+    const off = setup(false)
+    expect(await off.permitting.call(permit)).toMatchObject({ ok: false })
+    expect(off.declared).toEqual([])
+    const on = setup(true)
+    expect(await on.permitting.call({ ...permit, token: "b".repeat(48) })).toEqual({
+      ok: false,
+      reason: "Novadeck couldn't declare it.",
+    })
+    expect(on.declared).toEqual([])
   })
 })

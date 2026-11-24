@@ -6,6 +6,7 @@ import { transcripts as agy } from "@novadeck/harness-agy/transcripts"
 import { transcripts as claude } from "@novadeck/harness-claude/transcripts"
 import { transcripts as codex } from "@novadeck/harness-codex/transcripts"
 import type { TranscriptDecoder, TranscriptEntry } from "@novadeck/harness-core/harness"
+import { transcripts as opencode } from "@novadeck/harness-opencode/transcripts"
 import { transcriptItem, type TranscriptItem } from "@novadeck/protocol"
 import type { AgentName } from "@novadeck/protocol/harnesses"
 import { withBatch } from "@novadeck/runner-adapter/conversations"
@@ -17,7 +18,12 @@ import { act, createElement } from "react"
 type Transcripts = TranscriptDecoder
 
 // Each harness's transcripts, whose decoder reads its records.
-export const transcriptsOf: Readonly<Record<AgentName, Transcripts>> = { claude, codex, agy }
+export const transcriptsOf: Readonly<Record<AgentName, Transcripts>> = {
+  claude,
+  codex,
+  agy,
+  opencode,
+}
 
 const session = "contract"
 
@@ -163,11 +169,14 @@ const lineOf = (block: Element): { line: string; rows: number } => {
     )
     return { line: `tools: ${folded}${rows.join("; ")}`, rows: rows.length }
   }
-  // One of Novadeck's own notices, as it opens: its words, the header off, each action behind its arrow.
+  // Novadeck's own notices delivered together, as their line opens: the line (`noticesSeen`), then
+  // what opened under it, the headers off, each action behind its arrow.
   if (block.matches(".chat-notice")) {
-    const line = block.querySelector<HTMLElement>(".chat-subagent-summary")!
-    if (line.getAttribute("aria-expanded") === "false") click(line)
-    return { line: `notice: ${textOf(line)}`, rows: 0 }
+    const key = block.querySelector<HTMLElement>(".chat-notice-key")!
+    if (key.getAttribute("aria-expanded") === "false") click(key)
+    const said = textOf(block.querySelector<HTMLElement>(".chat-notice-said")!)
+    const body = block.querySelector<HTMLElement>(".chat-notice-body")
+    return { line: `notice: ${said}${body ? ` | ${textOf(body)}` : ""}`, rows: 0 }
   }
   // A subagent's report: its name, whether it runs or failed, and the whole of what it said.
   if (block.matches(".chat-subagent")) {

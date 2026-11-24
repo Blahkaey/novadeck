@@ -1,6 +1,6 @@
 import type { ChatDialog } from "@novadeck/core/conversation"
 import type { InboxBinding } from "@novadeck/core/inbox"
-import { dialogMs, type Asked, type WrittenEntry } from "@novadeck/core/inbox/rows"
+import { dialogMs, type Asked, type WrittenEntry } from "@novadeck/core/inbox/entries"
 import {
   noMessages,
   type AgentMessage,
@@ -123,7 +123,7 @@ const messagesOf = (...threads: MessageThread[]): MessagesState => ({
 })
 
 // The finished turns the tests state, by session context then terminal: each stands for the
-// stored row of that terminal's current end, as the runner lists it.
+// stored entry of that terminal's current end, as the runner lists it.
 type Marks = Readonly<Record<string, Readonly<Record<string, "done" | "failed">>>>
 const done: Marks = { "p/s": { "01": "done" } }
 const failed: Marks = { "p/s": { "01": "failed" } }
@@ -190,14 +190,15 @@ const setup = (
   unread: Marks = {},
   messages: MessagesState = noMessages,
   options: Parameters<typeof createRunnerInbox>[2] = {},
+  more: Partial<Pick<InboxStreams, "takeBack" | "gate">> = {},
 ) => {
   const details: ReturnType<typeof channel<AgentDetail>>[] = []
   const feed = channel<InboxEntry[]>()
-  // What the runner lists: the asks and tells a test pushes, and the turn rows its marks
+  // What the runner lists: the asks and tells a test pushes, and the turn entries its marks
   // stand for, which reading removes.
   let others: InboxEntry[] = []
-  let rows: InboxEntry[] = []
-  const publish = () => feed.push([...others, ...rows])
+  let turnEntries: InboxEntry[] = []
+  const publish = () => feed.push([...others, ...turnEntries])
   const entries = {
     stream: feed.iterator,
     returned: feed.returned,
@@ -211,6 +212,7 @@ const setup = (
     inbox: {
       watch: vi.fn<InboxStreams["inbox"]["watch"]>(() => feed.iterator),
       answer: vi.fn<InboxStreams["inbox"]["answer"]>(async () => {}),
+      answerQuestions: vi.fn<InboxStreams["inbox"]["answerQuestions"]>(async () => {}),
       dismiss: vi.fn<InboxStreams["inbox"]["dismiss"]>(async () => {}),
       // As the runner clears: its tells, done reports and resolved entries leave the listing.
       clear: vi.fn<InboxStreams["inbox"]["clear"]>(async () => {
@@ -221,8 +223,8 @@ const setup = (
       }),
       read: vi.fn<InboxStreams["inbox"]["read"]>(async (ids) => {
         const gone = ({ id, content }: InboxEntry) => content.kind === "turn" && ids.includes(id)
-        if (!rows.some(gone) && !others.some(gone)) return
-        rows = rows.filter((each) => !gone(each))
+        if (!turnEntries.some(gone) && !others.some(gone)) return
+        turnEntries = turnEntries.filter((each) => !gone(each))
         others = others.filter((each) => !gone(each))
         publish()
       }),
@@ -237,12 +239,13 @@ const setup = (
     interrupt: vi.fn<InboxStreams["interrupt"]>(async () => null),
     release: vi.fn<InboxStreams["release"]>(),
     stop: vi.fn<InboxStreams["stop"]>(),
+    ...more,
   }
   const workspaceStore = createStore(workspace)
   const messagesStore = createStore(messages)
-  // The runner now lists these marks' rows.
+  // The runner now lists these marks' entries.
   const marks = (next: Marks): void => {
-    rows = turnEntriesOf(workspaceStore.getSnapshot(), next)
+    turnEntries = turnEntriesOf(workspaceStore.getSnapshot(), next)
     publish()
   }
   // The messages track a release or a stop in the messages state, as the runner backend's do.
@@ -257,7 +260,7 @@ const setup = (
   const binding: InboxBinding = { workspace: workspaceStore }
   if (Object.keys(unread).length > 0) marks(unread)
   const stop = inbox.bind(binding)
-  // The rows that are still open; the resolved ones stay listed beside them, as history.
+  // The entries that are still open; the resolved ones stay listed beside them, as history.
   const ids = () =>
     inbox.state
       .getSnapshot()
@@ -477,8 +480,8 @@ describe("The runner's Inbox", () => {
       return set
     }
 
-    it("keeps a dialog answered here as a resolved row, with the person's answer, and saves it", async () => {
-      const saveHistory = vi.fn<(rows: readonly string[]) => void>()
+    it("keeps a dialog answered here as a resolved entry, with the person's answer, and saves it", async () => {
+      const saveHistory = vi.fn<(saved: readonly string[]) => void>()
       const { inbox, workspaceStore } = await withRequest({ saveHistory })
       inbox.answer("request:r1", {
         kind: "request",
@@ -506,7 +509,7 @@ describe("The runner's Inbox", () => {
     })
 
     it("brings back what the runner kept, and drops what it can't read", async () => {
-      const saveHistory = vi.fn<(rows: readonly string[]) => void>()
+      const saveHistory = vi.fn<(saved: readonly string[]) => void>()
       const first = await withRequest({ saveHistory })
       first.workspaceStore.update(() => workspaceOf(agentTerminal(1)))
       await settle()
@@ -521,8 +524,8 @@ describe("The runner's Inbox", () => {
       ])
     })
 
-    it("makes no row of an ask its agent withdrew, and saves none", async () => {
-      const saveHistory = vi.fn<(rows: readonly string[]) => void>()
+    it("makes no entry of an ask its agent withdrew, and saves none", async () => {
+      const saveHistory = vi.fn<(saved: readonly string[]) => void>()
       const { entries, inbox } = setup(workspaceOf(agentTerminal(1)), {}, noMessages, {
         saveHistory,
       })
@@ -532,10 +535,10 @@ describe("The runner's Inbox", () => {
       entries.push([])
       await settle()
       expect(inbox.state.getSnapshot().items).toEqual([])
-      expect(saveHistory.mock.calls.every(([rows]) => rows.length === 0)).toBe(true)
+      expect(saveHistory.mock.calls.every(([saved]) => saved.length === 0)).toBe(true)
     })
 
-    it("takes no row to have ended while the connection is down, nor until the streams list again", async () => {
+    it("takes no entry to have ended while the connection is down, nor until the streams list again", async () => {
       const status = channel<{ state: string }>()
       const { entries, inbox, details, workspaceStore } = setup(
         workspaceOf(agentTerminal(1, attention)),
@@ -560,17 +563,17 @@ describe("The runner's Inbox", () => {
       await settle()
       details[0]!.push(detailOf(asked("r1", 9000)))
       await settle()
-      expect(inbox.state.getSnapshot().items.map((row) => row.settled)).toEqual([undefined])
+      expect(inbox.state.getSnapshot().items.map((entry) => entry.settled)).toEqual([undefined])
     })
 
-    it("does not take a row to have ended while the runner's entries are out", async () => {
+    it("does not take an entry to have ended while the runner's entries are out", async () => {
       const { entries, inbox } = setup(workspaceOf(agentTerminal(1)))
       entries.push([entry()])
       await settle()
       expect(inbox.state.getSnapshot().items).toHaveLength(1)
       entries.end()
       await settle()
-      // Its row is gone with its listing, not resolved.
+      // Its entry is gone with its listing, not resolved.
       expect(inbox.state.getSnapshot().items).toEqual([])
     })
   })
@@ -704,7 +707,7 @@ describe("The runner's Inbox", () => {
       expect(inbox.state.getSnapshot().answering).toEqual({})
     })
 
-    it("resolves a failed turn that is no longer the agent's current end, and reads its stored row", async () => {
+    it("resolves a failed turn that is no longer the agent's current end, and reads its stored entry", async () => {
       const ws = workspaceOf(
         agentTerminal(1, {
           working: false,
@@ -726,10 +729,10 @@ describe("The runner's Inbox", () => {
           .items.map(({ id }) => id)
           .toSorted(),
       ).toEqual(["old-row", "trouble:01:200"])
-      const rows = inbox.state.getSnapshot().items
+      const shown = inbox.state.getSnapshot().items
       // The current one waits; the old one ended when its agent went on.
-      expect(rows.find(({ id }) => id === "trouble:01:200")?.settled).toBeUndefined()
-      expect(rows.find(({ id }) => id === "old-row")?.settled).toMatchObject({ how: "worked" })
+      expect(shown.find(({ id }) => id === "trouble:01:200")?.settled).toBeUndefined()
+      expect(shown.find(({ id }) => id === "old-row")?.settled).toMatchObject({ how: "worked" })
       expect(streams.inbox.read.mock.calls.map(([batch]) => batch)).toEqual([["old-row"]])
     })
 
@@ -802,7 +805,7 @@ describe("The runner's Inbox", () => {
       expect(streams.send).toHaveBeenCalledWith(key, "Fix it.", { automatic: true })
     })
 
-    it("reads the failed row once its nudge was sent, with nothing left answering", async () => {
+    it("reads the failed entry once its nudge was sent, with nothing left answering", async () => {
       const { inbox, streams, ids } = setup(
         workspaceOf(
           agentTerminal(1, { working: false, lastTurn: turn({ outcome: "failed", error: "x" }) }),
@@ -818,7 +821,7 @@ describe("The runner's Inbox", () => {
       expect(inbox.state.getSnapshot().answering).toEqual({})
     })
 
-    it("nudges no failed row while its agent works, and interrupts nothing", async () => {
+    it("nudges no failed entry while its agent works, and interrupts nothing", async () => {
       const working = agentTerminal(1, {
         working: true,
         lastTurn: turn({ outcome: "failed", error: "x" }),
@@ -924,6 +927,254 @@ const entry = (change: Partial<InboxEntry> = {}): InboxEntry => ({
 
 const told = (id = "told-1"): InboxEntry =>
   entry({ id, content: { kind: "tell", subject: "Preview ready", body: "Open the preview." } })
+
+// `request_permit` answers at once, so an agent's turn ends while the gate's card waits on the
+// person: the runner's summary counts each card as a request asked without waiting.
+describe("The shipping gate's cards", () => {
+  const ended = (count: number) =>
+    workspaceOf(
+      agentTerminal(1, {
+        working: false,
+        attention: { kind: "permission", count, detached: true },
+        lastTurn: turn(),
+      }),
+    )
+  const cards = (...titles: string[]): AgentDetail => {
+    const base = detailOf()
+    return {
+      ...base,
+      requests: titles.map((title, index) => ({
+        ref: `held-c${index + 1}`,
+        actor: "rootrootrootroot",
+        kind: "permission" as const,
+        tool: "request_permit",
+        subject: title,
+        choices: ["Allow", "Deny"],
+        dialog: {
+          type: "choices" as const,
+          id: `permit-c${index + 1}`,
+          title,
+          detail: "PR #1189, on main",
+          options: [
+            { id: "allow", label: "Allow", text: null },
+            { id: "deny", label: "Deny", text: null },
+          ],
+        },
+        answered: false,
+        askedAt: 9000 + index,
+        detached: true as const,
+      })),
+    }
+  }
+
+  it("lists each open card of an agent whose turn ended, and answers one through its dialog", async () => {
+    const { details, inbox, streams, ids } = setup(ended(2))
+    expect(details).toHaveLength(1)
+    details[0]!.push(cards("Merge PR #1189?", "Merge PR #1191?"))
+    await settle()
+
+    expect(ids().toSorted()).toEqual(["request:held-c1", "request:held-c2"])
+    const answer = { type: "choice", dialog: "permit-c1", option: "allow" } as const
+    inbox.answer("request:held-c1", { kind: "request", answer })
+    expect(streams.answer).toHaveBeenCalledWith(
+      { projectId: "p", workspaceSessionId: "s", terminalId: "01" },
+      "held-c1",
+      answer,
+    )
+  })
+
+  it("drops a card once the runner no longer holds it: answered, given by words, or closed", async () => {
+    const { details, workspaceStore, ids } = setup(ended(2))
+    details[0]!.push(cards("Merge PR #1189?", "Merge PR #1191?"))
+    await settle()
+
+    details[0]!.push(cards("Merge PR #1189?"))
+    workspaceStore.update(() => ended(1))
+    await settle()
+    expect(ids()).toEqual(["request:held-c1"])
+
+    workspaceStore.update(() => workspaceOf(agentTerminal(1, { working: false, lastTurn: turn() })))
+    await settle()
+    expect(ids()).toEqual([])
+  })
+})
+
+describe("The shipping gate's standing permits", () => {
+  // A resting agent whose summary says a permit stands there: only its detail lists them.
+  const resting = () => workspaceOf(agentTerminal(1, { working: false, permits: 1 }))
+  const standing = (...ids: string[]): AgentDetail => ({
+    ...detailOf(),
+    permits: ids.map((id) => ({
+      id,
+      title: "Merge PR #1190 into main",
+      quote: id === "p1" ? "merge it" : null,
+      givenAt: 9000,
+      until: 9000 + 12 * 60 * 60_000,
+      usedAt: null,
+    })),
+  })
+  const take = () => vi.fn<NonNullable<InboxStreams["takeBack"]>>(async () => ({ ended: true }))
+  const gated = (open = true) => createStore(open)
+
+  it("follows no resting agent's detail where its summary says no permit stands", async () => {
+    const { details } = setup(
+      workspaceOf(agentTerminal(1)),
+      {},
+      noMessages,
+      {},
+      { takeBack: take(), gate: gated() },
+    )
+    await settle()
+    expect(details).toHaveLength(0)
+  })
+
+  it("follows a resting agent's detail while the gate is on, and lists each permit", async () => {
+    const takeBack = take()
+    const { details, inbox, ids } = setup(
+      resting(),
+      {},
+      noMessages,
+      {},
+      { takeBack, gate: gated() },
+    )
+    await settle()
+    expect(details).toHaveLength(1)
+
+    details[0]!.push(standing("p1", "p2"))
+    await settle()
+
+    expect(ids().toSorted()).toEqual(["permit:01:p1", "permit:01:p2"])
+    expect(inbox.state.getSnapshot().items.find(({ id }) => id === "permit:01:p1")).toMatchObject({
+      kind: "permit",
+      at: 9000,
+      permit: { quote: "merge it", usedAt: null },
+    })
+  })
+
+  it("resolves a permit once the detail stops listing it", async () => {
+    const { details, inbox, ids, entries } = setup(
+      resting(),
+      {},
+      noMessages,
+      {},
+      { takeBack: take(), gate: gated() },
+    )
+    entries.push([])
+    await settle()
+    details[0]!.push(standing("p1"))
+    await settle()
+    details[0]!.push(standing())
+    await settle()
+
+    expect(ids()).toEqual([])
+    expect(inbox.state.getSnapshot().items[0]).toMatchObject({
+      id: "permit:01:p1",
+      settled: { how: "lapsed" },
+    })
+  })
+
+  it("resolves a permit the chat took back as taken back, and one whose call failed as lapsed", async () => {
+    const { details, inbox, entries } = setup(
+      resting(),
+      {},
+      noMessages,
+      {},
+      { takeBack: take(), gate: gated() },
+    )
+    entries.push([])
+    await settle()
+    details[0]!.push(standing("p1", "p2"))
+    await settle()
+    inbox.takenBack("01", "p1")
+    inbox.takenBack("01", "p2")
+    inbox.takenBack("01", "p2", true)
+    details[0]!.push(standing())
+    await settle()
+
+    const settled = Object.fromEntries(
+      inbox.state.getSnapshot().items.map(({ id, settled: how }) => [id, how?.how]),
+    )
+    expect(settled).toEqual({ "permit:01:p1": "takenBack", "permit:01:p2": "lapsed" })
+  })
+
+  it("shows none and follows no detail where the runner can't take one back, or the gate is off", async () => {
+    const without = setup(resting(), {}, noMessages, {}, { gate: gated() })
+    const off = setup(resting(), {}, noMessages, {}, { takeBack: take(), gate: gated(false) })
+    await settle()
+
+    expect(without.details).toHaveLength(0)
+    expect(off.details).toHaveLength(0)
+    expect(without.ids()).toEqual([])
+    expect(off.ids()).toEqual([])
+  })
+
+  it("follows the detail from when the gate is turned on, and shows no permit once it is off", async () => {
+    const gate = gated(false)
+    const { details, ids } = setup(resting(), {}, noMessages, {}, { takeBack: take(), gate })
+    await settle()
+    expect(details).toHaveLength(0)
+
+    gate.update(() => true)
+    await settle()
+    details[0]!.push(standing("p1"))
+    await settle()
+    expect(ids()).toEqual(["permit:01:p1"])
+
+    gate.update(() => false)
+    await settle()
+    expect(ids()).toEqual([])
+  })
+
+  describe("taking one back", () => {
+    const listed = async (takeBack: ReturnType<typeof take>) => {
+      const made = setup(resting(), {}, noMessages, {}, { takeBack, gate: gated() })
+      made.entries.push([])
+      await settle()
+      made.details[0]!.push(standing("p1"))
+      await settle()
+      return made
+    }
+    const press = (inbox: Awaited<ReturnType<typeof listed>>["inbox"]) =>
+      inbox.answer("permit:01:p1", { kind: "permit", action: "take-back" })
+
+    it("asks the runner for that permit, and notes it was the person who ended it", async () => {
+      const takeBack = take()
+      const { inbox, details } = await listed(takeBack)
+      press(inbox)
+      await settle()
+      expect(takeBack).toHaveBeenCalledWith("01", "p1")
+      expect(inbox.state.getSnapshot().answering).toEqual({ "permit:01:p1": true })
+
+      details[0]!.push(standing())
+      await settle()
+      expect(inbox.state.getSnapshot().items[0]).toMatchObject({ settled: { how: "takenBack" } })
+    })
+
+    it("says so on the entry when the call is refused, and the permit still stands", async () => {
+      const takeBack = take()
+      takeBack.mockRejectedValueOnce(new Error("offline"))
+      const { inbox, ids } = await listed(takeBack)
+      press(inbox)
+      await settle()
+
+      expect(ids()).toEqual(["permit:01:p1"])
+      expect(inbox.state.getSnapshot()).toMatchObject({
+        answering: {},
+        failed: { "permit:01:p1": "Couldn't take it back. Try again." },
+      })
+    })
+
+    it("says so, too, when the runner answers that none stood while the entry still shows", async () => {
+      const takeBack = take()
+      takeBack.mockResolvedValueOnce({ ended: false })
+      const { inbox } = await listed(takeBack)
+      press(inbox)
+      await settle()
+
+      expect(inbox.state.getSnapshot().failed).toEqual({ "permit:01:p1": "It had already ended." })
+    })
+  })
+})
 
 describe("Inbox entries", () => {
   it("are core's written entries once their finished turns and session id are left out", () => {
@@ -1066,6 +1317,27 @@ describe("Inbox entries", () => {
     accepted!()
     await settle()
     expect(inbox.state.getSnapshot().answering).toEqual({})
+  })
+
+  it("sends the answers to several questions by their own procedure", async () => {
+    const { entries, inbox, streams } = setup(workspaceOf(agentTerminal(1)))
+    entries.push([entry()])
+    await settle()
+    inbox.answer("entry-1", {
+      kind: "ask",
+      answer: {
+        type: "questions",
+        answers: [
+          { options: [1], text: "" },
+          { options: [], text: "Neither" },
+        ],
+      },
+    })
+    expect(streams.inbox.answerQuestions).toHaveBeenCalledExactlyOnceWith("entry-1", [
+      { options: [1], text: "" },
+      { options: [], text: "Neither" },
+    ])
+    expect(streams.inbox.answer).not.toHaveBeenCalled()
   })
 
   it("keeps an ask pending beside trouble while its answer is unresolved", async () => {
@@ -1502,6 +1774,7 @@ describe("Turn rows", () => {
       inbox: {
         watch: () => feed.iterator,
         answer: async () => {},
+        answerQuestions: async () => {},
         read: async () => {},
         dismiss: async () => {},
         clear: async () => {},
@@ -1524,7 +1797,7 @@ describe("Turn rows", () => {
     expect(inbox.turns.getSnapshot()).toBeUndefined()
   })
 
-  it("hides a viewed terminal's rows at once, and keeps them hidden until a listing drops them", async () => {
+  it("hides a viewed terminal's entries at once, and keeps them hidden until a listing drops them", async () => {
     const { inbox, streams, entries, ids } = setup(ws(), bothFailed)
     await settle()
     let answered: (() => void) | undefined
@@ -1571,7 +1844,7 @@ describe("Turn rows", () => {
     await vi.advanceTimersByTimeAsync(retryMs)
     expect(streams.inbox.read).toHaveBeenCalledTimes(3)
 
-    // A listing that still holds a row not on its way sends it again.
+    // A listing that still holds an entry not on its way sends it again.
     streams.inbox.read.mockRejectedValueOnce(new Error("down"))
     inbox.readFinishes([{ context: "p/s", terminalId: "02" }])
     await settle()
@@ -1580,7 +1853,7 @@ describe("Turn rows", () => {
     expect(streams.inbox.read.mock.calls.map(([ids]) => ids)).toContainEqual(["update:02:200"])
   })
 
-  it("reads a row that lands later when the terminal is read again", async () => {
+  it("reads an entry that lands later when the terminal is read again", async () => {
     const { inbox, streams, entries } = setup(ws(), { "p/s": { "01": "done" } })
     await settle()
     inbox.readFinishes([finish])
@@ -1597,7 +1870,7 @@ describe("Turn rows", () => {
     expect(inbox.turns.getSnapshot()).toEqual([])
   })
 
-  it("keeps rows hidden under a lead in turns, and out of the items", async () => {
+  it("keeps entries hidden under a lead in turns, and out of the items", async () => {
     const worker: TerminalMetadata = {
       ...agentTerminal(2, { working: false, lastTurn: turn({ at: 200 }) }),
       ledBy: "01",
@@ -1635,7 +1908,7 @@ describe("Turn rows", () => {
     expect(streams.inbox.read).toHaveBeenCalledTimes(2)
   })
 
-  it("shows a row of a terminal without a handle, and reads it once it is resolved", async () => {
+  it("shows an entry of a terminal without a handle, and reads it once it is resolved", async () => {
     const bare: TerminalMetadata = {
       ...agentTerminal(1, { working: false, lastTurn: turn({ reply: "a" }) }),
     }

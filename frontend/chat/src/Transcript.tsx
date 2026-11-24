@@ -1,11 +1,17 @@
-import { sameBlock, turnsWorked, type ChatBlock } from "@novadeck/core/conversation/turns"
+import {
+  sameBlock,
+  turnsWorked,
+  type ChatBlock,
+  type ChatNotice,
+} from "@novadeck/core/conversation/turns"
 import type { MessageParty } from "@novadeck/core/messages"
-import { noticeBody, noticeOneLine, readNotice } from "@novadeck/core/notices"
+import { noticeBody, noticesSeen, readNotice } from "@novadeck/core/notices"
 import { counted } from "@novadeck/core/units"
 import { shownControls } from "@novadeck/requests/shown-controls"
 import { Markdown } from "@novadeck/toolkit/Markdown"
 import { MentionedText } from "@novadeck/toolkit/Mentioned"
 import { mentionAt, type Mention } from "@novadeck/toolkit/mentions"
+import { NovaMark } from "@novadeck/toolkit/NovaLogo"
 import { memo, useId, useMemo, useState } from "react"
 
 import { withBubbles, type SentBubble } from "./bubbles"
@@ -231,48 +237,73 @@ const SubagentLine = ({
   )
 }
 
-// One of Novadeck's own notices, whether it came in a ring's delivery or rode on the prompt's hook:
-// a dim line of its own first words, its `Novadeck · <Kind>` header off (the person reads the
-// facts, not the header), which opens in place to the whole, each `→` action on its line. As a
-// subagent's report is, not as someone's message is: nobody said it, so no author and no face.
+// Novadeck's own notices delivered together, whether a ring's or a prompt's hook's: one quiet bell
+// line with Novadeck's mark in the gutter, a dashed rule to the edge as the doorbell's own line
+// has, and the time on hover. It says what the person is told of them (`noticesSeen`): an event's
+// family line, a standing one's subject, and several standing ones as Novadeck setting the agent
+// up. A click opens the notices themselves under it, facts and `→` actions, each under its kind
+// where there are several. Their `Novadeck · <Kind>` headers are never shown, and nobody said
+// them, so no author and no face.
 const NoticeLine = ({
-  id,
-  text,
+  notices,
   at,
-  written,
   mention,
 }: {
-  readonly id: string
-  readonly text: string
-  // The time its line shows, where it shows one; `written` when its words were, for the handles in them.
+  // Each with when its words were written, for the handles in them.
+  readonly notices: readonly (ChatNotice & { readonly written: number | null })[]
+  // The time its line shows, where it shows one.
   readonly at: number | null
-  readonly written: number | null
   readonly mention: Mention | undefined
 }): React.JSX.Element => {
   const [open, setOpen] = useState(false)
-  const { kind } = readNotice(text)
-  const said = mentionAt(mention, written)
+  const bodyId = useId()
+  const kinds = [...new Set(notices.flatMap(({ text }) => readNotice(text).kind ?? []))]
+  const several = notices.length > 1
   return (
     <div
-      className="chat-subagent chat-notice"
-      data-notice={id}
+      className="chat-notice"
+      data-notice={notices[0]?.id}
+      data-event={notices.some(({ event }) => event) || undefined}
       role="group"
-      aria-label={kind ? `Novadeck notice, ${kind}` : "Novadeck notice"}
+      aria-label={
+        `Novadeck ${several ? "notices" : "notice"}` +
+        (kinds.length > 0 ? `, ${kinds.join(", ")}` : "")
+      }
     >
-      <button
-        type="button"
-        className="chat-subagent-summary chat-notice-key nodrag nopan"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="chat-notice-said" data-open={open || undefined}>
-          <MentionedText
-            text={shownControls(open ? noticeBody(text) : noticeOneLine(text))}
-            mention={said}
-          />
-        </span>
-      </button>
-      <TimeFact at={at} hover />
+      <NovaMark size={12} className="chat-notice-mark" />
+      <div className="chat-notice-head">
+        <button
+          type="button"
+          className="chat-notice-key nodrag nopan"
+          aria-expanded={open}
+          aria-controls={open ? bodyId : undefined}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="chat-notice-said">
+            {noticesSeen(notices.map(({ text, event }) => ({ text, standing: !event })))}
+          </span>
+          <span className="chat-notice-rule" aria-hidden />
+        </button>
+        <TimeFact at={at} hover />
+      </div>
+      {open && (
+        <div className="chat-notice-body" id={bodyId}>
+          {notices.map(({ id, text, written }) => {
+            const { kind } = readNotice(text)
+            return (
+              <div key={id} className="chat-notice-one">
+                {several && kind && <p className="chat-notice-kind">{kind}</p>}
+                <p>
+                  <MentionedText
+                    text={shownControls(noticeBody(text))}
+                    mention={mentionAt(mention, written)}
+                  />
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -413,16 +444,21 @@ const BlockView = memo(
             data-thinking={block.thinking || undefined}
             aria-label={block.thinking ? `${agent}, summary` : agent}
           >
-            <Markdown text={block.text} mention={mentionAt(mention, block.at)} />
-            {block.truncated && <Shortened />}
-            {block.thinking && (
+            {block.thinking ? (
               // The agent's update as its terminal shows it, which tags it "summary" after the
-              // words, dim: its thinking, not its reply.
-              <span className="chat-summary-tag" aria-hidden>
-                {" "}
-                · summary
-              </span>
+              // words, dim: its thinking, not its reply. The words run inline to keep the tag on
+              // their last line, so this block holds them to the measure an inline one can't.
+              <div className="chat-said">
+                <Markdown text={block.text} mention={mentionAt(mention, block.at)} />
+                <span className="chat-summary-tag" aria-hidden>
+                  {" "}
+                  · summary
+                </span>
+              </div>
+            ) : (
+              <Markdown text={block.text} mention={mentionAt(mention, block.at)} />
             )}
+            {block.truncated && <Shortened />}
             {worked !== null ? (
               <Fact>worked {span(worked)}</Fact>
             ) : (
@@ -500,17 +536,19 @@ const BlockView = memo(
                 )}
               </article>
             ))}
-            {block.notices.map((notice) => (
+            {block.notices.length > 0 && (
               <NoticeLine
-                key={notice.id}
-                id={notice.id}
-                text={notice.text}
-                written={notice.sentAt}
-                // Each says when it was delivered, as a line of its own.
-                at={notice.deliveredAt}
+                notices={block.notices.map(({ id, text, sentAt }) => ({
+                  id,
+                  text,
+                  event: true,
+                  written: sentAt,
+                }))}
+                // When the first was delivered: the ring delivers them together.
+                at={block.notices[0]!.deliveredAt}
                 mention={mention}
               />
-            ))}
+            )}
           </article>
         )
       }
@@ -530,10 +568,8 @@ const BlockView = memo(
       case "notice":
         return (
           <NoticeLine
-            id={block.id}
-            text={block.text}
+            notices={block.notices.map((notice) => ({ ...notice, written: block.at }))}
             at={block.at}
-            written={block.at}
             mention={mention}
           />
         )
@@ -541,7 +577,11 @@ const BlockView = memo(
         return (
           <RecordLine
             kind="gap"
-            words="part of the record the chat can't read"
+            words={
+              block.newer
+                ? "part of the conversation that needs a newer Novadeck"
+                : "part of the record the chat can't read"
+            }
             said={null}
             body={block.raw}
             truncated={block.truncated}

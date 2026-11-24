@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 
 import type { ScreenText } from "@novadeck/emulator/headless"
@@ -21,6 +23,7 @@ import {
   agentWorking,
   doorbellHost,
   profileOf,
+  shellIn,
   typingTarget,
   type DoorbellBound,
   type DoorbellRecord,
@@ -273,6 +276,8 @@ const drawn = ({ height, columns, rows }: Pair["after"]): ScreenText => {
 // A reply line of 299 characters in each harness's box at 40x14, as the boxes draw it
 // (2026-11-07, e2e/probes/reply-overflow.e2e.ts): only its end shows.
 const frame = "─".repeat(40)
+// What closes a reply line: its element, and the tag that names its ring again.
+const END = '</novadeck-reply><end ring="n7Q2"/>'
 const padded = (rows: readonly string[]) => [
   ...Array.from({ length: 14 - rows.length }, () => ""),
   ...rows,
@@ -283,7 +288,7 @@ const tails = {
       frame,
       "❯ say so in the changelog merge it",
       "  and say so in the changelog merge it",
-      "  and say [n7Q2]",
+      '  and say</novadeck-reply><end ring="n7Q2"/>',
       frame,
       "",
     ]),
@@ -295,7 +300,7 @@ const tails = {
       "  the changelog merge it and say so in",
       "  the changelog merge it and say so in",
       "  the changelog merge it and say",
-      "  [n7Q2]",
+      '  </novadeck-reply><end ring="n7Q2"/>',
       "",
       "  fake-model default · /tmp/novadeck-e2…",
       "",
@@ -312,7 +317,7 @@ const tails = {
       "  in the changelog merge it and say so",
       "  in the changelog merge it and say so",
       "  in the changelog merge it and say",
-      "  [n7Q2]",
+      '  </novadeck-reply><end ring="n7Q2"/>',
       frame,
       "                    Gemini 3.1 Pro · low",
       "",
@@ -322,10 +327,15 @@ const tails = {
 } as const
 
 describe("the nonce closing what a box shows", () => {
-  it("is a reply line's, or a plain line's after its comma, wrapped anywhere", () => {
+  it("is a reply tag's end or a doorbell tag's, wrapped anywhere", () => {
+    expect(closingNonce('say so</novadeck-reply><end\nring="n7Q2"/>')).toBe("n7Q2")
+    expect(closingNonce('<novadeck-doorbell from="moth hu\nshz" ring="n7Q2"/>')).toBe("n7Q2")
+    expect(closingNonce("mess\nages waiting, n7\nQ2]")).toBe("n7Q2")
+  })
+
+  it("is a bracket line's, from before the tag, wrapped anywhere", () => {
     expect(closingNonce("say so\n[n7Q2]")).toBe("n7Q2")
     expect(closingNonce("messages waiting,\n n7Q2]")).toBe("n7Q2")
-    expect(closingNonce("mess\nages waiting, n7\nQ2]")).toBe("n7Q2")
   })
 
   it("is none for anything else", () => {
@@ -333,6 +343,8 @@ describe("the nonce closing what a box shows", () => {
     expect(closingNonce("[n7Q2] and on")).toBeUndefined()
     expect(closingNonce("n7Q2]")).toBeUndefined()
     expect(closingNonce("[not a nonce!]")).toBeUndefined()
+    expect(closingNonce('<end ring="n7Q2"/> and on')).toBeUndefined()
+    expect(closingNonce('<end ring="not!"/>')).toBeUndefined()
   })
 })
 
@@ -384,15 +396,16 @@ describe.each([
   it.runIf(agent === "claude")(
     "is the person's in a box run off the screen's bottom, which may hold their words under it",
     () => {
-      const line = '[Novadeck Inbox reply, n7Q2] Re your ask "Which one?": I picked "B". [n7Q2]'
+      const line =
+        '<novadeck-reply>Re your ask "Which one?": I picked "B".</novadeck-reply><end ring="n7Q2"/>'
       const rows = [
         "● A reply",
         "",
         "✔ Update installed · /restart to apply",
         "─".repeat(40),
-        "❯ [Novadeck Inbox reply, n7Q2] Re your",
-        '  ask "Which one?": I picked "B".',
-        "  [n7Q2]",
+        "❯ <novadeck-reply>Re your",
+        '  ask "Which one?": I picked "B".</novadeck-reply>',
+        '  <end ring="n7Q2"/>',
       ]
       const clipped = screen({ rows, columns: 40, cursor: { row: 6, column: 8 } })
       expect(harnesses.claude.box.read(clipped)).toMatchObject({ clipped: true })
@@ -404,7 +417,7 @@ describe.each([
   )
 
   describe("in a box too short for it", () => {
-    const line = `[Novadeck Inbox reply, n7Q2] ${"and say so in the changelog merge it ".repeat(7)}and say [n7Q2]`
+    const line = `<novadeck-reply>${"and say so in the changelog merge it ".repeat(7)}and say${END}`
     const typed = (nonce: string) => (nonce === "n7Q2" ? line : undefined)
     const tail = (last = tails[agent].rows[tails[agent].last]!) =>
       screen({
@@ -413,7 +426,7 @@ describe.each([
         bright: tails[agent].rows.map((row, at) =>
           at === tails[agent].last ? last : row.replace(/ ↑$/, ""),
         ),
-        columns: 40,
+        columns: 60,
         cursor: { row: tails[agent].last, column: last.length },
       })
 
@@ -422,15 +435,33 @@ describe.each([
       expect(rings.leftover("t", tail(), typed)).toBe("n7Q2")
     })
 
+    // The doorbell tag keeps its nonce last, so a box showing only its end still names the ring.
+    it.runIf(agent === "claude")("is told for a doorbell tag whose head is out of sight", () => {
+      const rows = padded([
+        frame,
+        '❯ doorbell from="moth newtz',
+        '  hushz"',
+        '  ring="n7Q2"/>',
+        frame,
+        "",
+      ])
+      const shown = screen({ rows, columns: 40, cursor: { row: 11, column: 15 } })
+      const names = ["moth", "newtz", "hushz"]
+      const tag = (nonce: string) => (nonce === "n7Q2" ? doorbellLine("n7Q2", names) : undefined)
+      expect(rings.leftover("t", shown, tag)).toBe("n7Q2")
+      // An end that isn't the typed line's is the person's.
+      expect(rings.leftover("t", shown, () => doorbellLine("n7Q2", ["fox"]))).toBeUndefined()
+    })
+
     it("is the person's where the doorbell knows no such line", () => {
       expect(rings.leftover("t", tail())).toBeUndefined()
       expect(rings.leftover("t", tail(), () => undefined)).toBeUndefined()
     })
 
     it("is the person's where the end isn't the line's", () => {
-      expect(rings.leftover("t", tail("  and so [n7Q2]"), typed)).toBeUndefined()
-      expect(rings.leftover("t", tail("  and say [n7Q2] x"), typed)).toBeUndefined()
-      expect(rings.leftover("t", tail(), () => "another line [n7Q2]")).toBeUndefined()
+      expect(rings.leftover("t", tail(`  and so${END}`), typed)).toBeUndefined()
+      expect(rings.leftover("t", tail(`  and say${END} x`), typed)).toBeUndefined()
+      expect(rings.leftover("t", tail(), () => `another line${END}`)).toBeUndefined()
     })
 
     it("is the person's once its ring was confirmed", () => {
@@ -445,7 +476,7 @@ describe.each([
       )
       const scrolled = screen({
         rows,
-        columns: 40,
+        columns: 60,
         cursor: { row: tails[agent].last - 1, column: 10 },
       })
       expect(rings.leftover("t", scrolled, typed)).toBeUndefined()
@@ -453,16 +484,15 @@ describe.each([
   })
 
   it.runIf(agent === "claude")("is finished though it fills the box of a small pane", () => {
-    // 14 rows: its line wrapped over two of them. Nothing is known to be out of sight, and a
-    // message left waiting for good is worse than any words going out with it.
+    // 14 rows: its line wrapped over two of them, as Claude Code's 40-column box wraps the tag
+    // (the break falls before `ring`: tag-box probe, 2.1.329). Nothing is known to be out of
+    // sight, and a message left waiting for good is worse than any words going out with it.
     const rule = "─".repeat(40)
-    const line = doorbellLine("n7Q2")
-    const cut = line.indexOf(" ", 30)
     const rows = [
       ...Array.from({ length: 8 }, () => ""),
       rule,
-      `❯ ${line.slice(0, cut)}`,
-      `  ${line.slice(cut + 1)}`,
+      '❯ <novadeck-doorbell from=""',
+      '  ring="n7Q2"/>',
       rule,
       "  footer",
       "",
@@ -682,5 +712,36 @@ describe("a session stopped with background work running", () => {
         }),
       ),
     ).toBe("queued")
+  })
+})
+
+describe("shellIn", () => {
+  // A folder of stand-in shells to put on a PATH, as `name` and `name.exe`, so it reads the same
+  // on every platform.
+  const shells = (...names: string[]): string => {
+    const folder = mkdtempSync(join(tmpdir(), "novadeck-shells-"))
+    for (const name of names)
+      for (const file of [name, `${name}.exe`]) writeFileSync(join(folder, file), "")
+    return folder
+  }
+
+  it("writes opencode's command of several lines for the shell its terminal's PATH gives it", ({
+    resources,
+  }) => {
+    const { box } = harnesses.opencode
+    const pwsh = shells("pwsh")
+    const bash = shells("bash")
+    resources.defer(() => rmSync(pwsh, { recursive: true, force: true }))
+    resources.defer(() => rmSync(bash, { recursive: true, force: true }))
+    const written = (env: NodeJS.ProcessEnv) => shellIn(box, env).shell.command?.("echo a\necho b")
+    expect(written({ SHELL: "pwsh", PATH: pwsh })).toMatch(/^Invoke-Expression /)
+    expect(written({ SHELL: "bash", PATH: bash })).toMatch(/^eval "\$\(printf %s '/)
+    // One line goes as it is, whichever the shell.
+    expect(shellIn(box, { SHELL: "pwsh", PATH: pwsh }).shell.command?.("ls")).toBe("ls")
+  })
+
+  it("leaves a profile as it is without an environment, or with no command to write", () => {
+    expect(shellIn(harnesses.opencode.box, undefined)).toBe(harnesses.opencode.box)
+    expect(shellIn(harnesses.claude.box, { PATH: "" })).toBe(harnesses.claude.box)
   })
 })

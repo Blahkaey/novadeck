@@ -3,7 +3,7 @@ import {
   emptyInbox,
   withSnoozes,
   type Inbox,
-  type InboxRow,
+  type InboxEntry,
   type InboxState,
 } from "@novadeck/core/inbox"
 import { createStore } from "@novadeck/core/store"
@@ -26,7 +26,7 @@ Object.assign(globalThis, {
   },
 })
 
-const source: InboxRow["source"] = {
+const source: InboxEntry["source"] = {
   projectId: "p",
   workspaceSessionId: "s",
   terminalId: "t",
@@ -36,7 +36,7 @@ const source: InboxRow["source"] = {
   projectName: "Project",
 }
 
-const permission = (id: string, at: number): InboxRow => ({
+const permission = (id: string, at: number): InboxEntry => ({
   id,
   source,
   at,
@@ -65,7 +65,7 @@ const permission = (id: string, at: number): InboxRow => ({
   },
 })
 
-const told = (id: string, at: number): InboxRow => ({
+const told = (id: string, at: number): InboxEntry => ({
   id,
   source,
   at,
@@ -83,7 +83,7 @@ const Clear = () => {
 
 // An Inbox whose rows the test changes, with the list, the held pill and the sheets as the
 // sidebar and the workspace wire them.
-const agentAsk = (id: string, at: number, settled?: InboxRow["settled"]): InboxRow => ({
+const agentAsk = (id: string, at: number, settled?: InboxEntry["settled"]): InboxEntry => ({
   id,
   source,
   at,
@@ -95,7 +95,7 @@ const agentAsk = (id: string, at: number, settled?: InboxRow["settled"]): InboxR
 })
 
 const mount = (
-  rows: readonly InboxRow[],
+  entries: readonly InboxEntry[],
   working = false,
   dismissing = false,
   arranging = false,
@@ -104,7 +104,7 @@ const mount = (
   looking = true,
   clearing = false,
 ) => {
-  const state = createStore<InboxState>({ ...emptyInbox, items: rows })
+  const state = createStore<InboxState>({ ...emptyInbox, items: entries })
   const answered: string[] = []
   const order = createStore<readonly string[]>([])
   const inbox: Inbox = {
@@ -113,15 +113,15 @@ const mount = (
     see: (id) =>
       state.update((current) => ({
         ...current,
-        items: current.items.map((row) => (row.id === id ? { ...row, seen: true } : row)),
+        items: current.items.map((entry) => (entry.id === id ? { ...entry, seen: true } : entry)),
       })),
     ...(dismissing
       ? {
           dismiss: (id: string) =>
             state.update((current) => ({
               ...current,
-              items: current.items.map((row) =>
-                row.id === id ? { ...row, settled: { how: "dismissed", at: 99 } } : row,
+              items: current.items.map((entry) =>
+                entry.id === id ? { ...entry, settled: { how: "dismissed", at: 99 } } : entry,
               ),
             })),
         }
@@ -186,9 +186,9 @@ const mount = (
         .querySelector<HTMLElement>(`[data-inbox-row="${id}"] .inbox-row-select`)!
         .click(),
     )
-  const arrive = (row: InboxRow): void =>
+  const arrive = (entry: InboxEntry): void =>
     act(() => {
-      state.update((current) => ({ ...current, items: [...current.items, row] }))
+      state.update((current) => ({ ...current, items: [...current.items, entry] }))
     })
   const press = (key: string): void =>
     act(() => {
@@ -203,7 +203,7 @@ const mount = (
         .querySelector(".inbox-row-select")!
         .dispatchEvent(new KeyboardEvent("keydown", { key, altKey: true, bubbles: true }))
     })
-  // Answers the row from its sheet, and the backend takes it away, as an answer that took.
+  // Answers the entry from its sheet, and the backend takes it away, as an answer that took.
   const answer = (id: string): void =>
     act(() => {
       const asked = state.getSnapshot().items.find((each) => each.id === id)!
@@ -217,7 +217,7 @@ const mount = (
         items: current.items.filter((each) => each.id !== id),
       }))
     })
-  // The backend takes the row away unanswered, as when its agent withdraws it.
+  // The backend takes the entry away unanswered, as when its agent withdraws it.
   const withdraw = (id: string): void =>
     act(() => {
       state.update((current) => ({
@@ -267,12 +267,12 @@ describe("The Inbox's list", () => {
     })
   })
 
-  context("when a row arrives with no sheet open", () => {
+  context("when an entry arrives with no sheet open", () => {
     it("joins the list at once", async () => {
       const inbox = mount([permission("a", 1)])
       inbox.arrive(permission("b", 2))
 
-      // The row added last is first.
+      // The entry added last is first.
       expect(inbox.subjects()).toEqual(["Run b?", "Run a?"])
       expect(inbox.pill()).toBeNull()
       await nextFrame()
@@ -280,14 +280,15 @@ describe("The Inbox's list", () => {
     })
   })
 
-  context("when a row arrives while a sheet is open", () => {
+  context("when an entry arrives while a sheet is open", () => {
     it("is held: the list stays as it was, and the header counts it", async () => {
       const inbox = mount([permission("a", 1), permission("b", 2)])
       inbox.open("a")
       inbox.arrive(permission("c", 3))
 
       expect(inbox.subjects()).toHaveLength(2)
-      expect(inbox.pill()?.textContent).toBe("1 new · show")
+      expect(inbox.pill()?.textContent).toBe("1 new")
+      expect(inbox.pill()?.getAttribute("aria-label")).toBe("Show 1 new")
       await nextFrame()
       inbox.view.unmount()
     })
@@ -402,7 +403,7 @@ describe("The Inbox's list", () => {
     })
   })
 
-  context("when a row that asks has been opened", () => {
+  context("when an entry that asks has been opened", () => {
     it("keeps it asking, marked as opened", async () => {
       const inbox = mount([permission("a", 1), permission("b", 2)])
       expect(inbox.row("a").dataset).toMatchObject({ needs: "true", seen: "false" })
@@ -421,7 +422,7 @@ describe("The Inbox's list", () => {
     it("marks the updates as asking nothing, and draws no line anywhere", async () => {
       const inbox = mount([told("u1", 1), permission("a", 2), told("u2", 3)])
 
-      // The row added last is first, whatever it asks.
+      // The entry added last is first, whatever it asks.
       expect(inbox.subjects()).toEqual(["u2", "Run a?", "u1"])
       expect(inbox.row("a").dataset.needs).toBe("true")
       expect(inbox.row("u1").dataset.needs).toBe("false")
@@ -443,7 +444,7 @@ describe("The Inbox's list", () => {
   })
 
   context("where the backend can clear", () => {
-    const clearing = (rows: readonly InboxRow[]) =>
+    const clearing = (rows: readonly InboxEntry[]) =>
       mount(rows, false, true, false, false, true, true, true)
     const clearButton = (inbox: ReturnType<typeof mount>): HTMLElement | null =>
       inbox.view.container.querySelector<HTMLElement>(
@@ -601,7 +602,7 @@ describe("The Inbox's list", () => {
     })
 
     it("doesn't read one scrolled past, or one already resolved", async () => {
-      const resolved = { ...told("r", 2), settled: { how: "read", at: 3 } } as InboxRow
+      const resolved = { ...told("r", 2), settled: { how: "read", at: 3 } } as InboxEntry
       const inbox = mount([told("u", 1), resolved])
       await nextFrame()
       vi.useFakeTimers()
@@ -627,7 +628,7 @@ describe("The Inbox's list", () => {
       act(() => {
         inbox.state.update((current) => ({
           ...current,
-          items: current.items.map((row) => ({ ...row, settled: { how: "read", at: 9 } })),
+          items: current.items.map((entry) => ({ ...entry, settled: { how: "read", at: 9 } })),
         }))
       })
       inbox.show(false)
@@ -807,7 +808,7 @@ describe("The Inbox's list", () => {
     })
   })
 
-  context("when a sheet opens for its row alone, as from a toast", () => {
+  context("when a sheet opens for its entry alone, as from a toast", () => {
     const current = (inbox: ReturnType<typeof mount>): string | null =>
       inbox.view.container
         .querySelector('[aria-current="true"]')
@@ -882,7 +883,7 @@ describe("The Inbox's list", () => {
       inbox.view.unmount()
     })
 
-    it("puts back what it took the place of when its row goes unanswered", async () => {
+    it("puts back what it took the place of when its entry goes unanswered", async () => {
       const inbox = mount([permission("a", 1), permission("b", 2)])
       const back: string[] = []
       act(() => inbox.handlers().open("a", { once: true, after: () => void back.push("a") }))

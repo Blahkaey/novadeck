@@ -4,10 +4,12 @@ import {
   runningSeats,
   sameSeats,
 } from "@novadeck/core/agents/account-usage"
+import { watchPerson } from "@novadeck/core/person"
 import type { TerminalKey } from "@novadeck/core/port"
 import { waitingAgents } from "@novadeck/core/terminals/ending"
 import { nextWaitingChange } from "@novadeck/core/terminals/waiting"
 import type { TerminalMetadata, Workspace } from "@novadeck/core/types"
+import { useTourBusy, useTourOffer } from "@novadeck/tour/TourProvider"
 import {
   memo,
   useCallback,
@@ -21,7 +23,11 @@ import {
 import { FeedbackButton } from "../feedback/FeedbackButton"
 import { FooterHelp } from "../shell/FooterHelp"
 import { nothingToCheck, restartCheck, riskKey } from "../shell/restart-check"
-import { readSubscriptionOrder, writeSubscriptionOrder } from "../shell/shell-storage"
+import {
+  readSubscriptionOrder,
+  subscriptionOrder,
+  writeSubscriptionOrder,
+} from "../shell/shell-storage"
 import { SubscriptionUsage } from "../shell/SubscriptionUsage"
 import { WorkspaceFooter } from "../shell/WorkspaceFooter"
 import { programIcon } from "../terminals/processes/profiles"
@@ -30,7 +36,6 @@ import { chatOfferDue, selectedAgentCanChat } from "./chat-offer"
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
 import { useAccounts } from "./controller/footer-accounts"
 import { crashLoopQuestion, currentState, shallowEqual } from "./selectors"
-import { useTourBusy, useTourOffer } from "./TourProvider"
 import { chatViewOn, dismissWhatsNew, onboardingTourOn } from "./ui-store"
 import { useBusyTerminals } from "./use-busy-terminals"
 import { useOfferNews } from "./use-offer-news"
@@ -102,10 +107,12 @@ export const FooterSection = memo((): React.JSX.Element => {
       state.recent.switcher !== null ||
       crashLoopQuestion(state) > 0,
   )
-  const welcome = useSyncExternalStore(
+  // The welcome is the app's first window's.
+  const welcomeOpen = useSyncExternalStore(
     backend.agents?.welcome.subscribe ?? always,
     () => backend.agents?.welcome.getSnapshot() ?? false,
   )
+  const welcome = welcomeOpen && backend.projectWindows?.extra !== true
   // A tour that runs, or whose closing card is up: its spotlight and coach are not a dialog, so
   // the offer, whose Try Agent Chat would change how the tour's agent shows, waits until it ends.
   const tourBusy = useTourBusy()
@@ -198,7 +205,15 @@ export const FooterSection = memo((): React.JSX.Element => {
   useRenderAt(waitingChange)
   const seats = useWorkspaceState(runningSeats, sameSeats)
   // The order the person left the subscriptions in, kept for their next visit.
+  // The person's, so it follows another device's change (core's person.ts).
   const [order, setOrder] = useState(readSubscriptionOrder)
+  useEffect(
+    () =>
+      watchPerson((key) => {
+        if (key === subscriptionOrder.key) setOrder(readSubscriptionOrder())
+      }),
+    [],
+  )
   // The time windows are measured against, moved on as the soonest one resets, so it
   // drops out then though no agent reports anything new.
   const [now, setNow] = useState(Date.now)

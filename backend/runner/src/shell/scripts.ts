@@ -1,5 +1,6 @@
 import { join } from "node:path"
 
+import { launchHooks } from "@novadeck/harness-agy/plugin"
 import type { Launchers, Machine, Start } from "@novadeck/harness-core/harness"
 import { header } from "@novadeck/harness-core/header"
 import { manifest } from "@novadeck/harness-core/plugin"
@@ -24,6 +25,7 @@ import {
 } from "./capture.js"
 import { hookVariables } from "./hook.js"
 import { mcpVersions } from "./mcp.js"
+import { openShims } from "./open-shims.js"
 
 // The files Novadeck puts in shells it starts, and the plugins agents install when the
 // person connects them, as text. They are written into Novadeck's own data directory;
@@ -33,6 +35,11 @@ import { mcpVersions } from "./mcp.js"
 export type ShellPaths = ShellScriptPaths & {
   /** Put first on PATH while a harness with shims is connected, as Codex's `codex`. */
   readonly bin: string
+  /**
+   * On Linux, the shims that open apps in scopes of their own (`openShims`), first on PATH in
+   * every terminal with a scope of its own.
+   */
+  readonly open: string
   /** The plugin sources each agent installs from when the person connects it. */
   readonly plugins: { readonly [agent in AgentName]: string }
   /** Where a fresh shell finds the command that resumes its agent, one file per shell. */
@@ -56,6 +63,13 @@ export type ShellPaths = ShellScriptPaths & {
    */
   readonly agyCmdDir: string
   readonly agyCmd: string
+  /**
+   * The folder holding Antigravity's PreToolUse hook alone, as a workspace's `.agents/hooks.json`
+   * (Windows), which its shim adds to sessions in Novadeck's terminals where cmd's AutoRun prints
+   * and its global plugin registers none (`Machine.hooksFolder`). Anything there is the agent's to
+   * write, so it holds nothing else.
+   */
+  readonly agyHooks: string
   /** What an agent's commands load to capture their output (Linux and macOS; see capture.ts). */
   readonly capture: CapturePaths
   /**
@@ -69,6 +83,7 @@ export const shellPaths = (directory: string, platform = process.platform): Shel
   // Their variables and functions are named NOVADECK_RESUME, __novadeck_prompt.
   ...shellScriptPaths(directory, "novadeck"),
   bin: join(directory, "bin"),
+  open: join(directory, "open"),
   plugins: Object.fromEntries(
     agents.map((agent) => [agent, join(directory, "plugins", harnesses[agent].plugin)]),
   ) as ShellPaths["plugins"],
@@ -80,6 +95,7 @@ export const shellPaths = (directory: string, platform = process.platform): Shel
   relayConfig: join(directory, "relay.json"),
   agyCmdDir: join(directory, "agy-cmd"),
   agyCmd: join(directory, "agy-cmd", "cmd.exe"),
+  agyHooks: join(directory, "agy-hooks"),
   capture: capturePaths(directory),
   pwshDir: join(directory, "pwsh"),
 })
@@ -132,6 +148,26 @@ export const relayConfig = {
   ),
   env: [...hookVariables],
   fallbacks: silentAnswers,
+}
+
+/**
+ * `relay.json` while the shipping gate is on: the events it answers wait the long limit too
+ * (4 s, as a Stop does), as the runner answers them by a deadline of its own. Off, the file is
+ * `relayConfig` as it always was.
+ */
+export const gatedRelayConfig = {
+  ...relayConfig,
+  // The shim's rules for Antigravity are in force (see `shippingRules`), and opencode's own default
+  // allows a shell command: the relay refuses their shapes (for opencode, anything that looks like
+  // git or gh shipping), never asks, where the runner gives no answer.
+  gate: true,
+  asks: {
+    ...relayConfig.asks,
+    claude: [...relayConfig.asks.claude!, "PreToolUse"],
+    codex: [...relayConfig.asks.codex!, "PreToolUse", "PermissionRequest"],
+    agy: [...relayConfig.asks.agy!, "PreToolUse"],
+    opencode: [...relayConfig.asks.opencode!, "PreToolUse", "PermissionRequest"],
+  },
 }
 
 const relayArguments = (paths: ShellPaths) =>
@@ -269,7 +305,10 @@ export const shellFiles = (
     ...given,
   }
   const common = [
-    file(paths.relayConfig, `${JSON.stringify(relayConfig, null, 2)}\n`),
+    file(
+      paths.relayConfig,
+      `${JSON.stringify(machine.shippingGate === true ? gatedRelayConfig : relayConfig, null, 2)}\n`,
+    ),
     ...shellScripts(paths, header),
     ...agents.flatMap((agent) =>
       harnesses[agent]
@@ -279,6 +318,10 @@ export const shellFiles = (
   ]
   // Every harness's shims, which the shells put first on PATH only while one is connected.
   const shims = agents.flatMap((agent) => harnesses[agent].shims?.(platform, machine) ?? [])
+  // On Linux, the shims that open apps in scopes of their own, in a folder of their own.
+  const opening = openShims(platform).map((each) =>
+    file(join(paths.open, each.path), each.content, each.mode),
+  )
   const bin = shims.map((each) =>
     file(
       join(paths.bin, each.path),
@@ -294,6 +337,10 @@ export const shellFiles = (
         // plugin's copy, which starts the MCP server through cmd and this launcher.
         file(paths.mcp, cmdLauncher(paths, "mcp", "MCP server launcher")),
         ...bin,
+        // Antigravity's PreToolUse, where only its shim can give it, in Novadeck's terminals.
+        ...(machine.cmdShimDir !== undefined && machine.hooksFolder !== undefined
+          ? [file(join(paths.agyHooks, launchHooks.path), launchHooks.content(platform))]
+          : []),
       ]
     : [
         ...common,
@@ -303,5 +350,6 @@ export const shellFiles = (
         file(paths.hook, posixLauncher(paths, "hook", "agent hook launcher"), 0o700),
         file(paths.mcp, posixLauncher(paths, "mcp", "MCP server launcher"), 0o700),
         ...bin,
+        ...opening,
       ]
 }

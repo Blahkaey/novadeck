@@ -1,6 +1,11 @@
 import {
   desktopBadgeOf,
   parsePortableState,
+  parseProjectWindowShown,
+  windowKeyOf,
+  parseProjectWindowsState,
+  parseProjectWindowTarget,
+  windowIdOf,
   parseUpdateOffer,
   parseWhatsNew,
   rendererPoolOf,
@@ -43,6 +48,9 @@ import {
   type FilesClipboardReply,
   dismissWhatsNewChannel,
   feedbackAboutChannel,
+  extraWindowArgumentPrefix,
+  windowKeyArgumentPrefix,
+  windowKeysChannel,
   feedbackArgumentPrefix,
   feedbackSendChannel,
   installAppChannel,
@@ -79,6 +87,12 @@ import {
   whatsNewChannel,
   windowFocusChannel,
   windowFocusRequestChannel,
+  projectWindowHandOffChannel,
+  projectWindowNavigateChannel,
+  projectWindowOpenChannel,
+  projectWindowShowChannel,
+  projectWindowsChannel,
+  projectWindowsRequestChannel,
   screenReaderChannel,
   screenReaderRequestChannel,
   tellsScreenReader,
@@ -106,6 +120,15 @@ const apiUrl = new URL(argument.slice(apiUrlArgumentPrefix.length))
 // Whether the main process sends feedback notes: it says so by an argument, `1`.
 const feedback = process.argv.includes(`${feedbackArgumentPrefix}1`)
 
+// Whether this window is not the app's first: the main process says so by an argument, `1`.
+const extraWindow = process.argv.includes(`${extraWindowArgumentPrefix}1`)
+
+// This window's key, which the main process passes as an argument when it is a UUID.
+const windowKey = windowKeyOf(
+  process.argv
+    .find((item) => item.startsWith(windowKeyArgumentPrefix))
+    ?.slice(windowKeyArgumentPrefix.length),
+)
 // Whether the runner is on another machine: the main process says so by an argument, `1`.
 const remote = process.argv.includes(`${remoteArgumentPrefix}1`)
 
@@ -306,6 +329,53 @@ const bridge = {
     ipcRenderer.send(windowFocusRequestChannel)
     return () => {
       ipcRenderer.removeListener(windowFocusChannel, relay)
+    }
+  },
+  // Only a valid state comes back; the request makes the main process answer with the current
+  // one, as the page may have started listening after it last changed, or loaded again.
+  onProjectWindows: (listener) => {
+    const relay = (_event: unknown, value: unknown): void => {
+      const state = parseProjectWindowsState(value)
+      if (state) listener(state)
+    }
+    ipcRenderer.on(projectWindowsChannel, relay)
+    ipcRenderer.send(projectWindowsRequestChannel)
+    return () => {
+      ipcRenderer.removeListener(projectWindowsChannel, relay)
+    }
+  },
+  // Only an id, or null, crosses; the main process checks it again.
+  showProjectWindow: (projectId, known = []) => {
+    const shown = parseProjectWindowShown({ projectId, known })
+    if (shown) ipcRenderer.send(projectWindowShowChannel, shown)
+  },
+  // Only a list of keys comes back; anything else, or a failure, is no answer.
+  windowKeys: async () => {
+    try {
+      const keys: unknown = await ipcRenderer.invoke(windowKeysChannel)
+      if (!Array.isArray(keys)) return undefined
+      return keys.flatMap((key: unknown) => windowKeyOf(key) ?? [])
+    } catch {
+      return undefined
+    }
+  },
+  openProjectWindow: (projectId) => {
+    if (windowIdOf(projectId) !== undefined) ipcRenderer.send(projectWindowOpenChannel, projectId)
+  },
+  // Only a valid place goes to the app, which routes it to the window that takes it.
+  handOffToProjectWindow: (target) => {
+    const place = parseProjectWindowTarget(target)
+    if (place) ipcRenderer.send(projectWindowHandOffChannel, place)
+  },
+  // Only a valid place comes back.
+  onProjectWindowNavigate: (listener) => {
+    const relay = (_event: unknown, value: unknown): void => {
+      const place = parseProjectWindowTarget(value)
+      if (place) listener(place)
+    }
+    ipcRenderer.on(projectWindowNavigateChannel, relay)
+    return () => {
+      ipcRenderer.removeListener(projectWindowNavigateChannel, relay)
     }
   },
   // Only where the app can tell whether a screen reader runs (macOS, Windows, Linux); elsewhere
@@ -529,5 +599,7 @@ contextBridge.exposeInMainWorld("novadeck", {
   livePages: true,
   ...(webglContexts === undefined ? {} : { webglContexts }),
   ...(feedback ? { feedback: true as const } : {}),
+  ...(extraWindow ? { extraWindow: true as const } : {}),
+  ...(windowKey ? { windowKey } : {}),
   ...bridge,
 } satisfies DesktopApp)

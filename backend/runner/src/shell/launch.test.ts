@@ -1,4 +1,8 @@
-import { delimiter } from "node:path"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { delimiter, join } from "node:path"
+
+import { onTestFinished } from "vitest"
 
 import { describe, expect, it } from "../test.js"
 import type { InstalledShell } from "./install.js"
@@ -42,6 +46,51 @@ describe("Novadeck's launchers in a shell", () => {
     expect(without.PATH).toBe("/usr/bin")
     expect(without).not.toHaveProperty("NOVADECK_BIN")
     expect(without).not.toHaveProperty("NOVADECK_SHIMS")
+  })
+
+  it("has a Windows cmd's startup command wait for its job through the relay", () => {
+    const startup = { command: "claude", file: "C:\\data\\resume\\1" }
+    const cmd = shellLaunch("cmd.exe", paths, {}, { startup, scoped: true }, "win32")
+    expect(cmd.args).toBe(`/s /k ""${paths.relay}" held "C:\\data\\resume\\1.held" & claude"`)
+    expect(cmd.scopeFile).toBe("C:\\data\\resume\\1.held")
+    const pwsh = shellLaunch("pwsh.exe", paths, {}, { startup, scoped: true }, "win32")
+    expect(pwsh.env.NOVADECK_SCOPE).toBe("C:\\data\\resume\\1.held")
+  })
+
+  it("puts the shims that open apps first in a terminal with a scope of its own, and names BROWSER", () => {
+    const posix: InstalledShell = {
+      ...shellPaths("/data", "linux"),
+      launcher: "/data/hook",
+      mcpLauncher: "/data/mcp",
+    }
+    // A PATH with an xdg-open on it: /usr/bin's on Linux, a stand-in elsewhere.
+    const real = mkdtempSync(join(tmpdir(), "launch-open-"))
+    onTestFinished(() => rmSync(real, { recursive: true, force: true }))
+    writeFileSync(join(real, "xdg-open"), "#!/bin/sh\n", { mode: 0o755 })
+    const scoped = shellLaunch("bash", posix, { PATH: real }, { scoped: true }, "linux").env
+    expect(scoped).toMatchObject({
+      PATH: `${posix.open}${delimiter}${real}`,
+      NOVADECK_OPEN: posix.open,
+      BROWSER: join(posix.open, "xdg-open"),
+    })
+    // Not the harnesses' shims, which go first only while one that has them is connected.
+    expect(scoped).not.toHaveProperty("NOVADECK_BIN")
+    // The person's own browser stands, and none is named where no xdg-open is there.
+    expect(
+      shellLaunch("bash", posix, { PATH: real, BROWSER: "firefox" }, { scoped: true }, "linux").env
+        .BROWSER,
+    ).toBe("firefox")
+    expect(
+      shellLaunch("bash", posix, { PATH: "/nowhere" }, { scoped: true }, "linux").env,
+    ).not.toHaveProperty("BROWSER")
+    // A Windows job's terminal has none of Linux's shims.
+    expect(
+      shellLaunch("bash", posix, { PATH: real }, { scoped: true }, "win32").env,
+    ).not.toHaveProperty("NOVADECK_OPEN")
+    const unscoped = shellLaunch("bash", posix, { PATH: "/usr/bin" }, { scoped: false }).env
+    expect(unscoped).not.toHaveProperty("NOVADECK_OPEN")
+    expect(unscoped).not.toHaveProperty("BROWSER")
+    expect(unscoped.PATH).toBe("/usr/bin")
   })
 
   it("leaves out the MCP server's on Windows, whose plugins start the relay itself", () => {

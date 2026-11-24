@@ -36,6 +36,9 @@ resumable stream of it, its browser view, and shell integration.
     know no app, wire or protocol. `store` is optional (a plain store otherwise); an owner
     that observes its stores passes its own. Files pasted in are saved on the terminal's host
     through the owner's `paste.upload`, and go in as their paths there.
+  - `overlay(key, view)` is optional: what the owner draws over the terminal's own output, given its
+    view as its screen opens. Its `restored` is called once a snapshot of the host's screen is
+    drawn (on opening and on every reattach), its `dispose` as the screen closes.
   - `parkMs` and `parkedCap` are the park defaults, and `ViewPhase` and `PasteFailure` what an
     owner words.
   - It builds on `@novadeck/emulator/browser`, and its tests run under jsdom.
@@ -93,7 +96,7 @@ resolve it.
 
 - `./pty`: a terminal's processes.
   - A `Terminal` runs its program in a `Pty`, through node-pty (an optional peer: install it to
-    use `./host`), started as `PtyOptions` say; on Windows its arguments can be one command
+    use `./host`), started as `PtyOptions` say (`spawnPty`, which a test can call alone); on Windows its arguments can be one command
     line, as cmd needs. Its `pid` is undefined until it is known,
     never 0 (on Windows, 0 names the app itself until the program's output connects); `drawn` says
     output has arrived; it reports its exit once, its code null where the program's isn't
@@ -104,7 +107,18 @@ resolve it.
     program's own exit may never come, as for a Windows kill queued until the first draw, the
     pty takes it as ended. `platform` decides all of this, so a test can play a ConPTY with a
     stand-in `native` on any system. `userScopes()` keeps each Linux program in a systemd scope
-    of its own, so an out-of-memory kill takes only it.
+    of its own, so an out-of-memory kill takes only it, and stops one its program left empty.
+    Told when an agent runs there (`agentStarted`, `agentEnded`), a pty ends what the agent left
+    in its scope as `end` runs (`left`), or by `endLeft` once its shell has exited: each tree of
+    the scope whose root started during an agent's run, but for what `apart` names
+    (`leftovers`). `windowsJobs(relay)` gives Windows the same through a job object per
+    terminal, which the relay's `jobs` mode holds (started at once, let go by `close()`): the
+    shell goes into it once node-pty names
+    its pid, and `scopeFile` is made once that has settled; the job lists its own processes
+    (`listed`) and ends them by pid and start (`end`). On macOS, `taggedScopes()` gives each pty the scope of the processes that
+    started with its terminal's variable in their environment, as the caller's relay lists them
+    (`TaggedScopes`), with each start to the microsecond, the clock its runs are kept in
+    (`wallClock`; Linux's is `tickClock`, Windows' `windowsClock`).
   - `sampleForeground(child, last)` names the program in a terminal's foreground, cheaply
     enough to sample, from `/proc` on Linux and `ps` on macOS (Windows can't tell).
     `terminalForeground`, `processGroup`, `foregroundProcess`, `foregroundRuns`, `openFiles`,
@@ -126,8 +140,9 @@ resolve it.
     `__acme_prompt`), and the comment each file opens with.
   - `shellLaunch` gives a shell the arguments and environment that load them (cmd reports
     through its `PROMPT` and takes the command with `/k`), with a folder put first and a
-    startup command, which with `scoped` bash, zsh and fish hold for their scope (see
-    `userScopes`); `startsCommands` says which shells run one. `shQuote` and `cmdQuote` quote
+    startup command, which with `scoped` bash, zsh and fish hold for their scope on Linux
+    (see `userScopes`), and every shell on Windows for its job (`scopeFile`; cmd through a
+    `waiter`, see `windowsJobs`); `startsCommands` says which shells run one. `shQuote` and `cmdQuote` quote
     a value as one word of sh and cmd.
   - `refreshPath` merges the folders the Windows registry's PATH has now into an environment,
     read through the relay where it's given one, else through PowerShell, cached and backed off

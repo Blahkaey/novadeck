@@ -1,10 +1,13 @@
 import type { OfferedUninstall } from "@novadeck/core/desktop/uninstall"
 import type { ForgeConnection, ForgeName } from "@novadeck/core/forges"
 import type { AgentName } from "@novadeck/core/harnesses"
+import { isOnBar } from "@novadeck/core/items"
 import type { AgentMode, Backend } from "@novadeck/core/port"
 import { orderedTiles, tileOf } from "@novadeck/core/roster"
 import { activeProject } from "@novadeck/core/state"
 import type { SchemePreference, Tile } from "@novadeck/core/types"
+import { TourConsentDialog } from "@novadeck/tour/TourConsent"
+import { useTourOffer, useTourRun } from "@novadeck/tour/TourProvider"
 import {
   memo,
   Suspense,
@@ -40,9 +43,6 @@ import { tileIcon } from "../terminals/panel-icons"
 import { visibleSwitcher } from "../terminals/recent"
 import { TerminalSwitcher } from "../terminals/TerminalSwitcher"
 import { schemeCountOfTheme } from "../theme/themes"
-import { TourClosingCard } from "../tour/ClosingCard"
-import { TourSpotlight } from "../tour/Spotlight"
-import { TourConsentDialog } from "../tour/TourConsent"
 import { CloseTeamRows } from "./CloseTeamRows"
 import {
   useFeatureFlag,
@@ -51,7 +51,7 @@ import {
   useWorkspaceState,
 } from "./controller/context"
 import { useRouteDialog, type RouteDialog } from "./controller/useRouteDialog"
-import { Preferences, TerminalSearch } from "./deferred-views"
+import { Preferences, TerminalSearch, TourClosingCard, TourStage } from "./deferred-views"
 import { dingOf } from "./ding"
 import { moveQuestionOf, sameMoveQuestion } from "./move-question"
 import { NameOffer } from "./NameOffer"
@@ -64,7 +64,6 @@ import {
   sameItems,
   shallowEqual,
 } from "./selectors"
-import { useTourOffer, useTourRun } from "./TourProvider"
 import { chatViewOn, switchOffExperimental, type ExperimentalFeatures } from "./ui-store"
 import { useForgeRuns } from "./useForgeRuns"
 import { useInstalls } from "./useInstalls"
@@ -138,6 +137,17 @@ const useAgentModes = (
   return agentModes && { enabled, onChange: agentModes.set }
 }
 
+// Whether the shipping gate is on, for Preferences; undefined where the backend has none.
+const useShippingGate = (
+  shippingGate: Backend["shippingGate"],
+): { readonly enabled: boolean; readonly onChange: (enabled: boolean) => void } | undefined => {
+  const enabled = useSyncExternalStore(
+    shippingGate?.enabled.subscribe ?? always,
+    () => shippingGate?.enabled.getSnapshot() ?? false,
+  )
+  return shippingGate && { enabled, onChange: shippingGate.set }
+}
+
 // Whether agents get worktrees, for Preferences; undefined where the backend has none.
 const useWorktrees = (
   worktrees: Backend["worktrees"],
@@ -150,12 +160,17 @@ const useWorktrees = (
 }
 
 const noAsks: readonly never[] = []
-// The first approval an agent asked for that waits on the person, with the terminals it names.
-const useApproval = (approvals: Backend["approvals"]): ApprovalView | null => {
+// The first approval an agent asked for that waits on the person, with the terminals it names;
+// one the person put aside unanswered (a newer Novadeck's) waits, unshown, until they go to the
+// terminal that asked.
+const useApproval = (
+  approvals: Backend["approvals"],
+  setAside: ReadonlyMap<string, string>,
+): ApprovalView | null => {
   const first = useSyncExternalStore(
     approvals?.pending.subscribe ?? always,
     () => approvals?.pending.getSnapshot() ?? noAsks,
-  )[0]
+  ).find((each) => !setAside.has(each.requestId))
   return useWorkspaceState(
     (workspace) => (first ? approvalView(first, workspace) : null),
     sameApprovalView,
@@ -164,7 +179,8 @@ const useApproval = (approvals: Backend["approvals"]): ApprovalView | null => {
 
 const noAgents: readonly never[] = []
 // The backend's connectable agents and whether to offer them at first run.
-const useAgents = (agents: Backend["agents"]) => {
+// The welcome is the app's first window's: a window that is not the first never offers it.
+const useAgents = (agents: Backend["agents"], extraWindow: boolean) => {
   const list = useSyncExternalStore(
     agents?.state.subscribe ?? always,
     () => agents?.state.getSnapshot() ?? noAgents,
@@ -173,7 +189,7 @@ const useAgents = (agents: Backend["agents"]) => {
     agents?.welcome.subscribe ?? always,
     () => agents?.welcome.getSnapshot() ?? false,
   )
-  return { list, welcome }
+  return { list, welcome: welcome && !extraWindow }
 }
 
 // The backend's forges and what each reads of its tool, for Preferences.
@@ -369,8 +385,9 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const hibernation = useHibernation(backend.hibernation)
   const agentModes = useAgentModes(backend.agentModes)
   const agentMode = useAgentMode(backend.agentMode)
+  const shippingGate = useShippingGate(backend.shippingGate)
   const worktrees = useWorktrees(backend.worktrees)
-  const agents = useAgents(backend.agents)
+  const agents = useAgents(backend.agents, backend.projectWindows?.extra === true)
   const installs = useInstalls(backend.agents)
   const driver = useTourRun()
   // Whether the project the tour ran in is still there, for its closing card to offer removing.
@@ -386,7 +403,18 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
   const tour = useTourOffer()
   const forgeList = useForges(backend.forges)
   const forgeRuns = useForgeRuns(backend.forges)
-  const approval = useApproval(backend.approvals)
+  // Approvals put aside unanswered, as this build can't answer them, by the terminal that asked:
+  // going to that terminal brings its approval back.
+  const [setAside, setSetAside] = useState<ReadonlyMap<string, string>>(new Map())
+  const selectedTerminal = useWorkspaceState((workspace) => currentState(workspace).selected)
+  // Going to a terminal, as the selection moves there, brings back what it asked.
+  const [passed, setPassed] = useState(selectedTerminal)
+  if (passed !== selectedTerminal) {
+    setPassed(selectedTerminal)
+    if ([...setAside.values()].includes(selectedTerminal))
+      setSetAside(new Map([...setAside].filter(([, asker]) => asker !== selectedTerminal)))
+  }
+  const approval = useApproval(backend.approvals, setAside)
   const voice = useVoice(backend.voice)
   const murmur = useMurmur(backend.murmur)
   const { go, closeDialog } = navigation
@@ -517,43 +545,63 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         />
       )}
       {driver.shown && (
-        <TourSpotlight
-          {...driver.shown}
-          onPause={driver.pause}
-          onResume={driver.resume}
-          onSkip={driver.skip}
-          onNext={driver.next}
-          onEnd={driver.end}
-          onBack={driver.back}
-        />
+        <Suspense fallback={null}>
+          <TourStage
+            {...driver.shown}
+            onCaption={driver.captioned}
+            onTouch={driver.touched}
+            onShow={driver.show}
+            onEnd={driver.end}
+            onBack={driver.back}
+          />
+        </Suspense>
       )}
       {driver.closing && (
-        <TourClosingCard
-          agent={driver.closing.agent}
-          canRemove={tourProjectThere}
-          {...(backend.pickDirectory && {
-            onOpen: () => {
+        <Suspense fallback={null}>
+          <TourClosingCard
+            canRemove={tourProjectThere}
+            keepError={driver.closing.keepError}
+            onRetryKeep={driver.retryKeep}
+            onKeep={() => {
               const closing = driver.closing
-              const before = workspaceStore.getSnapshot().activeProjectId
-              commands.openFolder().then(
-                () => {
-                  const after = workspaceStore.getSnapshot().activeProjectId
-                  // A folder picked, other than the tour's: its agent starts there, and the card
-                  // goes.
-                  if (!closing || after === before || after === closing.projectId) return
-                  commands.add({ command: closing.agent })
-                  driver.close()
-                },
-                // The card stays, for another try.
-                (error: unknown) => console.error("Novadeck couldn't open that folder:", error),
-              )
-            },
-          })}
-          onRemove={() => {
-            if (driver.closing?.projectId) commands.removeProject(driver.closing.projectId)
-          }}
-          onClose={driver.close}
-        />
+              driver.close()
+              if (!closing) return
+              // Focus puts the agent's terminal and the live game side by side, where Canvas lays
+              // the page's pane over the terminal. Ignored where Focus isn't enabled.
+              commands.changeView("focus")
+              if (closing.projectId) commands.revealTerminal(closing.terminalId, closing.projectId)
+              else commands.reveal(closing.terminalId)
+              const page = workspaceStore
+                .getSnapshot()
+                .projects.flatMap((project) => project.history)
+                .flatMap(({ state }) => state.items)
+                .find((item) => item.kind === "page" && isOnBar(item, closing.terminalId))
+              if (page) commands.openBarTab(closing.terminalId, page.id)
+            }}
+            {...(backend.pickDirectory && {
+              onOpen: () => {
+                const closing = driver.closing
+                const before = workspaceStore.getSnapshot().activeProjectId
+                commands.openFolder().then(
+                  () => {
+                    const after = workspaceStore.getSnapshot().activeProjectId
+                    // A folder picked, other than the tour's: its agent starts there, and the card
+                    // goes.
+                    if (!closing || after === before || after === closing.projectId) return
+                    commands.add({ command: closing.agent })
+                    driver.close()
+                  },
+                  // The card stays, for another try.
+                  (error: unknown) => console.error("Novadeck couldn't open that folder:", error),
+                )
+              },
+            })}
+            onRemove={() => {
+              if (driver.closing?.projectId) commands.removeProject(driver.closing.projectId)
+            }}
+            onClose={driver.close}
+          />
+        </Suspense>
       )}
       {tour && (
         <TourConsentDialog
@@ -594,7 +642,13 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
         onAnswer={answerLeave}
       />
       {backend.approvals && (
-        <ApprovalDialog approval={approval} onAnswer={backend.approvals.answer} />
+        <ApprovalDialog
+          approval={approval}
+          onAnswer={backend.approvals.answer}
+          onSetAside={(requestId) =>
+            setSetAside((held) => new Map(held).set(requestId, approval?.asker?.id ?? ""))
+          }
+        />
       )}
       <NameOffer />
       {backend.feedback?.ask && <AskAgent feedback={backend.feedback} />}
@@ -653,6 +707,7 @@ export const WorkspaceOverlays = memo((): React.JSX.Element => {
           {...(hibernation ? { hibernation } : {})}
           {...(agentModes ? { agentModes } : {})}
           {...(agentMode ? { agentMode } : {})}
+          {...(shippingGate ? { shippingGate } : {})}
           {...(worktrees ? { worktrees } : {})}
           tour={tour !== undefined}
           notices={backend.notices !== undefined}

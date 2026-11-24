@@ -1,4 +1,10 @@
-import { noticeBody, noticeOneLine, readNotice, splitHookText } from "@novadeck/protocol/notices"
+import {
+  noticeBody,
+  noticeOneLine,
+  noticesSeen,
+  readNotice,
+  splitHookText,
+} from "@novadeck/protocol/notices"
 import { describe, expect, it } from "vitest"
 
 import { closeNotice } from "../terminals/closes.js"
@@ -39,8 +45,8 @@ describe("noticeText", () => {
   })
 
   it("has no arrow line where there is nothing to do", () => {
-    expect(noticeText("Host load", { facts: "CPU at 90%+ for 3 min." })).toBe(
-      "Novadeck · Host load\nCPU at 90%+ for 3 min.",
+    expect(noticeText("Resources", { facts: "CPU at 90%+ for 3 min." })).toBe(
+      "Novadeck · Resources\nCPU at 90%+ for 3 min.",
     )
     expect(noticeLines({ facts: "x" })).toEqual(["x"])
   })
@@ -91,7 +97,7 @@ describe("every notice Novadeck words", () => {
 
   it("keeps a lead's report-back as an action, and its standing rules out of the event", () => {
     expect(leadNotice.nowLed("newtz")).toBe(
-      "Novadeck · Lead\nThe user let @newtz lead you from now on.\n→ Report back to it with send when you're done or stuck.",
+      "Novadeck · Team\nThe user let @newtz lead you from now on.\n→ Report back to it with send when you're done or stuck.",
     )
     for (const text of [leadNotice.nowLed("newtz"), leadNotice.released("newtz")])
       expect(text).not.toMatch(/still stands|lead mark|peer's/)
@@ -122,6 +128,16 @@ describe("every notice Novadeck words", () => {
       expect(noticeOneLine(text)).not.toMatch(/\n|Novadeck · /)
       for (const action of actions) expect(text).toContain(`\n→ ${action}`)
     }
+  })
+
+  // On the hook, worktrees going off is the same kind as their standing notice: the person's line
+  // tells it apart by its facts.
+  it("reads worktrees turned off to the person as off, never on or a briefing", () => {
+    const hook = (...each: string[]) => noticesSeen(each.map((text) => ({ text, standing: true })))
+    expect(hook(worktreesOffNotice)).toBe("You notice agent worktrees are off.")
+    expect(hook(worktreesOnNotice)).toBe("You notice agent worktrees are on.")
+    expect(hook(worktreesEarlyNotice)).toBe("You notice agent worktrees are on.")
+    expect(hook(companionNotice, inboxNotice, worktreesOnNotice)).toBe("You notice a briefing.")
   })
 
   it("splits a hook's text back into the notices it joined, a blank line apart", () => {

@@ -2,7 +2,8 @@ import { existsSync } from "node:fs"
 import { mkdir, realpath } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 
-import { behindMain } from "../checkouts/repository.js"
+import { currentBranch, keysOfBranch, writeKeys } from "../checkouts/home.js"
+import { behindMain, mainBranch } from "../checkouts/repository.js"
 import { logs } from "../log.js"
 import { Cleanup, type CleanupHost, type OwnerState } from "./cleanup.js"
 import type { WorktreeRecord, WorktreeRecords } from "./records.js"
@@ -15,7 +16,8 @@ import {
   finishRemoval,
   forgetEntry,
   hasSubmodules,
-  heldByMain,
+  heldByAny,
+  headOf,
   homeOf,
   keepStrayHead,
   keepWork,
@@ -107,10 +109,19 @@ export type Opened = {
   readonly tracking?: boolean
   /** The paths of the instruction files at its top. */
   readonly instructions: readonly string[]
+  /** Its home (see `homeSaid`); undefined where the repository has no main and none was given. */
+  readonly home?: string
 }
 
 export type Taken =
-  | { readonly ok: true; readonly path: string; readonly branch: string; readonly already?: true }
+  | {
+      readonly ok: true
+      readonly path: string
+      readonly branch: string
+      readonly already?: true
+      /** Its home, as `Opened`'s. */
+      readonly home?: string
+    }
   /** Another live terminal owns it: the person decides. */
   | { readonly ok: true; readonly approval: WorktreeRecord }
   | Failure
@@ -143,6 +154,32 @@ export const folderName = (text: string): string =>
 
 /** How long a new worktree waits for the remote's main before it starts from the one it has. */
 const freshMainMs = 5000
+
+/** The repository's main as a local branch's name: `main` for `origin/main`. */
+export const mainName = async (folder: string): Promise<string | undefined> =>
+  (await mainBranch(folder))?.name.replace(/^origin\//, "")
+
+/**
+ * The branch a `from` spells, by its short name: `x` for `x`, `origin/x`, `refs/heads/x` or
+ * `refs/remotes/origin/x`, where that branch is there; undefined for anything else (a commit, a
+ * tag, `HEAD`, `@{-1}`, another remote's branch), which names no home by itself (`HEAD` is
+ * read as the checkout's branch by `chosenHome`).
+ */
+const branchNamed = async (folder: string, from: string): Promise<string | undefined> => {
+  const name = from.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/, "")
+  if (name === "" || name === "HEAD" || !(await validBranch(folder, name))) return undefined
+  const there =
+    (await branchTip(folder, name)) !== undefined ||
+    (await commitAt(folder, `refs/remotes/origin/${name}`)) !== undefined
+  return there ? name : undefined
+}
+
+/**
+ * A worktree's home, the branch its work belongs on, where it is told or was set: its branch's
+ * `novadeckHome` key, else the repository's main by its local name. See checkouts/home.ts.
+ */
+export const homeSaid = async (folder: string, branch: string): Promise<string | undefined> =>
+  (await keysOfBranch(folder, branch)).home ?? (await mainName(folder))
 
 /**
  * The git worktrees agents work in: who owns each, and how they are made, taken, given and
@@ -340,6 +377,8 @@ export class Worktrees {
     readonly branch: string
     readonly from?: string | undefined
     readonly group?: string | undefined
+    /** The branch its work belongs on, here or on origin; see `chosenHome`. */
+    readonly home?: string | undefined
   }): Promise<Opened | Failure> {
     // Origin's refs are made current, and asked about, before the queue, which every
     // repository's operations wait in.
@@ -404,9 +443,24 @@ export class Worktrees {
       tip === undefined && input.from === undefined && origin !== undefined && origin !== "gone"
         ? await commitAt(repository.home, originRef(input.branch))
         : undefined
-    const start = input.from ?? remote ?? (await behindMain(folder))?.commit ?? "HEAD"
-    const base = tip ?? (await commitAt(folder, start))
+    const behind =
+      input.from === undefined && remote === undefined ? await behindMain(folder) : undefined
+    const start = input.from ?? remote ?? behind?.commit ?? "HEAD"
+    // From the folder's own HEAD, its commit and branch are read in one git call, so they can't
+    // disagree: that branch is where the work builds on (as in a lead's worktree, for the agents
+    // it opens); a detached HEAD has none.
+    const head = tip === undefined && start === "HEAD" ? await headOf(folder) : undefined
+    const base = tip ?? head?.commit ?? (await commitAt(folder, start))
     if (base === undefined) return refused(`${start} isn't a commit in ${repository.name}.`)
+    const startedOn = head?.branch
+    const home = await this.chosenHome(
+      repository.home,
+      input.branch,
+      input.home,
+      input.from,
+      startedOn,
+    )
+    if (!home.ok) return home
     await mkdir(join(wanted, ".."), { recursive: true })
     const real = join(await realpath(join(wanted, "..")), repository.name)
     // The row first: a crash between the two leaves a row whose folder never appeared, which
@@ -444,6 +498,19 @@ export class Worktrees {
       remote === undefined
         ? undefined
         : await setUpstream(repository.home, input.branch, originRef(input.branch))
+    // A new branch's keys are all its own: one a deleted branch of that name left goes.
+    // An existing one keeps what it has, its home changed only when given.
+    const kept = tip === undefined ? {} : await keysOfBranch(real, input.branch)
+    await this.keyed(
+      real,
+      input.branch,
+      tip === undefined
+        ? { base, made: true, home: home.write ?? null }
+        : {
+            ...(kept.base === undefined && { base }),
+            ...(input.home !== undefined && { home: home.write ?? null }),
+          },
+    )
     this.made({ root: real, projectId: input.projectId })
     return {
       ok: true,
@@ -458,7 +525,57 @@ export class Worktrees {
       instructions: instructionFiles
         .map((name) => join(real, name))
         .filter((file) => existsSync(file)),
+      ...(await this.homeOf(real, input.branch)),
     }
+  }
+
+  /**
+   * The home a worktree is given: `home` where named (a branch here, or origin's as `origin/x`
+   * or `x`), else the branch `from` names, else the branch it starts from (`startedOn`: the
+   * checkout's own branch, where it started from that checkout's HEAD, which `from: HEAD` is
+   * too), else none: it stays the repository's main (a detached HEAD, a tag or commit, origin's
+   * branch of its name, an existing branch). `write` is what the branch's key holds: nothing
+   * where home is the repository's main, which is measured by as ever without a key.
+   */
+  private async chosenHome(
+    folder: string,
+    branch: string,
+    home: string | undefined,
+    from: string | undefined,
+    startedOn?: string,
+  ): Promise<{ readonly ok: true; readonly write?: string } | Failure> {
+    const named =
+      home !== undefined
+        ? home.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/, "")
+        : from !== undefined && from !== "HEAD"
+          ? await branchNamed(folder, from)
+          : startedOn
+    if (named === undefined) return { ok: true }
+    if (named === branch) return refused("A worktree's home is another branch than its own.")
+    const there =
+      (await branchTip(folder, named)) !== undefined ||
+      (await commitAt(folder, originRef(named))) !== undefined
+    if (!there) return refused(`${home ?? named} isn't a branch here or on origin.`)
+    return named === (await mainName(folder)) ? { ok: true } : { ok: true, write: named }
+  }
+
+  /** Sets a branch's keys, logging a write git refused: an open or take never fails on one. */
+  private async keyed(
+    folder: string,
+    branch: string,
+    keys: Parameters<typeof writeKeys>[2],
+  ): Promise<void> {
+    if (Object.keys(keys).length === 0) return
+    if (!(await writeKeys(folder, branch, keys)))
+      log.warn("worktrees.keys-failed", "Novadeck couldn't write a worktree's keys to git config", {
+        data: { path: folder, branch },
+      })
+  }
+
+  /** `{ home }` as said in an answer, or nothing where there is none to say. */
+  private async homeOf(folder: string, branch: string): Promise<{ readonly home?: string }> {
+    const home = await homeSaid(folder, branch)
+    return home === undefined ? {} : { home }
   }
 
   /**
@@ -472,6 +589,8 @@ export class Worktrees {
     readonly terminalId: string
     readonly cwd: string
     readonly path: string
+    /** Sets its home (see `chosenHome`), once it is the caller's by this call. */
+    readonly home?: string | undefined
   }): Promise<Taken> {
     return this.serial(() => this.taking(input))
   }
@@ -500,16 +619,21 @@ export class Worktrees {
     if (row) {
       if (row.projectId !== input.projectId)
         return refused("That worktree belongs to another project.")
-      if (row.terminalId === input.terminalId)
-        return { ok: true, path: row.path, branch: row.branch, already: true }
-      if (this.gone(row.terminalId)) {
-        this.moveOwner(row.path, row.terminalId, input.terminalId)
-        return { ok: true, path: row.path, branch: row.branch }
+      const mine = row.terminalId === input.terminalId
+      if (!mine && !this.gone(row.terminalId)) return { ok: true, approval: row }
+      const homed = await this.rehomed(row.path, row.branch, input.home)
+      if (!homed.ok) return homed
+      if (!mine) this.moveOwner(row.path, row.terminalId, input.terminalId)
+      return {
+        ok: true,
+        path: row.path,
+        branch: row.branch,
+        ...(mine && { already: true as const }),
+        ...(await this.homeOf(row.path, row.branch)),
       }
-      return { ok: true, approval: row }
     }
     const found = await repositoryAt(top)
-    if (!found.ok) return refused(`${top} isn't a git worktree.`)
+    if (!found.ok) return found
     const { repository } = found
     if (!(await this.ofProject(input.projectId, input.cwd, repository)))
       return refused(
@@ -534,12 +658,15 @@ export class Worktrees {
     if (entry.locked) return refused("That worktree is locked in git, so Novadeck won't take it.")
     if (entry.branch === null)
       return refused("That worktree has a detached HEAD, with no branch to track.")
+    const homed = await this.chosenHome(real, entry.branch, input.home, undefined)
+    if (!homed.ok) return homed
+    const base = await startOf(real)
     try {
       this.records.insertWorktree({
         path: real,
         commonDir: repository.commonDir,
         branch: entry.branch,
-        base: await startOf(real),
+        base,
         projectId: input.projectId,
         terminalId: input.terminalId,
         adopted: true,
@@ -553,8 +680,38 @@ export class Worktrees {
           : "Novadeck couldn't record the worktree: its project is gone.",
       )
     }
+    // What a script that made it set stands, home included, unless home is given.
+    const kept = await keysOfBranch(real, entry.branch)
+    await this.keyed(real, entry.branch, {
+      ...(kept.base === undefined && { base }),
+      ...(input.home !== undefined && { home: homed.write ?? null }),
+    })
     this.made({ root: real, projectId: input.projectId })
-    return { ok: true, path: real, branch: entry.branch }
+    return {
+      ok: true,
+      path: real,
+      branch: entry.branch,
+      ...(await this.homeOf(real, entry.branch)),
+    }
+  }
+
+  /** Sets a tracked worktree's home where `home` is given; why not, where it can't be. */
+  private async rehomed(
+    path: string,
+    branch: string,
+    home: string | undefined,
+  ): Promise<{ readonly ok: true } | Failure> {
+    if (home === undefined) return { ok: true }
+    if (!existsSync(path)) return refused("That worktree's folder is gone, so its home stays.")
+    const live = await currentBranch(path)
+    if (live !== branch)
+      return refused(
+        `That worktree is on ${live ?? "a detached HEAD"} now, not ${branch}, so its home stays.`,
+      )
+    const chosen = await this.chosenHome(path, branch, home, undefined)
+    if (!chosen.ok) return chosen
+    await this.keyed(path, branch, { home: chosen.write ?? null })
+    return { ok: true }
   }
 
   /**
@@ -607,7 +764,7 @@ export class Worktrees {
 
   /**
    * Closes the caller's worktree: refused while it holds uncommitted or untracked files, or
-   * commits the main branch doesn't have, unless `force`, which keeps what can be kept on
+   * commits its home doesn't have, unless `force`, which keeps what can be kept on
    * refs first. Ownership is checked in the queue, just before the removal.
    */
   closeOwned(input: {
@@ -715,8 +872,8 @@ export class Worktrees {
         ...(unmerged
           ? [
               standing.ahead === null
-                ? "commits the main branch may not have"
-                : `${standing.ahead} commit${standing.ahead === 1 ? "" : "s"} the main branch doesn't have`,
+                ? `commits ${standing.home ?? "the main branch"} may not have`
+                : `${standing.ahead} commit${standing.ahead === 1 ? "" : "s"} ${standing.home ?? "the main branch"} doesn't have`,
             ]
           : []),
       ]
@@ -730,7 +887,7 @@ export class Worktrees {
           "as .env or data, are not), and a branch with commits stays.",
       }
     }
-    const stray = await keepStrayHead(row.path, row.branch, standing.main)
+    const stray = await keepStrayHead(row.path, row.branch, standing.holders)
     if (stray === null)
       return refused(
         "Novadeck couldn't keep the commits HEAD alone reaches, so the worktree stays.",
@@ -745,14 +902,14 @@ export class Worktrees {
     if (!removed.ok && existsSync(row.path) && !(await finishRemoval(home, row.path)))
       return refused(`git couldn't remove the worktree: ${said(removed)}.`)
     let branchDeleted = false
-    const { main } = standing
+    const { holders } = standing
     const tip = await branchTip(home, row.branch)
     if (
       row.branchMade &&
-      main &&
+      holders.length > 0 &&
       tip !== undefined &&
-      row.branch !== main.name &&
-      (await heldByMain(home, tip, main))
+      !holders.some((each) => each.name === row.branch) &&
+      (await heldByAny(home, tip, holders))
     )
       branchDeleted = await deleteBranch(home, row.branch)
     return finish({
@@ -795,10 +952,29 @@ export class Worktrees {
           // eslint-disable-next-line no-await-in-loop -- One at a time.
           await forgetEntry(row.commonDir, row.path)
           this.forget(row.path)
-        } else if (row.terminalId !== null && !this.host.exists(row.terminalId)) {
-          this.records.orphanWorktree(row.path)
+        } else {
+          if (row.terminalId !== null && !this.host.exists(row.terminalId))
+            this.records.orphanWorktree(row.path)
+          // eslint-disable-next-line no-await-in-loop -- One at a time.
+          await this.carried(row)
         }
       }
+    })
+  }
+
+  /**
+   * Carries a row's start commit, and whether Novadeck made its branch, into its branch's keys
+   * in git config, where they aren't yet: only while the branch checked out there is the row's,
+   * so a name reused since is never marked. Nothing where git can't be read; the next start
+   * tries again. See architecture/worktree-home.md in the workspace.
+   */
+  private async carried(row: WorktreeRecord): Promise<void> {
+    if ((await currentBranch(row.path)) !== row.branch) return
+    const kept = await keysOfBranch(row.path, row.branch)
+    if (kept.base !== undefined) return
+    await this.keyed(row.path, row.branch, {
+      base: row.base,
+      ...(row.branchMade && { made: true }),
     })
   }
 }

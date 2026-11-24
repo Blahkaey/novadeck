@@ -461,6 +461,7 @@ describe("runner client workspace", () => {
       name: "A",
       state: null,
       visitedAt: null,
+      revision: 0,
     })
     await expect(
       runner.sessions.create({ id: ids.session, projectId: project.id, name: "B" }),
@@ -474,7 +475,7 @@ describe("runner client workspace", () => {
       }),
     ).resolves.toBeUndefined()
     await expect(runner.sessions.list({ projectId: project.id })).resolves.toEqual([
-      { ...created, state: '{"layout":"split"}', visitedAt: 5 },
+      { ...created, state: '{"layout":"split"}', visitedAt: 5, revision: 1 },
     ])
     await expect(
       runner.sessions.save({ sessionId: crypto.randomUUID(), state: "{}", visitedAt: null }),
@@ -1420,6 +1421,25 @@ describe("runner client message watch", () => {
     await expect(client.messages.watch(crypto.randomUUID()).next()).resolves.toEqual({
       done: true,
       value: undefined,
+    })
+  })
+})
+
+describe("runner client message rings", () => {
+  it("gives a terminal's rings after a sequence, none yet, and refuses an unknown terminal", async ({
+    resources,
+  }) => {
+    const app = await deployed(resources)
+    const client = await app.connect()
+    const { id: sessionId } = await session(client, app.directory)
+    const terminal = await client.terminals.create(shell(sessionId))
+    await expect(client.messages.rings(terminal.id, 0)).resolves.toEqual({
+      seq: 0,
+      rings: [],
+      deliveries: [],
+    })
+    await expect(client.messages.rings(crypto.randomUUID(), 0)).rejects.toMatchObject({
+      code: "TERMINAL_NOT_FOUND",
     })
   })
 })

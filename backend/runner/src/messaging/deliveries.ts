@@ -6,6 +6,7 @@ import type { KeyKind } from "@novadeck/tui-input"
 import type { Binding } from "../harnesses/bindings.js"
 import { rootedIn } from "../harnesses/roots.js"
 import {
+  personSubmits,
   firing,
   pendingEnter,
   phaseOf,
@@ -53,7 +54,13 @@ const whoseEpoch = (live: Live, delivery: Delivery): "person" | "others" | "notT
 const inherit = (live: Live, before: Delivery): void => {
   const { delivery } = live
   if (!running(delivery)) live.inherited = null
-  else if (running(before) && delivery.epoch !== before.epoch) {
+  else if (
+    before.state === "fresh" &&
+    before.unboundEnter !== undefined &&
+    before.unboundEnter === before.box.enteredAt
+  ) {
+    live.inherited = { epoch: delivery.epoch, whose: "notTheirs" }
+  } else if (running(before) && delivery.epoch !== before.epoch) {
     const whose = whoseEpoch(live, before)
     live.inherited = whose === "person" ? null : { epoch: delivery.epoch, whose }
   }
@@ -340,6 +347,27 @@ export class Deliveries {
         yield message
   }
 
+  /** The distinct senders' handles of the messages waiting for the terminal, in delivery order (`novadeck` for its notices). */
+  senders(terminalId: string): readonly string[] {
+    const live = this.host.sessions.get(terminalId)
+    if (!live) return []
+    const handles = new Set<string>()
+    for (const { from } of this.waitingFor(live))
+      if (from.kind === "agent") handles.add(from.handle)
+      else if (from.kind === "novadeck") handles.add("novadeck")
+    return [...handles].filter((handle) => /^[A-Za-z0-9_-]+$/.test(handle))
+  }
+
+  /**
+   * What the doorbell's line says now, for the terminal's view: the person's replies where it
+   * is the reply line, else every message waiting, in delivery order.
+   */
+  ringMessages(terminalId: string, replies: boolean): readonly Message[] {
+    const live = this.host.sessions.get(terminalId)
+    if (!live) return []
+    return replies ? this.repliesFor(live) : [...this.waitingFor(live)]
+  }
+
   /**
    * The doorbell's line, by its nonce, where the person's Inbox replies no line has said yet
    * wait for the terminal's root session (`replyLine`), oldest first; undefined for none. A
@@ -353,6 +381,13 @@ export class Deliveries {
         subject: cleanInboxText(response!.subject),
         ...(response!.option !== undefined && { option: cleanInboxText(response!.option) }),
         ...(response!.action !== undefined && { action: cleanInboxText(response!.action) }),
+        ...(response!.answers !== undefined && {
+          answers: response!.answers.map(({ question, header, picked, text: words }) => ({
+            question: cleanInboxText(header ?? question),
+            picked: picked.map(cleanInboxText),
+            text: words ?? "",
+          })),
+        }),
         text,
       })),
     )
@@ -391,6 +426,18 @@ export class Deliveries {
   ringsPlain(terminalId: string, plain: boolean): void {
     const live = this.host.sessions.get(terminalId)
     if (live) live.ringsPlain = plain
+  }
+
+  /**
+   * The words of the person's root prompt the last turn event brought, once: whether it started
+   * a turn or came into one Novadeck continued (where `personPrompt` still names the turn's
+   * first). Undefined where that prompt wasn't the person's own submission.
+   */
+  takeSaid(terminalId: string): string | undefined {
+    const live = this.host.sessions.get(terminalId)
+    const said = live?.said ?? undefined
+    if (live) live.said = null
+    return said
   }
 
   /**
@@ -525,14 +572,20 @@ export class Deliveries {
         const { epoch } = live.delivery
         if (event.replies) live.lineAt = this.host.now()
         // Whose turn it is, and what it did to the box, delivery alone decides.
-        this.step(live, {
+        const prompted = {
           type: "prompt",
           by: event.cause,
           ...(event.nonce !== undefined && { nonce: event.nonce }),
           at: this.host.now(),
           startedAt: event.startedAt,
           ...(event.firedAt !== undefined && { firedAt: event.firedAt }),
-        })
+        } as const
+        const theirs = personSubmits(live.delivery, prompted, this.host.slackMs)
+        this.step(live, prompted)
+        // The person's words, as a turn or into one Novadeck continued, which starts no turn of
+        // its own: an Escape that left their prompt in the box took them back.
+        live.said =
+          theirs && event.prompt !== undefined && running(live.delivery) ? event.prompt : null
         // A new root turn: the prompt that started it, if a prompt with text did.
         if (live.delivery.epoch !== epoch)
           live.prompt =

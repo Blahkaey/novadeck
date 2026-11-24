@@ -151,7 +151,10 @@ or use Move left and Move right on its right-click.
 
 Drag any icon onto another terminal's bottom bar to move it there (Grid and Canvas,
 where both are on screen); a terminal with nothing to show grows an empty bar while an
-icon is dragged over it. It now belongs to that bar: its peek, menu and pane still say
+icon is dragged over it. Along its own bar an icon reorders freely; past the bar's edge
+it resists, stretching less the further it's pulled, and only breaks free to go elsewhere
+once pulled far enough (the toolkit's pull-out drag). Let go before then, it stays on
+its bar. It now belongs to that bar: its peek, menu and pane still say
 which terminal it came from, and an image or file stacks with the bar's own like any
 other. If that bar already holds the same file or page, the moved one replaces it. Its
 agent showing it again updates it where you put it, as it does an undocked window.
@@ -221,7 +224,7 @@ connection state, the crash-loop count and the terminal count, over the demo swi
 sample agents' plans and artifacts), `plain`, `agents` (its seven projects each with
 an agent in a state of its own: waiting, asking, working, and two that finish done and
 failed a moment after it opens, for the project switcher), `messages`, `inbox` (the agents
-demo with hardcoded Inbox rows of every kind over those its agents make), `welcome` or
+demo with hardcoded Inbox entries of every kind over those its agents make), `welcome` or
 `chirp` (a one-off for the runner-skits video "Chirp": a desk of twelve agents at work on the
 Canvas, one waiting to run a command; `frontend/demo/src/videos/chirp.ts`) or `babcia` (a one-off
 for the video "Babcia": project bar-mleczny's twelve Claude Code, Codex and Antigravity agents
@@ -242,7 +245,7 @@ done; or each alone), 4 three asks at once (or each alone: a permission, after t
 its Inbox sheet lists, a plan, a question with its own pick), 5
 the lead Orders API opens three teammates, each briefed by its lead as a message; one asks the
 person a question and messages its lead the same one, the lead answers first and the teammate
-withdraws its ask; another reports done (a done mark and an Update row, and the same to its lead as
+withdraws its ask; another reports done (a done mark and an Update entry, and the same to its lead as
 a message), 6 the page and then the changes (`show { changes }`) or a screenshot of three takes
 on a button (6c) shown in the pane, each cue selecting Order status page first as Babcia's 5
 does, 7 every agent
@@ -282,7 +285,8 @@ Terminals:
   agent with a saved session and no process; a showcase sleeper, once seen for a moment, in Focus or
   in sight in Grid and Canvas, wakes by itself: waking, then its agent resting; one the panel set,
   from here or the gallery, stays asleep), waking (that agent on its way back), loading
-  output, back at the prompt, running a long program, Claude Code, Codex or Antigravity, a failed
+  output, another window holding its keyboard (idle, or typing so a key shows the strip's busy
+  form; see "Observing a terminal another client controls"), back at the prompt, running a long program, Claude Code, Codex or Antigravity, a failed
   paste, and each way to end (clean exit, exit code, killed, killed for memory, failed to
   start). Each one that changes the state calls off what the terminal's agent had
   pending, so a finish due later doesn't bring the agent back. "Leads the others" makes the selected terminal
@@ -348,7 +352,7 @@ Terminals:
   rows' safe-to-close standing reads (a failing, a running and a passed check, a draft with none, a
   merged and a closed one that are safe, and docs-site's merged one holding two uncommitted files); New lines,
   Many files and Work merged move those counts too. Commits not pushed gives the worktree 2 commits no
-  remote holds, Uncommitted files 3 uncommitted paths (a merged one then reads unsafe), and Origin
+  remote holds, Work with a home adds "→ JIRA-123" after its branch (again to remove it), Uncommitted files 3 uncommitted paths (a merged one then reads unsafe), and Origin
   fetched 3 h ago dates its fetch three hours back; Commits main lacks is not merged because a merged one with nothing
   uncommitted is safe, and closes without asking. The demo's
   fetch moves its project's fetch time to now. In the showcase, selecting a row shows its work as a changes item on the terminal's
@@ -393,7 +397,7 @@ Agents:
   set, which the runner never keeps an item for, so the item stays to show "has no background
   shells now") and Many shells (ten, in every state, to scroll and unfold). When a later verb
   leaves the agent with no shells at all, the demo takes the Shells item away, as the runner
-  does, and an open pane says "The shells are gone." Rest leaves it at its prompt with nothing running or asking; the Inbox rows it wrote (a done report,
+  does, and an open pane says "The shells are gone." Rest leaves it at its prompt with nothing running or asking; the Inbox entries it wrote (a done report,
   a failed turn) stay. "Every state at once" has Shells, one failed and Many shells.
 - **Agent fixtures:** what no turn produces: an unheard agent (of the chosen harness, in
   place of whatever ran, whose hooks say nothing), an agent held at its startup screen (of the
@@ -408,8 +412,19 @@ Agents:
   lead); "Ask to take selected's worktree" has it ask to take the selected terminal's worktree
   (allowing changes nothing in the demo); "Ask to join selected's team", "Ask to leave
   selected's team" and "Ask to hand its team to selected" raise the cards for `join`, `leave`
-  and `hand_lead` (confirming sets the asker's lead in the demo workspace); "Withdraw
-  approvals" takes them back.
+  and `hand_lead` (confirming sets the asker's lead in the demo workspace); "Ask for something
+  newer" raises the placeholder for an action a newer Novadeck's runner asks about (only Not now,
+  which puts it aside); "Withdraw approvals" takes them back.
+- **A newer Novadeck's values:** the placeholders for what a newer runner sends that this build
+  doesn't know show nowhere by default, so a visitor to the public demo never meets "update
+  Novadeck"; each has an action: the approval above; the Inbox group's "Ask in a shape from a newer
+  Novadeck", "Dialog from a newer Novadeck" and "Update from a newer Novadeck" (never marked read);
+  "Chat: a newer Novadeck's words" adds a dialog and a quiet note row (text unfolds) to the selected
+  agent's chat, and "Back to normal" takes them away; in the `showcase` demo "Items from a newer
+  Novadeck" shows a Timeline item (kind `newer`) and scene.usdz (content reason `newer`), each saying
+  it needs a newer Novadeck to show; "Asleep, a newer Novadeck's agent" (also in the gallery) is a
+  sleeper this build never wakes; and History's "Closed agent of a newer Novadeck" adds a Gift cards
+  row saying its agent needs a newer Novadeck to restore.
 - **Doorbell** and **Messages:** only in the `messages` variant, on the selected terminal.
   Doorbell puts its idle agent where the doorbell can't ring it (working, a prompt queued,
   shell mode, text in its box, a dialog, asking you, failed, away), which its Messages pane
@@ -442,6 +457,15 @@ Agents:
   has two, and an image pasted into any demo chat shows as pasted once the prompt is
   recorded), gone (boxes naming each `[Image #N]`), slow (quiet boxes for 6 s) or unreachable
   (the boxes, asked again when the row is drawn again). Click a thumbnail to see it larger.
+- **Chat: shipping permits:** the shipping gate's standing permits, which no demo agent is given
+  (`agents.detail`'s `permits`). "Permit by words, not used" and "Permit by card, not used" give
+  the selected agent one for a merge or a PR, "Permit by words, used" and "Permit by card, used"
+  one that was used and stands only for its retry (`Used at … · ends …`). Each shows in the agent's
+  chat as an `Allowed` card under the requests, and in the Inbox as an Update entry with the same
+  facts (`On your words: "…"` or `You allowed it on its card`, then when it stands until) and one
+  Take back, which the demo answers after 300 ms and which resolves the entry. "Next Take back
+  fails" makes the next one say it couldn't, on the card and the sheet, with the permit standing;
+  "Back to normal" removes the selected agent's permits (`frontend/demo-debug/src/permits.ts`).
 - **Chat: nothing to show:** what the selected agent's chat says when it has no items, as the runner's
   facts about its record and screen decide (`emptiness` in `frontend/core`): "Empty, proven" is
   the plain "Nothing said yet. Send a prompt below."; "Transcript not found", "Records
@@ -601,14 +625,14 @@ Agents:
   their own, a file every 3 to 7 s, resting 10 to 20 s between turns, only while their
   terminal's agent works and asks nothing of the person (a permission, question or plan stops
   the writing and its cursor; nothing moves under `?still` or reduced motion). The `plain` and
-  `welcome` variants have no Files panel, as their storefront terminals are plain shells. "Agent
+  `welcome` variants have no Files panel, as their storefront terminals are plain shells (the debug panel's demo, and `?channel=experimental`, add one for the tour's project alone; see the Tour item). "Agent
   writes a file" and "Agent stops writing (Files only)" act on the selected storefront agent
   terminal (Crow otherwise): the row pulses and its cursor moves, or goes; the second only
   clears the cursor, and the agent's turn is ended with the Agent group's states. "Third agent
   edits Checkout.tsx" adds the storefront's third terminal's agent (`owl`) to a row that
   already shows Moth and Crow, folding the chips into "+1". "Agent writes Checkout.tsx" has the
   selected storefront agent write that file at once (see "File preview" below). "Agent creates a file in a folder"
-  adds `src/api/payments.ts`, so a folded `src/api` pulses and shows Crow's chip. "A folder can't
+  adds `src/api/payments.ts`: a closed `src/api` opens by itself (a folder opens the first time it comes to hold a change, unless the person closed it) and shows Crow's chip, with `payments.ts` added inside. "A folder can't
   be read", "A folder lists only part" and "The project's files can't be read" make the next
   reads of `src/cart`, of `src/components` and of the root fail, list two files, and fail (the
   panel reads again when it is shown again, so switch panels and back): a muted "Can't read this
@@ -773,7 +797,8 @@ Agents:
   projects have no preview, so they open as main's copy.
 - **Agent connections:** make the next connect in Preferences fail, refresh the agents, or
   connect Antigravity with the note Preferences shows where its own status line keeps
-  Novadeck's out, as on Windows.
+  Novadeck's out, as on Windows, or opencode with the note for a release too old for Novadeck's
+  plugin, or for an opencode 2, which Novadeck doesn't know yet.
 - **History:** only where the demo keeps closed terminals (`plain`, `agents`, `messages`,
   `inbox` and `welcome`; the showcase and the videos' demos have no History panel). Storefront
   starts with 14 rows, one in each state a row can be in but restoring, which a click on a row
@@ -946,44 +971,115 @@ App:
   shows only with Experimental on and the tour's own switch on: choose the panel's "Experimental
   on" (App > Updates), open Preferences once for the flag to follow, and turn on Onboarding tour
   in its Experimental tab, as a spec does with `?channel=experimental` and `switchTourOn()`
-  (`support/help.tsx`). With the switch off there is no Help button, as its menu holds the tour alone. Take the tour opens its consent on the first
-  connected agent (with a choice where several are); Start the tour opens a "Tour" project with
-  one terminal starting that agent on its cheapest model. "Fail next start" makes the next Start
-  the tour fail as a folder of the person's own at `~/.novadeck/tour` does, the consent staying
-  open with why; "Next start: models unlisted" fails it as Codex not signed in yet does, with a
-  Start button that opens the agent in a terminal. A spec asks with the address:
-  `&tourStart=fails` and `&tourStart=unlisted` fail the first start.
+  (`support/help.tsx`). With the switch off there is no Help button, as its menu holds the tour
+  alone. Take the tour opens its consent on the first connected agent (with a choice where
+  several are); Start the tour opens a "Tour" project with one terminal starting that agent on
+  its cheapest model. "Fail next start" makes the next Start the tour fail as a folder of the
+  person's own at `~/.novadeck/tour` does, the consent staying open with why; "Next start:
+  models unlisted" fails it as Codex not signed in yet does, with a Start button that opens the
+  agent in a terminal. A spec asks with the address: `&tourStart=fails` and
+  `&tourStart=unlisted` fail the first start.
   The tour's terminal runs a scripted agent (`frontend/demo/src/tour/player.ts`): after a few
-  hundred ms it binds, works and names its terminal "Tour lead" (as its own describe);
+  hundred ms it binds, works and names its terminal "Game lead" (as its own describe);
   Antigravity starts working only once the UI rang `brief`. Then the story
-  (`frontend/demo/src/tour/story.ts`, as a runner would report it): the lead opens two
-  teammates (terminals with `ledBy` = the lead), "Copywriter" and "Designer", the designer on
-  another connected harness where there is one; they message one another and the lead (the
-  demo's messages); the copywriter asks the Inbox "Which tagline for the welcome card?" (options
-  A and B) and waits for the person; once answered it tells the lead, who shows a "Welcome card"
-  page (`by: "agent"`, asked to open) and finishes its turn. "Tour story: answer the tagline ask
-  (A)" answers it as the person would; "Tour story: teammates stay quiet until nudged" has the
-  next lead wait for `Tour.nudge` before opening its team; "Tour agent: stop" exits the lead's
-  process (the UI's "Your agent stopped"). "Tour agent: hold at folder trust" / "sign-in" /
-  "hooks" hold the next one at that startup screen until "Answer the startup screen"; "Tour
-  agent: quiet until nudged" has the next one sit idle at its prompt, no turn begun, until
-  `Tour.nudge`, then work and name itself; "Tour agent: ask permission first" has the next one
-  raise a permission dialog (an Inbox row, Unblock) and wait for the person's answer before it
-  goes on, and the tour's coach points at its terminal meanwhile. Addresses: `&tourScreen=startup|sign-in|hooks`
-  (`&tourScreenMs=<n>` answers the screen after n ms), `&tourAgent=quiet|permission`,
-  `&tourStory=off` (stop after the lead names itself), `&tourTeam=quiet`,
-  `&tourPatienceMs=<n>` (the UI's wait before nudging).
-  As the agent goes, the tour's driver (`frontend/ui/src/tour/driver.ts`, `app/useTourDriver.ts`)
-  draws a ring around what its step points at and a coach card beside it: "Your agent is
-  starting", or, while a startup screen holds, "Your agent is asking you something first" in
-  that screen's words, or "Your agent is asking your permission" while the lead or a teammate has
-  an Unblock row waiting in the Inbox (any harness's own dialog, or a held message). Pause, Skip step and End tour steer it; while paused, or while another
-  project is on screen, a small bar stands in for it.
+  (`frontend/demo/src/tour/story.ts`, as a runner would report it; its files, model and page
+  are made in `tour/content.ts`, loaded only as a story plays, so the website's bundle doesn't
+  carry them): the tour's folder is a blank start for a browser game, as the runner's seed has
+  it. The lead asks its sheet in the Inbox, "Which game shall we build?", one ask of two questions,
+  "The world" (Fantasy / Sci-fi / Modern) and "The kind" (RPG / Shooter / Strategy), own words
+  allowed. Once answered it opens two teammates (terminals with `ledBy` = the lead, on the lead's
+  own harness), "Modeller" and "Builder"; a few seconds later it asks to run the game's server
+  (`backend.approvals.pending` holds a `run` approval from the lead: the app's approval dialog,
+  "Run command"; the plain demo has an approvals store of its own for it, and the debug demo
+  routes it to the panel's, so `Tour.prepare`'s `page` can be true on both); once allowed, the
+  lead opens a "Game server" terminal (`openedBy` = the lead, no lead of its own) and shows the
+  game's `page` item on its own bar. The Modeller opens its worktree `models`, writes
+  `models/hero.gltf` and shows it as a `model` item (a tiny glTF whose buffer is a data address,
+  drawn by the 3D pane: a rocket for a Sci-fi world, a robot for Modern, a cat for anything
+  else), and tells the lead "Hero modelled.". The Builder opens its worktree, changes
+  `src/main.js`, shows a `changes` item (with its diffs, read by `companions.changeFile`) and
+  tells the lead "Game built."; the lead's page item loads afresh. Each agent's writes are works
+  (the Worktrees panel) and a feed in the Files panel (cursors, pulses, chips), by the writer's
+  handle. `Tour.keep` resolves. The Files panel lists the game's files (`vendor/` ignored; the
+  tour's feed is added only where the tour is offered, so no other demo shows a Files button:
+  `?channel=experimental`, and the debug panel's demo, which has a Files panel in its plain and
+  welcome variants too). The Worktrees panel and the Files overlay show in the tour's project
+  even with Agent worktrees off (`useWorktreesShown`, `isTourFolder`: `tour`, `tour-2`, ...), and
+  only there.
+  The panel's actions: "Tour story: answer the sheet (Fantasy, RPG)" / "(Sci-fi, Shooter)" /
+  "(own words)" answer the lead's sheet as the person would; "Tour story: the lead's sheet waits
+  until nudged" has the next lead name itself, then wait for `Tour.nudge` before it asks its sheet
+  and opens its team; "Tour story: the modeller stays quiet until nudged" leaves the next
+  Modeller idle at its prompt (no model) until a nudge; "Tour story: the modeller asks about the
+  hero's colour" has the next Modeller, once it showed its model, ask "What colour should the
+  hero be?" and wait for the answer before it reports, and "Tour story: answer the modeller's
+  question (Red)" answers it; "Tour story: no page (as on a computer without Node or Python)"
+  makes the next `Tour.prepare` answer `page: false` (no server, no page, the steps for them left
+  out); "Tour story: keeping fails" makes the next `Tour.keep` reject, for the closing card's
+  error line and Try again; "Tour agent: exits to its shell" ends the lead's program with its
+  shell back (`agentRan`, an idle shell), for the coach "It didn't start."; "Tour agent: stop"
+  exits the lead's process (the UI's "Your agent stopped."). "Tour agent: hold at folder trust"
+  / "sign-in" / "hooks" hold the next one at that startup screen until "Answer the startup
+  screen"; "Tour agent: quiet until nudged" has the next one sit idle at its prompt, no turn
+  begun, until `Tour.nudge`, then work and name itself; "Tour agent: ask permission first" has
+  the next one raise a permission dialog (an Inbox entry, Unblock) and wait for the person's
+  answer before it goes on, and the tour's coach points at its terminal meanwhile. Addresses:
+  `&tourScreen=startup|sign-in|hooks` (`&tourScreenMs=<n>` answers the screen after n ms),
+  `&tourAgent=quiet|permission`, `&tourStory=off` (stop after the lead names itself),
+  `&tourTeam=quiet`, `&tourModeller=quiet`, `&tourMate=asks` (the Modeller's question),
+  `&tourAgent=shell`, `&tourPage=none`, `&tourKeep=fails`, `&tourPatienceMs=<n>` (the UI's wait
+  before nudging).
+  As the agents go, the tour's driver (`frontend/tour/src/driver.ts`, `useTourDriver.ts`)
+  plays the story in Canvas, and its stage (`Stage.tsx`, in its own print look, `print.css`)
+  marks the page's own elements, `data-tour-look` where to look (a magenta line) and
+  `data-tour-click` what to press (a slowly breathing yellow one), each drawn by a mark a little
+  way out from the element, and, a second after a mark shows, letters one caption box beside
+  them in space no window takes. The tour opens no sidebar panel and moves the camera only to
+  bring the window a step is about into view (`travel`, the app's `travel` command): on Canvas
+  the camera stays where that window is on screen at a size to read, and otherwise zooms out to
+  every window first and then flies in to it; the team step zooms out only where a teammate
+  lands out of sight. A step that shows the person something waits for them (`person`): once
+  done, it marks its subject to press, or what opens it first (the rail's Inbox or Files button,
+  a window whose pane isn't showing), and moves on only when they press in it or click into it
+  (a page or a model takes the focus: `useTouch` in `Stage.tsx`, the reducer's `touched` event),
+  however long they take; the last step holds 20 s from that press before the closing card (8 s
+  on the model, where there is no page). The tour never moves the view again by itself: where
+  what a step marks is there but has been out of sight 2.5 s (the person went elsewhere, opened a
+  file over it, or is in Zen with the rail hidden), its caption box shows all the same with
+  Show me, which takes the same calm way back (`showAgain`), or opens the panel the rail would. A step the agents end holds a while once done
+  (`holdMs`: 3 s, the first and the finish) from when its caption box is shown (`onCaption`, the
+  reducer's `caption` event); a caption that hasn't shown `captionWaitMs` (8 s) after the step
+  was done on screen is given up on, and the hold counts from then. Its
+  steps (`frontend/tour/src/steps.ts`), in Nyx's voice: "That's your agent. It runs this job."
+  (`start`, the lead describes itself); "Your call. What game?" (`ask`, the Inbox's button,
+  then the lead's sheet in it, until it is answered); "It wants to run the game. Fine. Say yes." (`run`, the
+  approval's Run command is marked, and the step waits on the person: the lead hires no one
+  before they answer, so the approval has the screen to itself); "The game. Live. Empty, for
+  now." (`page`, the lead's page tab); "Look. It hired its own help." (`team`, both teammates
+  there and named); "A model. From scratch. Go on, spin it." (`shape`, the
+  Modeller's model tab); "Every blink? An agent. Writing." (`files`, the Files panel); "What it
+  wrote. Line by line." (`diff`, the Builder's changes tab); and "Three agents. Your game. Go
+  play." (`play`, the lead's page, a while, then the closing card: "It's yours now."). A
+  teammate's own question to the person is no step: while one waits in the Inbox the coach says
+  "A teammate has a question for you." and points at it (or the Inbox's button) until it is
+  answered or dismissed, and no step makes its moves meanwhile (the camera would take the person
+  away from the Inbox). The
+  UI calls `Tour.keep` itself, once, as the story ends; the card's Keep building only goes back
+  to the lead in Focus, and a refused keep shows "Novadeck couldn't keep the project: ..." with
+  Try again. A run whose lead's command was declined, or with `page: false`, leaves out the run
+  and page steps and ends on the model ("Three agents. Your game. Yours."). While a startup
+  screen holds, the coach says "It wants an answer first." with that screen's words under it,
+  "It didn't start." (an agent's program ended, its shell back), or "It's asking your
+  permission." while an agent of the story has an Unblock row waiting in the Inbox. End tour
+  sits in the footer; while another project is on screen, a small bar stands in for it. A run
+  kept in session storage by a version with other steps is dropped, not followed. The specs
+  (`tour.spec.tsx`, `tour-driver.spec.tsx`, `tour-story.spec.tsx`, with `support/tour.tsx`) read
+  the caption from the page itself, as the approval's modal hides the rest from role queries.
 - **Boot failures:** each fails the first attempt as the runner would, so a transient one
   retries on its own and the others wait for Retry (an incompatible runner, or a workspace
   a newer Novadeck has used, only for Quit). Each hint carries the error code, so the search
   finds it; `WORKSPACE_TOO_NEW` is what an older Novadeck shows once a newer one has used
-  the workspace.
+  the workspace, and `UNAUTHORIZED/revoked` what a device whose credential was revoked shows.
 - **Runner:** lock the terminals with Reconnecting for 5 s; show them Runner offline until
   you toggle it back; or count four crashes, which opens the dialog, puts Restart terminals
   in the footer and fails the selected terminal's session's terminals (Try again or Restart
@@ -1001,13 +1097,16 @@ App:
   reader's text only while one runs. "As in a browser" boots back to a page nothing tells, which
   offers On and Off alone.
 - **Window controls:** boot as the macOS desktop app, whose window sets its close, minimise and
-  zoom buttons into the header (drawn in the page as stand-ins): the header is 52px, its mark gives
+  zoom buttons into the page (drawn in the page as stand-ins): the rail and the sidebar run to the
+  window's top, their top 52px a strip of the title bar the buttons sit on, and the header heads
+  the terminals' column alone; with the sidebar closed the header runs the width, its mark gives
   way to them and its start keeps clear of them, and in Zen they hide and come back while the
   pointer is in the top-left corner, the Focus window's header moving aside for them, and in Grid
   and Canvas a plate in the dock's look holding them. "macOS, full screen" boots with them gone to
   the menu bar, the header starting at its edge. "Windows, in the header" boots as the Windows app,
-  its caption buttons at the 48px header's end, as tall as it; in Zen they stay, on the Focus
-  window's header past a rule, or on a plate in the top-right corner. "Own title bar" boots back to
+  its caption buttons 32px tall in the 72px header's top-right corner, as a Windows 11 app's title
+  bar: the mark, project and views keep to the header's top, Search and Preferences to its bottom,
+  below them; in Zen a strip as tall as the buttons holds them. "Own title bar" boots back to
   a window with its own, as on Linux and in a browser.
 - **Agent worktrees:** the page's update channel starts stable, which turns the
   setting off, so the rail has no Worktrees toggle, as in a stable build. "On, with Worktrees" boots on
@@ -1015,6 +1114,20 @@ App:
   actions. "Not offered" boots a backend without the setting, so Preferences > Experimental shows
   the Agent worktrees row disabled, reading "Not available here."; "Offered" boots
   back to normal.
+- **Project windows:** the App section's group for the desktop app's project windows. "Offered"
+  boots with a backend that can open windows; "Not offered" boots one that can't, as a browser, so a
+  project's menu has no Open in new window; "A second window, not the first" boots as a window that isn't the app's first, with no
+  welcome dialog, Agent Chat offer, voice or Murmur offer or what's-new card. The other windows
+  are pretended: "Another window shows the next project" and "Other windows show every other
+  project" put the quiet window mark and its "Shown in another window" tooltip on those projects in
+  the switcher and the pins bar (a hint only: picking one shows it in this window all the same),
+  and a project's right-click menu opens one in a window of its own ("Open in new window", offered
+  for every project, the one on screen too); "No other window" clears them. "Another window sends
+  this one to the next project" plays the receiving side of a hand-off; "Another window has the
+  voice" and "This window has the voice" move the voice (this window rings no ding without it).
+  The page's hand-offs to a pretend window go nowhere a page can see, so the demo only notes them
+  (`frontend/demo-debug/src/desktop/project-windows.ts`). Specs use `&windows=on` and
+  `&windows=extra` and the `projectWindows` handle of `support/backend.ts`.
 - **Forges:** the App section's group for the forge integrations (Preferences > Experimental >
   Forge integrations, which needs the experimental channel, and the pull request marks in
   Worktrees). The demo starts with GitHub signed in on github.com, GitLab installed but signed out on
@@ -1212,6 +1325,7 @@ atlas.
 | `frontend/items`          | The items package: kinds, store, taskbar, peek, plan editor, messages, bar drag and homes. |
 | `frontend/chat`           | The chat view: transcript, requests and composer, with the chat's own store and commands.  |
 | `frontend/requests`       | An agent's request drawn and answered: the card, one menu, pages, form and detail.         |
+| `frontend/tour`           | The onboarding tour: consent, run, steps, and its own look over the workspace.             |
 | `frontend/runner-adapter` | The UI's backend for a runner, over a WebSocket or the desktop app.                        |
 | `frontend/terminal-views` | The xterm mount both backends draw terminals with.                                         |
 | `frontend/demo`           | The demo backend: a scripted workspace and simulated terminals.                            |
@@ -1233,6 +1347,7 @@ atlas.
 | `harnesses/claude`        | The Claude Code adapter: hooks, transcripts, dialogs, input box.                           |
 | `harnesses/codex`         | The Codex adapter, same shape.                                                             |
 | `harnesses/agy`           | The Antigravity adapter, same shape.                                                       |
+| `harnesses/opencode`      | The opencode adapter: the plugin its shim loads per launch, transcripts, dialogs, box.     |
 | `libraries/emulator`      | The terminal emulator: xterm.js pinned and patched, the character-width rule, helpers.     |
 | `libraries/terminal`      | Hosting terminals: a pty, a headless screen, a resumable stream, the browser view.         |
 | `libraries/tui-input`     | Typing into a full-screen program and checking that the text landed.                       |
@@ -1326,7 +1441,7 @@ backend-only tests.
 ### Working on the UI
 
 The UI is split into packages: `frontend/core`, `frontend/ui`, `frontend/toolkit`,
-`frontend/items`, `frontend/chat`, `frontend/requests`, `frontend/runner-adapter`, `frontend/terminal-views`, `frontend/demo`, `frontend/demo-debug`, `frontend/test-kit`,
+`frontend/items`, `frontend/chat`, `frontend/requests`, `frontend/tour`, `frontend/runner-adapter`, `frontend/terminal-views`, `frontend/demo`, `frontend/demo-debug`, `frontend/test-kit`,
 `frontend/specs` and `frontend/chat-contract`, and the apps `apps/desktop`, `apps/try` and `apps/previews`. `frontend/ui`
 holds the page's layers, each a folder of its `src/`; the rest are packages of their own. In
 the table a path that starts with `frontend/` or `apps/` is a package, and any other is a
@@ -1366,6 +1481,7 @@ folder of `frontend/ui/src/`:
 | `frontend/items/src/bar/drag-session.ts`                        | What's dragged off a taskbar, the views' drop spaces, and the windows it's over.                                               |
 | `frontend/chat/src/`                                            | The agent's chat: its blocks, tool rows, requests and the composer, and the chat's own store (`state.ts`) and commands.        |
 | `frontend/requests/src/`                                        | An agent's request drawn and answered (`RequestCard`, `RequestDialog`, `Menu`, `Detail`, forms), and `requests.css`.           |
+| `frontend/tour/src/`                                            | The onboarding tour: consent, start, driver, steps and signals, `TourProvider` (handed a `TourHost`), and `tour.css`.          |
 | `layouts/canvas/`, `grid/`, `focus/`                            | View adapters and colocated library styles.                                                                                    |
 | `layouts/` (top level)                                          | Helpers shared by views: view transitions, background gestures, visibility.                                                    |
 | `inbox/`                                                        | The Inbox: what agents ask of the person, its sidebar rows and the sheet that answers.                                         |
@@ -1613,6 +1729,117 @@ any window resize; the browser pane's views keep their own zoom. Nothing else zo
 Ctrl+0 is taken from a terminal on Linux or Windows), and Electron applies no pinch or Ctrl+wheel zoom. A browser has no `showScale`, so the row is hidden there and the
 browser's own zoom does it; the previews demo scales by CSS `zoom` instead.
 
+### Observing a terminal another client controls
+
+Two UI clients on one runner (two windows, or the desktop app and a browser) may show the same
+terminal, and only one of them controls it: writes and resizes are its alone. Where the runner supports
+`terminals.controls` (contract revision 8), no setting is involved: the adapter attaches with
+`control-else-observe` (control where it is free, else observing, also after a reconnection), and
+`@novadeck/runner-client` follows `terminals.controls` once per connection to keep each attachment's
+`mode` current (`onMode` tells a change; `take({ ifIdleMs })` moves control here). Runners without it
+keep the old behaviour: a refused attach is polled every 300 ms in the desktop app, and after 4 s
+the terminal reads "Open in another window".
+
+An observing screen (`libraries/terminal/src/view`, shared by Focus, Grid and Canvas) is sized to the
+pty from `snapshot` and `resized`, never refits to its frame and never sends a size. It is drawn
+scaled down to fit the frame, never above 1:1, anchored top left (`scale.ts`; the layout size is
+measured, so Canvas's zoom doesn't change it), and the 120-column cap doesn't apply. A slim strip
+above it (`TerminalControlStrip`) reads "Typing in another window" with a Take over button. Becoming
+the controller fits the frame and sends the size as before. Focus, clicks, selection and scrolling
+(arrow keys the emulator makes of the wheel included) never take control; input does, by its class
+(`takeover.ts`, applied in `follow.ts`): typed text and a paste take control (`take` with
+`ifIdleMs: 2000`) and are delivered, while Enter, Esc, Tab, Backspace, arrows and Ctrl or Alt chords take
+control but aren't delivered, and the screen says "You have the keyboard now". Ctrl+C with a selection
+still copies. A take refused with `CONTROL_BUSY` delivers nothing and keeps the strip.
+
+### Project windows
+
+The desktop app can open several windows, each showing one project, and a project may show in
+several windows at once; all windows are equal. A browser can't, and there is no setting (earlier
+builds kept it behind Preferences > Experimental; their `projectWindows` preference is read past).
+Everything lives in the runner, so
+a window is another UI client of it. The main process keeps which window shows what
+(`apps/desktop/src/main/window/project-windows.ts`, pure over the window type, with its IPC in
+`project-windows-ipc.ts`); each page reports its project (`showProjectWindow`) and hears the
+projects the other windows show and whether it is the voice window (`onProjectWindows`, kept in
+the UI store's `windows`); the page decides at once what an action does:
+
+- **Open in new window** (a project's right-click menu in the switcher and the pins bar, for any
+  project, this window's own too) always opens a new window on it (`openProjectWindow`: its route is
+  `#/projects/<id>/sessions/_/_`, so the page takes the project's own session and view), whether or
+  not a window shows it already. The app opens only on a project a page has told it knows
+  (`showProjectWindow`'s `known`) and at most 16 windows. There is no other way to open one.
+- **Picking a project.** Picking, in the switcher, a pin or its shortcut, a project shows it in this
+  window, even when another window shows it too; that window is never changed or brought forward. Once
+  another window has shown a project since this page loaded (`UiState.windowsShared`; from the start in a
+  window that isn't the app's first), this window first reads the project from the runner (`Backend.syncProject`, then the
+  core's `project/sync`), for the sessions another window made or removed, and then switches. What each
+  window changes in a session reaches the others live through the runner's session feed (`sessions.watch`
+  in [Backend API](backend-api.md)), so nothing waits for another window's saves. The latest pick wins when
+  readings finish out of order. A project this window shows is never read over: its copy is the live one. A
+  read lets this window's own saves and creates land first, and one that can't be read or built is logged and
+  the window carries on with what it has. A project the window never heard of, made in another window after it
+  loaded, is learned the same way: no page reload. The switcher's mark for a project another window shows
+  is only a hint: it neither redirects nor blocks.
+- **Saves.** Every window saves its changes to any session, as one client of the runner among others: the runner
+  merges the windows' changes a record at a time and feeds them to each, so two windows never overwrite each
+  other's layouts.
+- **Routing.** What is about a project goes to one window that shows it, which comes forward and goes there
+  (`handOffToProjectWindow`): `reveal` (an Inbox entry's "Go to terminal", a message link, a toast),
+  an Inbox entry's sheet (`InboxProvider`'s `routeAway`), and a notification's click. The target is the
+  window acted in when it shows the project, else the window showing it that the person used last, else, with
+  none showing it, the window acted in, which switches to it. While no other window shows a project, the
+  window acted in does it all itself, as a browser does. A notification's click always brings some window
+  forward: with one window open, that one at once; else the project's, else the one that raised it, else
+  the voice's (`clickNotice` in `window/voice.ts`). What isn't about a project (Preferences, search, dialogs) stays in the window acted in;
+  nothing changes a window on its own.
+- **Agents.** What an agent asks of the person goes to the window that shows the project of the terminal
+  that asked: while another window shows a project, the page tells the runner which project it shows
+  (`terminals.showing`, lapsing with its connection; `null` once it is alone again, so a lone window
+  says nothing, as a browser doesn't) and an approval, a look at a page and `open_agent` go to that client,
+  else the one used last (its `terminals.active` or `showing` report came last), else the newest
+  (`ClientWindows`, `Followers.newest`), which is also what a client that says nothing gets. What an agent
+  does never raises a window: an `open_agent` with focus for a project another window shows is handed
+  over `quiet`, so that window goes there without coming forward or taking the system's focus. Only
+  the person's own actions (an Inbox entry, a notification click, Open in new window) bring a window
+  forward. A request from a session the receiving window doesn't know (made after it loaded) is
+  answered "The terminal that asked isn't open in Novadeck."; with routing by project this mostly goes
+  away.
+- **One-time things** (the welcome, the Agent Chat offer, voice and Murmur offers, what's new) are left to
+  the app's first window: later ones get `DesktopApp.extraWindow` and `Backend.projectWindows.extra`.
+- **Noise.** Only the window used last (the voice) plays the ding (`createDing`'s `on`), raises
+  notifications and sets the badge (the main process drops the others' notices and badges and shows
+  the new voice's last count when the voice moves; a closing voice's notifications go with it). The
+  rules are pure in `window/voice.ts`, tested there.
+- **Restore.** The main process keeps each window's project and bounds in
+  `windows.json` of the data folder (`window/saved-windows.ts`) and reopens them at the next launch; a
+  window closed while others remain leaves the list, a quit keeps the windows open at its start, and
+  the last window closing keeps the list as it stood before. Two windows on one project are two entries, so
+  both reopen. On macOS, where the app lives on with no window, the Dock or a second launch reopens the
+  kept windows the same way. A file from before (with its `on`) is read past that switch: with it off it
+  listed none.
+- **Window keys.** Each window has a key, a UUID kept in `windows.json` beside its project and bounds (an
+  older entry gets one at load, written back at once), the same across relaunches; a new window gets a new
+  one. The main process passes it to the page's preload (`--novadeck-window-key=`), which exposes it as
+  `DesktopApp.windowKey`; a browser has none. The page keeps what is one window's own under it in
+  `localStorage`: the view of a session (`novadeck:session-view:<key>:<sessionId>`, read before the device's
+  `novadeck:session-view:<sessionId>`, and written to both so a new window starts from the view used last;
+  `sessions/views.ts`) and the session the window shows in each project
+  (`novadeck:window-session:<key>:<projectId>`, which the seed opens the project on before the session visited
+  last, so two windows on one project each reopen their own; `ProjectSeed.openSessionId`). Without a key only
+  the device's view is kept.
+- **Use.** The page tells the runner which terminal the window uses (`terminals.active`, which counts as the
+  window used last) as the terminal changes, and again, at most once a second, when the window gains focus and
+  on keys and pointer presses (`watchActiveTerminal`).
+- **Known limit.** "The window used last" (what a request with no window for its project goes to) follows
+  the window the person focuses or types in (its `active` report, re-sent on focus and input), or last
+  showed a project (`showing`); a null `active` is not use. A client that never reports (a `dev:web` tab)
+  is never chosen.
+- **Title.** The document's title names the project the window shows.
+
+Preferences are one `localStorage` shared by the windows, which follow each other's changes through
+the `storage` event (`followSavedPreferences`).
+
 ### UI behaviour specs
 
 `frontend/specs/src/` describes the UI the way a person uses it and guards the UX while
@@ -1721,7 +1948,7 @@ cp backend/runner/example.env backend/runner/.env
 - Terminal API: `NOVADECK_TOKEN` enables authenticated WebSocket RPC;
   `NOVADECK_DATABASE` optionally selects the SQLite metadata file,
   `NOVADECK_TRANSCRIPT_KEY_FILE` a file for the key saved terminal output is encrypted with
-  (none unless set, so nothing is saved), and `NOVADECK_MAX_TERMINALS` the cap on terminals (32
+  (by default, `transcript.key` beside the database), and `NOVADECK_MAX_TERMINALS` the cap on terminals (32
   unless set; `none` for no cap). Without a token, only the existing HTTP status API is
   available.
 - Electron: the host runs the runner in a utility process and hands each window a
@@ -1925,6 +2152,20 @@ rerunning its promotion's Write Release Notes job: they start from the stable re
 it, and Promote, which reruns with it, refuses to mark an older tag latest. With `OPENROUTER_API_KEY` and a `gh` login,
 `node scripts/release-notes/main.ts promote v1.2.3 --dry-run` prints what a promotion would
 write without changing any release; it asks the model, so it spends credit.
+
+Features behind Preferences > Experimental stay out of the notes until they leave it.
+[scripts/release-notes/experimental.json](../scripts/release-notes/experimental.json) lists
+each Experimental row by its id (a test keeps it equal to the tab's rows), with the commit
+scopes and the code paths that are only about it. A commit in one of those scopes, or whose
+pull request body has a line `Experimental: <id>`, is left out of the notes while the
+release's tag lists its feature, unless its body says `Experimental: none` (a change people
+without the feature see too); the run's summary names what it left out. Verify fails a
+`feat`, `fix` or `perf` pull request that changes a listed feature's paths under another
+scope until its body has one of those lines, so the agent writing it says which it is. The
+pull request that takes a feature out of Experimental is a `feat`, removes its entry, and says
+in its What what the feature does: the next notes tell it as new, with every change to it
+since the last stable release, and the ones before that stable release are known only from
+that pull request.
 
 For an interrupted release, inspect the latest
 workflow first. An unpublished draft or orphaned version tag must be cleaned up before

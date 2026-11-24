@@ -1,3 +1,4 @@
+import type { ProjectWindows } from "@novadeck/core/desktop/project-windows"
 import { maxFixLength, type SandboxState } from "@novadeck/core/desktop/sandbox"
 import {
   maxUninstallPath,
@@ -18,6 +19,10 @@ import {
   type DesktopApp,
   isWindowControlsSide,
   parsePortableState,
+  parseProjectWindowShown,
+  parseProjectWindowsState,
+  parseProjectWindowTarget,
+  windowIdOf,
   parseUpdateOffer,
   parseWhatsNew,
 } from "@novadeck/protocol/bridge"
@@ -109,6 +114,42 @@ export const desktopWindowFocus = (app: DesktopApp | undefined): Backend["window
     listen((focused) => {
       if (typeof focused === "boolean") listener(focused)
     })
+}
+
+// The app's project windows, where it has them: what crosses the bridge is checked both ways,
+// so a page learns only a state and a place the contract allows, and the app is asked only
+// with ids.
+export const desktopProjectWindows = (app: DesktopApp | undefined): ProjectWindows | undefined => {
+  const listen = app?.onProjectWindows
+  const show = app?.showProjectWindow
+  const open = app?.openProjectWindow
+  const handOff = app?.handOffToProjectWindow
+  const navigate = app?.onProjectWindowNavigate
+  if (!listen || !show || !open || !handOff || !navigate) return undefined
+  return {
+    onState: (listener) =>
+      listen((state) => {
+        const checked = parseProjectWindowsState(state)
+        if (checked) listener(checked)
+      }),
+    show: (projectId, known) => {
+      const shown = parseProjectWindowShown({ projectId, known })
+      if (shown) show(shown.projectId, shown.known)
+    },
+    open: (projectId) => {
+      if (windowIdOf(projectId) !== undefined) open(projectId)
+    },
+    handOff: (target) => {
+      const checked = parseProjectWindowTarget(target)
+      if (checked) handOff(checked)
+    },
+    onNavigate: (listener) =>
+      navigate((target) => {
+        const checked = parseProjectWindowTarget(target)
+        if (checked) listener(checked)
+      }),
+    extra: app?.extraWindow === true,
+  }
 }
 
 // The app's own window controls where they sit over the page (macOS, at its start): a known
@@ -367,6 +408,7 @@ export const desktopOptions = (
   const notices = desktopNotices(app)
   const badge = desktopBadge(app)
   const windowFocus = desktopWindowFocus(app)
+  const projectWindows = desktopProjectWindows(app)
   const windowControls = desktopWindowControls(app)
   const screenReader = desktopScreenReader(app)
   const updates = desktopUpdates(app)
@@ -385,6 +427,7 @@ export const desktopOptions = (
     ...(notices ? { notices } : {}),
     ...(badge ? { badge } : {}),
     ...(windowFocus ? { windowFocus } : {}),
+    ...(projectWindows ? { projectWindows } : {}),
     ...(windowControls ? { windowControls } : {}),
     ...(screenReader ? { screenReader } : {}),
     ...(updates ? { updates } : {}),

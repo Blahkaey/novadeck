@@ -1,4 +1,6 @@
+import { activeProject } from "@novadeck/core/state"
 import { createStore } from "@novadeck/core/store"
+import { isTourFolder } from "@novadeck/core/tour-folder"
 import { useLayoutEffect } from "react"
 
 import { useUiState, useWorkspaceServices, useWorkspaceState } from "./controller/context"
@@ -13,10 +15,14 @@ const noWorktrees = createStore(false)
 // Whether the sidebar shows the Worktrees panel and its toggle: where the backend reports the
 // worktrees' work, and only while the person has agent worktrees on (Preferences →
 // Experimental), which a stable build always turns off. A backend without that setting has none.
+// The tour's own project shows them whatever the setting says, as the tour's story is the work its
+// agents do in their worktrees; the setting itself is never changed, and no other project is
+// touched.
 export const useWorktreesShown = (): boolean => {
   const { backend } = useWorkspaceServices()
   const worktreesOn = useStoreSelector(backend.worktrees?.enabled ?? noWorktrees, (on) => on)
-  return reportsWorks(backend) && worktreesOn
+  const inTour = useWorkspaceState((workspace) => isTourFolder(activeProject(workspace)!.directory))
+  return reportsWorks(backend) && (worktreesOn || inTour)
 }
 
 // Leaves the Worktrees panel for Terminals while it isn't shown, before the sidebar paints it

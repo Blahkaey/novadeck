@@ -17,16 +17,15 @@ export type ConfirmDialogProps<Subject> = {
   // What shows under the words and over the answers, such as a list of what the answer
   // touches.
   readonly body?: (subject: Subject) => ReactNode
-  // Null for none, while going on waits on something that answers by itself: only
-  // cancelling is left to the person.
-  readonly confirmLabel: string | null
+  // Without one, the dialog offers only cancelling: a notice of what can't be answered here.
+  readonly confirmLabel?: string | null | undefined
   // A third answer, between cancelling and confirming: a narrower way to go ahead. With
   // it, cancelling moves to the start of the row.
   readonly alternative?: { readonly label: string; readonly onSelect: () => void }
   // Whether confirming is not yet possible; the button is disabled, cancelling stays.
   readonly confirmDisabled?: boolean
   readonly cancelLabel: string
-  readonly onConfirm: () => void
+  readonly onConfirm?: (() => void) | undefined
   // Also on Escape and a click outside.
   readonly onCancel: () => void
   // Which answer takes focus first: the safe one. Cancel unless told otherwise.
@@ -136,7 +135,7 @@ export const ConfirmDialog = <Subject,>({
             {alternative.label}
           </button>
         )}
-        {confirmLabel !== null && (
+        {confirmLabel != null && (
           <button
             ref={confirm}
             type="button"
@@ -144,7 +143,7 @@ export const ConfirmDialog = <Subject,>({
             disabled={confirmDisabled || !armed}
             onClick={() => {
               confirmed.current = true
-              onConfirm()
+              onConfirm?.()
             }}
           >
             {confirmLabel}

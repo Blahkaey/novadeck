@@ -541,6 +541,10 @@ export const WorkspaceTerminal = memo(
                       ((request) => conversations!.saveDialog!(terminalKey, request))
                     }
                     onOpenLogs={backend.openLogs}
+                    onTakeBack={
+                      conversations!.takeBack &&
+                      ((permit) => conversations!.takeBack!(terminalKey, permit))
+                    }
                     focusInput={wanted}
                     onInputFocused={onInputFocused}
                     refused={conversations!.refused}

@@ -1,3 +1,5 @@
+import { isAbsolute, resolve } from "node:path"
+
 import { hookShellSlackMs, dialectPrograms } from "@novadeck/harness-core/hook-command"
 import type { Report } from "@novadeck/harness-core/report"
 import { agentName, dialogTextLimits, type AgentName } from "@novadeck/protocol"
@@ -22,6 +24,105 @@ type RelayHook = {
   readonly report: Omit<Report, "terminalId" | "token">
   /** An ask's deadline, in epoch milliseconds; absent for a report. */
   readonly deadline?: number
+  /** What the shipping gate reads of a shell tool's hook, from the payload before it is pruned. */
+  readonly gate?: GateCall
+}
+
+/**
+ * A shell command an agent is about to run, as its PreToolUse or PermissionRequest hook says,
+ * whole: the shipping gate reads the raw command, never the pruned report (see
+ * architecture/grants.md, review point 4).
+ */
+export type GateCall = {
+  readonly event: "PreToolUse" | "PermissionRequest"
+  readonly command: string
+  readonly cwd: string
+  /** Claude Code's permission mode. */
+  readonly mode?: string
+  /** Codex's rollout, where it names it. */
+  readonly transcript?: string
+  /** The words the agent was started with, where the relay read them: Antigravity's `--mode`. */
+  readonly launch?: readonly string[]
+  /** The agent process that ran the hook, as the report names it. */
+  readonly instance?: string
+  /** Antigravity's step for the call, which names the request of its confirmation. */
+  readonly step?: number
+  /** The conversation the call is of: a subagent's has its own, with steps of its own. */
+  readonly conversation?: string
+  /** opencode's id for the tool call, which its permission dialog's request names too. */
+  readonly call?: string
+}
+
+// The most of a command the gate takes; a longer one is refused by the reader's own limit.
+const maxGateCommand = 1_000_000
+
+/** The command a shell tool's hook is about to run: its string, or a shell's `-c` script. */
+const commandOf = (input: unknown): string | undefined => {
+  if (!object(input)) return undefined
+  const { command } = input
+  if (typeof command === "string") return command.length <= maxGateCommand ? command : undefined
+  if (!Array.isArray(command) || !command.every((word) => typeof word === "string"))
+    return undefined
+  const words = command as string[]
+  // `["bash", "-lc", "<script>"]`: the script is the command.
+  if (words.length === 3 && /(^|\/)(?:ba|z|da)?sh$/.test(words[0]!) && /^-[a-z]*c$/.test(words[1]!))
+    return words[2]
+  return words.join(" ")
+}
+
+/**
+ * Antigravity's shell command: its `run_command` call's `CommandLine`, in the `toolCall` its
+ * hook names, and the folder it runs in (`Cwd` where the call gives one, else the session's).
+ */
+const agyCall = (payload: Fields): { command: string; cwd: string | undefined } | undefined => {
+  const call = payload.toolCall
+  if (!object(call) || call.name !== "run_command" || !object(call.args)) return undefined
+  const command = commandOf({ command: call.args.CommandLine })
+  if (command === undefined) return undefined
+  return { command, cwd: folderOf(payload, { workdir: call.args.Cwd }) }
+}
+
+/**
+ * opencode's shell command, in the two reports the plugin makes of it: the `bash` tool's call
+ * (its `command`, and its `workdir` where it gives one), and the `bash` permission's request,
+ * which names the raw command in its metadata and the call it is for. The tool is `bash` on
+ * every platform (tool/shell/id.ts, 1.19.6).
+ */
+const opencodeCall = (
+  payload: Fields,
+  event: string,
+): { command: string; cwd: string | undefined; call: string | undefined } | undefined => {
+  if (event === "PreToolUse") {
+    if (payload.tool_name !== "bash") return undefined
+    const command = commandOf(payload.tool_input)
+    return command === undefined
+      ? undefined
+      : {
+          command,
+          cwd: folderOf(payload, payload.tool_input),
+          call: text(payload.call_id, 128),
+        }
+  }
+  if (event !== "PermissionRequest" || payload.permission !== "bash") return undefined
+  const metadata = object(payload.metadata) ? payload.metadata : {}
+  const command = commandOf({ command: metadata.command })
+  const tool = object(payload.tool) ? payload.tool : {}
+  return command === undefined
+    ? undefined
+    : { command, cwd: folderOf(payload, undefined), call: text(tool.callID, 128) }
+}
+
+/**
+ * The folder a shell tool's command runs in: its `workdir` where the tool takes one (Codex's
+ * shell tools do), else the session's `cwd`. Undefined where it isn't a whole path, so the gate
+ * has no opinion rather than reading the runner's own folder.
+ */
+const folderOf = (payload: Fields, input: unknown): string | undefined => {
+  const cwd = typeof payload.cwd === "string" && isAbsolute(payload.cwd) ? payload.cwd : undefined
+  const workdir = object(input) && typeof input.workdir === "string" ? input.workdir : ""
+  if (workdir === "") return cwd
+  if (isAbsolute(workdir)) return workdir
+  return cwd === undefined ? undefined : resolve(cwd, workdir)
 }
 
 /**
@@ -259,6 +360,8 @@ const instanceOf = (agent: AgentName, env: Fields, ancestors: Ancestor[]): strin
 export const relayHook = (
   value: Fields,
   platform: NodeJS.Platform = process.platform,
+  // Whether the shipping gate answers `agent`'s `event` now: only while it is on.
+  gating: (agent: AgentName, event: string) => boolean = () => false,
 ): RelayHook | undefined => {
   const agent = agentName.safeParse(value.agent)
   const { seq, payload: sent } = value
@@ -320,7 +423,55 @@ export const relayHook = (
     typeof deadline === "number" && Number.isFinite(deadline)
       ? Math.min(deadline, seq + askMs)
       : seq + askMs
-  return askOf(agent.data, event)
-    ? { report: sized, deadline: Math.round(relayGivesUp) - printMs }
+  const gated = gating(agent.data, event)
+  const agyRun = gated && agent.data === "agy" ? agyCall(payload) : undefined
+  const opencodeRun = gated && agent.data === "opencode" ? opencodeCall(payload, event) : undefined
+  const command = gated
+    ? agent.data === "agy"
+      ? agyRun?.command
+      : agent.data === "opencode"
+        ? opencodeRun?.command
+        : commandOf(payload.tool_input)
+    : undefined
+  const folder =
+    agent.data === "agy"
+      ? agyRun?.cwd
+      : agent.data === "opencode"
+        ? opencodeRun?.cwd
+        : folderOf(payload, payload.tool_input)
+  const gate: GateCall | undefined =
+    command === undefined ||
+    folder === undefined ||
+    (event !== "PreToolUse" && event !== "PermissionRequest")
+      ? undefined
+      : {
+          event,
+          command,
+          cwd: folder,
+          ...(typeof payload.permission_mode === "string" && { mode: payload.permission_mode }),
+          ...(typeof payload.transcript_path === "string" && {
+            transcript: payload.transcript_path,
+          }),
+          ...(launch !== undefined && { launch }),
+          ...(instance !== null && { instance }),
+          ...(agent.data === "agy" &&
+            typeof payload.stepIdx === "number" &&
+            Number.isSafeInteger(payload.stepIdx) && { step: payload.stepIdx }),
+          ...(agent.data === "agy" &&
+            typeof payload.conversationId === "string" &&
+            payload.conversationId.length <= 128 && { conversation: payload.conversationId }),
+          // opencode's session and call, which tie its permission dialog to the hook that vetted it.
+          ...(agent.data === "opencode" &&
+            text(payload.session_id, 128) !== undefined && {
+              conversation: text(payload.session_id, 128)!,
+            }),
+          ...(opencodeRun?.call !== undefined && { call: opencodeRun.call }),
+        }
+  return askOf(agent.data, event) || gate
+    ? {
+        report: sized,
+        deadline: Math.round(relayGivesUp) - printMs,
+        ...(gate && { gate }),
+      }
     : { report: sized }
 }

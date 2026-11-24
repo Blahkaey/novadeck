@@ -1,5 +1,6 @@
+import type { MessagesState } from "@novadeck/core/messages"
 import type { TerminalKey, ThemeSource } from "@novadeck/core/port"
-import { createStore } from "@novadeck/core/store"
+import { createStore, type Store } from "@novadeck/core/store"
 import { terminalKeyId } from "@novadeck/core/terminals/registry"
 import type { RendererPool } from "@novadeck/emulator/browser"
 import { maxUploadBytes } from "@novadeck/protocol"
@@ -8,8 +9,13 @@ import { hasCode, type AttachedTerminal, type TerminalPosition } from "@novadeck
 import type { AttachStream, Exit } from "@novadeck/terminal"
 import { openEmulator } from "@novadeck/terminal-views/emulator"
 import { screenMarkup } from "@novadeck/terminal-views/mount"
-import { copiedNotice, pasteNotice as sharedNotice } from "@novadeck/terminal-views/paste-notice"
+import {
+  copiedNotice,
+  pasteNotice as sharedNotice,
+  tookNotice,
+} from "@novadeck/terminal-views/paste-notice"
 import { pageRendererPool } from "@novadeck/terminal-views/renderer-pool"
+import { ringRows, type RingFeed } from "@novadeck/terminal-views/rings"
 import { terminalTheme } from "@novadeck/terminal-views/theme"
 import type { PasteFailure } from "@novadeck/terminal/view"
 import { parkedCap, parkMs, type TerminalScreensOptions } from "@novadeck/terminal/view"
@@ -27,7 +33,12 @@ export const retainMs = 30 * 60 * 1000
 const attachments = new WeakMap<AttachStream, AttachedTerminal>()
 const streamOf = (attached: AttachedTerminal): AttachStream<TerminalPosition> => {
   const stream: AttachStream<TerminalPosition> = {
-    mode: attached.mode,
+    // Live: control passes between clients while the screen follows it.
+    get mode() {
+      return attached.mode
+    },
+    onMode: (listener) => attached.onMode(listener),
+    take: (options) => attached.take(options),
     [Symbol.asyncIterator]: () => attached[Symbol.asyncIterator](),
     write: (data) => attached.write(data),
     resize: (cols, rows) => attached.resize({ cols, rows }),
@@ -55,19 +66,40 @@ export const pasteNotice = (failure: PasteFailure): string =>
       : failure,
   )
 
+const none: readonly never[] = []
+
+// What a terminal's screen draws its doorbell rows from: the rings and deliveries the runner
+// lists with the terminal's messages.
+export const ringFeed = (messages: Store<MessagesState>, terminalId: string): RingFeed => ({
+  get: () => {
+    const { terminals } = messages.getSnapshot()
+    const mine = Object.values(terminals).find((each) => each.terminalId === terminalId)
+    return {
+      rings: mine?.rings ?? none,
+      deliveries: mine?.deliveries ?? none,
+      agent: mine?.agent === true,
+    }
+  },
+  subscribe: (listener) => messages.subscribe(listener),
+})
+
 // The runner backend's terminal screens: its runtime, the emulator drawn with the page's
-// WebGL pool and theme, a screen reader's tree for the terminal in focus, and the app's
-// words and policies.
+// WebGL pool and theme, a screen reader's tree for the terminal in focus, the doorbell's
+// rows drawn from the messages, and the app's words and policies.
 export const screensOptions = (
   runtime: SurfaceRuntime,
   {
     pool = pageRendererPool(),
     cap = parkedCap,
     theme,
-  }: { pool?: RendererPool; cap?: number; theme: ThemeSource },
+    messages,
+  }: { pool?: RendererPool; cap?: number; theme: ThemeSource; messages?: Store<MessagesState> },
 ): TerminalScreensOptions<TerminalKey, TerminalPosition> => ({
   keyOf: terminalKeyId,
   emulator: openEmulator({ pool, screenReader: true }),
+  ...(messages && {
+    overlay: (key, view) => ringRows(view, { feed: ringFeed(messages, key.terminalId), theme }),
+  }),
   theme: terminalTheme(theme),
   store: createStore,
   markup: screenMarkup,
@@ -76,7 +108,13 @@ export const screensOptions = (
   connection: runtime.connection,
   reconnected: () => runtime.connected(),
   classify: (error) =>
-    hasCode(error, "RESOURCE_LIMIT")
+    hasCode(error, "RESOURCE_LIMIT") ||
+    // On a runner that can't hand control over (no `terminals.controls`), with project windows
+    // the window that showed the project lets go of the terminal a moment after this one asks
+    // for it: ask again until it has. Where it can, an attach observes instead of failing.
+    (hasCode(error, "CONTROL_IN_USE") &&
+      runtime.sharing?.() === true &&
+      runtime.observes?.() !== true)
       ? "busy"
       : hasCode(error, "DISCONNECTED")
         ? "offline"
@@ -87,6 +125,7 @@ export const screensOptions = (
   park: { afterMs: parkMs, keep: cap },
   retain: { afterMs: retainMs, shown: (key) => runtime.shown(key) },
   copied: copiedNotice,
+  took: tookNotice,
   paste: {
     upload: (key, file) => runtime.upload(key.terminalId, file),
     // The desktop app's runner is on this machine, so a copied file's own path names it.
@@ -99,6 +138,9 @@ export const screensOptions = (
     resized: (key, size) => runtime.resized(key, size),
     stage: (key, stage) => runtime.screen(key, stage),
     lost: (key, error) => runtime.lost(key, error),
+    waiting: (key, error) => {
+      if (hasCode(error, "CONTROL_IN_USE")) runtime.elsewhere?.(key)
+    },
     attached: (key, stream) => runtime.attached(key, attachments.get(stream)!),
   },
 })

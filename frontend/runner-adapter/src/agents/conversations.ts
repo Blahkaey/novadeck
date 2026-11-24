@@ -7,6 +7,7 @@ import {
   type ChatRecords,
   type ChatItem,
   type ChatPrompt,
+  type ChatPermit,
   type ChatRequest,
   conflictFailure,
   InDoubt,
@@ -25,6 +26,7 @@ import {
   conflictReason,
   maxPromptImages,
   maxUploadBytes,
+  newer,
   normalisedText,
   promptImageTypes,
   promptFailure,
@@ -37,6 +39,9 @@ import {
   type TranscriptItem,
 } from "@novadeck/protocol"
 import { hasCode } from "@novadeck/runner-client"
+import { readTolerantly } from "@novadeck/wire"
+
+import { permitsOf, samePermits, takeBackOf } from "./permits"
 
 // The runner's conversations: each terminal's agent as `agents.detail` follows it, and
 // the root agent's transcript as `agents.transcript` streams it. Reading a terminal
@@ -98,6 +103,8 @@ export type ConversationStreams = {
   readonly clearBox: (terminalId: string, seen: string) => Promise<{ readonly cleared: boolean }>
   readonly answer: (terminalId: string, request: string, answer: RequestAnswer) => Promise<void>
   readonly saveDialog: (terminalId: string, request: string) => Promise<{ readonly path: string }>
+  // Takes a shipping permit back; absent where the runner has no such call.
+  readonly takeBack?: (terminalId: string, permit: string) => Promise<{ readonly ended: boolean }>
 }
 
 export type RunnerConversations = Conversations & {
@@ -151,7 +158,25 @@ const end = (stream: Stream<unknown> | undefined): void => {
   void stream?.return?.()?.catch?.(() => {})
 }
 
-const itemOf = (session: string, item: TranscriptItem): ChatItem => ({
+// An item of a role or kind a newer runner tells of that this build doesn't know keeps its
+// place, as a quiet row with its text: never dropped, so the chat never looks emptier than it is.
+const itemOf = (session: string, item: TranscriptItem): ChatItem =>
+  item.role === newer || item.kind === newer
+    ? {
+        ...knownItemOf(session, { ...item, role: "note", kind: "text", note: undefined }),
+        run: null,
+        outcome: null,
+        note: { type: "newer" },
+      }
+    : knownItemOf(session, { ...item, role: item.role, kind: item.kind })
+
+const knownItemOf = (
+  session: string,
+  item: TranscriptItem & {
+    readonly role: Exclude<TranscriptItem["role"], typeof newer>
+    readonly kind: Exclude<TranscriptItem["kind"], typeof newer>
+  },
+): ChatItem => ({
   id: `${session}:${item.index}`,
   at: item.at,
   role: item.role,
@@ -206,6 +231,8 @@ export const requestOf = (
   askedAt: request.askedAt,
   ...(request.detached && { detached: true as const }),
 })
+
+const none: readonly ChatPermit[] = []
 
 const requestsOf = (detail: AgentDetail, root: string | null): readonly ChatRequest[] =>
   detail.requests.map((request) => requestOf(request, root))
@@ -275,7 +302,7 @@ const said = (error: unknown): string | undefined =>
 
 // Why the runner says a CONFLICT is one, where it says and this client knows the reason.
 const conflictReasonOf = (error: { readonly data: unknown }) =>
-  conflictReason.safeParse(error.data).data?.reason
+  readTolerantly(conflictReason, error.data)?.reason
 
 // The words a prompt took out of the agent's box before it failed, where it says.
 // A conflict's data has its own `reason`, so only `returned` is read, whatever else is there.
@@ -298,7 +325,7 @@ const failure = (
   // The agent never showed an image in its box: it came back out, with the words.
   if (
     hasCode(error, "PROMPT_FAILED") &&
-    promptFailure.safeParse((error as { data?: unknown }).data).data?.reason === "image-not-shown"
+    readTolerantly(promptFailure, (error as { data?: unknown }).data)?.reason === "image-not-shown"
   )
     return withReturned(
       new Error("The agent didn't take the image. It is back in the box."),
@@ -614,6 +641,8 @@ const read = (
     const requests = requestsOf(snapshot, root)
     const prompts = promptsOf(snapshot, changed ? [] : store.getSnapshot().prompts)
     const box = snapshot.box ?? null
+    // Where the runner can't take them back, no permit shows.
+    const standing = streams.takeBack ? permitsOf(snapshot) : none
     // Whether a turn of this session was seen, as its hooks and records tell.
     if (changed) working = null
     watchTurn(snapshot.activity)
@@ -625,6 +654,7 @@ const read = (
         current.session === session &&
         current.turned === turned &&
         sameBox(current.box, box) &&
+        samePermits(current.permits, standing) &&
         sameRequests(current.requests, requests) &&
         samePrompts(current.prompts, prompts)
       if (same) return current
@@ -638,6 +668,7 @@ const read = (
         doorbell: current.doorbell,
         box: sameBox(current.box, box) ? current.box : box,
         requests: sameRequests(current.requests, requests) ? current.requests : requests,
+        permits: samePermits(current.permits, standing) ? current.permits : standing,
         prompts: samePrompts(current.prompts, prompts) ? current.prompts : prompts,
         ...(changed
           ? { loaded: false, records: { state: "reading" as const }, items: [] }
@@ -929,6 +960,10 @@ export const createRunnerConversations = (
           throw refusal(error)
         },
       ),
+    ...(streams.takeBack && {
+      takeBack: ({ terminalId }: TerminalKey, permit: string) =>
+        takeBackOf(streams.takeBack!, track)(terminalId, permit),
+    }),
     saveDialog: ({ terminalId }, request) =>
       track(streams.saveDialog(terminalId, request)).then(
         ({ path }) => path,

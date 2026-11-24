@@ -35,8 +35,15 @@ export const createDemoApprovals = (
   readonly approvals: Approvals
   // Makes `from` ask to close `terminal`, queued behind the approvals already waiting.
   readonly askToClose: (from: TerminalKey, terminal: TerminalKey) => void
-  // Makes `from` ask to open a terminal running a command, confirmed or not.
-  readonly askToRun: (from: TerminalKey, command: string, cwd: string) => void
+  // Makes `from` ask to open a terminal running a command, confirmed or not; `answered` hears
+  // whether the person allowed it (declined, or taken back, is false). The demo opens none: the
+  // tour's story opens its own on a yes.
+  readonly askToRun: (
+    from: TerminalKey,
+    command: string,
+    cwd: string,
+    answered?: (approved: boolean) => void,
+  ) => void
   // Makes `from` ask to lead `terminal` with a brief.
   readonly askToLead: (from: TerminalKey, terminal: TerminalKey, brief: string) => void
   // Makes `from` ask to take `terminal`'s worktree on `branch` at `path`.
@@ -52,6 +59,8 @@ export const createDemoApprovals = (
   readonly askToLeave: (from: TerminalKey, terminal: TerminalKey) => void
   // Makes `from` ask to hand its team to `terminal`, which it leads.
   readonly askToHand: (from: TerminalKey, terminal: TerminalKey) => void
+  // Makes `from` ask for an action a newer Novadeck's runner knows and this build doesn't.
+  readonly askForNewer: (from: TerminalKey, terminal: TerminalKey) => void
   // The person ends `terminal`'s lead.
   readonly release: (terminal: TerminalKey) => void
   // Takes back every approval waiting, as the runner does when the terminals closed.
@@ -60,6 +69,8 @@ export const createDemoApprovals = (
   const pending = createStore<readonly Approval[]>([])
   // Where each approval's terminal lives, to act on it on a confirmation.
   const targets = new Map<string, { terminal: TerminalKey; from: TerminalKey }>()
+  // Who hears each run's answer.
+  const heard = new Map<string, (approved: boolean) => void>()
   let count = 0
   const queue = (from: TerminalKey, terminal: TerminalKey, action: Approval["action"]): void => {
     count += 1
@@ -78,11 +89,15 @@ export const createDemoApprovals = (
         const action = pending.getSnapshot().find((each) => each.requestId === requestId)?.action
         targets.delete(requestId)
         pending.update((waiting) => waiting.filter((each) => each.requestId !== requestId))
+        heard.get(requestId)?.(approved)
+        heard.delete(requestId)
         if (!approved || !found || !action) return
         // A run's terminal would be new: the demo opens none.
         if (action.type === "run") return
         // The demo has no worktrees: the answer only goes away.
         if (action.type === "take") return
+        // An action this build doesn't know: nothing to carry out.
+        if (action.type === "newer") return
         // Teams: the demo's `ledBy` is the whole of it. A hand-over moves only the asker.
         if (action.type === "join" || action.type === "hand")
           return void dispatch()?.([
@@ -124,13 +139,17 @@ export const createDemoApprovals = (
       },
     },
     askToClose: (from, terminal) => queue(from, terminal, { type: "close" }),
-    askToRun: (from, command, cwd) => queue(from, from, { type: "run", command, cwd }),
+    askToRun: (from, command, cwd, answered) => {
+      if (answered) heard.set(`approval-${count + 1}`, answered)
+      queue(from, from, { type: "run", command, cwd })
+    },
     askToLead: (from, terminal, brief) => queue(from, terminal, { type: "lead", brief }),
     askToTake: (from, terminal, branch, path) =>
       queue(from, terminal, { type: "take", path, branch }),
     askToJoin: (from, terminal, message) => queue(from, terminal, { type: "join", message }),
     askToLeave: (from, terminal) => queue(from, terminal, { type: "leave" }),
     askToHand: (from, terminal) => queue(from, terminal, { type: "hand" }),
+    askForNewer: (from, terminal) => queue(from, terminal, { type: "newer" }),
     release: (terminal) =>
       dispatch()?.([
         {
@@ -141,6 +160,8 @@ export const createDemoApprovals = (
         },
       ]),
     withdraw: () => {
+      for (const answered of heard.values()) answered(false)
+      heard.clear()
       targets.clear()
       pending.update(() => [])
     },
@@ -235,6 +256,17 @@ export const approvalGroups = (
           const key = selected()
           if (!key) return note("Select a terminal first.")
           controls.askToRun(key, demoCommand, "~/projects/billing")
+        },
+      },
+      {
+        label: "Ask for something newer",
+        hint: "Modal: another terminal's agent asks for something only a newer Novadeck can show; it says so and offers only Not now, which sets it aside unanswered",
+        run: ({ selected, note }) => {
+          const key = selected()
+          if (!key) return note("Select a terminal first.")
+          const [asker] = othersOf(workspace(), key)
+          if (!asker) return note("Add a second terminal first.")
+          controls.askForNewer({ ...key, terminalId: asker.id }, key)
         },
       },
       {

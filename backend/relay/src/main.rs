@@ -6,6 +6,8 @@
 //!
 //! On Windows it also reads for the runner what it would otherwise start PowerShell or
 //! taskkill for: the registry's environment, and a terminal's process tree, which it ends.
+//! On macOS it lists the processes each terminal started, by the variable that names it in
+//! the environment they started with, among the app's own coalition (`tagged`).
 
 mod allow;
 mod ancestors;
@@ -14,12 +16,17 @@ mod hook;
 mod idle;
 #[cfg(windows)]
 mod job;
+#[cfg(windows)]
+mod jobs;
 mod mcp;
+mod order;
 #[cfg(windows)]
 mod processes;
 #[cfg(windows)]
 mod registry;
 mod status_line;
+#[cfg(target_os = "macos")]
+mod tagged;
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -47,11 +54,15 @@ pub fn epoch_ms() -> Option<f64> {
 
 const USAGE: &str = "usage: novadeck-relay mcp <server-version> <protocol-version>...
        novadeck-relay hook [--config <relay.json>] [--<option> <value>]... <agent> [event]
-       novadeck-relay allow <settings.json> <rule> <file>
+       novadeck-relay allow <settings.json> <rule> <file> [<extra rule>... -- <agent's arguments>...]
+       novadeck-relay after <folder> <working directory>
        novadeck-relay --version
        novadeck-relay environment                    (Windows)
        novadeck-relay tree <pid>[:<started-ms>]...   (Windows)
-       novadeck-relay end <pid>:<started-ms>...      (Windows)";
+       novadeck-relay end <pid>:<started-ms>...      (Windows)
+       novadeck-relay jobs                           (Windows)
+       novadeck-relay held <file>
+       novadeck-relay tagged <variable>              (macOS)";
 
 /// The leading `--name value` options, and the arguments after them. Every option takes a
 /// value, so one this relay doesn't know, from a newer runner's launcher, is passed over
@@ -92,8 +103,31 @@ fn main() -> ExitCode {
         }
         // A shim's: writes the person's allow rules with Novadeck's added to `file`, or fails,
         // and the shim passes no settings.
-        Some((mode, [settings, rule, file])) if mode == "allow" => {
-            if allow::write(Path::new(settings), rule, Path::new(file)) {
+        Some((mode, [settings, rule, file, more @ ..])) if mode == "allow" => {
+            // Extra rules, then `--` and the launch's own arguments: where one of them skips every
+            // permission, the extras (the shipping gate's) aren't written.
+            let (extra, launch) = more.split_at(
+                more.iter()
+                    .position(|each| each == "--")
+                    .unwrap_or(more.len()),
+            );
+            let skipping = launch
+                .iter()
+                .any(|each| each == "--dangerously-skip-permissions");
+            let mut rules = vec![rule.as_str()];
+            if !skipping {
+                rules.extend(extra.iter().map(String::as_str));
+            }
+            if allow::write_with(Path::new(settings), &rules, Path::new(file)) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        // A shim's: succeeds where `folder` sorts after the agent's working directory, so adding it
+        // leaves that directory first among Antigravity's workspaces (`order.rs`).
+        Some((mode, [folder, cwd])) if mode == "after" => {
+            if order::sorts_after(folder, cwd, cfg!(windows)) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
@@ -111,6 +145,15 @@ fn main() -> ExitCode {
             registry::print();
             ExitCode::SUCCESS
         }
+        // The user's processes that started with the variable, as JSON lines.
+        #[cfg(target_os = "macos")]
+        Some((mode, [name])) if mode == "tagged" && !name.is_empty() => {
+            if tagged::print(name) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
         #[cfg(windows)]
         Some((mode, rest)) if mode == "tree" => match roots(rest) {
             Some(roots) if processes::print_trees(&roots) => ExitCode::SUCCESS,
@@ -126,8 +169,34 @@ fn main() -> ExitCode {
             }
             None => usage(),
         },
+        #[cfg(windows)]
+        Some((mode, [])) if mode == "jobs" => {
+            jobs::run();
+            ExitCode::SUCCESS
+        }
+        Some((mode, [file])) if mode == "held" => {
+            held(Path::new(file), HELD_TRIES);
+            ExitCode::SUCCESS
+        }
         _ => usage(),
     }
+}
+
+/// How many times `held` looks for its file, 5 ms apart: about a quarter of a second, as a
+/// Linux shell waits for its scope.
+const HELD_TRIES: u32 = 40;
+
+/// `novadeck-relay held <file>`: waits for `file`, which the runner makes once a shell's job
+/// has settled, then removes it, so a cmd's startup command runs inside the job; after `tries`
+/// looks it goes on all the same. cmd has no wait of its own short of a second.
+fn held(file: &Path, tries: u32) {
+    for _ in 0..tries {
+        if file.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let _ = std::fs::remove_file(file);
 }
 
 /// Prints to stderr, where a failed write must not end the relay: `eprintln!` panics on
@@ -182,6 +251,20 @@ mod tests {
 
     fn args(each: &[&str]) -> Vec<String> {
         each.iter().map(|one| (*one).to_owned()).collect()
+    }
+
+    #[test]
+    fn held_waits_for_its_file_and_removes_it_or_goes_on_without_it() {
+        let file = std::env::temp_dir().join(format!("novadeck-held-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let started = std::time::Instant::now();
+        held(&file, 4);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(15));
+        std::fs::write(&file, "").unwrap();
+        let started = std::time::Instant::now();
+        held(&file, 400);
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(!file.exists());
     }
 
     #[test]

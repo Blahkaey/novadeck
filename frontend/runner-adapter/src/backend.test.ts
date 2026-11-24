@@ -1623,6 +1623,56 @@ describe("the works, as the backend starts", () => {
   })
 })
 
+describe("project windows, as the backend serves one", () => {
+  // A project with a session of its own, which another window made on the runner.
+  const madeElsewhere = async () => {
+    const other = await runner.another()
+    const projectId = crypto.randomUUID()
+    await other.projects.create({ id: projectId, name: "elsewhere", cwd: process.cwd() })
+    const sessionId = crypto.randomUUID()
+    await other.sessions.create({ id: sessionId, projectId, name: "Theirs" })
+    return { other, projectId, sessionId, remove: () => other.projects.remove({ projectId }) }
+  }
+
+  it("reads a project it never heard of, which another window made, without a reload", async () => {
+    const app = open()
+    const { projectId, sessionId, remove } = await madeElsewhere()
+    const seed = await app.backend.syncProject!(projectId)
+    expect(seed).toMatchObject({ id: projectId, name: "elsewhere" })
+    expect(seed?.sessions.map((session) => session.id)).toEqual([sessionId])
+    app.stop()
+    await remove()
+  })
+
+  it("reads a project again as the runner holds it now, the sessions and terminals another window added", async () => {
+    const app = open()
+    const { other, projectId, sessionId, remove } = await madeElsewhere()
+    await app.backend.syncProject!(projectId)
+    const added = crypto.randomUUID()
+    await other.sessions.create({ id: added, projectId, name: "Added later" })
+    const seed = await app.backend.syncProject!(projectId)
+    expect(seed?.sessions.map((session) => session.id).toSorted()).toEqual(
+      [sessionId, added].toSorted(),
+    )
+    app.stop()
+    await remove()
+  })
+
+  it("reads nothing for a project the runner no longer has", async () => {
+    const app = open()
+    expect(await app.backend.syncProject!(crypto.randomUUID())).toBeUndefined()
+    app.stop()
+  })
+
+  it("tells the runner which project it shows, and again once the link is back", async () => {
+    const io: string[] = []
+    const app = open(runner.listing, {}, recordingRunner(runner.client, io))
+    app.backend.showingProject!("a-project")
+    await vi.waitFor(() => expect(io).toContain("showing a-project"), eventually)
+    app.stop()
+  })
+})
+
 describe("the notes, by what the runner answered at startup", () => {
   it("are placed where the runner places them, and not where it can't, as an older one", () => {
     const placing = open()

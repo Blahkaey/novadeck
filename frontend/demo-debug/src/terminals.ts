@@ -1,5 +1,5 @@
 import type { AgentName } from "@novadeck/core/harnesses"
-import type { InboxRow } from "@novadeck/core/inbox"
+import type { InboxEntry } from "@novadeck/core/inbox"
 import type { BackendAction, TerminalKey } from "@novadeck/core/port"
 import type { AgentStatus, AgentUsage, TerminalMetadata, Workspace } from "@novadeck/core/types"
 import { demoTerminalId } from "@novadeck/demo/samples"
@@ -114,10 +114,11 @@ export const starting = (key: TerminalKey): BackendAction[] => [
 ]
 
 // An agent with its session saved and no process, resumed when someone needs it; `reported`
-// when its `done` still stands, `endedAt` when its last turn ended.
+// when its `done` still stands, `endedAt` when its last turn ended. `newer` is an agent of a
+// harness a newer Novadeck integrates, which this build never wakes.
 export const sleeping = (
   key: TerminalKey,
-  agent: AgentName,
+  agent: AgentName | "newer",
   reported = false,
   endedAt?: number,
 ): BackendAction[] => [
@@ -201,7 +202,7 @@ export const mcpAsk = (
   kind: AskKind,
   now: number,
   agent: AgentName,
-): InboxRow | undefined => {
+): InboxEntry | undefined => {
   const project = workspace?.projects.find((each) => each.id === key.projectId)
   const terminal = terminalOf(workspace, key)
   if (!project || !terminal) return undefined

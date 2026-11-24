@@ -385,6 +385,8 @@ export const createDemoChat = (
         : attention
           ? settle(found, made, transcript?.requests ?? [], attention)
           : [],
+      // The demo's agents hold no shipping permits: the debug panel gives one to a chat.
+      permits: [],
       // The demo follows no prompts: what it sends shows as its transcript's own item.
       prompts: [],
     }
@@ -576,6 +578,7 @@ export const createDemoChat = (
     if (
       !dialog ||
       dialog.type === "raw" ||
+      dialog.type === "newer" ||
       !outcome ||
       !{
         choices: ["choice"],

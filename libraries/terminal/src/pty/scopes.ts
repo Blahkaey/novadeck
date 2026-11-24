@@ -1,13 +1,22 @@
 import { execFile } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { posix } from "node:path"
 import { promisify } from "node:util"
+
+import type { Followed, Listed } from "./descendants.js"
 
 /** Why a pty's program ended, where its platform says: it was killed for memory. */
 export type ExitCause = "out-of-memory"
 
 /** Runs `file` with `args` for its output; rejects where it can't run or fails. */
 export type RunTool = (file: string, args: readonly string[]) => Promise<string>
+
+/**
+ * A process in a scope: its pid, and where the scope tells it, when it started, in
+ * milliseconds since the Unix epoch, to the microsecond (macOS's; Linux's cgroups tell none).
+ */
+export type ScopeMember = { readonly pid: number; readonly startedMs?: number }
 
 /** A program's own scope, asked for as it started. */
 export type Scope = {
@@ -23,12 +32,54 @@ export type Scope = {
    * program has no scope.
    */
   weigh(weight: number): Promise<void>
+  /**
+   * The processes in the scope now, however each got there: a program started detached
+   * (`setsid`, `nohup`, a daemon that forked twice) stays in the scope of the terminal it was
+   * started in, though it has left the shell's tree. On Linux as its cgroup lists them, on
+   * macOS as the environment they started with names the terminal (see `TaggedScopes`).
+   * Undefined where it can't be told, as with no scope; it never rejects.
+   */
+  members(): Promise<readonly ScopeMember[] | undefined>
+  /**
+   * Its program has exited: a scope left empty is stopped. A scope whose program was moved in
+   * as it died stays active with nothing in it for ever, as systemd collects a scope only once
+   * its cgroup empties, and this one was never seen full. One that still holds processes is
+   * left for systemd to collect once they end. It never rejects.
+   */
+  exited(): Promise<void>
+  /**
+   * Whether the program reached its scope, once that is settled, where it gets there only
+   * some milliseconds after it starts and its shell can't see that for itself, as with a
+   * Windows job (`windowsJobs`): the shell's startup command waits for it.
+   */
+  readonly held?: Promise<boolean>
+  /**
+   * The processes in the scope now, as a listing shows them, where the scope can say so
+   * itself, as a Windows job does, which no `Listing` can see. Undefined where it can't be
+   * told; it never rejects.
+   */
+  listed?(): Promise<readonly Listed[] | undefined>
+  /**
+   * Ends each of `ones` still running as the process it was, by its pid and start, where the
+   * scope can, as Windows has no signal to send first. It never rejects.
+   */
+  end?(ones: readonly Followed[]): Promise<void>
+  /**
+   * The terminal is gone, and nothing reads its scope again: what still runs in it runs on,
+   * in no scope of Novadeck's. Where letting go would end what runs there, as stopping a
+   * systemd scope would, there is none.
+   */
+  done?(): void
 }
 
 /** Where each pty's program is kept apart from the app's own processes. */
 export type Scopes = {
-  contain(pid: number): Scope
-  /** Whether a program started now is on its way to a scope of its own. */
+  /** The scope of the program `pid`, started with `env` where it is known. */
+  contain(pid: number, env?: NodeJS.ProcessEnv): Scope
+  /**
+   * Whether a program started now is on its way to a scope it is moved into, so its shell waits
+   * for the move before it starts anything (Linux's); never for a scope it starts in.
+   */
   active(): boolean
 }
 
@@ -165,8 +216,76 @@ export const killsSince = (unit: string, since: number): readonly string[] => [
   ...killedForMemory.map((id) => `MESSAGE_ID=${id}`),
 ]
 
+/**
+ * `unit`'s object path on systemd's bus: each character but a letter or a digit (and a
+ * leading digit) as `_` and its two hex digits, as systemd's `bus_label_escape` writes it.
+ */
+export const unitPath = (unit: string): string =>
+  `/org/freedesktop/systemd1/unit/${[...unit]
+    .map((char, at) =>
+      /[A-Za-z]/.test(char) || (at > 0 && /\d/.test(char))
+        ? char
+        : `_${char.charCodeAt(0).toString(16).padStart(2, "0")}`,
+    )
+    .join("")}`
+
+/** The user's systemd manager's call that reads scope `unit`'s cgroup, as `s "<path>"`. */
+export const scopeGroup = (unit: string): readonly string[] => [
+  "--user",
+  "--timeout=5",
+  "get-property",
+  "org.freedesktop.systemd1",
+  unitPath(unit),
+  "org.freedesktop.systemd1.Scope",
+  "ControlGroup",
+]
+
+/** The user's systemd manager's call that stops `unit`. */
+export const stopScope = (unit: string): readonly string[] => [
+  "--user",
+  "--quiet",
+  "--timeout=5",
+  "call",
+  "org.freedesktop.systemd1",
+  "/org/freedesktop/systemd1",
+  "org.freedesktop.systemd1.Manager",
+  "StopUnit",
+  "ss",
+  unit,
+  "replace",
+]
+
+/** The path `get-property` answers with; undefined for none, as for a unit that has gone. */
+export const parseGroup = (answer: string): string | undefined => {
+  const path = /^s\s+"(.*)"\s*$/.exec(answer.trim())?.[1]
+  return path?.startsWith("/") ? path : undefined
+}
+
+/** Reads a cgroup's file, by its path under the cgroup root; rejects where it can't. */
+export type ReadGroup = (path: string) => Promise<string>
+
+// Where the unified cgroup hierarchy is mounted: at the root on cgroup v2 alone, under
+// `unified` on a hybrid one.
+const groupRoot = (): string =>
+  existsSync("/sys/fs/cgroup/cgroup.controllers") ? "/sys/fs/cgroup" : "/sys/fs/cgroup/unified"
+
+const readGroup: ReadGroup = (path) => readFile(posix.join(groupRoot(), path), "utf8")
+
+/** The pids a `cgroup.procs` lists. */
+export const parseProcs = (procs: string): ScopeMember[] =>
+  procs
+    .split("\n")
+    .map((line) => Number.parseInt(line, 10))
+    .filter((pid) => Number.isSafeInteger(pid) && pid > 0)
+    .map((pid) => ({ pid }))
+
 /** A program left in the app's scope, as where systemd can't give it one. */
-const unscoped: Scope = { cause: () => undefined, weigh: () => Promise.resolve() }
+export const unscoped: Scope = {
+  cause: () => undefined,
+  weigh: () => Promise.resolve(),
+  members: () => Promise.resolve(undefined),
+  exited: () => Promise.resolve(),
+}
 
 /**
  * Linux's scopes: each pty's program goes into a transient systemd scope of its own as it
@@ -185,6 +304,7 @@ export class UserScopes implements Scopes {
     private readonly prefix: string,
     private readonly run: RunTool = runTool,
     private readonly delayMs = journalMs,
+    private readonly read: ReadGroup = readGroup,
   ) {}
 
   active(): boolean {
@@ -210,7 +330,42 @@ export class UserScopes implements Scopes {
     )
     // Weights are set one after another, so the last asked is the last set.
     let weighed: Promise<void> = started.then(() => undefined)
+    // The scope's cgroup, asked once it is known; asked again after an answer that named none.
+    let group: Promise<string | undefined> | undefined
+    const groupOf = (): Promise<string | undefined> => {
+      group ??= this.run("busctl", scopeGroup(unit))
+        .then(parseGroup)
+        .catch(() => undefined)
+      const asked = group
+      void asked.then((path) => {
+        if (path === undefined && group === asked) group = undefined
+      })
+      return asked
+    }
     return {
+      members: async () => {
+        if (!(await started)) return undefined
+        const path = await groupOf()
+        if (path === undefined) return undefined
+        return this.read(posix.join(path, "cgroup.procs")).then(parseProcs, () => undefined)
+      },
+      exited: async () => {
+        // Whether it was moved or not: a move whose program was dying may have made the
+        // scope and still been refused. Asked again a moment later where systemd named no
+        // cgroup yet, as while its start is still under way.
+        const moved = await started
+        let path = await groupOf()
+        if (path === undefined && moved) {
+          await new Promise((resolve) => setTimeout(resolve, this.delayMs * 2))
+          path = await groupOf()
+        }
+        if (path === undefined) return
+        // Only a cgroup read and found empty: one that can't be read, as where the cgroups
+        // here aren't systemd's, may hold anything.
+        const procs = await this.read(posix.join(path, "cgroup.procs")).catch(() => undefined)
+        if (procs === undefined || parseProcs(procs).length > 0) return
+        await this.run("busctl", stopScope(unit)).catch(() => undefined)
+      },
       weigh: (weight) => {
         weighed = weighed
           .then(async () => {

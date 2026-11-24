@@ -9,8 +9,7 @@ import { usePanelView } from "../sidebar/panel-host"
 import { SidebarPanel, sidebarCreateClasses } from "../sidebar/SidebarPanel"
 import { TerminalTabs } from "../terminals/TerminalTabs"
 import { useWorkspaceServices, useWorkspaceState } from "./controller/context"
-import { useTabsAway } from "./move-to"
-import { usePanelOpen, usePanelPlace } from "./panels-shown"
+import { usePanelOpen } from "./panels-shown"
 import { historyShown } from "./routing"
 import { currentState, currentTarget, sameItems, sameTarget } from "./selectors"
 import { SessionsSection } from "./SessionsSection"
@@ -25,7 +24,6 @@ export const TerminalsSection = (): React.JSX.Element => {
   const { commands, backend } = useWorkspaceServices()
   const { hideSidebar, add } = commands
   const reorderTiles = useReorderTiles()
-  const away = useTabsAway()
   const projectId = useWorkspaceState((workspace) => workspace.activeProjectId)
   // Only what the panel shows of the sessions itself: how many, and the open one's name once
   // there are others. Their rows read the rest (SessionsSection), and the tabs their own tiles,
@@ -47,9 +45,6 @@ export const TerminalsSection = (): React.JSX.Element => {
   // its window.
   const sessionsOpen = usePanelOpen("sessions")
   const terminalsOpen = usePanelOpen("terminals")
-  // A tab dragged out of the list goes to another session over the page; in a window of its own,
-  // whose drag ends at its edge, it only reorders the list.
-  const own = usePanelPlace("terminals") === "window"
   // The window the list is drawn in, whose observers follow its tabs.
   const view = usePanelView()
   return (
@@ -96,7 +91,6 @@ export const TerminalsSection = (): React.JSX.Element => {
           ids={ids}
           renderTab={renderTab}
           onReorder={reorderTiles}
-          away={own ? undefined : away}
           sensor={PanelPointerSensor}
           view={view}
         />

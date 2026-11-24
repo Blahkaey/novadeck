@@ -33,7 +33,7 @@ export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
       })),
       {
         label: "Answer the startup screen",
-        hint: 'The tour agent held at a startup screen goes on: it binds, works, names its terminal "Tour lead" and finishes its turn',
+        hint: 'The tour agent held at a startup screen goes on: it binds, works, names its terminal "Game lead" asks its sheet and opens its team',
         run: () => tour.answer(),
       },
       {
@@ -47,14 +47,54 @@ export const tourGroups = (tour: DemoTour): readonly DemoActionGroup[] => [
         run: () => tour.askPermission(),
       },
       {
-        label: "Tour story: answer the tagline ask (A)",
-        hint: "While the copywriter's ask waits in the Inbox (Which tagline for the welcome card?), answers it with option A as the person would: the row goes, the copywriter tells the lead, and the lead shows the welcome card",
-        run: () => tour.answerTagline(0),
+        label: "Tour story: the lead's sheet waits until nudged",
+        hint: "The next tour lead names itself, then waits for the tour's nudge before it asks its sheet and opens its Modeller and Builder",
+        run: () => tour.goQuietTeam(),
       },
       {
-        label: "Tour story: teammates stay quiet until nudged",
-        hint: "The next tour lead names itself, then waits for the tour's nudge before opening its Copywriter and Designer teammates",
-        run: () => tour.goQuietTeam(),
+        label: "Tour story: the modeller stays quiet until nudged",
+        hint: "In the next run the Modeller opens but sits idle at its prompt, so no model appears, until the tour nudges it",
+        run: () => tour.goQuietModeller(),
+      },
+      {
+        label: "Tour story: the modeller asks about the hero's colour",
+        hint: "In the next run the Modeller, once it showed its model, asks in the Inbox What colour should the hero be? and waits for the answer before it reports; the tour points at the ask until it's answered",
+        run: () => tour.goMateAsks(),
+      },
+      {
+        label: "Tour story: no page (as on a computer without Node or Python)",
+        hint: "The next run has no page: the lead opens no Game server terminal, asks for no command, and shows no page, so the tour skips those two steps and goes on to the Modeller's model",
+        run: () => tour.goNoPage(),
+      },
+      {
+        label: "Tour story: answer the sheet (Fantasy, RPG)",
+        hint: "While the lead's sheet waits in the Inbox (Which game shall we build?), answers it with its first options as the person would: the row goes, and the lead opens its Modeller and Builder",
+        run: () => tour.answerSheet(),
+      },
+      {
+        label: "Tour story: answer the sheet (Sci-fi, Shooter)",
+        hint: "The same sheet answered with its second options: the Modeller models a rocket, and the game is called Sci-fi Shooter",
+        run: () => tour.answerSheet({ world: 1, kind: 1 }),
+      },
+      {
+        label: "Tour story: answer the sheet (own words)",
+        hint: "The same sheet answered in your own words, Modern and Racing: the Modeller models a robot, and the game is called Modern Racing",
+        run: () => tour.answerSheet({ world: "Modern", kind: "Racing" }),
+      },
+      {
+        label: "Tour story: answer the modeller's question (Red)",
+        hint: "While the Modeller's ask waits in the Inbox (What colour should the hero be?), answers it with Red as the person would: the row goes, and the Modeller reports to the lead",
+        run: () => tour.answerMate(0),
+      },
+      {
+        label: "Tour story: keeping fails",
+        hint: "The next Keep building on the closing card fails, and the card says why and stays; the try after goes through",
+        run: () => tour.failKeep(),
+      },
+      {
+        label: "Tour agent: exits to its shell",
+        hint: "The running tour lead's program ends and its shell is back at the prompt, as Claude Code leaves where you don't trust the folder: the tour says It didn't start. and to end it and take it again",
+        run: () => tour.exitToShell(),
       },
       {
         label: "Tour agent: stop",

@@ -97,6 +97,32 @@ describe("the agent modes setting", () => {
   })
 })
 
+describe("the shipping gate setting", () => {
+  it("shows what the runner said, and changes it there", async () => {
+    const app = scripted({ shown: [] })
+    const shippingGate = app.backend.shippingGate!
+    expect(shippingGate.enabled.getSnapshot()).toBe(false)
+    shippingGate.set(true)
+    expect(shippingGate.enabled.getSnapshot()).toBe(true)
+    await app.idle()
+    expect(app.of("settings")).toEqual([{ shippingGate: true }])
+    app.stop()
+  })
+
+  it("goes back when the runner could not change it", async () => {
+    const app = scripted({
+      shown: [],
+      saveSettings: () => Promise.reject(new WireError("DISCONNECTED")),
+    })
+    const { enabled, set } = app.backend.shippingGate!
+    set(true)
+    expect(enabled.getSnapshot()).toBe(true)
+    await app.idle()
+    expect(enabled.getSnapshot()).toBe(false)
+    app.stop()
+  })
+})
+
 describe("the agents' mode setting", () => {
   it("shows what the runner said, and changes it there", async () => {
     const app = scripted({ shown: [] })
@@ -212,6 +238,21 @@ describe("the agent switches", () => {
       connected: false,
       busy: false,
     })
+    app.stop()
+  })
+
+  it("keep an agent whose limit a newer runner names as no limit this UI can show", async () => {
+    const found = [
+      { agent: "opencode", available: true, connected: true, limited: "newer" },
+      { agent: "agy", available: true, connected: true, limited: "own-status-line" },
+    ]
+    const app = scripted({ shown: [], listAgents: async () => found })
+    const agents = app.backend.agents!
+    await agents.refresh()
+    expect(agents.state.getSnapshot()).toEqual([
+      { agent: "opencode", available: true, connected: true, busy: false },
+      { agent: "agy", available: true, connected: true, limited: "own-status-line", busy: false },
+    ])
     app.stop()
   })
 

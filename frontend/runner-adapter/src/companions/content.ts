@@ -14,6 +14,7 @@ import {
   folderMatchLimits,
   harnesses,
   lookLimits,
+  newer,
   planUnwritable,
   type AgentName,
   type CompanionItem as RunnerItem,
@@ -22,6 +23,7 @@ import {
   type PageTrouble as RunnerTrouble,
 } from "@novadeck/protocol"
 import { hasCode, type Runner } from "@novadeck/runner-client"
+import { readTolerantly } from "@novadeck/wire"
 
 // The runner's companion items as the UI holds them: what agents show and the person
 // attaches, each a pointer the runner keeps, and their content, which `content` reads
@@ -41,10 +43,16 @@ const shortNames = Object.fromEntries(
   harnesses.map(({ id, shortName }) => [id, shortName]),
 ) as Record<AgentName, string>
 
+// An agent of a harness a newer runner integrates that this build doesn't know, by what it is.
+const displayNameOf = (agent: AgentName | typeof newer): string =>
+  agent === newer ? "An agent" : displayNames[agent]
+const shortNameOf = (agent: AgentName | typeof newer): string =>
+  agent === newer ? "The agent" : shortNames[agent]
+
 export const itemOf = ({ sessionId: _session, plan, id, ...item }: RunnerItem): Item => ({
   ...item,
   id: itemIdOf(id),
-  plan: plan && { agent: displayNames[plan.agent], role: plan.role, source: plan.source },
+  plan: plan && { agent: displayNameOf(plan.agent), role: plan.role, source: plan.source },
 })
 
 export const windowOf = ({
@@ -67,6 +75,8 @@ const contentOf = (content: RunnerContent, livePages: boolean): ItemContent => {
   if (content.state === "unavailable") return content
   const { stamp } = content
   const shown = content.content
+  // Content of a kind a newer runner shows: said as such, never left loading.
+  if (shown.kind === newer) return { state: "unavailable", reason: "newer", size: null }
   if (shown.kind === "page") {
     const { scroll, ...page } = shown
     return {
@@ -76,7 +86,7 @@ const contentOf = (content: RunnerContent, livePages: boolean): ItemContent => {
     }
   }
   if (shown.kind === "shells")
-    return { state: "ready", stamp, content: { ...shown, agent: shortNames[shown.agent] } }
+    return { state: "ready", stamp, content: { ...shown, agent: shortNameOf(shown.agent) } }
   if (shown.kind === "plan") {
     const { changedAt: _changed, ...plan } = shown
     return { state: "ready", stamp, content: plan }
@@ -209,9 +219,9 @@ export const createRunnerCompanions = (
     if (!fitsRunner(text, companionLimits.plan)) throw new PlanUnwritableError("too-large")
     const edit = { itemId, text, basedOn, ...(path !== undefined && { path }) }
     const result = await runner.save(edit).catch((error: unknown) => {
-      // An edit that can't be written says why; any other failure may pass.
-      const why = hasCode(error, "PLAN_UNWRITABLE") && planUnwritable.safeParse(error.data)
-      throw why && why.success ? new PlanUnwritableError(why.data.reason) : error
+      // A plan that can't be written says why; any other failure may pass.
+      const why = hasCode(error, "PLAN_UNWRITABLE") && readTolerantly(planUnwritable, error.data)
+      throw why ? new PlanUnwritableError(why.reason) : error
     })
     if (result.saved) return result
     const { stamp, ...plan } = result.current
@@ -243,7 +253,7 @@ export const createRunnerCompanions = (
   wroteTo: async (_target, terminalId) =>
     (await runner.wroteTo({ terminalId })).map(({ agent, ...folder }) => ({
       ...folder,
-      harness: displayNames[agent],
+      harness: displayNameOf(agent),
     })),
   repoint: async (target, itemId, path) =>
     itemOf(await inOrder(target, () => runner.repoint({ itemId, path }))),

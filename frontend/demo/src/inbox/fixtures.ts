@@ -1,18 +1,18 @@
 import type { ChatRequest } from "@novadeck/core/conversation"
 import type { AgentName } from "@novadeck/core/harnesses"
-import type { AskOption, InboxContent, InboxRow } from "@novadeck/core/inbox"
+import type { AskOption, InboxContent, InboxEntry } from "@novadeck/core/inbox"
 
 import { demoHandle } from "../handles"
 import { demoTerminalId, terminals } from "../samples"
 
-// The hardcoded rows of the demo's Inbox, on the sample terminals: the list the Inbox demo
+// The hardcoded entries of the demo's Inbox, on the sample terminals: the list the Inbox demo
 // starts with, and the states the debug panel adds.
 
 const minute = 60_000
 
-// Where a row comes from: a sample terminal of a sample project, by its number, running
+// Where an entry comes from: a sample terminal of a sample project, by its number, running
 // `agent`. The terminal's title is the sample's own, as the sidebar shows it.
-const sourceOf = (projectId: string, number: number, agent: AgentName) => ({
+const sourceOf = (projectId: string, number: number, agent: AgentName | "newer") => ({
   projectId,
   workspaceSessionId: "initial",
   terminalId: demoTerminalId({ projectId, workspaceSessionId: "initial" }, number),
@@ -26,13 +26,17 @@ type Fixture = {
   readonly id: string
   readonly project: string
   readonly terminal: number
-  readonly agent: AgentName
+  // `newer`: an agent of a harness a newer Novadeck integrates.
+  readonly agent: AgentName | "newer"
   readonly minutes: number
   readonly stopped: boolean
   readonly content: InboxContent
 }
 
-const rowOf = ({ id, project, terminal, agent, minutes, stopped, content }: Fixture, now: number) =>
+const entryOf = (
+  { id, project, terminal, agent, minutes, stopped, content }: Fixture,
+  now: number,
+) =>
   ({
     ...content,
     id,
@@ -40,7 +44,7 @@ const rowOf = ({ id, project, terminal, agent, minutes, stopped, content }: Fixt
     at: now - minutes * minute,
     stopped,
     seen: false,
-  }) satisfies InboxRow
+  }) satisfies InboxEntry
 
 // The Claude edit dialog Novadeck can't read, as it is on screen.
 const editScreen = `Edit file
@@ -93,6 +97,20 @@ const rawRequest: ChatRequest = {
   answered: false,
   askedAt: Date.now(),
   dialog: { type: "raw", text: editScreen, reason: "unsupported" },
+}
+
+// A dialog a newer Novadeck's runner reads that this build doesn't know: answered in the
+// terminal.
+const newerRequest: ChatRequest = {
+  id: "demo-newer-dialog",
+  kind: "permission",
+  tool: "Bash",
+  subject: "pnpm lint --fix",
+  choices: [],
+  subagent: false,
+  answered: false,
+  askedAt: Date.now(),
+  dialog: { type: "newer" },
 }
 
 // Claude marks the option it would pick with "(Recommended)" in its label.
@@ -251,6 +269,7 @@ export const demoInboxIds = {
   webhook: "demo-webhook-ask",
   question: "demo-question",
   questions: "demo-questions",
+  askQuestions: "demo-ask-questions",
   preview: "demo-preview-ask",
   login: "demo-login",
   limit: "demo-limit",
@@ -267,6 +286,9 @@ export const demoInboxIds = {
   waits: "demo-waits",
   entryTell: "demo-entry-tell",
   entryAsk: "demo-entry-ask",
+  newerAsk: "demo-newer-ask",
+  newerDialog: "demo-newer-dialog",
+  newerUpdate: "demo-newer-update",
 } as const
 
 // Claude's plan dialog: the first yes sets something standing, so it is a quiet link and
@@ -359,6 +381,61 @@ const extraFixtures: readonly Fixture[] = [
     stopped: true,
     content: { kind: "request", request: severalQuestionsRequest },
   },
+  // The same questions asked through Novadeck's own ask, from Codex, which has no question tool
+  // that takes several: drawn as the dialog above is, with the ask's own words over it.
+  {
+    id: demoInboxIds.askQuestions,
+    project: "infra",
+    terminal: 2,
+    agent: "codex",
+    minutes: 2,
+    stopped: true,
+    content: {
+      kind: "ask",
+      ask: {
+        subject: "How should the test fixtures handle dates?",
+        body: "The new fixtures need a few calls before I generate them.",
+        details: null,
+        hardToUndo: null,
+        shape: {
+          type: "questions",
+          questions: [
+            {
+              header: "Dates",
+              question: "Which date library should the tests use?",
+              multiSelect: false,
+              recommend: 0,
+              options: [
+                { label: "date-fns", summary: "Already used in the app." },
+                { label: "Keep native Date", summary: "No change." },
+              ],
+            },
+            {
+              header: "Suites",
+              question: "Which suites should run against the new fixtures?",
+              multiSelect: true,
+              recommend: null,
+              options: [
+                { label: "Unit", summary: "Fast, no browser." },
+                { label: "End to end", summary: "About 6 minutes in CI." },
+                { label: "Visual snapshots", summary: "Needs the fixtures regenerated." },
+              ],
+            },
+            {
+              header: "Timezone",
+              question: "Which timezone should the fixtures assume?",
+              multiSelect: false,
+              recommend: null,
+              options: [
+                { label: "UTC", summary: "Same everywhere." },
+                { label: "The machine's own", summary: "Catches DST bugs, flakier on CI." },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
   {
     id: demoInboxIds.plan,
     project: "storefront",
@@ -380,7 +457,7 @@ const extraFixtures: readonly Fixture[] = [
       trouble: {
         type: "limit",
         minutes: 0,
-        // Set by `demoInboxRows`, which knows now.
+        // Set by `demoInboxEntries`, which knows now.
         resetsAt: 0,
         autoResume: null,
         evidence: [{ text: "Usage limit reached", result: null, times: 1 }],
@@ -439,7 +516,7 @@ const extraFixtures: readonly Fixture[] = [
       kind: "held",
       held: {
         threadId: "demo-thread-gone",
-        // The sender's terminal has closed: it shows by its handle, and the row is the
+        // The sender's terminal has closed: it shows by its handle, and the entry is the
         // recipient's.
         from: { handle: "kestrel", title: "kestrel" },
         to: { handle: demoHandle(4), title: "Release notes" },
@@ -490,6 +567,51 @@ const extraFixtures: readonly Fixture[] = [
     minutes: 1,
     stopped: true,
     content: { kind: "request", request: plainDenyRequest },
+  },
+  // What a newer Novadeck's runner sends that this build can't show: an ask in a shape it
+  // doesn't know, a request whose dialog it doesn't know, and an update of a kind it doesn't.
+  {
+    id: demoInboxIds.newerAsk,
+    project: "mobile-app",
+    terminal: 1,
+    agent: "newer",
+    minutes: 3,
+    stopped: true,
+    content: {
+      kind: "ask",
+      ask: {
+        subject: "Which rollout should the new queue use?",
+        body: "The queue is ready to ship. I'd like your pick between a staged rollout and a single switch, and I can only ask it in a form this Novadeck doesn't know.",
+        details: null,
+        hardToUndo: null,
+        shape: { type: "newer" },
+      },
+    },
+  },
+  {
+    id: demoInboxIds.newerDialog,
+    project: "design-system",
+    terminal: 1,
+    agent: "claude",
+    minutes: 2,
+    stopped: true,
+    content: { kind: "request", request: newerRequest },
+  },
+  {
+    id: demoInboxIds.newerUpdate,
+    project: "dotfiles",
+    terminal: 1,
+    agent: "newer",
+    minutes: 12,
+    stopped: false,
+    content: {
+      kind: "update",
+      update: {
+        type: "newer",
+        subject: "An entry of a kind this Novadeck doesn't know",
+        body: "Its agent may be waiting on it: it stays here, unread, until a newer Novadeck shows it.",
+      },
+    },
   },
 ]
 
@@ -637,7 +759,7 @@ const fixtures: readonly Fixture[] = [
       trouble: {
         type: "limit",
         minutes: 300,
-        // Set by `demoInboxRows`, which knows now.
+        // Set by `demoInboxEntries`, which knows now.
         resetsAt: 0,
         autoResume: true,
         evidence: [{ text: "5-hour limit reached", result: null, times: 1 }],
@@ -678,9 +800,9 @@ const fixtures: readonly Fixture[] = [
   },
 ]
 
-// The hardcoded rows, as they stand at `now`: each waited as long as the sample says, and
+// The hardcoded entries, as they stand at `now`: each waited as long as the sample says, and
 // the limit resets in 1 h 12 min.
-export const demoInboxRows = (now: number): InboxRow[] => rowsOf(fixtures, now)
+export const demoInboxEntries = (now: number): InboxEntry[] => entriesOf(fixtures, now)
 
 // The messages demo's entries from the checkout's Claude Code (moth): a tell the person
 // hasn't read and a question still open, which its Messages pane lists with the one it
@@ -722,15 +844,15 @@ const entries: readonly Fixture[] = [
   },
 ]
 
-export const demoEntries = (now: number): InboxRow[] => rowsOf(entries, now)
+export const demoEntries = (now: number): InboxEntry[] => entriesOf(entries, now)
 
 // Those, and the states the debug panel adds.
-export const demoInboxRowsAll = (now: number): InboxRow[] =>
-  rowsOf([...fixtures, ...extraFixtures], now)
+export const demoInboxEntriesAll = (now: number): InboxEntry[] =>
+  entriesOf([...fixtures, ...extraFixtures], now)
 
-const rowsOf = (all: readonly Fixture[], now: number): InboxRow[] =>
+const entriesOf = (all: readonly Fixture[], now: number): InboxEntry[] =>
   all.map((fixture) =>
-    rowOf(
+    entryOf(
       fixture.content.kind === "trouble" && fixture.content.trouble.type === "limit"
         ? {
             ...fixture,

@@ -46,15 +46,17 @@ import {
   maxWroteFolders,
   wroteFolder,
 } from "./companions.js"
+import { device, deviceId, deviceName, mintedDevice } from "./devices.js"
 import { requestAnswer } from "./dialogs.js"
 import { feedbackDraft, maxFeedbackText } from "./feedback.js"
 import { directory, id, name } from "./fields.js"
 import { fileImportLimits, fileImportWrite } from "./file-import.js"
 import { forgeIntegration, forgeName } from "./forges.js"
 import { closedTerminal, historyChange, maxHistoryRemoved } from "./history.js"
-import { askAnswer, inboxEntry } from "./inbox.js"
-import { terminalMessages, threadId } from "./messages.js"
+import { askAnswer, inboxEntry, questionsAnswer } from "./inbox.js"
+import { terminalMessages, terminalRings, threadId } from "./messages.js"
 import { boardColumn, note, noteBody, noteLimits, notesChange, noteText } from "./notes.js"
+import { preferenceChange, preferenceKey, preferenceValue } from "./preferences.js"
 import {
   checkoutState,
   checkoutUpdate,
@@ -65,6 +67,9 @@ import {
   folderBrowse,
   folderListing,
   project,
+  projectsChange,
+  sessionChange,
+  sessionPatch,
   workspaceSession,
 } from "./projects.js"
 import { runnerSettings, runnerSettingsState } from "./settings.js"
@@ -76,6 +81,7 @@ import {
   maxUploadPartLength,
   startupCommand,
   terminalAttached,
+  terminalControl,
   terminalChange,
   terminalEvent,
   terminalRequest,
@@ -113,6 +119,11 @@ export const errors = {
   TERMINAL_EXITED: { status: 409 },
   CONTROL_IN_USE: { status: 409 },
   CONTROL_REQUIRED: { status: 403 },
+  // The terminal's controller wrote within the `ifIdleMs` a `terminals.take` gave: it's typing.
+  CONTROL_BUSY: { status: 409 },
+  // The connection's credential doesn't let it do this, as a device minting another: only the
+  // owner's does. Unlike UNAUTHORIZED, the connection goes on.
+  FORBIDDEN: { status: 403 },
   ALREADY_ATTACHED: { status: 409 },
   SNAPSHOT_TOO_LARGE: { status: 413 },
   UPLOAD_TOO_LARGE: { status: 413 },
@@ -169,6 +180,9 @@ export const contract = {
     // agents' messages; its folder stays. A project the runner doesn't have, as one
     // removed already, is NOT_FOUND.
     remove: procedure.input(z.strictObject({ projectId: id })).output(z.void()),
+    // The projects as they change, as `projectsChange` says, for a client sharing them with
+    // others.
+    watch: procedure.meta({ since: 5 }).input(z.void()).output(eventIterator(projectsChange)),
     // One folder of the project's directory as it is now, named by its path from the
     // project's root with `/` between names ("" for the root). The entries are sorted,
     // folders first; git's own `.git` is never among them. A project the runner doesn't
@@ -285,6 +299,26 @@ export const contract = {
         z.strictObject({ sessionId: id, state: clientState, visitedAt: z.number().nullable() }),
       )
       .output(z.void()),
+    // Changes the session's client state by `patch`, applied to the JSON the runner holds
+    // without reading what it means, and when the person last visited it, where given;
+    // resolves its new revision. `writer` names the client instance (any short token) and
+    // `base` the revision its patch was made on, which `watch` passes on. A patch that leaves
+    // no JSON object, or a state past `maxClientStateLength`, is CONFLICT and changes nothing.
+    change: procedure
+      .meta({ since: 4 })
+      .input(
+        z.strictObject({
+          sessionId: id,
+          writer: z.string().min(1).max(64),
+          base: z.number().int().nonnegative(),
+          patch: sessionPatch,
+          visitedAt: z.number().nullable().optional(),
+        }),
+      )
+      .output(z.strictObject({ revision: z.number().int().nonnegative() })),
+    // Every session's changes, as `sessionChange` says, for a client sharing them with others.
+    // Ends with the connection.
+    watch: procedure.meta({ since: 4 }).input(z.void()).output(eventIterator(sessionChange)),
   },
   terminals: {
     // Every terminal of the session, running or saved to restore, oldest first.
@@ -366,7 +400,7 @@ export const contract = {
     // without restarting it. A lead takes its whole team along, at every depth; a teammate
     // moved on its own leaves its lead. Each keeps its handle unless the session it goes to
     // has given it already, or a terminal there holds it, then draws that session's next.
-    // Its team's `ledBy` ids stay, as a terminal keeps its id. Its Inbox rows and
+    // Its team's `ledBy` ids stay, as a terminal keeps its id. Its Inbox entries and
     // the companion items its bar holds go with it, and `watch` tells each move as a `changed` with the new `sessionId`. A terminal
     // it keeps nothing of is TERMINAL_NOT_FOUND; a session it doesn't have NOT_FOUND; the
     // terminal's own session, one of another project, or one being removed, a CONFLICT, as
@@ -411,6 +445,26 @@ export const contract = {
       .input(z.strictObject({ terminalId: id, cols: columns, rows }))
       .output(z.void()),
     ack: procedure.input(z.strictObject({ terminalId: id, sequence })).output(z.void()),
+    // Takes control of a terminal this client is attached to: its attachment controls from now
+    // on, and the one that controlled observes, its writes and resizes refused. With
+    // `ifIdleMs`, only where the controller hasn't written for that long, else CONTROL_BUSY.
+    // A controller that doesn't follow `controls` couldn't learn it lost control, so keeps it:
+    // CONTROL_IN_USE. Taking a terminal no one controls, or that this client does, is fine; one
+    // this client isn't attached to is a CONFLICT.
+    take: procedure
+      .meta({ since: 8 })
+      .input(
+        z.strictObject({
+          terminalId: id,
+          ifIdleMs: z.number().int().min(0).max(60_000).optional(),
+        }),
+      )
+      .output(z.void()),
+    // Who controls each terminal this client is attached to (`TerminalControl`), as each
+    // attachment starts and again as it changes. A client that follows it is handed control
+    // when the controller lets go (detaches, closes or disconnects): the one of those observing
+    // the terminal it used last. Lapses with the connection.
+    controls: procedure.meta({ since: 8 }).input(z.void()).output(eventIterator(terminalControl)),
     // The terminal this client's person is using now, null for none: the one on screen in Focus
     // view, the selected one in Grid and Canvas, while the window has their focus. Each client
     // has one, which replaces its last and lapses with its connection, and the runner gives
@@ -419,6 +473,13 @@ export const contract = {
     // most to the system, however fast they are told. A terminal not there is not an error: the
     // call stands for whenever it starts.
     active: procedure.input(z.strictObject({ terminalId: id.nullable() })).output(z.void()),
+    // The project this client shows now, null to say nothing of any (as a window that shows none), which the desktop app's project windows
+    // tell so that what an agent asks of the person (a terminal to open, a command to approve, a
+    // look at a page) goes to the window that shows the project of the terminal that asked: else
+    // to the client used last, else to the one that connected last. Each client has one, which
+    // replaces its last and lapses with its connection; a client that never calls it is only
+    // reached by the last of these.
+    showing: procedure.input(z.strictObject({ projectId: id.nullable() })).output(z.void()),
     // The terminals this client's person has in sight now, as a whole list that replaces its
     // last: really on screen and legible, which is what lets a sleeper wake. Each client has
     // its own, which lapses with its connection. A terminal no client lists is unseen, and
@@ -634,6 +695,14 @@ export const contract = {
     answer: procedure
       .input(z.strictObject({ terminalId: id, request: agentRef, answer: requestAnswer }))
       .output(z.void()),
+    // Takes back a permit of the shipping gate that stands for the terminal's agent (its
+    // `agents.detail` `permits` id), as the person asked: it ends at once, with every target it
+    // covered, and the agent is told. Resolves whether one stood; a terminal it doesn't have
+    // is NOT_FOUND.
+    takeBack: procedure
+      .meta({ since: 10 })
+      .input(z.strictObject({ terminalId: id, permit: z.string().min(1).max(64) }))
+      .output(z.strictObject({ ended: z.boolean() })),
     // Writes a request's raw dialog (one the runner could not read, `agents.detail`'s
     // `dialog.type` "raw") to a file the person can attach to a bug report or drop into a
     // harness's test fixtures: the screen as it is now, the request's kind, tool and input,
@@ -1025,6 +1094,11 @@ export const contract = {
     list: procedure.input(z.void()).output(z.array(inboxEntry)),
     watch: procedure.input(z.void()).output(eventIterator(z.array(inboxEntry))),
     answer: procedure.input(z.strictObject({ id, answer: askAnswer })).output(z.void()),
+    // Answers an ask of several questions, all at once; errors as `answer` does.
+    answerQuestions: procedure
+      .meta({ since: 9 })
+      .input(z.strictObject({ id, answers: questionsAnswer }))
+      .output(z.void()),
     // Marks entries read: a tell stays listed, resolved, a finished turn is removed, an ask is
     // not touched. Unknown ids are skipped.
     read: procedure.input(z.strictObject({ ids: z.array(id).max(1000) })).output(z.void()),
@@ -1059,6 +1133,12 @@ export const contract = {
     // A terminal's threads and messages with their states. An unknown terminal is
     // TERMINAL_NOT_FOUND.
     list: procedure.input(z.strictObject({ terminalId: id })).output(terminalMessages),
+    // What the terminal's doorbell rings and the hooks' deliveries say after sequence `since`
+    // (0 for all the runner keeps), for the terminal's view to draw: `list` carries the latest
+    // sequence (`ringSeq`), so a reader asks once it grew. An unknown terminal is TERMINAL_NOT_FOUND.
+    rings: procedure
+      .input(z.strictObject({ terminalId: id, since: z.number().int().nonnegative() }))
+      .output(terminalRings),
     // What `list` says, then again on each change to the terminal's threads, messages or
     // delivery state, or to the pause, until the terminal is gone. An unknown terminal is
     // TERMINAL_NOT_FOUND.
@@ -1149,6 +1229,52 @@ export const contract = {
     get: procedure.input(z.void()).output(runnerSettingsState),
     // Changes the settings given; the others stay.
     set: procedure.input(runnerSettings.partial()).output(z.void()),
+    // The settings as they are now, then again each time a client changes them, so every
+    // device the person uses follows. Ends with the connection.
+    watch: procedure.meta({ since: 7 }).input(z.void()).output(eventIterator(runnerSettingsState)),
+  },
+  // The person's own preferences, which follow them from device to device (see
+  // `preferenceChange`; docs/backend-api.md, "Preferences").
+  preferences: {
+    // Every preference kept, and the revision they are at (`writer` null).
+    get: procedure.meta({ since: 7 }).input(z.void()).output(preferenceChange),
+    // Keeps `value` as the preference `key`, or forgets it for null, as `writer` (a client
+    // instance's own short token, which `watch` passes on) changed it; resolves the new
+    // revision. Last write wins, key by key. A key past `maxPreferences` is a CONFLICT.
+    set: procedure
+      .meta({ since: 7 })
+      .input(
+        z.strictObject({
+          key: preferenceKey,
+          value: preferenceValue.nullable(),
+          writer: z.string().min(1).max(64),
+        }),
+      )
+      .output(z.strictObject({ revision: z.number().int().nonnegative() })),
+    // Every preference first, then each change: a reader slower than the changes gets each
+    // key once, as it is when it reads it. Ends with the connection.
+    watch: procedure.meta({ since: 7 }).input(z.void()).output(eventIterator(preferenceChange)),
+  },
+  // Devices with credentials of their own (docs/backend-api.md, "Devices"). A connection
+  // proved by the owner's token, or the desktop app's own, is the owner's; one proved by a
+  // device's credential is that device's.
+  devices: {
+    // Gives a new device its own credential, which its handshake's token then is: answered
+    // once, as the runner keeps only its hash. The owner's only (FORBIDDEN to a device);
+    // `maxDevices` not revoked at once, a CONFLICT.
+    mint: procedure
+      .meta({ since: 6 })
+      .input(z.strictObject({ name: deviceName }))
+      .output(mintedDevice),
+    // The devices not revoked, oldest first.
+    list: procedure.meta({ since: 6 }).input(z.void()).output(z.array(device)),
+    // Revokes a device's credential: its sessions end at once, and its next handshake is
+    // UNAUTHORIZED with `{ reason: "revoked" }`. The owner may revoke any device, a device
+    // only itself (FORBIDDEN otherwise); one not listed is NOT_FOUND.
+    revoke: procedure
+      .meta({ since: 6 })
+      .input(z.strictObject({ id: deviceId }))
+      .output(z.void()),
   },
   // Novadeck's tour, a live run of the person's own agent in a folder of Novadeck's.
   tour: {
@@ -1166,6 +1292,18 @@ export const contract = {
     // with its brief from the step it is on, where it has gone quiet. A terminal elsewhere, or
     // whose agent hasn't shown yet, is a CONFLICT.
     nudge: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
+    // Rings the agent in a terminal of the tour's folder the artist's brief, as `brief` rings
+    // the lead's: the artist is an agent on no team, started by the tour beside the others.
+    // As `brief`, a terminal elsewhere or whose agent hasn't shown yet is a CONFLICT; so is no
+    // run, no lead yet, a terminal that is the lead or has one, or a run whose artist is
+    // another terminal. Asking again for the same terminal rings nothing twice.
+    artist: procedure.input(z.strictObject({ terminalId: id })).output(z.void()),
+    // The person keeps the project: its folder stops being the tour's (the marker goes, the
+    // project's own AGENTS.md replaces the sandbox's rules, the tour's Claude Code settings
+    // go), its lead is told, and the run is forgotten. A later run starts in another folder.
+    // With no run in memory (the runner started since) it keeps every marked tour folder that is
+    // open as a project, and with none it does nothing.
+    keep: procedure.input(z.void()).output(z.void()),
   },
 }
 

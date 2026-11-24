@@ -14,16 +14,71 @@ describe("connection failure", () => {
     })
   })
 
-  context("when the runner is another version or refuses the app", () => {
-    it("says so and sorts them apart", () => {
-      expect(connectFailure(new WireError("INCOMPATIBLE_PROTOCOL"))).toMatchObject({
-        kind: "incompatible",
-        message: "This runner is from a different Novadeck version.",
+  context("when the app and the runner are outside each other's window", () => {
+    const behind = (side: "client" | "server") =>
+      new WireError("INCOMPATIBLE_PROTOCOL", "Outside the window.", {
+        data: { behind: side, server: 4, client: 3 },
       })
+
+    it("says to update the runner when the runner is behind", () => {
+      expect(connectFailure(behind("server"), true)).toEqual({
+        kind: "incompatible",
+        update: "runner",
+        message: "The runner is older than this app. Update Novadeck where the runner runs.",
+        code: "INCOMPATIBLE_PROTOCOL",
+        detail: "Outside the window.",
+      })
+      // One the wire couldn't place came from a runner older than every window.
+      expect(connectFailure(new WireError("INCOMPATIBLE_PROTOCOL"), true)).toMatchObject({
+        update: "runner",
+      })
+    })
+
+    it("says to update the app in the desktop app, which quits", () => {
+      expect(connectFailure(behind("client"), true)).toMatchObject({
+        kind: "incompatible",
+        update: "app",
+        message: "This app is older than its runner. Update Novadeck to connect.",
+      })
+      expect(connectFailure(behind("client"), true).reload).toBeUndefined()
+    })
+
+    it("offers a reload in a browser, which loads the runner's newer page", () => {
+      expect(connectFailure(behind("client"), false)).toMatchObject({
+        kind: "incompatible",
+        update: "app",
+        reload: true,
+        message: "This page is older than its runner. Reload it to load the newer Novadeck.",
+      })
+    })
+  })
+
+  context("when the runner refuses the app", () => {
+    it("says so", () => {
       expect(connectFailure(new WireError("UNAUTHORIZED"))).toMatchObject({
         kind: "unauthorized",
         message: "The runner didn't accept this app.",
       })
+    })
+
+    it("says this device was signed out once its credential is revoked, and who can let it in", () => {
+      const failure = connectFailure(
+        new WireError("UNAUTHORIZED", "Unauthorized", { data: { reason: "revoked" } }),
+      )
+      expect(failure).toEqual({
+        kind: "unauthorized",
+        revoked: true,
+        message:
+          "This device was signed out of the runner. The runner's owner can let it in again with a new credential.",
+        code: "UNAUTHORIZED",
+        detail: "Unauthorized",
+      })
+      // A reason it doesn't know is no reason: a plain refusal.
+      expect(
+        connectFailure(
+          new WireError("UNAUTHORIZED", "Unauthorized", { data: { reason: "later" } }),
+        ),
+      ).not.toHaveProperty("revoked")
     })
   })
 

@@ -14,37 +14,46 @@ export type ServerOptions = HttpOptions &
     uploads?: string
     /** Where saved dialogs go; see `RunnerOptions.dialogs`. */
     dialogs?: string
+    /**
+     * The file saved transcripts' key is kept in, made where missing (see
+     * `loadTranscriptKeyFile`); without it no transcript is saved.
+     */
+    transcriptKeyFile?: string
     /** The relay agents start for Novadeck's MCP server and hooks; see `RunnerOptions.relay`. */
     relay?: string
     /** Voice input's engine and where it installs; see `RunnerOptions.voice`. */
     voice?: RunnerOptions["voice"]
     /** Murmur's engine and where it installs; see `RunnerOptions.murmur`. */
     murmur?: RunnerOptions["murmur"]
-    /**
-     * A file holding the key saved transcripts are encrypted with, made on the first start;
-     * see `loadKeyFile`. Without one no transcript is saved or shown again.
-     */
-    transcriptKeyFile?: string
+    /** The default key beside the database can be unavailable while the runner starts. */
+    defaultTranscriptKey?: boolean
     /** The cap on running and retained terminals: 32 when omitted, none when `null`. */
     maxTerminals?: number | null
     terminals?: TerminalOptions
   }>
 
-export type { HttpServer as Server } from "./http.js"
+/** A standalone runner's listener, which `superviseRunner` ends. */
+export type Server = HttpServer &
+  Readonly<{
+    /** Saves every terminal's restore state now; nothing without a token, as there is no runner. */
+    persist: () => void
+  }>
 
 /** Standalone runner: HTTP status plus a token-authenticated WebSocket runner API. */
-export const startServer = async (options: ServerOptions = {}): Promise<HttpServer> => {
-  if (options.token === undefined) return startHttpServer(options)
-  const [{ createRunner }, { serveWebSocket }, { loadKeyFile }] = await Promise.all([
-    import("./index.js"),
-    import("@novadeck/wire/server"),
-    import("./terminals/key-file.js"),
-  ])
-  // Read before anything starts, so a key file that can't be used stops the start.
+export const startServer = async (options: ServerOptions = {}): Promise<Server> => {
+  if (options.token === undefined) return { ...(await startHttpServer(options)), persist: () => {} }
+  const [{ createRunner }, { serveWebSocket, tokenCheck }, { loadTranscriptKeyFile }, { logs }] =
+    await Promise.all([
+      import("./index.js"),
+      import("@novadeck/wire/server"),
+      import("./transcript-key-file.js"),
+      import("./log.js"),
+    ])
+  const keyFile = options.transcriptKeyFile
   const transcriptKey =
-    options.transcriptKeyFile === undefined
+    keyFile === undefined || options.defaultTranscriptKey
       ? undefined
-      : await loadKeyFile(options.transcriptKeyFile)
+      : await (await import("./terminals/key-file.js")).loadKeyFile(keyFile)
   // A shared, network-reachable runner keeps a cap unless told otherwise; the
   // desktop runner has none. The manager reads an absent cap as none.
   const cap = options.maxTerminals === undefined ? 32 : options.maxTerminals
@@ -57,13 +66,25 @@ export const startServer = async (options: ServerOptions = {}): Promise<HttpServ
     ...(options.relay !== undefined && { relay: options.relay }),
     ...(options.voice !== undefined && { voice: options.voice }),
     ...(options.murmur !== undefined && { murmur: options.murmur }),
+    // The runner starts at once and keeps no transcript until the key settles.
+    ...(options.defaultTranscriptKey &&
+      keyFile !== undefined && {
+        transcriptKey: loadTranscriptKeyFile({
+          path: keyFile,
+          platform: process.platform,
+          log: logs.for("transcript-key"),
+        }),
+      }),
     terminals: { ...(cap !== null && { maxTerminals: cap }), ...options.terminals },
   })
   let sockets: ReturnType<typeof serveWebSocket>
   try {
+    // The owner's token, then a device's own credential (`devices` in the contract). The
+    // owner's is checked first and always, in constant time, as before devices.
+    const owner = tokenCheck(options.token)
     sockets = serveWebSocket(runner.sessions, {
       path: "/api/rpc",
-      token: options.token,
+      verify: (token) => owner(token) || (runner.device(token) ?? false),
       origins: options.origins ?? ["http://127.0.0.1:5173"],
       maxPayloadBytes: maxWebSocketMessageBytes,
       // Room for a terminal's largest initial snapshot, and the traffic beside it.
@@ -73,14 +94,20 @@ export const startServer = async (options: ServerOptions = {}): Promise<HttpServ
     await runner.close()
     throw error
   }
-  return startHttpServer(options, {
-    attach: (server) => server.on("upgrade", sockets.upgrade),
+  const server = await startHttpServer(options, {
+    attach: (listener) => listener.on("upgrade", sockets.upgrade),
     async close() {
+      // The runner first: its last save is made while every shell still runs, before the
+      // clients' sessions end, which can take a while.
+      const closing = runner.close()
+      // Awaited below; until then a failure must not count as unhandled.
+      closing.catch(() => {})
       try {
         await sockets.close()
       } finally {
-        await runner.close()
+        await closing
       }
     },
   })
+  return { ...server, persist: () => runner.persist() }
 }

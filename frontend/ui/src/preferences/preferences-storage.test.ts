@@ -30,6 +30,16 @@ describe("readPreferences", () => {
     }
   })
 
+  it("reads preferences saved with the old Project windows switch, and leaves the switch out", () => {
+    localStorage.setItem(
+      preferencesStorageKey,
+      JSON.stringify({ fontSize: 14, sound: false, projectWindows: true }),
+    )
+
+    expect(readPreferences()).toMatchObject({ fontSize: 14, sound: false })
+    expect(readPreferences()).not.toHaveProperty("projectWindows")
+  })
+
   it("reads the sound setting, and keeps a volume within 0 and 1", () => {
     expect(readPreferences()).toMatchObject({ sound: true, soundVolume: 0.6 })
     for (const [saved, volume] of [

@@ -58,6 +58,8 @@ const terminal = (
     settleLost?: boolean
     /** The person's Inbox replies wait there: the line the host gives for them. */
     replies?: (nonce: string) => string
+    /** The handles of the senders of the messages waiting there (the host's `senders`). */
+    senders?: readonly string[]
     /** Its agent holds Novadeck's MCP tools only this long from the start, in milliseconds. */
     toolsWaitMs?: number
   } = {},
@@ -89,6 +91,7 @@ const terminal = (
   const emptied: number[] = []
   const blocks: (Waits | null)[] = []
   const plains: boolean[] = []
+  const noted: { nonce: string; replies: boolean }[] = []
   let leftover = options.leftover
   const ringLeftovers: string[] = []
   // What the doorbell asked of the agent and the foreground, in order.
@@ -171,7 +174,9 @@ const terminal = (
     agentGone: () => void asked.push("agentGone"),
     target: () => target,
     ...(options.replies && { replies: () => options.replies }),
+    ...(options.senders && { senders: () => options.senders! }),
     ringsPlain: (_, plain) => void plains.push(plain),
+    noted: (_, nonce, replies) => void noted.push({ nonce, replies }),
   }
   const target: TypingTarget = {
     screen: async () => {
@@ -250,6 +255,7 @@ const terminal = (
     emptied,
     blocks,
     plains,
+    noted,
     ringLeftovers,
     asked,
     emptiedAt,
@@ -470,7 +476,7 @@ describe("the doorbell", () => {
     await vi.waitFor(() => expect(enters(written)).toBe(1))
     expect(written[0]).toMatch(
       // eslint-disable-next-line no-control-regex -- A bracketed paste's markers.
-      /^\x1b\[200~\[Novadeck: automatic notice, agent messages waiting, [A-Za-z0-9]{6}\]\x1b\[201~$/,
+      /^\x1b\[200~<novadeck-doorbell from="" ring="[A-Za-z0-9]{6}"\/>\x1b\[201~$/,
     )
     expect(state()).toMatchObject({ holds: 1, held: false })
     confirm()
@@ -591,24 +597,44 @@ describe("the doorbell", () => {
     doorbell.close()
   })
 
+  it("rings with the handles of the senders of the waiting messages", async () => {
+    const { host, written, confirm } = terminal({ senders: ["newtz", "hushz", "novadeck"] })
+    const doorbell = new Doorbell(host, host.queue, fast)
+    doorbell.changed("t")
+    await vi.waitFor(() => expect(enters(written)).toBe(1))
+    expect(written[0]).toMatch(
+      // eslint-disable-next-line no-control-regex -- A bracketed paste's markers.
+      /^\x1b\[200~<novadeck-doorbell from="newtz hushz novadeck" ring="[A-Za-z0-9]{6}"\/>\x1b\[201~$/,
+    )
+    confirm()
+    doorbell.close()
+  })
+
   it("rings with the person's Inbox replies as its line, and the plain line after a ring of them failed", async () => {
-    const replies = (nonce: string) => `[Novadeck Inbox reply, ${nonce}] Re "x": yes [${nonce}]`
-    const { host, written, failed, rearm, plains } = terminal({ takes: "elsewhere", replies })
+    const replies = (nonce: string) =>
+      `<novadeck-reply>Re "x": yes</novadeck-reply><end ring="${nonce}"/>`
+    const { host, written, failed, rearm, plains, noted } = terminal({
+      takes: "elsewhere",
+      replies,
+    })
     const doorbell = new Doorbell(host, host.queue, fast)
     doorbell.changed("t")
     await vi.waitFor(() => expect(failed).toHaveLength(1))
     expect(plains).toEqual([true])
+    // The view is told what each line says, once per nonce: the replies, then the plain line.
+    expect(noted).toEqual([{ nonce: failed[0], replies: true }])
     expect(written[0]).toMatch(
       // eslint-disable-next-line no-control-regex -- A bracketed paste's markers.
-      /^\x1b\[200~\[Novadeck Inbox reply, ([A-Za-z0-9]{6})\] Re "x": yes \[\1\]\x1b\[201~$/,
+      /^\x1b\[200~<novadeck-reply>Re "x": yes<\/novadeck-reply><end ring="([A-Za-z0-9]{6})"\/>\x1b\[201~$/,
     )
     rearm()
     doorbell.changed("t")
     await vi.waitFor(() => expect(written).toHaveLength(2), { timeout: 5_000 })
     expect(written[1]).toMatch(
       // eslint-disable-next-line no-control-regex -- A bracketed paste's markers.
-      /^\x1b\[200~\[Novadeck: automatic notice, agent messages waiting, [A-Za-z0-9]{6}\]\x1b\[201~$/,
+      /^\x1b\[200~<novadeck-doorbell from="" ring="[A-Za-z0-9]{6}"\/>\x1b\[201~$/,
     )
+    expect(noted.map((each) => each.replies)).toEqual([true, false])
     doorbell.close()
   })
 
@@ -1030,12 +1056,12 @@ describe("a doorbell line a ring left alone in the box", () => {
 
   it("is submitted after a reply line's ring was rejected, and is the person's once they edit it", async () => {
     const replies = (nonce: string) =>
-      `[Novadeck Inbox reply, ${nonce}] Re your ask "x": yes [${nonce}]`
+      `<novadeck-reply>Re your ask "x": yes</novadeck-reply><end ring="${nonce}"/>`
     const rejected = terminal({ takes: "elsewhere", readsLeftover: true, replies })
     const doorbell = new Doorbell(rejected.host, rejected.host.queue, recheck)
     doorbell.changed("t")
     await vi.waitFor(() => expect(rejected.failed).toHaveLength(1))
-    const nonce = /\[Novadeck Inbox reply, ([A-Za-z0-9]+)\]/.exec(rejected.written[0]!)?.[1]
+    const nonce = /<end ring="([A-Za-z0-9]+)"\/>/.exec(rejected.written[0]!)?.[1]
     expect(nonce).toBeDefined()
     await vi.waitFor(() => expect(rejected.ringLeftovers).toEqual([nonce]))
     doorbell.close()
@@ -1059,7 +1085,7 @@ describe("a doorbell line a ring left alone in the box", () => {
   it("is the person's draft once anything is beside it, and never pressed", async () => {
     const drafted = terminal({ ringable: false, readsLeftover: true, stalled: "draft" })
     const doorbell = new Doorbell(drafted.host, drafted.host.queue, recheck)
-    drafted.rows[6] = "> and then [Novadeck: automatic notice, agent messages waiting, k3f9Xz]"
+    drafted.rows[6] = '> and then <novadeck-doorbell from="" ring="k3f9Xz"/>'
     doorbell.changed("t")
     await vi.waitFor(() => expect(drafted.blocks).toContain("draft"))
     await sleep(150)

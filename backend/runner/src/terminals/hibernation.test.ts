@@ -1,10 +1,11 @@
-import type { AgentActivity } from "@novadeck/protocol"
+import type { AgentActivity, AgentName } from "@novadeck/protocol"
 
 import { started } from "../harnesses/activity.js"
 import { describe, expect, it } from "../test.js"
 import {
   Hibernation,
   mayHibernate,
+  readTree,
   vetoOf,
   windowsTree,
   type Facts,
@@ -13,6 +14,7 @@ import {
   type Veto,
 } from "./hibernation.js"
 import type { Record } from "./record.js"
+import type { Turn } from "./store-turns.js"
 
 const minute = 60_000
 const now = 10_000_000
@@ -121,6 +123,8 @@ describe("when an agent may be stopped to rest", () => {
     ["unbaselined", { processes: { tree: quiet().processes!.tree, baseline: undefined } }],
     ["stray", { processes: processes({ below: new Set(["20:1", "99:5"]) }) }],
     ["beside", { processes: processes({ beside: true }) }],
+    // A server it started detached, which the rest's end would end and no resume restarts.
+    ["detached", { processes: processes({ detached: true }) }],
   ]
 
   for (const [veto, change] of vetoes)
@@ -219,24 +223,43 @@ describe("an agent's place in a Windows terminal's tree", () => {
   })
 })
 
+/** Lets every callback pending now run. */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
 /** A running terminal with an idle agent bound, as the sweep sees it, and a host that notes what it is asked. */
 const resting = (
-  change: { occupied?: () => boolean; end?: (record: Record) => Promise<void> } = {},
+  change: {
+    occupied?: () => boolean
+    end?: (record: Record) => Promise<void>
+    cards?: () => number
+    agent?: AgentName
+    /** The agent the terminal rests on, as the sleepers say. */
+    asleep?: AgentName
+  } = {},
 ) => {
+  const agent = change.agent ?? "claude"
+  let asleep = change.asleep
   const record = {
     summary: { id: "t", handle: "moth", lastProgram: "bash" },
     bound: {
-      binding: { agent: "claude", sessionId: "s", instance: "1" },
+      binding: { agent, sessionId: "s", instance: "1" },
       activity: started(0),
       telemetry: null,
     },
-    agents: { claude: { sessionId: "s", seq: 1, endedAt: 1 } },
+    agents: { [agent]: { sessionId: "s", seq: 1, endedAt: 1 } },
     terminal: { exit: null, exiting: false, attached: 0 },
     closed: false,
     changed: false,
     baseline: { instance: "1", begun: true, taken: new Set<string>(), timer: undefined },
   } as unknown as Record
   const calls: string[] = []
+  const turn = (name: string): Turn => {
+    calls.push(name)
+    let end!: () => void
+    const over = new Promise<void>((resolve) => (end = resolve))
+    void over.then(() => calls.push(`${name} ended`))
+    return { end, over }
+  }
   const host = {
     stopping: () => false,
     records: () => [record],
@@ -248,8 +271,14 @@ const resting = (
     inbox: () => ({ hasOpenAsk: () => false }),
     approvals: () => ({ involves: () => false }),
     opens: () => ({ asked: () => false }),
-    sleepers: () => ({ restable: () => true }),
+    sleepers: () => ({
+      restable: () => true,
+      resting: () => (asleep ? { agent: asleep, sessionId: "s" } : undefined),
+      // The turns of an agent that shares its store, noted as they are taken and given back.
+      turns: { wake: async () => turn("wake turn"), stop: async () => turn("stop turn") },
+    }),
     detailWatched: () => false,
+    cards: change.cards,
     trees: () => ({}),
     boxHolds: async () => false,
     save: async () => void calls.push("save"),
@@ -257,7 +286,10 @@ const resting = (
       calls.push("end")
       await change.end?.(record)
     },
-    rested: () => void calls.push("rested"),
+    rested: () => {
+      calls.push("rested")
+      asleep = agent
+    },
   } as unknown as HibernationHost
   const hibernation = new Hibernation(host, { windowMs: 0 })
   const tree: Tree = {
@@ -274,6 +306,18 @@ const resting = (
   return { record, calls, hibernation, rest }
 }
 
+describe("an agent the shipping gate's card waits on", () => {
+  // `request_permit` answers at once, so the agent's turn ends while the card waits: a rested
+  // terminal leaves the Inbox, and the card with it.
+  it("stays awake while a card is open, and may rest once none is", () => {
+    let cards = 1
+    const { record, hibernation } = resting({ cards: () => cards })
+    expect(vetoOf(hibernation.facts(record, 10_000), 10_000)).toBe("attention")
+    cards = 0
+    expect(vetoOf(hibernation.facts(record, 10_000), 10_000)).not.toBe("attention")
+  })
+})
+
 describe("stopping an agent that looked idle", () => {
   it("saves the screen, ends the agent, and lets the terminal rest, pinning what resumes", async () => {
     const { record, calls, rest, hibernation } = resting()
@@ -285,6 +329,66 @@ describe("stopping an agent that looked idle", () => {
     await done
     expect(calls).toEqual(["save", "end", "rested"])
     expect(hibernation.settling("t")).toBeUndefined()
+  })
+
+  it("ends an agent that shares its store in its turn, which lasts until its end", async () => {
+    let exited!: () => void
+    const exit = new Promise<void>((resolve) => (exited = resolve))
+    const { calls, rest } = resting({ agent: "opencode", end: () => exit })
+    const done = rest()
+    await flush()
+    expect(calls).toEqual(["save", "stop turn", "end"])
+    exited()
+    await done
+    await flush()
+    expect(calls).toEqual(["save", "stop turn", "end", "stop turn ended", "rested"])
+  })
+
+  it("gives its turn back where it leaves an agent that shares its store as it was", async () => {
+    const { calls, rest } = resting({ agent: "opencode", occupied: () => true })
+    await rest()
+    await flush()
+    expect(calls).toEqual(["save", "stop turn", "stop turn ended"])
+  })
+
+  it("gives its turn back where ending an agent that shares its store failed", async () => {
+    const { calls, rest } = resting({
+      agent: "opencode",
+      end: () => Promise.reject(new Error("no")),
+    })
+    await rest()
+    await flush()
+    expect(calls).toEqual(["save", "stop turn", "end", "stop turn ended"])
+  })
+
+  it("has a wake of an agent that shares its store wait for its turn, and no other", async () => {
+    const opencode = resting({ asleep: "opencode" })
+    await opencode.hibernation.settling("t")
+    expect(opencode.calls).toEqual(["wake turn"])
+    expect(resting({ asleep: "claude" }).hibernation.settling("t")).toBeUndefined()
+  })
+
+  it("holds a wake's turn until its agent binds, by when it has its store open", async () => {
+    const { record, calls, hibernation } = resting({ asleep: "opencode", agent: "opencode" })
+    const { bound } = record
+    record.bound = null
+    await hibernation.settling("t")
+    hibernation.look(record)
+    await flush()
+    expect(calls).toEqual(["wake turn"])
+    record.bound = bound
+    hibernation.look(record)
+    await flush()
+    expect(calls).toEqual(["wake turn", "wake turn ended"])
+  })
+
+  it("has a wake meeting its own stop take its turn once that stop ended", async () => {
+    const { calls, rest, hibernation } = resting({ agent: "opencode" })
+    const done = rest()
+    await hibernation.settling("t")
+    await done
+    await flush()
+    expect(calls).toEqual(["save", "stop turn", "end", "stop turn ended", "rested", "wake turn"])
   })
 
   it("leaves it as it was when a message came in while the screen was saved", async () => {
@@ -328,3 +432,46 @@ describe("stopping an agent that looked idle", () => {
     expect(calls).toEqual(["save", "end"])
   })
 })
+
+describe.skipIf(process.platform === "win32")(
+  "what an agent left detached, as hibernation reads it",
+  () => {
+    // A shell 10 whose agent 20 holds its foreground, as one listing shows them.
+    const rows = [
+      { pid: 10, parent: 1, group: 10, foreground: 20, started: "100", zombie: false },
+      { pid: 20, parent: 10, group: 20, foreground: 20, started: "200", zombie: false },
+    ]
+    const recordWith = (
+      leftovers: () => Promise<readonly { pid: number; started: string }[] | undefined>,
+    ) =>
+      ({
+        terminal: { pty: { pid: 10, agentRan: true, leftovers } },
+        bound: { binding: { agent: "codex", sessionId: "s1", instance: "20" } },
+        agents: {},
+      }) as unknown as Parameters<typeof readTree>[0]
+
+    it("is told where the terminal's scope holds what its agent left", async () => {
+      const tree = await readTree(
+        recordWith(() => Promise.resolve([{ pid: 30, started: "300" }])),
+        undefined,
+        () => Promise.resolve(rows),
+        () => false,
+      )
+      expect(tree).toMatchObject({ placed: true, foreground: true, beside: false, detached: true })
+    })
+
+    it("isn't, where nothing is left or the scope can't be read, which the rest couldn't end either", async () => {
+      const trees = await Promise.all(
+        [[], undefined].map((found) =>
+          readTree(
+            recordWith(() => Promise.resolve(found)),
+            undefined,
+            () => Promise.resolve(rows),
+            () => false,
+          ),
+        ),
+      )
+      expect(trees.map((tree) => tree?.detached)).toEqual([false, false])
+    })
+  },
+)

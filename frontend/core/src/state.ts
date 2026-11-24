@@ -28,6 +28,7 @@ import {
   withBar,
 } from "./items/transitions"
 import { emptyLayout, pruneCanvasLayout, spanTerminal } from "./layout/workspace-layout"
+import { sharedState, type SharedView } from "./restore"
 import {
   addPanel,
   addTerminal,
@@ -105,6 +106,10 @@ export type WorkspaceAction =
       initialSession?: WorkspaceSession
       enabledViews?: ViewMode[]
     }
+  // The backend read a project again, as a window that took it on from another window holds
+  // what the runner has now: its sessions, terminals and layouts replace this window's copy,
+  // keeping the open session if it is still there; a project this window didn't know joins it.
+  | { type: "project/sync"; project: WorkspaceProject }
   // The person removes a project, closing its terminals. The last one stays: the
   // workspace always has a project.
   | { type: "project/remove"; projectId: string; now: number; enabledViews?: ViewMode[] }
@@ -118,8 +123,34 @@ export type WorkspaceAction =
     }
   // The person renames a session.
   | { type: "session/rename"; projectId: string; workspaceSessionId: string; name: string }
+  // Another client's change to a session: its shared view (its order, layout and bars), laid
+  // in as a load lays a saved one (`sharedState`), and its name. Never sent to the runner,
+  // which already holds it.
+  | {
+      type: "session/shared"
+      projectId: string
+      workspaceSessionId: string
+      shared?: SharedView
+      name?: string
+    }
   // The person moves a session to a place in its project's list, as a drag drops it.
   | { type: "session/move"; projectId: string; workspaceSessionId: string; index: number }
+  // What another client did to the projects and sessions, laid in here as the person's own
+  // would be, and never sent to the runner, which holds it already: a session it made, which
+  // joins its project's list unopened; a session or project it removed, gone here as when the
+  // person removes one (the last stays; the open one hands over to the one visited last); its
+  // order of a project's sessions; and a project's new name.
+  | { type: "session/arrived"; projectId: string; session: WorkspaceSession }
+  | {
+      type: "session/gone"
+      projectId: string
+      workspaceSessionId: string
+      now: number
+      enabledViews?: ViewMode[]
+    }
+  | { type: "project/gone"; projectId: string; now: number; enabledViews?: ViewMode[] }
+  | { type: "sessions/arranged"; projectId: string; order: readonly string[] }
+  | { type: "project/renamed"; projectId: string; name: string }
   // The person deletes a session, closing its terminals. A project's last one stays: a
   // project always has a session. Deleting the open one opens the one visited last.
   | {
@@ -450,6 +481,21 @@ export const workspaceReducer = (workspace: Workspace, action: WorkspaceAction):
       const projects = left.map((item) => (item.id === project.id ? next : item))
       return { ...workspace, projects, activeProjectId: action.projectId }
     }
+    case "project/sync": {
+      const { project } = action
+      if (!project.history.length) return workspace
+      const held = workspace.projects.find((each) => each.id === project.id)
+      if (!held) return { ...workspace, projects: [...workspace.projects, project] }
+      const activeSessionId = project.history.some((each) => each.id === held.activeSessionId)
+        ? held.activeSessionId
+        : project.activeSessionId
+      return {
+        ...workspace,
+        projects: workspace.projects.map((each) =>
+          each.id === project.id ? { ...project, activeSessionId } : each,
+        ),
+      }
+    }
     case "project/remove": {
       const others = workspace.projects.filter((project) => project.id !== action.projectId)
       if (others.length === workspace.projects.length || !others.length) return workspace
@@ -513,6 +559,63 @@ export const workspaceReducer = (workspace: Workspace, action: WorkspaceAction):
           ),
         }
       })
+    case "session/arrived":
+      return workspaceReducer(workspace, {
+        type: "session/add",
+        projectId: action.projectId,
+        session: action.session,
+        activate: false,
+      })
+    case "session/gone":
+      return workspaceReducer(workspace, { ...action, type: "session/remove" })
+    case "project/gone":
+      return workspaceReducer(workspace, { ...action, type: "project/remove" })
+    case "sessions/arranged":
+      return updateProject(workspace, action.projectId, (project) => {
+        // Those the order names take its order, in the places they held; one it doesn't name,
+        // as one this client made that the runner doesn't have yet, keeps its place.
+        const named = new Set(action.order)
+        const next = action.order
+          .map((id) => project.history.find((session) => session.id === id))
+          .filter((session) => session !== undefined)
+        let taken = 0
+        const history = project.history.map((session) =>
+          named.has(session.id) ? next[taken++]! : session,
+        )
+        return history.every((session, index) => session === project.history[index])
+          ? project
+          : { ...project, history }
+      })
+    case "project/renamed":
+      return workspace.projects.some(
+        (project) => project.id === action.projectId && project.name !== action.name,
+      )
+        ? {
+            ...workspace,
+            projects: workspace.projects.map((project) =>
+              project.id === action.projectId ? { ...project, name: action.name } : project,
+            ),
+          }
+        : workspace
+    case "session/shared":
+      return updateProject(workspace, action.projectId, (project) =>
+        project.history.some((session) => session.id === action.workspaceSessionId)
+          ? {
+              ...project,
+              history: project.history.map((session) =>
+                session.id === action.workspaceSessionId
+                  ? {
+                      ...session,
+                      ...(action.name !== undefined && { name: action.name }),
+                      state: action.shared
+                        ? sharedState(session.state, action.shared)
+                        : session.state,
+                    }
+                  : session,
+              ),
+            }
+          : project,
+      )
     case "session/rename": {
       const name = action.name.trim()
       if (!name) return workspace

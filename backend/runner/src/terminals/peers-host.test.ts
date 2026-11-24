@@ -59,6 +59,22 @@ describe("what peers learn of a request waiting on the person", () => {
     expect(subject({ kind: "question", subject: "Which database?" })).toBe("Which database?")
     expect(subject({ kind: "plan", subject: "plan.md" })).toBe("plan.md")
   })
+  // A card waits on the person after `request_permit` answered, the agent's turn ended or not.
+  it("counts the shipping gate's open cards, after the harness's own requests", () => {
+    const cards = [{ askedAt: 7 }, { askedAt: 9 }]
+    expect(waitingOf({ pending: [] }, cards)).toEqual({
+      kind: "permission",
+      tool: "request_permit",
+      subject: null,
+      more: 1,
+      since: 7,
+    })
+    expect(waitingOf(null, cards.slice(1))).toMatchObject({ more: 0, since: 9 })
+    expect(waitingOf({ pending: [request({ toolName: "Edit" })] }, cards)).toMatchObject({
+      tool: "Edit",
+      more: 2,
+    })
+  })
 })
 
 const file = (path: string, secret = false) => ({ kind: "file" as const, path, secret })
@@ -228,8 +244,12 @@ describe("what peers read of a terminal", () => {
 
   describe("the background shells of each harness's agent, as agents lists them", () => {
     const minute = 60_000
-    // What each harness's decoder gives for a shell, in the shape of its own ids.
-    const shells: Record<AgentName, { ids: readonly [string, string, string]; secret: string }> = {
+    // What each harness's decoder gives for a shell, in the shape of its own ids. opencode runs
+    // no shell past its call (its bash has no background), so it has none to list.
+    const shells: Record<
+      Exclude<AgentName, "opencode">,
+      { ids: readonly [string, string, string]; secret: string }
+    > = {
       claude: { ids: ["bk1x2y3z4", "bq9w8e7r6", "bt5y4u3i2"], secret: "sk-live-9f8e7d6c5b4a3210" },
       codex: { ids: ["53902", "26916", "99018"], secret: "sk-live-9f8e7d6c5b4a3210" },
       agy: {

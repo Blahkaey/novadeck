@@ -31,7 +31,8 @@ const serve = async () => {
   const { wire: _, ...app } = contract
   const api = implement(app).$context<SessionContext>()
   const sessions = createSessions({
-    protocolVersion,
+    revision: protocolVersion,
+    oldestClient: protocolVersion,
     router: api.router({
       echo: api.echo.handler(({ input }) => input),
       bytes: api.bytes.handler(({ input }) => input.size),
@@ -72,7 +73,12 @@ const tunnel = (url: string, secret = token) => {
 }
 
 const joined = (client: MessagePortLike) =>
-  connect({ contract, transport: messagePort(client), protocolVersion })
+  connect({
+    contract,
+    transport: messagePort(client),
+    revision: protocolVersion,
+    oldestServer: protocolVersion,
+  })
 
 describe("tunnelPort", () => {
   it("carries a port's client to a server that asks for a token", async () => {

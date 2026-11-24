@@ -1,4 +1,4 @@
-import type { InboxRow } from "@novadeck/core/inbox"
+import type { InboxEntry } from "@novadeck/core/inbox"
 
 import { describe, expect, it } from "../test"
 import {
@@ -15,7 +15,7 @@ import {
   waitLabel,
 } from "./inbox-text"
 
-const source: InboxRow["source"] = {
+const source: InboxEntry["source"] = {
   projectId: "p",
   workspaceSessionId: "s",
   terminalId: "t",
@@ -26,7 +26,7 @@ const source: InboxRow["source"] = {
 }
 const base = { id: "i", source, at: 0, stopped: true, seen: false }
 
-const permission = (tool: string, subject: string | null): InboxRow => ({
+const permission = (tool: string, subject: string | null): InboxEntry => ({
   ...base,
   kind: "request",
   request: {
@@ -42,7 +42,7 @@ const permission = (tool: string, subject: string | null): InboxRow => ({
   },
 })
 
-const asking = (subject: string | null, questions: number): InboxRow => ({
+const asking = (subject: string | null, questions: number): InboxEntry => ({
   ...base,
   kind: "request",
   request: {
@@ -109,7 +109,7 @@ describe("A recommended option", () => {
   })
 })
 
-describe("An Inbox row's subject", () => {
+describe("An Inbox entry's subject", () => {
   it("says what a command or an edit would do", () => {
     expect(subjectOf(permission("Bash", "pnpm test"))).toBe("Run `pnpm test`?")
     expect(subjectOf(permission("Edit", "src/a.ts"))).toBe("Edit `src/a.ts`?")
@@ -121,6 +121,26 @@ describe("An Inbox row's subject", () => {
     expect(subjectOf(permission("WebFetch", "example.com"))).toBe("Use WebFetch on `example.com`?")
   })
 
+  it("asks the shipping gate's card's own question, not the tool that raised it", () => {
+    const card = permission("request_permit", "Push to origin/feature?")
+    if (card.kind !== "request") throw new Error("a request")
+    const held: InboxEntry = {
+      ...card,
+      request: {
+        ...card.request,
+        detached: true,
+        dialog: {
+          type: "choices",
+          id: "permit-c1",
+          title: "Push to origin/feature?",
+          detail: "Remote: origin",
+          options: [],
+        },
+      },
+    }
+    expect(subjectOf(held)).toBe("Push to origin/feature?")
+  })
+
   it("says how many more questions a call asks behind the first", () => {
     expect(subjectOf(asking(null, 1))).toBe("Question 1?")
     expect(subjectOf(asking(null, 3))).toBe("Question 1? (+2 more)")
@@ -128,7 +148,7 @@ describe("An Inbox row's subject", () => {
   })
 
   it("names a form an MCP server asks for by what it says it is for", () => {
-    const form = (message: string): InboxRow => ({
+    const form = (message: string): InboxEntry => ({
       ...base,
       kind: "request",
       request: {
@@ -148,7 +168,7 @@ describe("An Inbox row's subject", () => {
   })
 
   it("names where a held message goes", () => {
-    const row: InboxRow = {
+    const entry: InboxEntry = {
       ...base,
       kind: "held",
       held: {
@@ -160,18 +180,18 @@ describe("An Inbox row's subject", () => {
         heldFor: "loop",
       },
     }
-    expect(subjectOf(row)).toBe("Release a held message to B?")
+    expect(subjectOf(entry)).toBe("Release a held message to B?")
   })
 
   it("names a limit's window and whose it is", () => {
-    const row: InboxRow = {
+    const entry: InboxEntry = {
       ...base,
       kind: "trouble",
       trouble: { type: "limit", minutes: 300, resetsAt: 0, autoResume: true, evidence: [] },
     }
-    expect(subjectOf(row)).toBe("Hit Claude's 5-hour limit")
-    const fable: InboxRow = {
-      ...row,
+    expect(subjectOf(entry)).toBe("Hit Claude's 5-hour limit")
+    const fable: InboxEntry = {
+      ...entry,
       trouble: {
         type: "limit",
         minutes: 10_080,
@@ -185,7 +205,7 @@ describe("An Inbox row's subject", () => {
   })
 
   it("counts the messages a hold keeps from the agent, and says what holds them", () => {
-    const held = (count: number, waits: "draft" | "dialog"): InboxRow => ({
+    const held = (count: number, waits: "draft" | "dialog"): InboxEntry => ({
       ...base,
       kind: "trouble",
       trouble: { type: "waits", waits, count },
@@ -204,14 +224,14 @@ describe("An Inbox row's subject", () => {
   })
 })
 
-describe("How a resolved row ended", () => {
+describe("How a resolved entry ended", () => {
   it("says it in a line, with what the person answered", () => {
-    const ask: InboxRow = {
+    const ask: InboxEntry = {
       ...base,
       kind: "ask",
       ask: { subject: "s", body: "", details: null, hardToUndo: null, shape: { type: "text" } },
     }
-    const ended = (settled: NonNullable<InboxRow["settled"]>): InboxRow => ({ ...ask, settled })
+    const ended = (settled: NonNullable<InboxEntry["settled"]>): InboxEntry => ({ ...ask, settled })
     expect(endedLine(ended({ how: "answered", at: 1, answer: "Green" }))).toBe(
       "You answered: Green",
     )
@@ -222,7 +242,7 @@ describe("How a resolved row ended", () => {
     expect(endedLine(ask)).toBeNull()
   })
 
-  it("has a short phrase for every way a row ends", () => {
+  it("has a short phrase for every way an entry ends", () => {
     expect(Object.keys(endedWords).toSorted()).toEqual([
       "answered",
       "away",
@@ -230,14 +250,42 @@ describe("How a resolved row ended", () => {
       "dismissed",
       "ended",
       "gone",
+      "lapsed",
       "read",
       "released",
       "replied",
       "stopped",
+      "takenBack",
       "terminal",
       "worked",
     ])
     expect(endedWords.terminal).toBe("Answered in the terminal")
+  })
+})
+
+describe("A shipping permit", () => {
+  const permit: InboxEntry = {
+    ...base,
+    stopped: false,
+    kind: "permit",
+    permit: {
+      id: "p1",
+      title: "Merge PR #1190 into main",
+      quote: null,
+      givenAt: 1,
+      until: 2,
+      usedAt: null,
+    },
+  }
+
+  it("is named by what it covers, and says how it ended", () => {
+    expect(subjectOf(permit)).toBe("Merge PR #1190 into main")
+    expect(endedLine({ ...permit, settled: { how: "takenBack", at: 1 } })).toBe(
+      "You took back @moth's permit.",
+    )
+    expect(endedLine({ ...permit, settled: { how: "lapsed", at: 1 } })).toBe(
+      "@moth's permit no longer stands.",
+    )
   })
 })
 
@@ -248,8 +296,8 @@ describe("A sheet's label", () => {
   })
 })
 
-describe("An Inbox row's reading time", () => {
-  const ask = (body: string): InboxRow => ({
+describe("An Inbox entry's reading time", () => {
+  const ask = (body: string): InboxEntry => ({
     ...base,
     kind: "ask",
     ask: { subject: "s", body, details: null, hardToUndo: null, shape: { type: "text" } },
@@ -263,7 +311,7 @@ describe("An Inbox row's reading time", () => {
 })
 
 describe("A limit that resumes", () => {
-  const limit = (autoResume: boolean | null): InboxRow => ({
+  const limit = (autoResume: boolean | null): InboxEntry => ({
     ...base,
     stopped: !autoResume,
     kind: "trouble",

@@ -3,8 +3,9 @@ import {
   fileImportLimits,
   maxUploadBytes,
   maxUploadPartLength,
+  answerReaders,
   maxVoicePartLength,
-  protocolVersion,
+  compatibility,
   type AgentDetail,
   type AgentIntegration,
   type AgentName,
@@ -14,6 +15,7 @@ import {
   type CompanionChange,
   type CompanionItem,
   type ClosedTerminal,
+  type Device,
   type CompanionWindow,
   type EntryChanged,
   type FeedbackDraft,
@@ -28,12 +30,14 @@ import {
   type HistoryChange,
   type InboxEntry,
   type InterruptResult,
+  type QuestionsAnswer,
   type ChangeFileDiff,
   type ChangeRange,
   type ItemContent,
   type FilePart,
   type FolderMatch,
   type WroteFolder,
+  type MintedDevice,
   type MurmurSettings,
   type MurmurState,
   type BoardColumn,
@@ -47,10 +51,15 @@ import {
   type RequestAnswer,
   type RunnerSettings,
   type RunnerSettingsState,
+  type PreferenceChange,
+  type SessionChange,
+  type ProjectsChange,
+  type SessionPatch,
   type TourPrepared,
   type SliceChange,
   type TerminalChange,
   type TerminalMessages,
+  type TerminalRings,
   type TerminalRequest,
   type TerminalMove,
   type TerminalMoved,
@@ -69,7 +78,13 @@ import {
   type WorkspaceSession,
 } from "@novadeck/protocol"
 import { WireError } from "@novadeck/wire"
-import { connect, type Transport, type WireStatus } from "@novadeck/wire/client"
+import {
+  connect,
+  serves,
+  servesValue,
+  type Transport,
+  type WireStatus,
+} from "@novadeck/wire/client"
 
 import { lost, type RunnerErrorCode } from "./errors.js"
 import { followAll, followRestarting, followSession, type Reset } from "./follow.js"
@@ -77,6 +92,8 @@ import { base64Parts } from "./parts.js"
 import {
   attachTerminal,
   type AttachedTerminal,
+  type AttachMode,
+  type ControlHub,
   type TerminalMode,
   type TerminalPosition,
 } from "./terminal.js"
@@ -120,8 +137,32 @@ export type NotesWatchItem = NotesChange | Reset
  */
 export type WorkWatchItem = WorkChange | Reset
 
+// Each procedure's dotted path in `T`, as `sessions.save`.
+type Paths<T, Prefix extends string = ""> = {
+  [K in keyof T & string]: T[K] extends { readonly "~orpc": unknown }
+    ? `${Prefix}${K}`
+    : Paths<T[K], `${Prefix}${K}.`>
+}[keyof T & string]
+
+/** A procedure of the runner's contract, by its dotted path. */
+export type ProcedurePath = Paths<typeof contract>
+
 export type Runner = {
   readonly status: WireStatus
+  /**
+   * Whether the runner has the procedure at `path`: one the contract marks `since` a revision
+   * newer than the runner's isn't there, and calling it rejects with `UNSUPPORTED` without
+   * asking. A UI asks before it offers what such a procedure does. While reconnecting, it
+   * answers for the runner it last reached; a runner replaced since shows as a new epoch in
+   * `status`, and the UI asks again.
+   *
+   * With `{ at, value }` it asks instead whether the runner takes `value` at `at` of the
+   * procedure's input, where the contract marks it new since a revision (`inputEnum`,
+   * `inputUnion`): `at` names the input's keys with `.` between them, `*` for a list's items
+   * (`"harness"`), and for a union `value` is the variant's tag value. A call holding such a
+   * value rejects with `UNSUPPORTED` without asking the runner.
+   */
+  supports(path: ProcedurePath, input?: { readonly at: string; readonly value: string }): boolean
   /**
    * Yields the current status, then the latest one after each change, until the runner
    * closes. Quick successive changes may be coalesced. `break` stops it at any time.
@@ -146,6 +187,14 @@ export type Runner = {
      * one already removed, and with `CLOSING` when the runner shuts down first.
      */
     remove(input: { readonly projectId: string }): Promise<void>
+    /**
+     * The projects as they change, the whole list in the person's order with each one's pin,
+     * first and after each change, and a project's sessions in their order once arranged, as
+     * `ProjectsChange` says. Opened again after each
+     * reconnection, starting with the list again. A runner from before revision 5 has none
+     * (`supports("projects.watch")`).
+     */
+    watch(): AsyncIterableIterator<ProjectsChange, undefined>
     /**
      * Keeps the person's arrangement of the projects: `order` by id, first to last, and the
      * ones `pinned`, at most nine, the first in `order` (one `order` doesn't name isn't
@@ -281,6 +330,25 @@ export type Runner = {
       readonly state: string
       readonly visitedAt: number | null
     }): Promise<void>
+    /**
+     * Changes the session's `state` by `patch`, applied to its JSON as the runner holds it,
+     * and `visitedAt` where given; resolves its new revision. `writer` names this client and
+     * `base` the revision the patch was made on, which `watch` passes on. A runner from before
+     * revision 4 has neither (`supports("sessions.change")`).
+     */
+    change(input: {
+      readonly sessionId: string
+      readonly writer: string
+      readonly base: number
+      readonly patch: SessionPatch
+      readonly visitedAt?: number | null
+    }): Promise<{ revision: number }>
+    /**
+     * Every session's changes, as `SessionChange` says: each revision first, then each
+     * session as it changes. Opened again after each reconnection, starting with the
+     * revisions again.
+     */
+    watch(): AsyncIterableIterator<SessionChange, undefined>
   }
   readonly terminals: {
     list(input: { readonly sessionId: string }): Promise<TerminalSummary[]>
@@ -404,6 +472,8 @@ export type Runner = {
      */
     /** The terminal this client's person uses now, or none; see the contract's `terminals.active`. */
     active(terminalId: string | null): Promise<void>
+    /** The project this client shows now, or none; see the contract's `terminals.showing`. */
+    showing(projectId: string | null): Promise<void>
     /**
      * Tells the runner which terminals this client has in sight, replacing its last list
      * (`terminals.seen`); the runner takes any other as unseen.
@@ -434,13 +504,16 @@ export type Runner = {
     ): Promise<TerminalSummary>
     /**
      * Resolves once the runner has granted the attachment; `control` is the default mode.
+     * `control-else-observe` takes control where it is free and observes where another client
+     * has it, also after a reconnection (an observer then learns of a change of control from
+     * the attachment's `onMode`, where the runner supports `terminals.controls`).
      * With `after`, an earlier attachment's `position()`, it goes on from there: the runner
      * sends the events since, unless it no longer holds them, they would cost more than a
      * fresh screen, or `after` is of another of its lifetimes, where it sends that screen.
      */
     attach(
       terminalId: string,
-      options?: { readonly mode?: TerminalMode; readonly after?: TerminalPosition },
+      options?: { readonly mode?: AttachMode; readonly after?: TerminalPosition },
     ): Promise<AttachedTerminal>
   }
   readonly agents: {
@@ -531,6 +604,7 @@ export type Runner = {
      * request the runner doesn't have, `CONFLICT` for one whose dialog is not raw.
      */
     saveDialog(terminalId: string, request: string): Promise<{ readonly path: string }>
+    takeBack(terminalId: string, permit: string): Promise<{ readonly ended: boolean }>
     /**
      * Presses Escape in the terminal's agent, stopping its turn; `CONFLICT` without one.
      * Resolves with the queued words the agent's box took back, cleared out of it, for the
@@ -864,6 +938,11 @@ export type Runner = {
     /** Answers an agent's ask with the person's answer. */
     answer(id: string, answer: AskAnswer): Promise<void>
     /**
+     * Answers an agent's ask of several questions, one answer per question in its order. Only a
+     * runner from revision 9 on asks those (`supports("inbox.answerQuestions")`).
+     */
+    answerQuestions(id: string, answers: QuestionsAnswer): Promise<void>
+    /**
      * Marks entries read: a tell stays listed, resolved, a finished turn is removed, an ask is
      * not touched. Unknown ids are skipped.
      */
@@ -890,6 +969,12 @@ export type Runner = {
   readonly messages: {
     /** A terminal's threads and messages with their states; `TERMINAL_NOT_FOUND` when unknown. */
     list(terminalId: string): Promise<TerminalMessages>
+    /**
+     * What the terminal's doorbell rings and the hooks' deliveries say after sequence `since` (0 for
+     * all the runner keeps), which its view draws over the harness's lines; `list` gives the latest
+     * sequence as `ringSeq`. `TERMINAL_NOT_FOUND` when unknown.
+     */
+    rings(terminalId: string, since: number): Promise<TerminalRings>
     /**
      * Follows a terminal's threads and messages: what `list` says, then again on each
      * change to them, to its delivery state or to the pause, across reconnections.
@@ -967,6 +1052,35 @@ export type Runner = {
     get(): Promise<RunnerSettingsState>
     /** Changes the settings given; the others stay. */
     set(settings: Partial<RunnerSettings>): Promise<void>
+    /**
+     * The settings now, then as any client changes them, again after each reconnection
+     * (revision 3; ask `supports("settings.watch")` first).
+     */
+    watch(): AsyncIterableIterator<RunnerSettingsState, undefined>
+  }
+  /**
+   * The person's own preferences, which follow them from device to device (`preferences.*`,
+   * revision 3; ask `supports("preferences.get")` first).
+   */
+  readonly preferences: {
+    /** Every preference kept, and their revision. */
+    get(): Promise<PreferenceChange>
+    /** Keeps `value` (JSON text) as `key`, or forgets it for null, as `writer`; the new revision. */
+    set(key: string, value: string | null, writer: string): Promise<number>
+    /** Every preference, then each change, opened again (every preference first) after each reconnection. */
+    watch(): AsyncIterableIterator<PreferenceChange, undefined>
+  }
+  /**
+   * Devices with credentials of their own, beside the owner's token (`devices.*`, revision 3;
+   * ask `supports("devices.mint")` first).
+   */
+  readonly devices: {
+    /** Gives a new device its credential, answered once; the owner's connection only. */
+    mint(name: string): Promise<MintedDevice>
+    /** The devices not revoked, oldest first. */
+    list(): Promise<Device[]>
+    /** Revokes a device's credential and ends its sessions: any, as the owner, or this device. */
+    revoke(id: string): Promise<void>
   }
   /** Novadeck's tour, a live run of the person's own agent in a folder of Novadeck's. */
   readonly tour: {
@@ -976,6 +1090,10 @@ export type Runner = {
     brief(terminalId: string): Promise<void>
     /** Rings the tour's agent in the terminal to carry on with its brief (`tour.nudge`). */
     nudge(terminalId: string): Promise<void>
+    /** Rings the artist's brief to the agent in the terminal, which is on no team (`tour.artist`). */
+    artist(terminalId: string): Promise<void>
+    /** The person keeps the tour's project (`tour.keep`). */
+    keep(): Promise<void>
   }
   /** Disconnects. Attached terminals finish; their shells keep running on the runner. */
   close(): Promise<void>
@@ -994,9 +1112,22 @@ export const connectRunner = async (
     ...options,
     contract,
     transport,
-    protocolVersion,
+    revision: compatibility.revision,
+    oldestServer: compatibility.oldestRunner,
+    // A newer runner's values and variants this build doesn't know, read as its open
+    // schemas say: kept as placeholders, read as a catch-all, or left out.
+    outputs: answerReaders,
     fatal: (code) => code === "WORKSPACE_TOO_NEW",
   })
+  let revision = connection.session().revision
+  const current = (): number => {
+    try {
+      revision = connection.session().revision
+    } catch {
+      // Reconnecting or closed: the runner last reached stands.
+    }
+    return revision
+  }
   const call = async <T>(operation: (client: WireClient) => Promise<T>): Promise<T> => {
     const session = connection.session()
     try {
@@ -1005,16 +1136,76 @@ export const connectRunner = async (
       throw lost(error, session)
     }
   }
+  // Who holds each terminal this connection is attached to, once an attachment asks and the
+  // runner tells (`terminals.controls`): one stream for the connection, which opens again after
+  // each reconnection and sets the mode of the attachments it names.
+  const supportsControls = (): boolean => serves(contract, ["terminals", "controls"], current())
+  const joined = new Map<
+    string,
+    Set<(mode: TerminalMode, holder: "you" | "other" | "none") => void>
+  >()
+  const latest = new Map<
+    string,
+    { readonly mode: TerminalMode; readonly holder: "you" | "other" | "none"; readonly at: number }
+  >()
+  let controlEvents = 0
+  let controlling = false
+  const followControls = (): void => {
+    if (controlling) return
+    controlling = true
+    const events = followSession(connection, (client, signal) =>
+      client.terminals.controls(undefined, { signal }),
+    )
+    void (async () => {
+      try {
+        for await (const event of events) {
+          if (event.type !== "control") continue
+          controlEvents += 1
+          const mode = event.holder === "you" ? "control" : "observe"
+          latest.set(event.terminalId, { mode, holder: event.holder, at: controlEvents })
+          for (const set of joined.get(event.terminalId) ?? []) set(mode, event.holder)
+        }
+      } catch {
+        // The connection ended for good: modes stay as they were.
+      } finally {
+        controlling = false
+      }
+    })()
+  }
+  const controlHub: ControlHub = {
+    now: () => controlEvents,
+    join: (id, since, set) => {
+      const members = joined.get(id) ?? new Set()
+      members.add(set)
+      joined.set(id, members)
+      // News that came while the attachment was being granted.
+      const known = latest.get(id)
+      if (known && known.at > since) set(known.mode, known.holder)
+      return () => {
+        members.delete(set)
+        if (members.size === 0 && joined.get(id) === members) joined.delete(id)
+      }
+    },
+  }
+  // Control-aware from the start, so a client that makes a terminal before attaching anything is
+  // handed control when another lets go.
+  if (supportsControls()) followControls()
   return {
     get status() {
       return connection.status.value
     },
     watch: () => connection.status.watch(),
+    supports: (path, input) =>
+      serves(contract, path.split("."), current()) &&
+      (input === undefined ||
+        servesValue(contract, path.split("."), input.at, input.value, current())),
     projects: {
       list: () => call((client) => client.projects.list()),
       create: (input) => call((client) => client.projects.create(input)),
       rename: (input) => call((client) => client.projects.rename(input)),
       remove: (input) => call((client) => client.projects.remove(input)),
+      watch: () =>
+        followSession(connection, (client, signal) => client.projects.watch(undefined, { signal })),
       arrange: (input) =>
         call((client) =>
           client.projects.arrange({ order: [...input.order], pinned: [...input.pinned] }),
@@ -1055,6 +1246,18 @@ export const connectRunner = async (
         ),
       remove: (input) => call((client) => client.sessions.remove(input)),
       save: (input) => call((client) => client.sessions.save(input)),
+      change: (input) =>
+        call((client) =>
+          client.sessions.change({
+            sessionId: input.sessionId,
+            writer: input.writer,
+            base: input.base,
+            patch: { set: [...input.patch.set], unset: [...input.patch.unset] },
+            ...(input.visitedAt !== undefined && { visitedAt: input.visitedAt }),
+          }),
+        ),
+      watch: () =>
+        followSession(connection, (client, signal) => client.sessions.watch(undefined, { signal })),
     },
     terminals: {
       list: (input) => call((client) => client.terminals.list(input)),
@@ -1078,6 +1281,7 @@ export const connectRunner = async (
         call((client) => client.terminals.rename({ terminalId, title })),
       resetTitle: (terminalId) => call((client) => client.terminals.resetTitle({ terminalId })),
       active: (terminalId) => call((client) => client.terminals.active({ terminalId })),
+      showing: (projectId) => call((client) => client.terminals.showing({ projectId })),
       seen: (terminalIds) =>
         call((client) => client.terminals.seen({ terminalIds: [...terminalIds] })),
       busy: (only) => call((client) => client.terminals.busy(only)),
@@ -1099,8 +1303,10 @@ export const connectRunner = async (
         call((client) =>
           client.terminals.restart({ terminalId, cols, rows, ...(resume && { resume }) }),
         ),
-      attach: (terminalId, { mode = "control", after } = {}) =>
-        attachTerminal(connection, terminalId, mode, after),
+      attach: (terminalId, { mode = "control", after } = {}) => {
+        if (supportsControls()) followControls()
+        return attachTerminal(connection, terminalId, mode, controlHub, after)
+      },
     },
     agents: {
       list: (look) => call((client) => client.agents.list(look)),
@@ -1138,6 +1344,8 @@ export const connectRunner = async (
         call((client) => client.agents.answer({ terminalId, request, answer })),
       saveDialog: (terminalId, request) =>
         call((client) => client.agents.saveDialog({ terminalId, request })),
+      takeBack: (terminalId, permit) =>
+        call((client) => client.agents.takeBack({ terminalId, permit })),
       interrupt: (terminalId, { setAside } = {}) =>
         call((client) =>
           client.agents.interrupt({
@@ -1237,6 +1445,8 @@ export const connectRunner = async (
       watch: () =>
         followSession(connection, (client, signal) => client.inbox.watch(undefined, { signal })),
       answer: (id, answer) => call((client) => client.inbox.answer({ id, answer })),
+      answerQuestions: (id, answers) =>
+        call((client) => client.inbox.answerQuestions({ id, answers })),
       read: (ids) => call((client) => client.inbox.read({ ids: [...ids] })),
       dismiss: (id) => call((client) => client.inbox.dismiss({ id })),
       clear: () => call((client) => client.inbox.clear()),
@@ -1249,6 +1459,7 @@ export const connectRunner = async (
     },
     messages: {
       list: (terminalId) => call((client) => client.messages.list({ terminalId })),
+      rings: (terminalId, since) => call((client) => client.messages.rings({ terminalId, since })),
       watch: (terminalId) =>
         followRestarting(connection, (client, signal) =>
           client.messages.watch({ terminalId }, { signal }),
@@ -1287,11 +1498,29 @@ export const connectRunner = async (
     settings: {
       get: () => call((client) => client.settings.get()),
       set: (settings) => call((client) => client.settings.set(settings)),
+      watch: () =>
+        followSession(connection, (client, signal) => client.settings.watch(undefined, { signal })),
+    },
+    preferences: {
+      get: () => call((client) => client.preferences.get()),
+      set: async (key, value, writer) =>
+        (await call((client) => client.preferences.set({ key, value, writer }))).revision,
+      watch: () =>
+        followSession(connection, (client, signal) =>
+          client.preferences.watch(undefined, { signal }),
+        ),
+    },
+    devices: {
+      mint: (name) => call((client) => client.devices.mint({ name })),
+      list: () => call((client) => client.devices.list()),
+      revoke: (id) => call((client) => client.devices.revoke({ id })),
     },
     tour: {
       prepare: (agent) => call((client) => client.tour.prepare({ agent })),
       brief: (terminalId) => call((client) => client.tour.brief({ terminalId })),
       nudge: (terminalId) => call((client) => client.tour.nudge({ terminalId })),
+      artist: (terminalId) => call((client) => client.tour.artist({ terminalId })),
+      keep: () => call((client) => client.tour.keep()),
     },
     close: () => Promise.resolve(connection.close()),
   }

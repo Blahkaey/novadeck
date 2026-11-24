@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+
 import type { PullRequest } from "@novadeck/protocol"
 import { z } from "zod"
 
@@ -10,7 +12,7 @@ import type { LeadsHost } from "../terminals/leads.js"
 import { peerOf } from "../terminals/peers-host.js"
 import type { Record } from "../terminals/record.js"
 import type { WorktreeRecord } from "./records.js"
-import type { OriginBranch, Worktrees } from "./worktrees.js"
+import { homeSaid, type OriginBranch, type Worktrees } from "./worktrees.js"
 
 /** What the worktree calls need of the runner. */
 export type WorktreeCallsHost = Pick<
@@ -19,8 +21,11 @@ export type WorktreeCallsHost = Pick<
 > & {
   /** The service; none where the runner keeps no ownership (some tests). */
   readonly worktrees: () => Worktrees | undefined
-  /** Whether the person turned agent worktrees on (Preferences, Experimental). */
-  readonly enabled: () => boolean
+  /**
+   * Whether agent worktrees are on for the terminal: the person turned them on (Preferences,
+   * Experimental), or it is one of the tour's (`Wiring.enabled`).
+   */
+  readonly enabled: (terminalId: string) => boolean
   /** The project a session belongs to. */
   readonly projectOf: (sessionId: string) => string
 }
@@ -28,9 +33,18 @@ export type WorktreeCallsHost = Pick<
 /** The service the runner hands its terminals, with whether the person has worktrees on. */
 export type WorktreesWiring = {
   readonly service: Worktrees
-  readonly enabled: () => boolean
-  /** Whether an agent process started at that time can use worktrees (`RootFolder.ready`). */
-  readonly ready: (startedAt: number | undefined, relists: boolean) => boolean
+  /**
+   * Whether agent worktrees are on: the person's setting, or for a terminal of the tour's
+   * (`terminalId`), always, so the tour works the same whatever the person chose.
+   */
+  readonly enabled: (terminalId?: string) => boolean
+  /**
+   * Whether an agent process started at that time can use worktrees (`RootFolder.ready`); a
+   * tour terminal's (`terminalId`) needs only the folder.
+   */
+  readonly ready: (startedAt: number | undefined, relists: boolean, terminalId?: string) => boolean
+  /** Whether a folder is in a git repository, from the files alone (`repositoryKnown`). */
+  readonly inRepository?: (folder: string, wait: boolean) => Promise<boolean | undefined>
   /** A branch's pull request, where a forge the person switched on found one (`Forges`). */
   readonly pullRequest?: (commonDir: string, branch: string) => PullRequest | undefined
 }
@@ -51,7 +65,7 @@ export const worktreeHost = (
   projectOf: (sessionId: string) => string,
 ): Pick<WorktreeCallsHost, "worktrees" | "enabled" | "projectOf"> => ({
   worktrees: () => wiring?.service,
-  enabled: () => wiring?.enabled() ?? false,
+  enabled: (terminalId) => wiring?.enabled(terminalId) ?? false,
   projectOf,
 })
 
@@ -65,8 +79,12 @@ const openRequest = z.strictObject({
   branch: z.string().min(1).max(255),
   from: z.string().min(1).max(255).optional(),
   group: z.string().min(1).max(80).optional(),
+  home: z.string().min(1).max(255).optional(),
 })
-const takeRequest = z.strictObject({ path: z.string().min(1) })
+const takeRequest = z.strictObject({
+  path: z.string().min(1),
+  home: z.string().min(1).max(255).optional(),
+})
 const closeRequest = z.strictObject({ path: z.string().min(1), force: z.boolean().optional() })
 const giveRequest = z.strictObject({
   path: z.string().min(1),
@@ -135,9 +153,12 @@ export const worktreeNotice = {
       details: [path],
       actions: ["Don't change files there, and don't close it."],
     }),
-  given: (giver: string, path: string, branch: string): string =>
+  given: (giver: string, path: string, branch: string, home?: string): string =>
     noticeText("Worktrees", {
-      facts: `${mention(giver)} gave you its worktree on branch ${branch}. It's yours now.`,
+      facts:
+        `${mention(giver)} gave you its worktree on branch ${branch}` +
+        (home === undefined ? "" : `, home ${home}`) +
+        ". It's yours now.",
       details: [path],
       actions: ["Work there with absolute paths and git -C."],
     }),
@@ -157,6 +178,10 @@ export type WorktreeAnswer =
       readonly tracking?: boolean
       /** open_worktree: instruction files at its top. */
       readonly instructions?: readonly string[]
+      /** open_worktree and take_worktree: the branch its work belongs on. */
+      readonly home?: string
+      /** take_worktree: home was given but stays as it was (the worktree isn't yours yet). */
+      readonly homeKept?: true
       /** take_worktree: it was yours already. */
       readonly already?: true
       /** take_worktree: the person was asked; the worktree isn't yours yet. */
@@ -189,7 +214,7 @@ export class WorktreeCalls {
     | Failure {
     const record = callerOf(this.host.records(), call)
     if (!record) return unanswered
-    if (!this.host.enabled()) return refused(offRefusal)
+    if (!this.host.enabled(call.terminalId)) return refused(offRefusal)
     const service = this.host.worktrees()
     if (!service) return refused("Novadeck keeps no worktrees here.")
     return { record, service, projectId: this.host.projectOf(record.summary.sessionId) }
@@ -203,7 +228,7 @@ export class WorktreeCalls {
   /** Whether the tools are offered: the caller is one of Novadeck's terminals, and the setting is on. */
   listed(call: Call): { readonly ok: boolean; readonly on?: boolean; readonly reason?: string } {
     if (!callerOf(this.host.records(), call)) return unansweredCalls.worktrees
-    return { ok: true, on: this.host.enabled() }
+    return { ok: true, on: this.host.enabled(call.terminalId) }
   }
 
   async open(call: Call): Promise<WorktreeAnswer> {
@@ -213,7 +238,7 @@ export class WorktreeCalls {
     const read1 = read(
       openRequest,
       call.request,
-      "open_worktree needs branch, and takes only repo, from and group besides.",
+      "open_worktree needs branch, and takes only repo, from, group and home besides.",
     )
     if (!read1.ok) return read1
     const { request } = read1
@@ -225,6 +250,7 @@ export class WorktreeCalls {
       branch: request.branch,
       from: request.from,
       group: request.group,
+      home: request.home,
     })
     if (!opened.ok) return opened
     return {
@@ -235,6 +261,7 @@ export class WorktreeCalls {
       ...(opened.origin !== undefined && { origin: opened.origin }),
       ...(opened.tracking !== undefined && { tracking: opened.tracking }),
       instructions: opened.instructions,
+      ...(opened.home !== undefined && { home: opened.home }),
     }
   }
 
@@ -242,24 +269,46 @@ export class WorktreeCalls {
     const context = this.context(call, unansweredCalls.takeWorktree)
     if ("ok" in context) return context
     const { record, service, projectId } = context
-    const read1 = read(takeRequest, call.request, "take_worktree needs path, and nothing else.")
+    const read1 = read(
+      takeRequest,
+      call.request,
+      "take_worktree needs path, and takes only home besides.",
+    )
     if (!read1.ok) return read1
     const taken = await service.take({
       projectId,
       terminalId: call.terminalId,
       cwd: record.summary.cwd,
       path: read1.request.path,
+      home: read1.request.home,
     })
     if (!taken.ok) return taken
-    if ("approval" in taken)
-      return this.host.agentMode() === "swarm"
-        ? this.takeNow(call, record, service, taken.approval)
-        : this.ask(call, record, service, taken.approval)
+    if ("approval" in taken) {
+      const { home } = read1.request
+      if (this.host.agentMode() !== "swarm") {
+        const asked = this.ask(call, record, service, taken.approval)
+        return asked.ok && home !== undefined ? { ...asked, homeKept: true } : asked
+      }
+      const now = await this.takeNow(call, record, service, taken.approval)
+      if (!now.ok || home === undefined) return now
+      // Its own now: taken again with home, which sets it as for one's own.
+      const homed = await service.take({
+        projectId,
+        terminalId: call.terminalId,
+        cwd: record.summary.cwd,
+        path: taken.approval.path,
+        home,
+      })
+      return homed.ok && !("approval" in homed)
+        ? { ...now, ...(homed.home !== undefined && { home: homed.home }) }
+        : { ...now, homeKept: true }
+    }
     return {
       ok: true,
       path: taken.path,
       branch: taken.branch,
       ...(taken.already && { already: true as const }),
+      ...(taken.home !== undefined && { home: taken.home }),
     }
   }
 
@@ -336,7 +385,8 @@ export class WorktreeCalls {
           if (outcome === "gone") return tell(call.terminalId, worktreeNotice.gone(path))
           if (outcome === "withdrawn") return tell(call.terminalId, worktreeNotice.vanished(path))
           // The setting may have gone off while the person decided: nothing moves then.
-          if (!this.host.enabled()) return tell(call.terminalId, worktreeNotice.off(path))
+          if (!this.host.enabled(call.terminalId))
+            return tell(call.terminalId, worktreeNotice.off(path))
           if (!(await service.transfer(path, ownerId, call.terminalId)))
             return tell(call.terminalId, worktreeNotice.moved(path))
           tell(call.terminalId, worktreeNotice.taken(path, branch))
@@ -415,7 +465,12 @@ export class WorktreeCalls {
       .messaging()
       .notice(
         target.terminalId,
-        worktreeNotice.given(record.summary.handle, row.path, row.branch),
+        worktreeNotice.given(
+          record.summary.handle,
+          row.path,
+          row.branch,
+          existsSync(row.path) ? await homeSaid(row.path, row.branch) : undefined,
+        ),
         {
           always: true,
         },

@@ -541,6 +541,23 @@ describe("the person's submission", () => {
     },
   )
 
+  it("is the person's for a first prompt whose Enter came before its own binding, as Codex's and Antigravity's", () => {
+    // Their first prompt binds the session: the Enter that submitted it came while none was.
+    const submitted = run(unbound, key("enter", at), { ...binds, at: at + 300 })
+    expect(submitted).toMatchObject({ state: "fresh", box: { empty: true, enteredAt: at } })
+    expect(run(submitted, prompted(at + 310))).toMatchObject({ byPerson: true })
+    // Not an Enter past the window of the binding, nor one the person typed after.
+    const stale = run(unbound, key("enter", at), { ...binds, at: at + 20_000 })
+    expect(run(stale, prompted(at + 20_010))).toMatchObject({ byPerson: false })
+    const drafted = run(unbound, key("enter", at), key("content", at + 100), {
+      ...binds,
+      at: at + 300,
+    })
+    expect(run(drafted, prompted(at + 310))).toMatchObject({ byPerson: false })
+    // No Enter at all: the harness's own first prompt.
+    expect(run(unbound, binds, prompted(at + 310))).toMatchObject({ byPerson: false })
+  })
+
   it("keeps text typed after the next Enter when an older hook arrives late", () => {
     const next = run(
       settled,
@@ -1255,8 +1272,8 @@ describe("an agent's prompt shown before any session binds", () => {
       run(ready, typing, enter, { ...binds, at: at + 200 }, prompted(at + submitWindowMs + 1))
         .byPerson,
     ).toBe(false)
-    // Nor an Enter in the shell, before the agent's box showed: it started the program.
-    expect(run(unbound, typing, enter, binds, prompted()).byPerson).toBe(false)
+    // An Enter before the agent’s box showed is marked for the stricter notes check.
+    expect(run(unbound, typing, enter, binds)).toMatchObject({ state: "fresh", unboundEnter: at })
     // A turn the harness starts is never theirs.
     expect(run(ready, typing, enter, binds, harness).byPerson).toBe(false)
     // Nor one a session bound mid-turn starts, though they queued a prompt just before.

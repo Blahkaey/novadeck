@@ -328,6 +328,9 @@ importers:
       '@novadeck/harness-core':
         specifier: workspace:*
         version: link:../../harnesses/core
+      '@novadeck/harness-opencode':
+        specifier: workspace:*
+        version: link:../../harnesses/opencode
       '@novadeck/log':
         specifier: workspace:*
         version: link:../../libraries/log
@@ -364,6 +367,12 @@ importers:
       node-pty:
         specifier: 'catalog:'
         version: 1.2.0-beta.14(patch_hash=c78e0cc7eff2e13ea3521779288bbaad7b96df25030516a8aa8acd64fde92224)
+      phaser:
+        specifier: 3.90.0
+        version: 3.90.0
+      three:
+        specifier: 0.187.0
+        version: 0.187.0
       ws:
         specifier: 'catalog:'
         version: 8.22.2
@@ -551,6 +560,9 @@ importers:
       '@novadeck/harness-core':
         specifier: workspace:*
         version: link:../../harnesses/core
+      '@novadeck/harness-opencode':
+        specifier: workspace:*
+        version: link:../../harnesses/opencode
       '@novadeck/protocol':
         specifier: workspace:*
         version: link:../../contract/protocol
@@ -1053,6 +1065,52 @@ importers:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@3.0.4(@types/node@26.6.6)(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2)(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
 
+  frontend/tour:
+    dependencies:
+      '@fontsource/bangers':
+        specifier: 5.3.0
+        version: 5.3.0
+      '@novadeck/core':
+        specifier: workspace:*
+        version: link:../core
+      '@novadeck/toolkit':
+        specifier: workspace:*
+        version: link:../toolkit
+      lucide-react:
+        specifier: ^1.71.0
+        version: 1.71.0(@types/react@19.3.0)(react@19.3.1)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@novadeck/build-kit':
+        specifier: workspace:*
+        version: link:../../tools/build-kit
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      jsdom:
+        specifier: ^31.0.0
+        version: 31.0.0(@noble/hashes@2.4.0)
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^7.3.8
+        version: 7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@3.0.4(@types/node@26.6.6)(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2)(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+
   frontend/ui:
     dependencies:
       '@dnd-kit/dom':
@@ -1085,6 +1143,9 @@ importers:
       '@novadeck/toolkit':
         specifier: workspace:*
         version: link:../toolkit
+      '@novadeck/tour':
+        specifier: workspace:*
+        version: link:../tour
       '@novadeck/viewers':
         specifier: workspace:*
         version: link:../../libraries/viewers
@@ -1233,6 +1294,31 @@ importers:
       '@novadeck/emulator':
         specifier: workspace:*
         version: link:../../libraries/emulator
+      '@novadeck/protocol':
+        specifier: workspace:*
+        version: link:../../contract/protocol
+      '@novadeck/tui-input':
+        specifier: workspace:*
+        version: link:../../libraries/tui-input
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@3.0.4(@types/node@26.6.6)(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2)(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@7.3.8(@types/node@26.6.6)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  harnesses/opencode:
+    dependencies:
+      '@novadeck/emulator':
+        specifier: workspace:*
+        version: link:../../libraries/emulator
+      '@novadeck/harness-core':
+        specifier: workspace:*
+        version: link:../core
       '@novadeck/protocol':
         specifier: workspace:*
         version: link:../../contract/protocol
@@ -1988,6 +2074,9 @@ packages:
 
   '@fontsource-variable/jetbrains-mono@5.3.0':
     resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
+
+  '@fontsource/bangers@5.3.0':
+    resolution: {integrity: sha512-tSRpmWwkqrO9PCqo9wjA/99/5sLOIWm5cf51G3ooEHd8qZus8sVSSJoWp/7EvM5rIgZMjKRG6XtY9yeisKxE7g==}
 
   '@fontsource/share-tech-mono@5.3.0':
     resolution: {integrity: sha512-hVEzVCzEid/fBfhggMyvkfDzn9ODrMihxC0EiOeQK3BuQNvdjmith2ERnoDNUkbW8zhufbKNuCgaSoT8LUNpuQ==}
@@ -5098,6 +5187,9 @@ packages:
   perfect-freehand@1.2.3:
     resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
 
+  phaser@3.90.0:
+    resolution: {integrity: sha512-/cziz/5ZIn02uDkC9RzN8VF9x3Gs3XdFFf9nkiMEQT3p7hQlWuyjy4QWosU802qqno2YSLn2BfqwOKLv/sSVfQ==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -6402,6 +6494,8 @@ snapshots:
   '@fontsource-variable/archivo@5.3.0': {}
 
   '@fontsource-variable/jetbrains-mono@5.3.0': {}
+
+  '@fontsource/bangers@5.3.0': {}
 
   '@fontsource/share-tech-mono@5.3.0': {}
 
@@ -9697,6 +9791,10 @@ snapshots:
   perfect-debounce@2.1.0: {}
 
   perfect-freehand@1.2.3: {}
+
+  phaser@3.90.0:
+    dependencies:
+      eventemitter3: 5.0.4
 
   picocolors@1.1.1: {}
 

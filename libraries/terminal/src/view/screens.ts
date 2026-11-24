@@ -9,8 +9,17 @@ import {
 import { measureCols, sizeBounds } from "../size.js"
 import { copyOnSelect, readClipboard, takeClipboardWrites } from "./copy.js"
 import { followTerminal, type FollowedTerminal, type FollowOptions, type Screen } from "./follow.js"
-import { takeClipboardKeys, takeFilePastes, type PasteFailure, type PasteTarget } from "./paste.js"
+import {
+  foldersAmong,
+  pastedFiles,
+  pasteFiles,
+  takeClipboardKeys,
+  takeFilePastes,
+  type PasteFailure,
+  type PasteTarget,
+} from "./paste.js"
 import { silenceQueries } from "./queries.js"
+import { scaleToFit } from "./scale.js"
 import {
   createStore,
   nextViewState,
@@ -39,6 +48,11 @@ export const clampSize = (size: {
 const resizeSettleMs = 120
 // How long the notice of a failed paste stays.
 export const pasteNoticeMs = 4_000
+// How long the notice of a takeover stays.
+export const tookNoticeMs = 2_500
+// How long after a wheel turn arrow keys the emulator makes of it (in a full-screen program that
+// takes no mouse) are still the wheel's: they are not the person asking for the keyboard.
+const wheelKeysMs = 120
 // How long the notice of a copy stays: long enough to see, short enough to be out of the
 // way of the output under it.
 export const copyNoticeMs = 1_200
@@ -70,6 +84,13 @@ export type TerminalScreensOptions<K, P = unknown> = FollowOptions<K, P> & {
     // The class of the element a screen draws in.
     readonly containerClass?: string
   }
+  // What the owner draws over the terminal's own output, given its view when its screen opens:
+  // `restored` is called once a snapshot of the host's screen is drawn (on opening and on every
+  // reattach), `dispose` as the screen closes.
+  readonly overlay?: (
+    key: K,
+    view: View,
+  ) => { readonly restored: () => void; readonly dispose: () => void } | undefined
   // Called with the terminal's restart, as Enter asks for it in an ended shell.
   readonly restart: (key: K) => void
   // How long a screen nobody shows follows its terminal before it parks, and how many parked
@@ -82,6 +103,9 @@ export type TerminalScreensOptions<K, P = unknown> = FollowOptions<K, P> & {
   // The wording of the notice that tells the person a copy from the terminal reached the
   // clipboard: a selection, Ctrl+C's or a program's own. None shows without one.
   readonly copied?: string
+  // The wording of the notice that tells the person this client has the keyboard now, after a
+  // key that took control of an observed terminal was not delivered. None shows without one.
+  readonly took?: string
   readonly paste: {
     // Saves a file on the host's machine and resolves with its path there.
     readonly upload: (
@@ -124,6 +148,11 @@ type OpenScreen = {
   phase: ViewPhase
   // Starts a fresh shell, as Enter or the Restart button asks.
   readonly restart: () => void
+  // Whether the shell takes what is typed or pasted now: not while input is refused, nor once it
+  // ended and takes only Enter.
+  readonly takesInput: () => boolean
+  // Pastes the paths of `files` as a paste of them does (`pasteFiles`).
+  readonly pasteFiles: (files: readonly File[], folders: ReadonlySet<File>) => void
   // Set when a mount goes while focused, so the next to show this screen focuses it again.
   refocus: boolean
 }
@@ -178,6 +207,16 @@ export type Hold = {
   }) => void
   // Focuses the input, and says whether the focus landed in the screen.
   readonly focus: () => boolean
+  // Takes control of an observed terminal, as the person's Take over does.
+  readonly take: () => void
+  // Whether files dropped on it would go in now, as pasted ones would: while its shell takes
+  // input. Where it doesn't, as while reconnecting or once it ended, a paste goes nowhere.
+  readonly takesFiles: () => boolean
+  // Takes the files of a drop as a paste of them (`pasteFiles`): each one's own path where the
+  // owner knows it, else a copy's on the host's machine, then focuses the screen, so typing goes
+  // on after them. Read during the drop, which alone tells a folder apart. Nothing where it
+  // doesn't take files.
+  readonly dropFiles: (data: DataTransfer) => void
   // Lets the screen go, once. With `unmount`, focus the screen holds is left for the next
   // mount to restore; without it (out of sight, staying mounted) none is.
   readonly release: (options?: { readonly unmount?: boolean }) => void
@@ -204,6 +243,11 @@ export type TerminalScreens<K> = {
   // `restart`. Restarting past an open screen would leave it waiting for Enter, taking the
   // keys typed to the fresh shell as a restart's.
   readonly restart: (key: K) => void
+  // Lets go of the screens of every terminal `match` names, as when the owner stops showing
+  // their project and another client is to control them: each closes at once, detaching from its
+  // terminal, a screen still held by a mount as that mount lets go of it. A screen shown again
+  // before then stays. Never the terminal itself.
+  readonly release: (match: (key: K) => boolean) => void
   // Sets the terminal font from Preferences: new screens open in it and the open ones
   // whose size differs change to it and fit again.
   readonly setFont: (font: TerminalFont) => void
@@ -217,6 +261,13 @@ export type TerminalScreens<K> = {
   // spaces first: outside bracketed paste xterm turns a newline into Enter, which would
   // submit what was said.
   readonly typeInto: (key: K, text: string) => boolean
+  // Whether this client only observes the terminal now, another controlling it, as its screen
+  // knows synchronously. False for a terminal with no open screen.
+  readonly observing: (key: K) => boolean
+  // Takes control of an observed terminal for typing that isn't a key, as dictation does:
+  // resolves once it is here (at once where it already is), rejects with the host's refusal,
+  // such as CONTROL_BUSY while the controller wrote within `ifIdleMs`.
+  readonly take: (key: K, options?: { readonly ifIdleMs?: number }) => Promise<void>
 }
 
 // The terminal font the owner asks for: the size, and a family that goes in front of the
@@ -276,6 +327,9 @@ export const createTerminalScreens = <K, P = unknown>(
   const parkAfterMs = o.park?.afterMs ?? parkMs
   const cap = o.park?.keep ?? parkedCap
   const entries = new Map<string, Entry>()
+  // The key each entry opened for, and the entries to close once nothing holds them.
+  const keys = new Map<string, K>()
+  const doomed = new Set<string>()
   // The parked screens, the one parked longest first: a map keeps the order its keys were
   // added in, so a screen shown again leaves it and parking it again puts it last.
   const parked = new Map<string, { key: K; entry: Entry }>()
@@ -291,6 +345,7 @@ export const createTerminalScreens = <K, P = unknown>(
       container.setAttribute("class", o.markup.containerClass)
     const created: Entry = { container, users: 0 }
     entries.set(id(key), created)
+    keys.set(id(key), key)
     return created
   }
 
@@ -303,6 +358,7 @@ export const createTerminalScreens = <K, P = unknown>(
       theme: resolved.theme,
     })
     const xterm = view.terminal
+    const overlay = o.overlay?.(key, view)
     const queries = silenceQueries(xterm)
     for (const [name, value] of Object.entries(o.markup?.input ?? {}))
       xterm.textarea?.setAttribute(name, value)
@@ -319,9 +375,44 @@ export const createTerminalScreens = <K, P = unknown>(
       for (const wake of paceWaiters) wake()
       paceWaiters.clear()
     }
+    // While this client only observes: the pty's size the screen is drawn at, scaled to fit.
+    let observed: { readonly cols: number; readonly rows: number } | null = null
+    const scales = ["transform", "transform-origin", "width", "height"] as const
+    const rescale = (): void => {
+      const element = xterm.element
+      if (!element) return
+      if (!observed) {
+        for (const property of scales) element.style.removeProperty(property)
+        container.style.removeProperty("overflow")
+        return
+      }
+      // The layout size, which neither Canvas's zoom nor this scale changes.
+      const screen = element.querySelector<HTMLElement>(".xterm-screen")
+      const natural = { width: screen?.offsetWidth ?? 0, height: screen?.offsetHeight ?? 0 }
+      const factor = scaleToFit(natural, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+      })
+      if (factor === undefined) return
+      container.style.overflow = "hidden"
+      element.style.width = `${natural.width}px`
+      element.style.height = `${natural.height}px`
+      element.style.transformOrigin = "0 0"
+      element.style.transform = factor < 1 ? `scale(${factor})` : ""
+    }
     const drawn: Screen = {
       exited: () => {},
       live: () => {},
+      observe: (size) => {
+        observed = size
+        rescale()
+        // The renderer measures its cells after the resize that came with it.
+        if (size) requestAnimationFrame(() => observed === size && rescale())
+      },
+      strip: (control) => refresh({ control }),
+      took: () => {
+        if (o.took) say(o.took, tookNoticeMs)
+      },
       write: (data) => writeTo(xterm, data),
       // xterm's reset leaves its parser as it was, which a stream cut short or a write that
       // failed may have left inside a sequence: a CAN ends any, before the screen that follows.
@@ -329,6 +420,7 @@ export const createTerminalScreens = <K, P = unknown>(
         xterm.reset()
         xterm.write("\x18")
       },
+      restored: () => overlay?.restored(),
       pace: () => paceMs,
       paced: () => new Promise<void>((resolve) => paceWaiters.add(resolve)),
       resize: ({ cols, rows }) => {
@@ -395,13 +487,30 @@ export const createTerminalScreens = <K, P = unknown>(
         refresh({ waits: false })
         o.restart(key)
       },
+      takesInput: () => !gone && state.getSnapshot().lock === null && taking(),
+      pasteFiles: (files, folders) => void pasteFiles(files, target, folders),
       refocus: false,
     }
     refresh()
     // Whether the shell takes input; one that exited or failed to start only listens for
     // Enter, to start again.
     const taking = (): boolean => screen.phase !== "ended" && !state.getSnapshot().waits
+    // When the wheel last turned over the screen.
+    let wheeled = 0
+    const onWheel = (): void => {
+      wheeled = Date.now()
+    }
+    container.addEventListener("wheel", onWheel, { capture: true, passive: true })
     const deliver = (data: string): void => {
+      // Arrow keys the emulator makes of the wheel, in a terminal this client doesn't control,
+      // are scrolling: they never ask for the keyboard. Where this client controls, `control` is
+      // absent, and the wheel's mouse reports and arrow keys go to the program.
+      if (
+        (state.getSnapshot().control ?? null) !== null &&
+        data.startsWith("\u001b") &&
+        Date.now() - wheeled < wheelKeysMs
+      )
+        return
       if (taking()) return followed.input(data)
       if (data.includes("\r")) screen.restart()
     }
@@ -512,9 +621,11 @@ export const createTerminalScreens = <K, P = unknown>(
       selections()
       writes.dispose()
       container.removeEventListener("copy", browserCopy)
+      container.removeEventListener("wheel", onWheel, { capture: true })
       clearTimeout(noticed)
       queries.dispose()
       followed.stop()
+      overlay?.dispose()
       view.dispose()
       container.remove()
     }
@@ -523,6 +634,8 @@ export const createTerminalScreens = <K, P = unknown>(
 
   const close = (key: K, entry: Entry): void => {
     entries.delete(id(key))
+    keys.delete(id(key))
+    doomed.delete(id(key))
     parked.delete(id(key))
     clearTimeout(entry.timer)
     clearTimeout(entry.parking)
@@ -573,6 +686,7 @@ export const createTerminalScreens = <K, P = unknown>(
       }
     }
     entry.users += 1
+    doomed.delete(id(key))
     if (entry.timer !== undefined) clearTimeout(entry.timer)
     entry.timer = undefined
     clearTimeout(entry.parking)
@@ -598,6 +712,7 @@ export const createTerminalScreens = <K, P = unknown>(
     if (!entry) return
     entry.users -= 1
     if (entry.users > 0) return
+    if (doomed.has(id(key))) return close(key, entry)
     entry.unwatch?.()
     entry.unwatch = undefined
     if (entry.timer === undefined) settle(key, entry)
@@ -665,6 +780,16 @@ export const createTerminalScreens = <K, P = unknown>(
           screen.xterm.focus()
           return screen.container.contains(document.activeElement)
         },
+        take: () => void screen.followed.take().catch(() => {}),
+        takesFiles: () => !released && screen.takesInput(),
+        dropFiles: (data) => {
+          if (released || !screen.takesInput()) return
+          const files = pastedFiles(data)
+          if (files.length === 0) return
+          const folders = foldersAmong(data, files)
+          screen.xterm.focus()
+          screen.pasteFiles(files, folders)
+        },
         release: ({ unmount = false } = {}) => {
           if (released) return
           released = true
@@ -703,10 +828,28 @@ export const createTerminalScreens = <K, P = unknown>(
       } else for (const screen of changed) screen.followed.refit()
       fontSettling = setTimeout(fitAfterPause, resizeSettleMs)
     },
+    release: (match) => {
+      for (const [name, entry] of entries) {
+        const key = keys.get(name)
+        if (key === undefined || !match(key)) continue
+        if (entry.users === 0) close(key, entry)
+        else doomed.add(name)
+      }
+    },
     restart: (key) => {
       const screen = entries.get(id(key))?.screen
       if (screen) screen.restart()
       else o.restart(key)
+    },
+    observing: (key) => {
+      const control = entries.get(id(key))?.screen?.state.getSnapshot().control
+      return control !== undefined && control !== null
+    },
+    take: (key, options) => {
+      const screen = entries.get(id(key))?.screen
+      return screen
+        ? screen.followed.take(options)
+        : Promise.reject(new Error("The terminal has no screen."))
     },
     typeInto: (key, text) => {
       const screen = entries.get(id(key))?.screen

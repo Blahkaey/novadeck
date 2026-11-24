@@ -65,18 +65,19 @@ const show = (selection: BackendSelection, onShown?: () => void) => {
 }
 
 // A rejected connect carrying the failure the adapter would report.
-const failing = (kind: ConnectFailure["kind"], code: string) =>
+const failing = (kind: ConnectFailure["kind"], code: string, more: Partial<ConnectFailure> = {}) =>
   Object.assign(new Error("failed"), {
     failure: {
       kind,
       message:
         kind === "incompatible"
-          ? "This runner is from a different Novadeck version."
+          ? "The runner is older than this app. Update Novadeck where the runner runs."
           : kind === "outdated"
             ? "A newer version of Novadeck has used this workspace. Open the newer Novadeck instead; this copy is out of date."
             : "The runner didn't start.",
       code,
       detail: `runner said ${code}`,
+      ...more,
     } satisfies ConnectFailure,
   })
 
@@ -160,10 +161,14 @@ describe("backend gate", () => {
   })
 
   context("when connecting fails", () => {
-    const failed = async (kind: ConnectFailure["kind"], code: string) => {
+    const failed = async (
+      kind: ConnectFailure["kind"],
+      code: string,
+      more: Partial<ConnectFailure> = {},
+    ) => {
       const { selection, attempts } = pending()
       const page = show(selection)
-      const fail = () => act(async () => attempts.at(-1)!.reject(failing(kind, code)))
+      const fail = () => act(async () => attempts.at(-1)!.reject(failing(kind, code, more)))
       await fail()
       const alert = () => page.container.querySelector("[role=alert]")
       const button = (name: string) =>
@@ -234,17 +239,29 @@ describe("backend gate", () => {
       expect(page.alert()).toBeNull()
     })
 
-    it("offers only Quit for a runner from another version", async () => {
+    it("offers only Quit for a runner older than the app, saying to update it", async () => {
       const close = vi.spyOn(window, "close").mockImplementation(() => {})
-      const page = await failed("incompatible", "INCOMPATIBLE_PROTOCOL")
-      expect(page.alert()?.textContent).toContain(
-        "This runner is from a different Novadeck version.",
-      )
+      const page = await failed("incompatible", "INCOMPATIBLE_PROTOCOL", { update: "runner" })
+      expect(page.alert()?.textContent).toContain("The runner is out of date")
+      expect(page.alert()?.textContent).toContain("Update Novadeck where the runner runs.")
       expect(page.alert()?.textContent).not.toContain("Retrying in")
       expect(page.button("Retry now") ?? page.button("Retry")).toBeUndefined()
       act(() => page.button("Quit")!.click())
       expect(close).toHaveBeenCalled()
       expect(page.container.textContent).toBe("")
+    })
+
+    it("offers only Reload for a page older than its runner, which loads the newer page", async () => {
+      const page = await failed("incompatible", "INCOMPATIBLE_PROTOCOL", {
+        update: "app",
+        reload: true,
+        message: "This page is older than its runner. Reload it to load the newer Novadeck.",
+      })
+      expect(page.alert()?.textContent).toContain("This copy of Novadeck is out of date")
+      expect(page.button("Quit")).toBeUndefined()
+      expect(page.button("Retry now") ?? page.button("Retry")).toBeUndefined()
+      // jsdom can't navigate, so the reload itself isn't pressed here.
+      expect(page.button("Reload")).toBeDefined()
     })
 
     it("offers only Quit when a newer Novadeck has used the workspace", async () => {
@@ -315,6 +332,57 @@ describe("backend gate", () => {
       )!
       act(() => details.click())
       expect(page.container.querySelector("[role=alert]")?.textContent).toContain("Attempts1")
+    })
+  })
+
+  context("when the link ends for good once the workspace is shown", () => {
+    it("boots again, and the splash says why, as that this device was signed out", async () => {
+      vi.useFakeTimers()
+      const { selection, attempts } = pending()
+      const page = show(selection)
+      const listeners: ((failure: ConnectFailure) => void)[] = []
+      let stopped = 0
+      await act(async () =>
+        attempts.at(-1)!.resolve({
+          createBackend,
+          close: () => {},
+          ended: (listener) => {
+            listeners.push(listener)
+            return () => void (stopped += 1)
+          },
+        }),
+      )
+      page.report({ attached: 0, total: 0, done: true })
+      act(() => vi.advanceTimersByTime(onlineHoldMs + splashFadeMs))
+      expect(page.phase()).toBeNull()
+      const before = attempts.length
+
+      act(() =>
+        listeners.at(-1)!({
+          kind: "unauthorized",
+          revoked: true,
+          message: "signed out",
+          code: "UNAUTHORIZED",
+          detail: "Unauthorized",
+        }),
+      )
+      expect(page.phase()).toBe("Powering the deck…")
+      // A fresh attempt (StrictMode makes two of each).
+      expect(attempts.length).toBeGreaterThan(before)
+      // The workspace that was shown stopped listening as it went.
+      expect(stopped).toBeGreaterThan(0)
+      await act(async () =>
+        attempts.at(-1)!.reject(
+          failing("unauthorized", "UNAUTHORIZED", {
+            revoked: true,
+            message:
+              "This device was signed out of the runner. The runner's owner can let it in again with a new credential.",
+          }),
+        ),
+      )
+      const alert = page.container.querySelector("[role=alert]")?.textContent
+      expect(alert).toContain("This device was signed out")
+      expect(alert).toContain("The runner's owner can let it in again")
     })
   })
 

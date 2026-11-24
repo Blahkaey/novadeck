@@ -53,6 +53,10 @@ export type CommandsOptions = {
   readonly history?: CommandContext["history"]
   // The backend's move of a terminal to another session, when it has one.
   readonly moveTerminal?: CommandContext["moveTerminal"]
+  // The desktop app's project windows, when it opens them.
+  readonly windows?: CommandContext["windows"]
+  // Reads a project from the runner again, when the backend can.
+  readonly syncProject?: CommandContext["syncProject"]
   // Whether the backend keeps the person's notes, which the Notes panel and Todo board list.
   readonly notes?: boolean
 }
@@ -91,6 +95,8 @@ export const openCommands = ({
   murmur,
   history,
   moveTerminal,
+  windows,
+  syncProject,
   notes = false,
 }: CommandsOptions = {}) => {
   const panels = availablePanels(true, history !== undefined, false, notes)
@@ -216,6 +222,8 @@ export const openCommands = ({
     murmur,
     history,
     moveTerminal,
+    windows,
+    syncProject,
   }
   const commands = createWorkspaceCommands(context)
   // The subscriptions the provider attaches; nothing persists to storage here.

@@ -817,6 +817,20 @@ with every safety check again at that time:
   its files once all of them have been touched, oldest first, at most 32). Such a work lists no
   files and conflicts with nothing, and the panel lets merged win over a conflict. Work that merges
   cleanly but would change main (main reverted it) is not merged.
+  It is true too for work **landed by git**, a fast-forward landing included (`landedByReflog`,
+  `works/landed.ts`), which history can't tell from a branch that only caught up: a local holder
+  (home, home's name without `origin/`, the repository's main) has a reflog line `merge <what was
+  typed>: Fast-forward` or `…: Merge made by…` (git writes it for `git merge`, `--ff-only`,
+  `--no-ff`, and `pull <args>: …` for `git pull . <branch>`; a rebase then a fast-forward is that
+  merge), whose arguments name the branch (or its tip) and whose result holds the branch's head
+  where the branch before did not, and the holder still holds it. Precision first: a branch that
+  caught up is named by no line; a squash (`merge --squash` writes a plain `commit:` line, though
+  the content check above finds a squash on its own), a `reset`, an `update-ref`, a `--no-commit`
+  merge finished by `git commit`, a reflog that expired or is off, and `pull origin x` read as
+  today. It reads the reflog file (one read per holder, no git run) and runs git only for a line
+  that names the branch (three ancestor checks), at a measurement, which the work's read key
+  already limits: a landing moves its holder's commit, which is in the key. The panel's word is
+  the same "Merged". Git-only, so alike for Claude Code, Codex and Antigravity.
   It is not the close side's "merged" below (HEAD is in main, which a fresh
   worktree is too). It is
   measured as before: the working tree against main by an in-memory `merge-tree`, with what is unread
@@ -973,7 +987,14 @@ with every safety check again at that time:
   `command` and the request's `requestId`, from which the runner names it as the agent
   asked, as that agent's title, never the person's, and replies with
   `terminals.answerRequest`: the new terminal, or why not.
-  Without a client, or past the deadline, the agent hears so. The command runs once
+  Without a client, or past the deadline, the agent hears so. The runner knows the terminal
+  as soon as `terminals.create` makes it for the request, before the client confirms it
+  (which waits for its shell to start, slow on some Windows machines): `open_agent`'s task
+  waits there from then, before the agent's start prompt asks for it, and a terminal made
+  but confirmed past the deadline (or being made as it passes, while the call can still
+  answer: an open call gets 24 s, as a look does) is answered as opened, its late
+  confirmation no error. With no terminal made in time, the
+  agent hears that its task wasn't sent. The command runs once
   through the same file the shell integration resumes agents from, so it leaves no
   history entry; a shell without the integration, or with configured arguments, can't
   run one, and the terminal does not open rather than start a plain shell.
@@ -1051,7 +1072,30 @@ with every safety check again at that time:
   common dir, branch, the commit it `base`d on, project, owner terminal (plain text: a live
   terminal or one in History, null once orphaned), whether it was `adopted` and whether Novadeck made
   its branch (`branch_made`). A terminal may own several, and ownership moves only through agents.
-  - **`open_worktree({ branch, repo?, from?, group? })`** checks out the branch if it exists
+  - **A worktree's home** is the branch its work belongs on (`checkouts/home.ts`; design in the
+    workspace's `architecture/worktree-home.md`). Git keeps it, not the table: the runner writes
+    `branch.<branch>.novadeckHome` in the repository's own config (shared by its worktrees, never
+    committed or pushed), with `novadeckBase` (the commit it started from) and `novadeckMade`
+    (Novadeck made the branch) beside it, so git moves them with a renamed branch and drops them
+    with a deleted one, and plain `git config` reads them in any harness. Only the runner writes
+    them, as an agent's sandbox may hold `.git` read-only. Home is the `home` an agent gives
+    (`open_worktree` or `take_worktree`, a branch here or `origin/<b>`), else the branch `from`
+    names, else the checked-out branch when the new branch starts from the folder's `HEAD` (`from` left
+    out or `HEAD`; commit and branch read in one git call, a lead's worktree on `feat-x` homes its
+    teammates' worktrees on `feat-x`; a detached `HEAD`, a tag or commit, origin's branch of its
+    name or an existing branch gives none),
+    else the repository's main, for which no key is written: no key means exactly the
+    measure before homes (`mainBranch`). A worktree with a home is measured against it (its
+    remote-tracking branch where that holds local home, else local home) by the Worktrees
+    panel (`Work.home`, `base`), the changes item and `close_worktree`, and its work counts as
+    home once home, home's remote-tracking branch or the repository's main holds it, so a
+    stacked pull request retargeted to main reads merged too. The open and take answers, the
+    give notice and `agents` (where it isn't main) say it. At start, `reconcile` carries a row's
+    `base` and `branch_made` into keys its branch lacks, only while the row's branch is the one
+    checked out there. Keys are read with one `git config --get-regexp` per repository, again
+    only when its config file changes; a write retries while `config.lock` is held, and one
+    that fails is logged and never fails the call.
+  - **`open_worktree({ branch, repo?, from?, group?, home? })`** checks out the branch if it exists
     locally, or runs `git worktree add -b` from `from`. Left out, `from` is origin's branch of that
     name where `refs/remotes/origin/<branch>` exists, which the new branch then tracks
     (`git branch --set-upstream-to`), as a teammate's pull request branch, fetched but never checked
@@ -1086,7 +1130,7 @@ with every safety check again at that time:
     `show { changes: { path } }` updates its item, with `open` when the work is done. An
     unopened item's detail is the count as of its last show: only a read the pane triggers
     brings it up to date.
-  - **`take_worktree({ path })`** records a linked worktree some other tool made, as adopted;
+  - **`take_worktree({ path, home? })`** records a linked worktree some other tool made, as adopted;
     takes one with no owner, or whose owner terminal exists neither live nor in History, at
     once; and, for one another existing terminal owns, asks the person (a `take` approval
     aimed at the owner, `{ type: "take", path, branch }`, answered like `close` and `lead`
@@ -1094,6 +1138,9 @@ with every safety check again at that time:
     Deny). The call answers `asked` at once; both agents hear the outcome as a notice, and
     ownership moves only if it hasn't changed meanwhile. The nudge about the old owner
     arrives with the later step that nudges agents.
+    On a worktree the caller owns already, `home` sets or changes its home at any time (the
+    answer says `already`); a folder in no git repository is refused with the fact that its files
+    are changed in place, as `open_worktree` does.
   - **`give_worktree({ path, to })`** hands the owner's worktree to a terminal of its
     project and session by handle, which is told. **`close_worktree({ path, force? })`** is the
     owner's: refused while the worktree has uncommitted or untracked files or commits the main

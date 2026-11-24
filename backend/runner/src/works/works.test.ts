@@ -530,6 +530,89 @@ describe.skipIf(!hasGit)("the works of tracked worktrees", () => {
     expect(work.files.map((file) => file.path)).toEqual(["a.txt"])
   })
 
+  it("measures a worktree with a home against it, listing only its own work, and merged once it lands there", async ({
+    fixture,
+    resources,
+  }) => {
+    const { main } = fixture
+    main.git("checkout", "--quiet", "-b", "JIRA-123")
+    main.write("j.txt", "jira\n")
+    main.git("add", "-A")
+    main.git("commit", "--quiet", "-m", "jira")
+    main.git("checkout", "--quiet", "main")
+    const agent = fixture.worktree("agent")
+    agent.git("reset", "--quiet", "--hard", "JIRA-123")
+    agent.git("config", "branch.agent.novadeckHome", "JIRA-123")
+    const start = agent.git("rev-parse", "HEAD").trim()
+    agent.git("config", "branch.agent.novadeckBase", start)
+    agent.write("fix.txt", "fix\n")
+    agent.git("add", "-A")
+    agent.git("commit", "--quiet", "-m", "fix")
+    const { works } = open(() => [{ terminalId: terminal(1), root: agent.root }])
+    resources.defer(() => works.close())
+    const work = (await current(works)).get(agent.root)!
+    expect(work).toMatchObject({ base: "JIRA-123", home: "JIRA-123", merged: false })
+    // Home's own commit (j.txt) isn't the worktree's work.
+    expect(work.files.map((file) => file.path)).toEqual(["fix.txt"])
+    // Landed on home by a merge commit, main left behind.
+    main.git("checkout", "--quiet", "JIRA-123")
+    main.git("merge", "--quiet", "--no-ff", "-m", "land agent", "agent")
+    main.git("checkout", "--quiet", "main")
+    const landed = await current(works)
+    expect(landed.get(agent.root)).toMatchObject({ files: [], merged: true, home: "JIRA-123" })
+  })
+
+  it("reads a worktree as merged once home fast-forwarded to it, and not before", async ({
+    fixture,
+    resources,
+  }) => {
+    const { main } = fixture
+    main.git("branch", "JIRA-123")
+    const agent = fixture.worktree("agent")
+    agent.git("config", "branch.agent.novadeckHome", "JIRA-123")
+    agent.git("config", "branch.agent.novadeckBase", agent.git("rev-parse", "HEAD").trim())
+    agent.write("fix.txt", "fix\n")
+    agent.git("add", "-A")
+    agent.git("commit", "--quiet", "-m", "fix")
+    const { works } = open(() => [{ terminalId: terminal(1), root: agent.root }])
+    resources.defer(() => works.close())
+    expect((await current(works)).get(agent.root)).toMatchObject({ merged: false })
+    // The agent lands it as the grants design says: a plain merge into home, from its folder.
+    main.git("checkout", "--quiet", "JIRA-123")
+    main.git("merge", "--quiet", "--ff-only", "agent")
+    main.git("checkout", "--quiet", "main")
+    expect((await current(works)).get(agent.root)).toMatchObject({
+      files: [],
+      merged: true,
+      home: "JIRA-123",
+    })
+  })
+
+  it("doesn't read a worktree that only caught up with its home as merged into main", async ({
+    fixture,
+    resources,
+  }) => {
+    const { main } = fixture
+    main.git("branch", "JIRA-123")
+    const agent = fixture.worktree("caught-up")
+    agent.git("config", "branch.caught-up.novadeckHome", "JIRA-123")
+    agent.git("config", "branch.caught-up.novadeckBase", agent.git("rev-parse", "HEAD").trim())
+    // Another agent's work lands on home; this one only takes it in, with nothing of its own.
+    main.git("checkout", "--quiet", "JIRA-123")
+    main.write("other.txt", "other\n")
+    main.git("add", "-A")
+    main.git("commit", "--quiet", "-m", "another agent's work")
+    main.git("checkout", "--quiet", "main")
+    agent.git("merge", "--quiet", "--ff-only", "JIRA-123")
+    const { works } = open(() => [{ terminalId: terminal(1), root: agent.root }])
+    resources.defer(() => works.close())
+    expect((await current(works)).get(agent.root)).toMatchObject({
+      files: [],
+      merged: false,
+      home: "JIRA-123",
+    })
+  })
+
   it("falls back to master when there is no main", async ({ fixture, resources }) => {
     const { main } = fixture
     main.git("branch", "-m", "main", "master")

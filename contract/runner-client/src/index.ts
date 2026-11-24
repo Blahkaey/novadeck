@@ -5,9 +5,15 @@ export {
   type CompanionWatchItem,
   type ConnectOptions,
   type HistoryWatchItem,
+  type ProcedurePath,
   type NotesWatchItem,
   type Runner,
   type TerminalWatchItem,
   type WorkWatchItem,
 } from "./runner.js"
-export { type AttachedTerminal, type TerminalMode, type TerminalPosition } from "./terminal.js"
+export {
+  type AttachedTerminal,
+  type AttachMode,
+  type TerminalPosition,
+  type TerminalMode,
+} from "./terminal.js"

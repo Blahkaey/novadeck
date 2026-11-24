@@ -1,5 +1,5 @@
 import type { ActivityEvent } from "@novadeck/harness-core/events"
-import { defaultAgentMode, type AgentMode } from "@novadeck/protocol"
+import { defaultAgentMode, type AgentMode, type AgentName } from "@novadeck/protocol"
 
 import type { Binding } from "../harnesses/bindings.js"
 import type { Root } from "../harnesses/roots.js"
@@ -45,6 +45,12 @@ export type LeasingHost = {
   readonly held?: ((terminalId: string, root: Root, held: Held) => void) | undefined
   /** How the user has agents work together, which the notes on peers' messages follow; Herd when omitted. */
   readonly mode?: (() => AgentMode) | undefined
+  /** Whether the shipping gate covers the terminal's harness, which its approval rule says; no when omitted. */
+  readonly gated?: ((agent: AgentName) => boolean) | undefined
+  /** Told the messages a hook is given to print, which its harness may show as a block. */
+  readonly notes?:
+    | { readonly delivery: (terminalId: string, messages: readonly Message[]) => void }
+    | undefined
 }
 
 /**
@@ -124,6 +130,8 @@ export class Leasing {
     // printed, escaped as the harness reads them.
     const mark = newMark()
     const mode = this.host.mode?.() ?? defaultAgentMode
+    const agent = live.root?.agent ?? live.resting?.agent
+    const gated = (agent !== undefined && this.host.gated?.(agent)) || false
     // A message whose sender closed since says so, as no reply reaches it.
     const fromClosed = (message: Message) => {
       const sender = senderTerminal(message.from)
@@ -133,19 +141,21 @@ export class Leasing {
     // rather than block every message behind it.
     const first = queued.slice(0, 1)
     const marks =
-      byteLength(print(wrap(first, isFromLead, mark, { held, fromClosed, mode }))) <=
+      byteLength(print(wrap(first, isFromLead, mark, { held, fromClosed, mode, gated }))) <=
       maxDeliveryBytes
     const wrapped = (taken: readonly Message[]) =>
-      wrap(taken, isFromLead, mark, { held, mode, ...(marks && { fromClosed }) })
+      wrap(taken, isFromLead, mark, { held, mode, gated, ...(marks && { fromClosed }) })
     const prints = (taken: readonly Message[]) => byteLength(print(wrapped(taken)))
     const messages = deliveryOf(queued, (taken) => prints(taken) <= maxDeliveryBytes)
     // The first always goes, as it fits alone; beside what the turn holds it may not.
     if (messages.length === 0 || prints(messages) > maxDeliveryBytes) return undefined
+    // Told before the puts, whose change notices then carry it.
+    this.host.notes?.delivery(live.terminalId, messages)
     for (const message of messages) store.put({ ...message, state: "leased" })
     // Another agent's words may reach the turn from here, printed or not (`personTurn`).
     if (messages.some(({ from }) => from.kind === "agent")) live.othersIn = live.delivery.epoch
     const text = wrapped(messages)
-    const gave: Held = lasting ? givenIn(held, noteKinds(messages, isFromLead), mode) : {}
+    const gave: Held = lasting ? givenIn(held, noteKinds(messages, isFromLead), mode, gated) : {}
     return this.leases.grant({
       terminalId: live.terminalId,
       messages: messages.map((message) => message.id),

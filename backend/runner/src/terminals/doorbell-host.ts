@@ -56,6 +56,18 @@ export const profileOf = (
   return agent === undefined ? undefined : harnesses[agent].box
 }
 
+/**
+ * `profile` with its shell mode's command written for the shell `env` gives the agent, the
+ * environment its terminal's shells start from (opencode's PATH picks its shell, which may differ
+ * from the runner's own); as it is without one.
+ */
+export const shellIn = (profile: BoxProfile, env: NodeJS.ProcessEnv | undefined): BoxProfile => {
+  const { command } = profile.shell
+  return command && env
+    ? { ...profile, shell: { ...profile.shell, command: (text) => command(text, undefined, env) } }
+    : profile
+}
+
 export type TypingTargetHost<R extends DoorbellRecord> = {
   /** The record of a terminal that is running, if it is. */
   readonly live: (terminalId: string) => R | undefined
@@ -240,6 +252,8 @@ export const doorbellHost = <R extends DoorbellRecord>(
       return tailOf(box, text, rows, line) === undefined ? undefined : nonce
     },
     replies: (terminalId) => messaging.replyLine(terminalId),
+    senders: (terminalId) => messaging.senders(terminalId),
+    noted: (terminalId, nonce, replies) => messaging.noteRing(terminalId, nonce, replies),
     ringsPlain: (terminalId, plain) => messaging.ringsPlain(terminalId, plain),
     ringLeftover: (terminalId, nonce) => {
       const rung = messaging.ringLeftover(terminalId, nonce)

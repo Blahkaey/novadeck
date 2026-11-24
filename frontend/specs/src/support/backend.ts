@@ -1,7 +1,7 @@
 import type { ChatItem, Conversation, Conversations } from "@novadeck/core/conversation"
 import type { PortableInstall } from "@novadeck/core/desktop/portable"
 import type { SandboxState } from "@novadeck/core/desktop/sandbox"
-import type { InboxRow, InboxSource } from "@novadeck/core/inbox"
+import type { InboxEntry, InboxSource } from "@novadeck/core/inbox"
 import type { Approval, Approvals, Backend, BackendSink, Notice } from "@novadeck/core/port"
 import { createStore, type Store } from "@novadeck/core/store"
 import { createDemoBackend } from "@novadeck/demo"
@@ -10,6 +10,10 @@ import {
   type DemoPortable,
   type PortableSchedule,
 } from "@novadeck/demo-debug/desktop/portable"
+import {
+  createDemoProjectWindows,
+  type DemoProjectWindows,
+} from "@novadeck/demo-debug/desktop/project-windows"
 import { createDemoSandbox, sampleFix } from "@novadeck/demo-debug/desktop/sandbox"
 import {
   portableScenarios,
@@ -21,12 +25,17 @@ import {
 import { createDemoScreenReader } from "@novadeck/demo-debug/desktop/screen-reader"
 import { createDemoUninstall, uninstallScenarios } from "@novadeck/demo-debug/desktop/uninstall"
 import { createDemoUpdates } from "@novadeck/demo-debug/desktop/updates"
+import {
+  clearDemoWindowControls,
+  createDemoWindowControls,
+  type DemoWindowControls,
+} from "@novadeck/demo-debug/desktop/window-controls"
 import { addressParams } from "@novadeck/demo/address"
 import { demoTurns } from "@novadeck/demo/agents/turns"
 import { isDemoFiles } from "@novadeck/demo/files"
 import { isDemoInbox } from "@novadeck/demo/inbox"
-import { demoInboxRowsAll } from "@novadeck/demo/inbox/fixtures"
-import { demoResolved, demoResolvedRows } from "@novadeck/demo/inbox/resolved"
+import { demoInboxEntriesAll } from "@novadeck/demo/inbox/fixtures"
+import { demoResolved, demoResolvedEntries } from "@novadeck/demo/inbox/resolved"
 import { isDemoNotes } from "@novadeck/demo/notes"
 import { demoTerminalId } from "@novadeck/demo/samples"
 import type { SampleArtifact } from "@novadeck/demo/showcase/artifacts"
@@ -189,6 +198,17 @@ const requestedUninstall = (): Backend["uninstall"] => {
     : undefined
 }
 
+// Specs open the demo as the desktop app holding its window's controls over the page with
+// `?controls=` `inset` (macOS's buttons at the start), `fullScreen` (macOS's, in the menu bar)
+// or `caption` (Windows' at the end), drawn as the debug panel draws them; without it, the
+// window has its own title bar, as in a browser.
+const requestedWindowControls = (): Backend["windowControls"] => {
+  const mode = addressParams().get("controls")
+  const modes: readonly DemoWindowControls[] = ["inset", "fullScreen", "caption"]
+  const known = modes.find((each) => each === mode)
+  return known ? createDemoWindowControls(known) : undefined
+}
+
 // `&version=dev` makes the app a development build, which carries 0.0.0, and
 // `&version=none` one that gives no version and keeps no logs, as a browser.
 const requestedVersion = (
@@ -339,17 +359,17 @@ const asDesktop = (
   }
 }
 
-// The demo's Inbox rows (by fixture id) join every window's Inbox now, in the order given,
+// The demo's Inbox entries (by fixture id) join every window's Inbox now, in the order given,
 // waiting from now, as `change` makes them.
 const arriving = (
   ids: readonly string[],
-  change: (row: InboxRow) => InboxRow = (row) => row,
+  change: (entry: InboxEntry) => InboxEntry = (entry) => entry,
 ): void => {
   const now = Date.now()
   for (const each of desktops) {
     if (!isDemoInbox(each.inbox)) continue
     for (const id of ids) {
-      const found = demoInboxRowsAll(now).find((row) => row.id === id)
+      const found = demoInboxEntriesAll(now).find((entry) => entry.id === id)
       if (!found) throw new Error(`No Inbox fixture ${id}`)
       each.inbox.add(change({ ...found, at: now }))
     }
@@ -363,35 +383,36 @@ export const desktopWindow = {
     desktops.forEach((each) => each.focusListeners.forEach((listener) => listener(focused))),
   /** The OS notifications the page has shown, by title. */
   notices: (): string[] => desktops.flatMap((each) => each.shown.map((notice) => notice.title)),
-  /** The demo's Inbox rows (by fixture id) join it now, in the order given, waiting from now. */
+  /** The demo's Inbox entries (by fixture id) join it now, in the order given, waiting from now. */
   arrive: (...ids: readonly string[]): void => arriving(ids),
-  /** A resolved row of every way a row ends (the debug panel's 17) joins it now. */
+  /** A resolved entry of every way an entry ends (the debug panel's 17) joins it now. */
   arriveResolved: (): void => {
     const now = Date.now()
     for (const each of desktops)
       if (isDemoInbox(each.inbox))
         for (const group of Object.values(demoResolved))
-          for (const row of demoResolvedRows(now, group)) each.inbox.add(row)
+          for (const entry of demoResolvedEntries(now, group)) each.inbox.add(entry)
   },
-  /** A demo Inbox row (by fixture id) joins it now as `agent`'s, for a harness the demo's own
-   * rows don't come from. */
+  /** A demo Inbox entry (by fixture id) joins it now as `agent`'s, for a harness the demo's own
+   * entries don't come from. */
   arriveAs: (id: string, agent: InboxSource["agent"]): void =>
-    arriving([id], (row) => ({ ...row, source: { ...row.source, agent } })),
-  /** The ids of the rows the page's backend Inbox holds, whether or not it lists them (the
+    arriving([id], (entry) => ({ ...entry, source: { ...entry.source, agent } })),
+  /** The ids of the entries the page's backend Inbox holds, whether or not it lists them (the
    * first window is the page's: StrictMode's second is dropped and never answered). */
-  rowIds: (): string[] => desktops[0]?.inbox?.state.getSnapshot().items.map((row) => row.id) ?? [],
-  // The ids of the rows that are still open: those that resolved stay, as history.
-  openRowIds: (): string[] =>
+  entryIds: (): string[] =>
+    desktops[0]?.inbox?.state.getSnapshot().items.map((entry) => entry.id) ?? [],
+  // The ids of the entries that are still open: those that resolved stay, as history.
+  openEntryIds: (): string[] =>
     desktops[0]?.inbox?.state
       .getSnapshot()
-      .items.filter((row) => !row.settled)
-      .map((row) => row.id) ?? [],
-  /** The ids of the rows the page's backend Inbox holds resolved, as history. */
+      .items.filter((entry) => !entry.settled)
+      .map((entry) => entry.id) ?? [],
+  /** The ids of the entries the page's backend Inbox holds resolved, as history. */
   settledIds: (): string[] =>
     desktops[0]?.inbox?.state
       .getSnapshot()
-      .items.filter((row) => row.settled)
-      .map((row) => row.id) ?? [],
+      .items.filter((entry) => entry.settled)
+      .map((entry) => entry.id) ?? [],
   /** An ask is settled as withdrawn by its agent, and stays listed. */
   withdraw: (id: string): void =>
     desktops.forEach((each) =>
@@ -430,6 +451,40 @@ const withNestedTeam = (
   },
 })
 
+// Specs open the demo as a desktop app that opens a project in a window of its own with
+// `&windows=on`, whose other windows (pretended) a spec reads and moves with `projectWindows`;
+// `&windows=extra` makes this window one that is not the app's first.
+const windowsRequested = (): "first" | "extra" | undefined => {
+  const asked = addressParams().get("windows")
+  return asked === "on" ? "first" : asked === "extra" ? "extra" : undefined
+}
+
+// The project windows of every backend made since the page opened, as with `desktops`.
+const windowsMade: DemoProjectWindows[] = []
+
+const withWindows = (
+  backend: ReturnType<typeof createDemoBackend>,
+  kind: "first" | "extra",
+): ReturnType<typeof createDemoBackend> => {
+  const windows = createDemoProjectWindows({ extra: kind === "extra" })
+  windowsMade.push(windows)
+  return { ...backend, projectWindows: windows.windows }
+}
+
+/** The other windows of the app of `&windows=on`, pretended: what they show, the voice, and what
+ * the page asked of them. */
+export const projectWindows = {
+  /** The projects (by id) other windows show now. */
+  pretend: (ids: readonly string[]): void => windowsMade.forEach((each) => each.pretend(ids)),
+  /** Whether this window has the voice. */
+  voice: (voice: boolean): void => windowsMade.forEach((each) => each.setVoice(voice)),
+  /** Another window sends this one to a project. */
+  send: (projectId: string): void => windowsMade.forEach((each) => each.send({ projectId })),
+  /** The places the page handed to another window. */
+  handedOff: (): string[] =>
+    windowsMade.flatMap((each) => each.handedOff().map((place) => place.projectId)),
+}
+
 // The demo a spec opens, as its address's hash asks.
 export const createSpecBackend = (): ReturnType<typeof createDemoBackend> => {
   const plain = plainSpecBackend()
@@ -437,7 +492,9 @@ export const createSpecBackend = (): ReturnType<typeof createDemoBackend> => {
   const withApprovals = approvalsRequested() ? { ...demo, approvals: specApprovals() } : demo
   // Keeps no arrangement, as a demo doesn't, but takes the one a spec leaves in storage
   // (`novadeck.project-arrangement`) as an earlier client's, which the app imports.
-  const backend = desktopRequested() ? asDesktop(withApprovals) : withApprovals
+  const desktopLike = desktopRequested() ? asDesktop(withApprovals) : withApprovals
+  const kind = windowsRequested()
+  const backend = kind ? withWindows(desktopLike, kind) : desktopLike
   return {
     ...backend,
     arrange: async () => {},
@@ -645,20 +702,23 @@ const plainSpecBackend = (): ReturnType<typeof createDemoBackend> => {
       ? { ...withReader, showScale: (scale: number) => void scalesShown.push(scale) }
       : withReader
   const withUninstall = uninstall ? { ...withScale, uninstall } : withScale
+  const windowControls = requestedWindowControls()
+  const withControls = windowControls ? { ...withUninstall, windowControls } : withUninstall
   return portable
     ? {
-        ...withUninstall,
+        ...withControls,
         portable: createDemoPortable(portable, stepped() ? { schedule: hold } : {}).portable,
       }
-    : withUninstall
+    : withControls
 }
 
 /**
- * Forgets what earlier pages' backends left (their updates, desktop windows, approvals and Babcia
- * cues), as the workspace opens: what a spec reads and drives is then the page it has open,
- * though an earlier spec or an earlier page of its own made more.
+ * Forgets what earlier pages' backends left (their updates, desktop windows, window controls,
+ * approvals and Babcia cues), as the workspace opens: what a spec reads and drives is then the
+ * page it has open, though an earlier spec or an earlier page of its own made more.
  */
 export const forgetEarlierPages = (): void => {
+  clearDemoWindowControls()
   screenReaderStandIns.length = 0
   scalesShown.length = 0
   approvalBackends.length = 0

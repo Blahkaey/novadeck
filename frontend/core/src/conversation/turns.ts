@@ -43,6 +43,17 @@ export type ToolEntry = {
   readonly doneAt: number | null
 }
 
+/**
+ * One of Novadeck's own notices outside a ring, its text `Novadeck · <Kind>` header and all: a
+ * standing one that rode on the prompt's hook, as the harness's record holds it, or an event the
+ * runner delivered (`event`) with a prompt or tool call's hook or a Stop's continuation.
+ */
+export type ChatNotice = {
+  readonly id: string
+  readonly text: string
+  readonly event: boolean
+}
+
 export type ChatBlock =
   | {
       readonly kind: "user" | "assistant"
@@ -79,13 +90,14 @@ export type ChatBlock =
       readonly replies: boolean
       readonly notices: readonly DeliveredNotice[]
     }
-  // One of Novadeck's own notices that rode on the prompt's hook, as the harness's record holds it:
-  // its text, `Novadeck · <Kind>` header and all.
+  // Novadeck's own notices outside a ring, delivered together (recorded at the same moment, as
+  // one hook prints them, with nothing between them), oldest first: one line in the chat. Its id
+  // is its moment's, so a notice that joins it, or one that takes the place of another, keeps it.
   | {
       readonly kind: "notice"
       readonly id: string
       readonly at: number | null
-      readonly text: string
+      readonly notices: readonly ChatNotice[]
     }
   // A compaction: the summary the agent goes on from.
   | {
@@ -96,12 +108,13 @@ export type ChatBlock =
       readonly truncated: boolean
     }
   // A part of the record the backend can't read, where it stands: the line as written, empty
-  // where it can't be shown.
+  // where it can't be shown. `newer` where it is a part a newer Novadeck tells of.
   | {
       readonly kind: "gap"
       readonly id: string
       readonly raw: string
       readonly truncated: boolean
+      readonly newer?: true | undefined
     }
   // A subagent's report, apart from the commands and from other agents' messages. Claude Code
   // and Antigravity: the subagent's tool call (`ToolRun.subagent`) with its result as `text`,
@@ -301,11 +314,26 @@ export const groupItems = (
   let turnNotices = new Set<string>()
   // Notices delivered outside any ring, each shown once its time has come among the items.
   const pending = unclaimedNotices(items, notices)
+  // A notice joins the line of the notices just before it where they came together: recorded at
+  // the same moment, as one hook's are on every harness, with nothing between them.
+  const pushNotice = (at: number | null, notice: ChatNotice): void => {
+    const last = blocks.at(-1)
+    if (last?.kind === "notice" && at !== null && last.at === at) {
+      blocks[blocks.length - 1] = { ...last, notices: [...last.notices, notice] }
+      return
+    }
+    blocks.push({
+      kind: "notice",
+      id: at === null ? notice.id : `notices@${at}`,
+      at,
+      notices: [notice],
+    })
+  }
   const flushNotices = (before: number): void => {
     while (pending.length > 0 && pending[0]!.deliveredAt < before) {
       const { id, text, deliveredAt } = pending.shift()!
       open.run = null
-      blocks.push({ kind: "notice", id, at: deliveredAt, text })
+      pushNotice(deliveredAt, { id, text, event: true })
     }
   }
   let mode: string | undefined
@@ -414,11 +442,27 @@ export const groupItems = (
         })
       else if (note.type === "gap")
         blocks.push({ kind: "gap", id: item.id, raw: item.text, truncated: item.truncated })
+      else if (note.type === "newer")
+        blocks.push({
+          kind: "gap",
+          id: item.id,
+          raw: item.text,
+          truncated: item.truncated,
+          newer: true,
+        })
       else if (note.type === "plan-approved")
         blocks.push({ kind: "note", id: item.id, text: "plan approved" })
       else if (note.type === "notice") {
         turnNotices.add(item.text)
-        blocks.push({ kind: "notice", id: item.id, at: item.at, text: item.text })
+        // The record of a notice the runner delivered as an event (the same words, at the same time)
+        // is that event: the hook printed it, so the record holds it as it holds a standing one.
+        const event = notices.some(
+          ({ text, deliveredAt }) =>
+            text === item.text &&
+            item.at !== null &&
+            Math.abs(item.at - deliveredAt) <= ringSlackMs,
+        )
+        pushNotice(item.at, { id: item.id, text: item.text, event })
       }
       continue
     }
@@ -538,8 +582,14 @@ export const sameBlock = (a: ChatBlock, b: ChatBlock): boolean => {
       a.kind === "notice" &&
       b.kind === "notice" &&
       a.id === b.id &&
-      a.text === b.text &&
-      a.at === b.at
+      a.at === b.at &&
+      a.notices.length === b.notices.length &&
+      a.notices.every(
+        (notice, index) =>
+          notice.id === b.notices[index]!.id &&
+          notice.text === b.notices[index]!.text &&
+          notice.event === b.notices[index]!.event,
+      )
     )
   if (a.kind === "gap" || b.kind === "gap")
     return a.kind === "gap" && b.kind === "gap" && a.id === b.id

@@ -17,6 +17,7 @@ const callsFile = "backend/runner/src/terminals/calls.ts"
 const leadsFile = "backend/runner/src/terminals/leads.ts"
 const teamsFile = "backend/runner/src/terminals/teams.ts"
 const worktreeCallsFile = "backend/runner/src/worktrees/calls.ts"
+const shippingFile = "backend/runner/src/shipping/service.ts"
 const feedbackFile = "backend/runner/src/messaging/feedback.ts"
 const notesFile = "backend/runner/src/terminals/note-request.ts"
 const peersFile = "backend/runner/src/terminals/peers-host.ts"
@@ -25,6 +26,8 @@ const contractFile = "harnesses/core/src/harness.ts"
 const limitFiles: Record<string, string> = {
   inboxTextLimits: "contract/protocol/src/inbox.ts",
   maxAskOptions: "contract/protocol/src/inbox.ts",
+  maxAskQuestions: "contract/protocol/src/inbox.ts",
+  maxQuestionOptions: "contract/protocol/src/inbox.ts",
   maxCommandLines: "contract/protocol/src/text.ts",
   maxFeedbackText: "contract/protocol/src/feedback.ts",
   maxStartupCommand: "contract/protocol/src/terminals.ts",
@@ -44,6 +47,7 @@ const handlers: Record<string, { readonly file: string; readonly method: string 
   take_worktree: { file: worktreeCallsFile, method: "take" },
   close_worktree: { file: worktreeCallsFile, method: "close" },
   give_worktree: { file: worktreeCallsFile, method: "give" },
+  request_permit: { file: shippingFile, method: "declare" },
   lead: { file: leadsFile, method: "lead" },
   release: { file: leadsFile, method: "release" },
   join: { file: teamsFile, method: "join" },
@@ -115,7 +119,7 @@ const extractTools = (anchors: Anchors, packages: HarnessPackage[]): McpTool[] =
   // The constants the literals spread or name, each ending at a blank line or a comment.
   const preamble = [
     ...source.matchAll(
-      /^const (reused|userApproves|gate|teamTo|sharing|meets|agentsHere|together|onward|anchored|decides|peers|approvals|leadRules|peerRules|rules|agentChoices|entryFields|cwdProperty|focusProperty|effortProperty|noModel)\b[^=]*=\s*([\s\S]*?)\n(?=\n|\/\/)/gm,
+      /^const (reused|userApproves|gate|teamTo|sharing|meets|agentsHere|together|onward|anchored|decides|peers|approvals|gateApprovals|leadRules|peerRules|rules|gatedRules|agentChoices|entryFields|cwdProperty|focusProperty|effortProperty|noModel)\b[^=]*=\s*([\s\S]*?)\n(?=\n|\/\/)/gm,
     ),
   ]
     .map(([, name, value]) => `const ${name} = ${value}`)
@@ -144,7 +148,7 @@ const extractTools = (anchors: Anchors, packages: HarnessPackage[]): McpTool[] =
       ) => {
         name: string
         // A function where it follows how the user has agents work together (Herd or Solo).
-        description: string | ((mode: string) => string)
+        description: string | ((mode: string, gated: boolean) => string)
         inputSchema: JsonSchema
       }
       const tool = evaluate(
@@ -176,7 +180,9 @@ const extractTools = (anchors: Anchors, packages: HarnessPackage[]): McpTool[] =
           name: tool.name,
           // As Herd, the default, words it.
           description:
-            typeof tool.description === "function" ? tool.description("herd") : tool.description,
+            typeof tool.description === "function"
+              ? tool.description("herd", false)
+              : tool.description,
           input: tool.inputSchema,
           anchor: { file: mcpFile, line: anchors.find(mcpFile, `const ${variable}: Tool<`) },
           handler,
@@ -200,6 +206,7 @@ const titles: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
   agy: "Antigravity",
+  opencode: "opencode",
 }
 
 // Every `harnesses/*` package but the shared core is a harness.
@@ -245,7 +252,7 @@ const hookSummaries: Record<string, string> = {
 export const hookEvents = (
   source: string,
 ): { events: { event: string; conditional: boolean }[]; from: number } => {
-  const list = /^const events = \[([^\]]*)\]/m.exec(source)
+  const list = /^(?:export )?const events = \[([^\]]*)\]/m.exec(source)
   if (list?.[1] !== undefined) {
     return {
       events: [...list[1].matchAll(/"(\w+)"/g)].map(([, event]) => ({

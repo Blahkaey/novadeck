@@ -44,8 +44,10 @@ export type DemoOutcome = (
   readonly planning?: true
 }
 
-export type DemoDraft = Pick<ChatItem, "role" | "kind" | "text"> &
-  Partial<
+// `together`: recorded at the same moment as the draft before it, as one hook's notices are.
+export type DemoDraft = Pick<ChatItem, "role" | "kind" | "text"> & {
+  readonly together?: true
+} & Partial<
     Pick<
       ChatItem,
       | "tool"
@@ -189,7 +191,7 @@ export const written = (
 ): ChatItem[] =>
   drafts.map((draft, index) => ({
     id: `${terminalId}:${index + 1}`,
-    at: now - (drafts.length - index) * 30_000,
+    at: now - (drafts.length - (draft.together ? index - 1 : index)) * 30_000,
     role: draft.role,
     kind: draft.kind,
     text: draft.text,
@@ -208,10 +210,12 @@ export const written = (
   }))
 
 // The line Novadeck's doorbell types into an idle agent's box, as its record keeps it.
-const rang = (nonce: string, replies = false): DemoDraft => ({
+const rang = (nonce: string, replies = false, senders = ""): DemoDraft => ({
   role: "user",
   kind: "text",
-  text: `[Novadeck: automatic notice, agent messages waiting, ${nonce}]`,
+  text: replies
+    ? `<novadeck-reply>Re your ask "Which rounding?": Round half up, the way the invoices do.</novadeck-reply><end ring="${nonce}"/>`
+    : `<novadeck-doorbell from="${senders}" ring="${nonce}"/>`,
   ring: { nonce, replies },
 })
 
@@ -508,13 +512,16 @@ const transcriptsAt = (now: number): Readonly<Record<string, DemoTranscript>> =>
   "04": {
     items: written("04", now, [
       user("Review the checkout change on this branch for bugs, and fix what you find."),
-      // What the prompt's hook added: Novadeck's standing notices, a line each under the prompt.
+      // What the prompt's hook added: Novadeck's standing notices, one line under the prompt.
       standing(
         "Novadeck · Describe\nThis terminal has no summary yet.\n→ Once you've been given work, call describe with a title and a summary.",
       ),
-      standing(
-        "Novadeck · Inbox\nThe Inbox shows the user a copy of your questions and reports when they're away.\n→ Put every question your turn ends waiting on in it with ask.",
-      ),
+      {
+        ...standing(
+          "Novadeck · Inbox\nThe Inbox shows the user a copy of your questions and reports when they're away.\n→ Put every question your turn ends waiting on in it with ask.",
+        ),
+        together: true,
+      },
       say("I'll read the diff first, then have two explorers check the call sites."),
       use(
         "call_04a",
@@ -562,7 +569,7 @@ const transcriptsAt = (now: number): Readonly<Record<string, DemoTranscript>> =>
         "computeTotal is called from CartSummary, the order email and the export job. Only the export job still passes cents as a float.",
       ),
       from("/root/explorer_2", "No other caller depends on the old rounding."),
-      rang("k3f9"),
+      rang("k3f9", false, "moth"),
       rang("p8w2", true),
       // A ring that brought only a notice.
       rang("h5d1"),
@@ -1164,7 +1171,7 @@ export const agentTranscripts = (now: number): Readonly<Record<string, DemoTrans
           "Novadeck · Worktrees\n@moth gave you its worktree on fix/export-rounding.\n  /Users/alex/projects/novadeck-export\n→ Work there with absolute paths.\n→ Don't close it.",
         ]),
         ...noticesBy(review.items, "h5d1", [
-          "Novadeck · Host load\nCPU has been at 90% or more for 3 minutes; @owl and @fox are running tests.",
+          "Novadeck · Resources\nCPU has been at 90% or more for 3 minutes; @owl and @fox are running tests.",
         ]),
       ],
     },

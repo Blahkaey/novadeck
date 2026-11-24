@@ -11,16 +11,17 @@ import {
   type ProcessTrees,
 } from "@novadeck/terminal/pty"
 
-import { summary as activitySummary } from "../harnesses/activity.js"
+import { summary as activitySummary, withCards } from "../harnesses/activity.js"
 import { logs } from "../log.js"
 import type { Inbox } from "../messaging/inbox.js"
 import type { Messaging } from "../messaging/messaging.js"
 import type { Approvals } from "./approvals.js"
-import { agentProcess } from "./ending.js"
+import { agentProcess, apartOf } from "./ending.js"
 import type { OpenRequests } from "./opens.js"
 import type { Baseline, Record } from "./record.js"
 import { scheduled } from "./schedules.js"
 import type { Sleepers } from "./sleepers.js"
+import { sharesStore, type Turn } from "./store-turns.js"
 
 const log = logs.for("terminals")
 
@@ -48,6 +49,12 @@ export type Tree = {
   readonly lineage: ReadonlyMap<string, string>
   /** The shell started something besides the agent's own chain: a job, a server. */
   readonly beside: boolean
+  /**
+   * An agent left something running in the terminal's scope outside the shell's tree, as a
+   * server it started detached (`nohup`, `setsid`): the terminal's end would end it (see the
+   * pty's `endLeft`). On Linux, macOS and Windows; none where it can't be told.
+   */
+  readonly detached?: boolean
 }
 
 /** What hibernation needs to know of the processes: the read, and the baseline to compare with. */
@@ -119,13 +126,15 @@ export type Veto =
   | "unbaselined"
   | "stray"
   | "beside"
+  | "detached"
 
 /**
  * What keeps an agent from being stopped at `now`, or undefined when nothing does. An agent
  * rests only when its terminal is quiet and nothing it started would die with it: no turn,
  * subagent, background job or wake-up, nothing waiting on the person or on it, no draft, no
- * client, a wait of the setting's length since its last turn end, key, client or start, and
- * the processes under it and beside it only those it started with.
+ * client, a wait of the setting's length since its last turn end, key, client or start, the
+ * processes under it and beside it only those it started with, and nothing an agent left
+ * running detached in the terminal's scope, which the rest would end and no resume restarts.
  */
 export const vetoOf = (facts: Facts, now: number): Veto | undefined => {
   const { windowMs, activity } = facts
@@ -161,6 +170,7 @@ export const vetoOf = (facts: Facts, now: number): Veto | undefined => {
   if (processes.baseline === undefined) return "unbaselined"
   if (stray(processes.tree, processes.baseline) !== undefined) return "stray"
   if (processes.tree.beside) return "beside"
+  if (processes.tree.detached === true) return "detached"
   return undefined
 }
 
@@ -213,6 +223,15 @@ export const windowsTree = (
 }
 
 /**
+ * What an agent left in its terminal's scope, by `listing`, or by the scope's own where it
+ * lists its own, as a Windows job does; none where no agent ran there.
+ */
+const leftBy = async (record: Record, listing: Listing) => {
+  const { pty } = record.terminal
+  return pty.agentRan ? await pty.leftovers({ listing, apart: await apartOf(record) }) : []
+}
+
+/**
  * The processes under a bound agent and beside it, from the system, as hibernation and the
  * restart check both judge what the agent started: its tools and servers below it, the shell's
  * jobs beside it. `list` is the process listing, which a caller reading many terminals shares.
@@ -236,9 +255,16 @@ export const readTree = async (
   if (shell === undefined || agent === undefined) return undefined
   if (process.platform === "win32") {
     if (!trees) return undefined
-    const [all, own] = await Promise.all([trees.read(shell), trees.read(agent)])
+    const [all, own, left] = await Promise.all([
+      trees.read(shell),
+      trees.read(agent),
+      leftBy(record, () => Promise.resolve(undefined)),
+    ])
     if (!all || !own) return undefined
-    return windowsTree(all, own, shell, agent)
+    return {
+      ...windowsTree(all, own, shell, agent),
+      detached: (left?.length ?? 0) > 0,
+    }
   }
   const rows = await list()
   if (!rows) return undefined
@@ -253,6 +279,9 @@ export const readTree = async (
     }
   // Anything else on the shell's terminal: `npm run dev &` before the agent started.
   const beside = await jobs(shell, found.chain)
+  // What an agent left in the scope, by the same listing; where it can't be read, the rest
+  // can't end it either.
+  const left = await leftBy(record, () => Promise.resolve(rows))
   return {
     placed: true,
     foreground: found.foreground,
@@ -260,6 +289,7 @@ export const readTree = async (
     lineage: found.lineage,
     // Where the system can't tell, nothing is assumed gone.
     beside: beside !== false,
+    detached: (left?.length ?? 0) > 0,
   }
 }
 
@@ -277,6 +307,8 @@ export type HibernationHost = {
   readonly sleepers: () => Sleepers
   /** Whether anyone reads the terminal's chat. */
   readonly detailWatched: (terminalId: string) => boolean
+  /** How many of the shipping gate's cards wait on the person there; none without the gate. */
+  readonly cards?: (terminalId: string) => number
   readonly trees: () => ProcessTrees
   /**
    * Whether the agent's box holds text, read from the screen as the doorbell reads it;
@@ -292,7 +324,11 @@ export type HibernationHost = {
 }
 
 /** What one look at a terminal learned beyond its record: its processes, and its box. */
-type Seen = { readonly tree?: Tree; readonly empty?: boolean; readonly resting?: boolean }
+type Seen = {
+  readonly tree?: Tree
+  readonly empty?: boolean
+  readonly resting?: boolean
+}
 
 export type HibernationOptions = {
   /** How often idle agents are looked at, in milliseconds. */
@@ -321,6 +357,8 @@ export class Hibernation {
   private readonly born = new WeakMap<Record, number>()
   /** The terminals being stopped: their `create` waits for the end. */
   private readonly ending = new Map<string, Promise<void>>()
+  /** The wakes of an agent that shares its store, holding stops off until their agent binds. */
+  private readonly waking = new Map<string, Turn>()
   private readonly options: Required<Omit<HibernationOptions, "windowMs">> &
     Pick<HibernationOptions, "windowMs">
 
@@ -344,9 +382,28 @@ export class Hibernation {
     this.timer = undefined
   }
 
-  /** The end of a terminal being stopped, if one is, for a `create` to wait for. */
+  /**
+   * What a `create` waits for before its shell starts, if anything: the end of the terminal's
+   * own stop, if one is under way; and, for a wake of an agent that shares its store, its turn
+   * (`StoreTurns`), so it doesn't start as another's stop ends, nor another stop end before its
+   * agent bound (`look`), by which time the agent has its store open.
+   */
   settling(terminalId: string): Promise<void> | undefined {
-    return this.ending.get(terminalId)
+    const own = this.ending.get(terminalId)
+    const sleepers = this.host.sleepers()
+    const wake = () => sharesStore(sleepers.resting(terminalId)?.agent)
+    if (!own && !wake()) return undefined
+    return (async () => {
+      await own
+      // Resting by now, once its own stop ended: a rest follows its end at once.
+      if (!wake()) return
+      const turn = await sleepers.turns.wake()
+      this.waking.get(terminalId)?.end()
+      this.waking.set(terminalId, turn)
+      void turn.over.then(() => {
+        if (this.waking.get(terminalId) === turn) this.waking.delete(terminalId)
+      })
+    })()
   }
 
   /**
@@ -356,6 +413,8 @@ export class Hibernation {
    */
   look(record: Record): void {
     const { bound } = record
+    // A woken agent that shares its store bound: it has its store open, so stops may end.
+    if (bound) this.waking.get(record.summary.id)?.end()
     const instance = bound?.binding.instance
     if (!bound || instance === null || instance === undefined) return
     let baseline = record.baseline
@@ -459,7 +518,9 @@ export class Hibernation {
       record.summary = { ...record.summary, lastProgram: before }
       record.changed = changed
     }
-    log.info("terminals.hibernate", "Stopping an idle agent", { data: { id, agent } })
+    log.info("terminals.hibernate", "Stopping an idle agent", {
+      data: { id, agent },
+    })
     const ending = this.stopping(record, seen, back)
     this.ending.set(id, ending)
     await ending
@@ -475,20 +536,29 @@ export class Hibernation {
    */
   private async stopping(record: Record, seen: Seen, back: () => void): Promise<void> {
     await this.keepScreen(record)
-    const now = Date.now()
-    // Ignoring its own mark; the setting is read again, as a change counts at once.
-    this.minutes = { value: this.host.minutes() }
-    const veto = vetoOf(this.facts(record, now, { ...seen, resting: true }), now)
-    this.minutes = undefined
-    if (veto !== undefined || record.closed) return back()
+    // An agent that shares its store ends in its turn, once no wake of one is starting, which
+    // its end could make fail (`StoreTurns`); before the last look, as the wait may be seconds.
+    const turn = sharesStore(record.bound?.binding.agent)
+      ? await this.host.sleepers().turns.stop()
+      : undefined
     try {
-      await this.host.end(record)
-    } catch (error) {
-      log.warn("terminals.hibernate-failed", "Novadeck could not stop an idle agent", {
-        err: error,
-      })
-      // Gone all the same: the exit has been handled as a rest. Still running: it stays.
-      if (record.terminal.exit === null) back()
+      const now = Date.now()
+      // Ignoring its own mark; the setting is read again, as a change counts at once.
+      this.minutes = { value: this.host.minutes() }
+      const veto = vetoOf(this.facts(record, now, { ...seen, resting: true }), now)
+      this.minutes = undefined
+      if (veto !== undefined || record.closed) return back()
+      try {
+        await this.host.end(record)
+      } catch (error) {
+        log.warn("terminals.hibernate-failed", "Novadeck could not stop an idle agent", {
+          err: error,
+        })
+        // Gone all the same: the exit has been handled as a rest. Still running: it stays.
+        if (record.terminal.exit === null) back()
+      }
+    } finally {
+      turn?.end()
     }
   }
 
@@ -525,7 +595,10 @@ export class Hibernation {
     const agent = bound?.binding.agent ?? null
     const sessionId = bound?.binding.sessionId
     const report = agent === null ? undefined : record.agents[agent]
-    const activity = bound ? activitySummary(bound.activity) : null
+    // A card the shipping gate holds open waits on the person as a dialog does.
+    const activity = bound
+      ? withCards(activitySummary(bound.activity), host.cards?.(id) ?? 0)
+      : null
     const last = bound?.activity.lastTurn
     const ended = Math.max(last?.at ?? 0, report?.endedAt ?? 0)
     const delivery = host.messaging().delivery(id)
