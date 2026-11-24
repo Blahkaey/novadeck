@@ -1931,11 +1931,11 @@ const takeWorktree: Tool<Worktree> = {
   description: (mode) =>
     "Own a git worktree of this project that has no owner, or that something else made, such " +
     "as a repository's own script, so Novadeck tracks it and you may close it. A worktree " +
-    "nobody owns, or whose terminal is gone, is yours at once; one made another way is " +
+    "nobody owns, or whose terminal is closed or gone, is yours at once; one made another way is " +
     "recorded as yours. " +
     (mode === "swarm"
       ? "One another terminal owns is yours at once, and its owner is told. "
-      : "One another terminal owns is yours only if the user agrees: " +
+      : "One another open terminal owns is yours only if the user agrees: " +
         "Novadeck asks them and this answers at once; the outcome comes as a message from " +
         "Novadeck once your turn ends, and its owner is told if they agree. ") +
     "Use " +

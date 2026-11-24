@@ -202,7 +202,7 @@ export class Worktrees {
     private readonly host: WorktreesHost,
   ) {
     this.cleanup = new Cleanup(this, {
-      owner: host.owner ?? ((id) => (host.exists(id) ? "open" : "gone")),
+      owner: (id) => this.ownerState(id),
       ...(host.busy && { busy: host.busy }),
       ...(host.now && { now: host.now }),
       ...(host.hooksFolder !== undefined && { hooksFolder: host.hooksFolder }),
@@ -351,6 +351,12 @@ export class Worktrees {
   /** Whether a terminal that owned a worktree is gone, live or in History. */
   private gone(terminalId: string | null): boolean {
     return terminalId === null || !this.host.exists(terminalId)
+  }
+
+  /** Where a worktree's owner is: open (live or saved), closed into History, or gone. */
+  private ownerState(terminalId: string | null): OwnerState {
+    if (terminalId === null) return "gone"
+    return this.host.owner?.(terminalId) ?? (this.host.exists(terminalId) ? "open" : "gone")
   }
 
   /**
@@ -580,9 +586,9 @@ export class Worktrees {
 
   /**
    * Makes the worktree at `path` (or the one it is in) the terminal's: at once where it has
-   * no owner, or its owner is gone; one git lists but Novadeck never made is recorded as
-   * adopted, if it is of the project's repositories and not locked. Another live terminal's
-   * is returned for the person to approve (`transfer` then moves it).
+   * no owner, or its owner is closed into History or gone; one git lists but Novadeck never
+   * made is recorded as adopted, if it is of the project's repositories and not locked.
+   * Another open terminal's is returned for the person to approve (`transfer` then moves it).
    */
   take(input: {
     readonly projectId: string
@@ -620,7 +626,9 @@ export class Worktrees {
       if (row.projectId !== input.projectId)
         return refused("That worktree belongs to another project.")
       const mine = row.terminalId === input.terminalId
-      if (!mine && !this.gone(row.terminalId)) return { ok: true, approval: row }
+      // Only an open terminal's is the person's to approve: one closed into History runs no
+      // agent to hand it over, and the window can't name it to ask.
+      if (!mine && this.ownerState(row.terminalId) === "open") return { ok: true, approval: row }
       const homed = await this.rehomed(row.path, row.branch, input.home)
       if (!homed.ok) return homed
       if (!mine) this.moveOwner(row.path, row.terminalId, input.terminalId)
@@ -739,9 +747,9 @@ export class Worktrees {
       )
     if (row.terminalId !== terminalId)
       return refused(
-        this.gone(row.terminalId)
-          ? "That worktree has no owner: take_worktree it first."
-          : "That worktree is another terminal's: only its owner may do that.",
+        this.ownerState(row.terminalId) === "open"
+          ? "That worktree is another terminal's: only its owner may do that."
+          : "That worktree's owner is closed or gone: take_worktree it first.",
       )
     return { ok: true, row }
   }

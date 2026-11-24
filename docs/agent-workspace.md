@@ -1131,8 +1131,9 @@ with every safety check again at that time:
     unopened item's detail is the count as of its last show: only a read the pane triggers
     brings it up to date.
   - **`take_worktree({ path, home? })`** records a linked worktree some other tool made, as adopted;
-    takes one with no owner, or whose owner terminal exists neither live nor in History, at
-    once; and, for one another existing terminal owns, asks the person (a `take` approval
+    takes one with no owner, or whose owner terminal is closed into History or gone, at once
+    (a terminal in History runs no agent, and the window can't name it to ask); and, for one
+    another open terminal owns, asks the person (a `take` approval
     aimed at the owner, `{ type: "take", path, branch }`, answered like `close` and `lead`
     through `terminals.approvals`: "Let @claude take @codex's worktree?" with Allow and
     Deny). The call answers `asked` at once; both agents hear the outcome as a notice, and

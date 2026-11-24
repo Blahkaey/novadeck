@@ -55,6 +55,8 @@ type Fixture = {
   root: string
   store: WorkspaceStore
   live: Set<string>
+  // Terminals closed into History: they exist, but aren't open.
+  closed: Set<string>
   worktrees: Worktrees
   other: string
 }
@@ -65,16 +67,18 @@ const it = base.extend<{ fx: Fixture }>({
     const root = temporary(resources, "wt-root")
     const other = temporary(resources, "wt-other")
     const live = new Set(["t1", "t2"])
+    const closed = new Set<string>()
     const store = new WorkspaceStore(":memory:")
     resources.defer(() => store.close())
     const project = randomUUID()
     await store.createProject({ id: project, name: "P", cwd: repo })
     const worktrees = new Worktrees(store, {
-      exists: (id) => live.has(id),
+      exists: (id) => live.has(id) || closed.has(id),
+      owner: (id) => (live.has(id) ? "open" : closed.has(id) ? "history" : "gone"),
       root,
       projectFolder: () => repo,
     })
-    await use({ repo, project, root, store, live, worktrees, other })
+    await use({ repo, project, root, store, live, closed, worktrees, other })
   },
 })
 
@@ -601,6 +605,27 @@ describe("taking a worktree", () => {
     expect(await take(b.path)).toMatchObject({ ok: true, path: b.path })
     expect(f.store.worktree(a.path)?.terminalId).toBe("t2")
     expect(f.store.worktree(b.path)?.terminalId).toBe("t2")
+  })
+
+  it("takes one whose owner is closed into History at once, which only it may close then", async ({
+    fx: f,
+  }) => {
+    const a = await open(f, "a")
+    if (!a.ok) throw new Error("open")
+    f.live.delete("t1")
+    f.closed.add("t1")
+    expect(
+      await f.worktrees.closeOwned({ terminalId: "t2", cwd: f.repo, path: a.path, force: false }),
+    ).toMatchObject({ ok: false, reason: expect.stringContaining("take_worktree it first") })
+    const taken = await f.worktrees.take({
+      projectId: f.project,
+      terminalId: "t2",
+      cwd: f.repo,
+      path: a.path,
+    })
+    expect(taken).toMatchObject({ ok: true, path: a.path, branch: "a" })
+    expect(taken).not.toHaveProperty("approval")
+    expect(f.store.worktree(a.path)?.terminalId).toBe("t2")
   })
 
   it("is a no-op on the caller's own, and refuses another project's", async ({ fx: f }) => {
