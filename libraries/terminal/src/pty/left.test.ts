@@ -313,17 +313,30 @@ describe.skipIf(!scoped)("what an agent left in its terminal's scope", () => {
       process.on("SIGTERM", () => {})
       require("node:fs").appendFileSync("pids.txt", "stubborn " + process.pid + "\\n")
       setInterval(() => {}, 1000)`
-    const { root, startAgent, end } = await terminal()
+    const { pty, root, startAgent, end } = await terminal()
     writeFileSync(join(root, "stubborn.cjs"), stubborn)
     variants.stubborn = `${setsid} ${process.execPath} stubborn.cjs >/dev/null 2>&1 &`
     onTestFinished(() => {
       delete (variants as { stubborn?: string }).stubborn
     })
     const { pid, servers } = await startAgent(["stubborn"])
+    // A bound that leaves room for the reads of the scope ending takes (one before SIGTERM, one
+    // before SIGKILL, beside the follow's), as long as this machine takes them now, the slowest
+    // of three: a Mac running a night's whole suite takes over 600 ms for one `ps -E` alone,
+    // and a read the bound cuts ends nothing.
+    let readMs = 0
+    for (let at = 0; at < 3; at += 1) {
+      const read = Date.now()
+      // eslint-disable-next-line no-await-in-loop -- One read at a time, as ending makes them.
+      await pty.leftovers({ listing })
+      readMs = Math.max(readMs, Date.now() - read)
+    }
+    const bound = 600 + 4 * readMs
+    const what = `it to end by a bound of ${bound} ms (reads of ${readMs} ms)`
     const began = Date.now()
-    await end(pid, { by: began + 600 })
-    await eventually(async () => !(await running(servers.get("stubborn")!)), "it to end", 3_000)
-    expect(Date.now() - began).toBeLessThan(2_000)
+    await end(pid, { by: began + bound })
+    await eventually(async () => !(await running(servers.get("stubborn")!)), what, bound + 3_000)
+    expect(Date.now() - began, what).toBeLessThan(bound + 1_400)
   })
 })
 
